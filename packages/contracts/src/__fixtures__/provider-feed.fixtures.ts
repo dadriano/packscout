@@ -23,12 +23,12 @@ export interface SanitizedProviderFeedFixture {
     readonly counts: {
       readonly catalog: number;
       readonly pulls: number;
-      readonly sales: number;
+      readonly trades: number;
     };
     readonly nullableFields: {
       readonly pullPackExternalId: boolean;
-      readonly saleAmount: boolean;
-      readonly saleCurrency: boolean;
+      readonly tradeAmount: boolean;
+      readonly tradeCurrency: boolean;
     };
   };
 }
@@ -40,7 +40,7 @@ interface FixtureShape {
   readonly packExternalId?: string | null;
   readonly sampleCounts: SanitizedProviderFeedFixture["sampleProfile"]["counts"];
   readonly sampleNullableFields: SanitizedProviderFeedFixture["sampleProfile"]["nullableFields"];
-  readonly sale:
+  readonly trade:
     | "empty"
     | {
         readonly amount: number | null;
@@ -56,11 +56,11 @@ const sourceTime = "2026-01-02T03:04:05.000Z";
 const fixtureShapes: readonly FixtureShape[] = [
   {
     name: "beezie",
-    sampleCounts: { catalog: 4, pulls: 15, sales: 15 },
+    sampleCounts: { catalog: 4, pulls: 15, trades: 15 },
     sampleNullableFields: {
       pullPackExternalId: true,
-      saleAmount: false,
-      saleCurrency: false,
+      tradeAmount: false,
+      tradeCurrency: false,
     },
     catalogData: {
       fixture_shape: "machine-with-micro-unit-price",
@@ -69,7 +69,7 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "pull-without-pack-relationship" },
     packExternalId: null,
-    sale: {
+    trade: {
       amount: 14.5,
       currency: "fixture-token",
       eventType: "swap",
@@ -78,11 +78,11 @@ const fixtureShapes: readonly FixtureShape[] = [
   },
   {
     name: "clutchpacks",
-    sampleCounts: { catalog: 14, pulls: 15, sales: 15 },
+    sampleCounts: { catalog: 14, pulls: 15, trades: 15 },
     sampleNullableFields: {
       pullPackExternalId: true,
-      saleAmount: true,
-      saleCurrency: true,
+      tradeAmount: true,
+      tradeCurrency: true,
     },
     catalogData: {
       fixture_shape: "collection-with-formatted-prices",
@@ -91,7 +91,7 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "card-preview-pull" },
     packExternalId: null,
-    sale: {
+    trade: {
       amount: null,
       currency: null,
       eventType: "shipped",
@@ -100,11 +100,11 @@ const fixtureShapes: readonly FixtureShape[] = [
   },
   {
     name: "collector_crypt",
-    sampleCounts: { catalog: 14, pulls: 15, sales: 15 },
+    sampleCounts: { catalog: 14, pulls: 15, trades: 15 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: true,
-      saleCurrency: true,
+      tradeAmount: true,
+      tradeCurrency: true,
     },
     catalogData: {
       fixture_shape: "mixed-card-and-machine-catalog",
@@ -113,7 +113,7 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "machine-linked-pull" },
     packExternalId: "fixture:collector_crypt:pack:1",
-    sale: {
+    trade: {
       amount: null,
       currency: null,
       eventType: "unlisted",
@@ -122,11 +122,11 @@ const fixtureShapes: readonly FixtureShape[] = [
   },
   {
     name: "courtyard",
-    sampleCounts: { catalog: 11, pulls: 15, sales: 15 },
+    sampleCounts: { catalog: 11, pulls: 15, trades: 15 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: true,
-      saleCurrency: true,
+      tradeAmount: true,
+      tradeCurrency: true,
     },
     catalogData: {
       fixture_shape: "pack-with-inventory-and-price-records",
@@ -135,7 +135,7 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "out-of-page-pack-reference" },
     packExternalId: "fixture:courtyard:pack:outside-page",
-    sale: {
+    trade: {
       amount: null,
       currency: null,
       eventType: "transfer",
@@ -144,11 +144,11 @@ const fixtureShapes: readonly FixtureShape[] = [
   },
   {
     name: "gamestop",
-    sampleCounts: { catalog: 8, pulls: 15, sales: 0 },
+    sampleCounts: { catalog: 8, pulls: 15, trades: 0 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: false,
-      saleCurrency: false,
+      tradeAmount: false,
+      tradeCurrency: false,
     },
     catalogData: {
       fixture_shape: "category-with-purchasable-levels",
@@ -158,15 +158,15 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "category-and-level-pull" },
     packExternalId: "fixture:gamestop:category:1",
-    sale: "empty",
+    trade: "empty",
   },
   {
     name: "phygitals",
-    sampleCounts: { catalog: 15, pulls: 15, sales: 15 },
+    sampleCounts: { catalog: 15, pulls: 15, trades: 15 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: false,
-      saleCurrency: false,
+      tradeAmount: false,
+      tradeCurrency: false,
     },
     catalogData: {
       fixture_shape: "root-pack-with-variants",
@@ -179,7 +179,7 @@ const fixtureShapes: readonly FixtureShape[] = [
       marketplace: { identity: "sanitized", listing: { active: false } },
     },
     packExternalId: "fixture:phygitals:variant:1",
-    sale: {
+    trade: {
       amount: 9.75,
       currency: "USD",
       eventType: "buyback",
@@ -188,11 +188,11 @@ const fixtureShapes: readonly FixtureShape[] = [
   },
   {
     name: "stadium_vault",
-    sampleCounts: { catalog: 14, pulls: 15, sales: 0 },
+    sampleCounts: { catalog: 14, pulls: 15, trades: 0 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: false,
-      saleCurrency: false,
+      tradeAmount: false,
+      tradeCurrency: false,
     },
     catalogData: {
       fixture_shape: "pack-with-effective-odds",
@@ -201,15 +201,15 @@ const fixtureShapes: readonly FixtureShape[] = [
     },
     pullData: { fixture_shape: "graded-card-pull", grade: "fixture-grade" },
     packExternalId: "fixture:stadium_vault:pack:1",
-    sale: "empty",
+    trade: "empty",
   },
   {
     name: "trove",
-    sampleCounts: { catalog: 15, pulls: 15, sales: 0 },
+    sampleCounts: { catalog: 15, pulls: 15, trades: 0 },
     sampleNullableFields: {
       pullPackExternalId: false,
-      saleAmount: false,
-      saleCurrency: false,
+      tradeAmount: false,
+      tradeCurrency: false,
     },
     catalogData: {
       fixture_shape: "pack-with-tier-ranges-and-grails",
@@ -223,7 +223,7 @@ const fixtureShapes: readonly FixtureShape[] = [
       actor: "sanitized",
     },
     packExternalId: "fixture:trove:pack:1",
-    sale: "empty",
+    trade: "empty",
   },
 ] as const;
 
@@ -252,20 +252,20 @@ function buildFixture(shape: FixtureShape): SanitizedProviderFeedFixture {
         data: shape.pullData,
       },
     ],
-    sales:
-      shape.sale === "empty"
+    trades:
+      shape.trade === "empty"
         ? []
         : [
             {
               platform,
-              external_id: `fixture:${platform}:sale:1`,
-              event_type: shape.sale.eventType,
+              external_id: `fixture:${platform}:trade:1`,
+              event_type: shape.trade.eventType,
               tx_hash: `fixture:${platform}:transaction:1`,
-              amount: shape.sale.amount,
-              currency: shape.sale.currency,
+              amount: shape.trade.amount,
+              currency: shape.trade.currency,
               occurred_at: sourceTime,
               collected_at: collectedAt,
-              data: shape.sale.data,
+              data: shape.trade.data,
             },
           ],
     next_cursor: `fixture:${platform}:cursor:complete`,

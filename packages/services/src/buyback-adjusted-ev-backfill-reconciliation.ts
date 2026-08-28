@@ -62,7 +62,7 @@ export interface PackScoutBuybackEvBackfillRowV1 {
   readonly platformKey: string;
   readonly productKey: string;
   readonly publicRepackId: string;
-  readonly availability: "active" | "sold_out";
+  readonly availability: DataReleaseV3CanonicalProduct["availability"];
   readonly classification: PackScoutBuybackEvBackfillClassificationV1;
   readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
   readonly recomputationOutcome: PackScoutBuybackEvBackfillRecomputationOutcomeV1;
@@ -491,7 +491,9 @@ export class PackScoutBuybackEvBackfillReconciliationRunnerV1 {
         platformKey: product.platformKey,
         productKey: product.productKey,
         publicRepackId: product.publicRepackId,
-        availability: product.availability === "sold_out" ? "sold_out" : "active",
+        // The reconciliation row reports the canonical state verbatim: folding
+        // `unavailable`/`unknown` into `available` would misreport them.
+        availability: product.availability,
         classification: expected.classification,
         publicReason: expected.reason,
         recomputationOutcome:

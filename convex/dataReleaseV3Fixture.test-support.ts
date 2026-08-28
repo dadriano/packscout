@@ -213,7 +213,7 @@ export function buildV3Detail(
     contentMode: "focused",
     categories: [{ publicCategoryId: V3_CATEGORY_ID, label: "Cards" }],
     collectibleTypes: ["card"],
-    availability: "active",
+    availability: "available",
     price: {
       displayMoney: usd(V3_PACK_PRICE_MINOR),
       usdComparison: { status: "available", value: usd(V3_PACK_PRICE_MINOR) },
@@ -271,6 +271,27 @@ export function buildV3SoldOutDetail(
         reason: "NOT_REPORTED",
       },
     },
+    actionAvailability: { promo: true, repackLink: false },
+    actions: { promo: { code: "SCOUT", label: "Use SCOUT" } },
+    ...overrides,
+  });
+}
+
+/**
+ * A pack in one of the two availability states the four-state public
+ * vocabulary added. `unavailable` and `unknown` sit on the same exclusion side
+ * as `sold_out` — discoverable, never ranked, never actionable — so the
+ * fixture withholds the outbound repack link exactly as the sold-out fixture
+ * does. The PackScout estimate stays deliberately current: pack availability
+ * and EV availability are separate axes, so a fixture that nulled the estimate
+ * would let an availability guard go dead without any test noticing.
+ */
+export function buildV3UnpurchasableDetail(
+  availability: "unavailable" | "unknown",
+  overrides: Partial<PublicRepackDetailV3> = {},
+): PublicRepackDetailV3 {
+  return buildV3Detail({
+    availability,
     actionAvailability: { promo: true, repackLink: false },
     actions: { promo: { code: "SCOUT", label: "Use SCOUT" } },
     ...overrides,

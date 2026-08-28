@@ -3,7 +3,12 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, join, parse, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-const RECORD_GROUPS = ["catalog", "pulls", "sales"];
+const RECORD_GROUPS = ["catalog", "pulls", "trades"];
+const EVIDENCE_GROUP_BY_RECORD_KIND = Object.freeze({
+  catalog: "catalog",
+  pulls: "pulls",
+  trades: "sales",
+});
 const MANIFEST_URL = new URL(
   "../../packages/contracts/src/__fixtures__/provider-sample-manifest.json",
   import.meta.url,
@@ -76,7 +81,10 @@ async function readSample(directory, file) {
   }
   const page = requireObject(parsedValue, file, "page");
   const records = Object.fromEntries(
-    RECORD_GROUPS.map((group) => [group, requireRecordArray(page, group, file)]),
+    RECORD_GROUPS.map((group) => [
+      group,
+      requireRecordArray(page, EVIDENCE_GROUP_BY_RECORD_KIND[group], file),
+    ]),
   );
   for (const group of RECORD_GROUPS) {
     for (const record of records[group]) {
@@ -98,7 +106,10 @@ async function deriveManifest(directory) {
 
   for (const file of files) {
     const { bytes, page, records } = await readSample(directory, file);
-    addKeySet(pageKeySets, sortedKeySet(page));
+    addKeySet(
+      pageKeySets,
+      sortedKeySet(page).map((key) => (key === "sales" ? "trades" : key)),
+    );
     for (const group of RECORD_GROUPS) {
       for (const record of records[group]) {
         addKeySet(recordKeySets[group], sortedKeySet(record));
@@ -121,8 +132,8 @@ async function deriveManifest(directory) {
         pullPackExternalId: records.pulls.some(
           (record) => record.pack_external_id === null,
         ),
-        saleAmount: records.sales.some((record) => record.amount === null),
-        saleCurrency: records.sales.some((record) => record.currency === null),
+        tradeAmount: records.trades.some((record) => record.amount === null),
+        tradeCurrency: records.trades.some((record) => record.currency === null),
       },
     });
   }

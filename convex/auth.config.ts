@@ -32,17 +32,7 @@ export function buildPrivyAuthConfig(
   };
 }
 
-function optionalDeploymentEnvironmentValue(name: string): string | undefined {
-  // A direct process.env.NAME read makes NAME required during Convex auth
-  // bundling. Dynamic presence checking keeps unconfigured deployments valid.
-  const deploymentEnvironment = process.env as Readonly<
-    Record<string, string | undefined>
-  >;
-  return Object.prototype.hasOwnProperty.call(deploymentEnvironment, name)
-    ? deploymentEnvironment[name]
-    : undefined;
-}
-
-export default buildPrivyAuthConfig(
-  optionalDeploymentEnvironmentValue("PRIVY_APP_ID"),
-);
+// Convex discovers auth environment dependencies from direct property reads
+// while bundling auth.config.ts. Keep this statically visible so deployments
+// configured with PRIVY_APP_ID publish the provider instead of an empty list.
+export default buildPrivyAuthConfig(process.env.PRIVY_APP_ID);

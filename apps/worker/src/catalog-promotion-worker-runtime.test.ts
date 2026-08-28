@@ -185,6 +185,8 @@ test("provider and catalog loops start concurrently and stop together", async ()
           knownRemaining: 0,
           deferredOrganizations: 0,
           capReached: false,
+          prunedRecords: 0,
+          prunedFailures: 0,
         };
       },
     },

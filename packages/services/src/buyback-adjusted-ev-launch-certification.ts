@@ -902,13 +902,15 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     },
     {
       claim:
-        "Outbound actions are blocked for sold-out, unavailable, and " +
-        "unapproved targets and referral parameters apply exactly once.",
+        "Outbound actions are blocked for every non-available pack " +
+        "(sold-out, unavailable, and availability-unknown) and for missing, " +
+        "unapproved, and malformed targets, and referral parameters apply " +
+        "exactly once.",
       evidence: [
         {
           file: "apps/frontend/components/catalog/pack-actions.client.test.ts",
           testName:
-            "blocks missing, sold-out, unapproved, and malformed outbound actions",
+            "blocks every non-available, missing, unapproved, and malformed outbound action",
         },
         {
           file: "apps/frontend/components/catalog/pack-actions.client.test.ts",
@@ -917,7 +919,8 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         },
         {
           file: "apps/frontend/lib/all-repacks-table.test.ts",
-          testName: "sold-out rows never expose an outbound repack action",
+          testName:
+            "only available rows expose the outbound repack link, and promos are never gated by it",
         },
       ],
     },

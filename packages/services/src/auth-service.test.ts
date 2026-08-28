@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OperatorSummary } from "@packscout/contracts";
+import {
+  permissionsForOperatorRole,
+  type OperatorSummary,
+} from "@packscout/contracts";
 import {
   AuthService,
   AuthServiceError,
   BoundedLoginAttemptLimiter,
   type AuthAuditEvent,
+  type AuthAuditWriteFailure,
   type AuthRepository,
   type AuthoritativeSessionRecord,
   type LoginOperatorRecord,
+  type ActivateInvitedOperatorResult,
+  type CancelInvitedOperatorResult,
   type ProvisionOperatorResult,
   type UpdateOperatorResult,
 } from "./auth-service.ts";
@@ -50,6 +56,12 @@ interface RepositoryState {
   refreshed: Array<Parameters<AuthRepository["refreshSession"]>[0]>;
   provisionResult: ProvisionOperatorResult;
   updateResult: UpdateOperatorResult;
+  activateResult: ActivateInvitedOperatorResult;
+  cancelResult: CancelInvitedOperatorResult;
+  operatorById: OperatorSummary | null;
+  provisionInputs: Array<Parameters<AuthRepository["provisionOperator"]>[0]>;
+  activations: Array<Parameters<AuthRepository["activateInvitedOperator"]>[0]>;
+  cancellations: Array<Parameters<AuthRepository["cancelInvitedOperator"]>[0]>;
 }
 
 function createRepository(): { repository: AuthRepository; state: RepositoryState } {
@@ -60,8 +72,14 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     revokedTokens: [],
     operatorUpdates: [],
     refreshed: [],
-    provisionResult: { kind: "created", operator: summary() },
+    provisionResult: { kind: "created", operator: summary({ state: "pending" }) },
     updateResult: { kind: "updated", operator: summary() },
+    activateResult: { kind: "activated", operator: summary() },
+    cancelResult: { kind: "cancelled", operator: summary({ state: "cancelled" }) },
+    operatorById: summary({ state: "pending" }),
+    provisionInputs: [],
+    activations: [],
+    cancellations: [],
   };
   const repository: AuthRepository = {
     async findOperatorForLogin() {
@@ -82,8 +100,20 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
     async listOperators() {
       return { items: [summary()], nextCursor: null };
     },
-    async provisionOperator() {
+    async findOperatorById() {
+      return state.operatorById;
+    },
+    async provisionOperator(input) {
+      state.provisionInputs.push(input);
       return state.provisionResult;
+    },
+    async activateInvitedOperator(input) {
+      state.activations.push(input);
+      return state.activateResult;
+    },
+    async cancelInvitedOperator(input) {
+      state.cancellations.push(input);
+      return state.cancelResult;
     },
     async updateOperator(input) {
       state.operatorUpdates.push(input);
@@ -93,9 +123,13 @@ function createRepository(): { repository: AuthRepository; state: RepositoryStat
   return { repository, state };
 }
 
-function createHarness() {
+function createHarness(overrides?: {
+  /** Which records the ledger refuses, standing in for an unavailable sink. */
+  auditFailsOn?: (event: AuthAuditEvent) => boolean;
+}) {
   const { repository, state } = createRepository();
   const audits: AuthAuditEvent[] = [];
+  const auditFailures: AuthAuditWriteFailure[] = [];
   const passwordVerifications: string[] = [];
   const limiter = new BoundedLoginAttemptLimiter({
     windowMs: 60_000,
@@ -136,16 +170,20 @@ function createHarness() {
     loginLimiter: limiter,
     audit: {
       async append(event) {
+        if (overrides?.auditFailsOn?.(event)) {
+          throw new Error("the audit ledger is unavailable");
+        }
         audits.push(event);
       },
     },
+    reportAuditFailure: (failure) => auditFailures.push(failure),
     config: {
       sessionIdleMs: 60 * 60 * 1_000,
       sessionAbsoluteMs: 12 * 60 * 60 * 1_000,
       dummyPasswordHash: "hash:dummy value",
     },
   });
-  return { service, state, audits, passwordVerifications };
+  return { service, state, audits, auditFailures, passwordVerifications };
 }
 
 function captureServiceError(run: () => Promise<unknown>): Promise<AuthServiceError> {
@@ -308,11 +346,10 @@ test("session resolution rechecks authoritative role and rejects disabled accoun
     csrfToken: "valid-csrf",
   });
   assert.equal(actor.role, "data_operator");
-  assert.deepEqual(actor.permissions, [
-    "providers:view",
-    "imports:start",
-    "imports:retry",
-  ]);
+  // Compared against the authoritative grant rather than a restated literal, so
+  // this test proves the role was re-resolved and does not have to be edited
+  // every time the role's capabilities change.
+  assert.deepEqual(actor.permissions, permissionsForOperatorRole("data_operator"));
   assert.equal(state.refreshed[0]?.idleExpiresAt.toISOString(), state.authoritativeSession.absoluteExpiresAt.toISOString());
 
   state.authoritativeSession = { ...state.authoritativeSession, state: "disabled" };
@@ -412,10 +449,9 @@ test("operator mutations are admin-only, revoke stale sessions, and keep audits 
 
   const dataOperator = { ...actor, role: "data_operator" as const };
   const forbidden = await captureServiceError(() =>
-    service.provisionOperator(dataOperator, {
+    service.inviteOperator(dataOperator, {
       email: "new@packscout.test",
       displayName: "New Operator",
-      password: "initial secure password",
       role: "data_operator",
     }),
   );
@@ -443,4 +479,609 @@ test("atomic repository last-admin protection maps to a stable conflict", async 
   assert.equal(error.status, 409);
   assert.equal(error.code, "LAST_ACTIVE_ADMIN");
   assert.equal(state.operatorUpdates.length, 1);
+});
+
+test("password reset issuance resolves only active operators, silently", async () => {
+  const { service, state } = createHarness();
+
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail(admin.emailNormalized),
+    admin.id,
+  );
+
+  state.loginOperator = { ...admin, state: "disabled" };
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail(admin.emailNormalized),
+    null,
+  );
+
+  state.loginOperator = null;
+  assert.equal(
+    await service.resolveActiveOperatorIdByEmail("nobody@packscout.test"),
+    null,
+  );
+});
+
+test("password reset eligibility requires the same active operator behind the mailed address", async () => {
+  const { service, state } = createHarness();
+
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    true,
+  );
+  // The address resolves to a different operator than the token was bound to.
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      "00000000-0000-4000-8000-000000000099",
+      admin.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = { ...admin, state: "disabled" };
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = null;
+  assert.equal(
+    await service.isOperatorEligibleForPasswordReset(
+      admin.id,
+      admin.emailNormalized,
+    ),
+    false,
+  );
+});
+
+test("completing a password reset rehashes through the session-revoking update and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+
+  await service.completePasswordReset({
+    operatorId: admin.id,
+    addressNormalized: admin.emailNormalized,
+    newPassword: "a fresh strong password",
+  });
+
+  // The one repository call that both writes the hash and revokes every
+  // active session for the operator — the admin's existing machinery.
+  assert.equal(state.operatorUpdates.length, 1);
+  assert.deepEqual(state.operatorUpdates[0], {
+    organizationId: admin.organizationId,
+    operatorId: admin.id,
+    passwordHash: "hash:a fresh strong password",
+    now,
+  });
+
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.password_reset");
+  assert.equal(audit?.outcome, "success");
+  assert.equal(audit?.subjectId, admin.id);
+  assert.equal(audit?.actorId, admin.id);
+  const serializedAudit = JSON.stringify(audits);
+  assert.doesNotMatch(serializedAudit, /fresh strong password|hash:/);
+});
+
+test("a reset completion for an ineligible or mismatched operator is refused before any write", async () => {
+  const { service, state, audits } = createHarness();
+
+  state.loginOperator = { ...admin, state: "disabled" };
+  const disabled = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(disabled.code, "FORBIDDEN");
+
+  state.loginOperator = admin;
+  const mismatched = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: "00000000-0000-4000-8000-000000000099",
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(mismatched.code, "FORBIDDEN");
+
+  assert.equal(state.operatorUpdates.length, 0);
+  assert.equal(
+    audits.filter(
+      (event) =>
+        event.action === "operator.password_reset" &&
+        event.outcome === "blocked",
+    ).length,
+    2,
+  );
+  assert.doesNotMatch(JSON.stringify(audits), /fresh strong password/);
+});
+
+test("a reset completion that cannot update the operator reports unavailability honestly", async () => {
+  const { service, state, audits } = createHarness();
+  state.updateResult = { kind: "not_found" };
+
+  const error = await captureServiceError(() =>
+    service.completePasswordReset({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(error.code, "SERVICE_UNAVAILABLE");
+  assert.equal(error.status, 503);
+  assert.equal(audits.at(-1)?.outcome, "failure");
+  assert.doesNotMatch(JSON.stringify(audits), /fresh strong password/);
+});
+
+test("inviting an operator creates a credential-less pending account and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const result = await service.inviteOperator(actor, {
+    email: "invited@packscout.test",
+    displayName: "Invited Operator",
+    role: "data_operator",
+  });
+
+  assert.equal(result.operator.state, "pending");
+  assert.equal(state.provisionInputs.length, 1);
+  assert.equal(state.provisionInputs[0]?.passwordHash, null);
+  assert.equal(state.provisionInputs[0]?.state, "pending");
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.invite");
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /hash:|password|token|link/i);
+
+  const dataOperator = { ...actor, role: "data_operator" as const };
+  const forbidden = await captureServiceError(() =>
+    service.inviteOperator(dataOperator, {
+      email: "other@packscout.test",
+      displayName: "Other",
+      role: "data_operator",
+    }),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+});
+
+test("direct provisioning creates an active tenant-scoped account and audits without secrets", async () => {
+  const { service, state, audits } = createHarness();
+  state.provisionResult = { kind: "created", operator: summary() };
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: ["operators:manage" as const],
+    csrfToken: "csrf",
+  };
+  const password = "an initial secure password";
+
+  const result = await service.provisionOperator(actor, {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password,
+    role: "data_operator",
+  });
+
+  assert.equal(result.operator.state, "active");
+  assert.deepEqual(state.provisionInputs, [
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      organizationId: admin.organizationId,
+      emailNormalized: "direct@packscout.test",
+      displayName: "Direct Operator",
+      passwordHash: `hash:${password}`,
+      role: "data_operator",
+      state: "active",
+      now,
+    },
+  ]);
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.provision");
+  assert.equal(audit?.organizationId, admin.organizationId);
+  assert.equal(audit?.actorId, admin.id);
+  assert.equal(audit?.subjectId, result.operator.id);
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /initial secure password|hash:/i);
+
+  const forbidden = await captureServiceError(() =>
+    service.provisionOperator(
+      { ...actor, role: "data_operator" as const },
+      {
+        email: "forbidden@packscout.test",
+        displayName: "Forbidden Operator",
+        password,
+        role: "data_operator",
+      },
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+  assert.equal(state.provisionInputs.length, 1);
+});
+
+test("direct provisioning preserves stable outcomes when email or audit persistence conflicts", async () => {
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: ["operators:manage" as const],
+    csrfToken: "csrf",
+  };
+  const input = {
+    email: "direct@packscout.test",
+    displayName: "Direct Operator",
+    password: "an initial secure password",
+    role: "data_operator" as const,
+  };
+
+  const conflict = createHarness({
+    auditFailsOn: (event) => event.action === "operator.provision",
+  });
+  conflict.state.provisionResult = { kind: "email_conflict" };
+  const conflictError = await captureServiceError(() =>
+    conflict.service.provisionOperator(actor, input),
+  );
+  assert.equal(conflictError.code, "OPERATOR_EMAIL_CONFLICT");
+  assert.equal(conflictError.status, 409);
+  assert.deepEqual(conflict.auditFailures, [
+    {
+      action: "operator.provision",
+      outcome: "failure",
+      afterCommit: false,
+    },
+  ]);
+
+  const committed = createHarness({
+    auditFailsOn: (event) => event.action === "operator.provision",
+  });
+  committed.state.provisionResult = {
+    kind: "created",
+    operator: summary(),
+  };
+  const result = await committed.service.provisionOperator(actor, input);
+  assert.equal(result.operator.state, "active");
+  assert.deepEqual(committed.auditFailures, [
+    {
+      action: "operator.provision",
+      outcome: "success",
+      afterCommit: true,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(committed.auditFailures),
+    /initial secure password|hash:/i,
+  );
+});
+
+test("a pending account is refused by every authentication path", async () => {
+  // One enumeration over every route into an authenticated identity, so a
+  // new path cannot quietly start accepting invited-but-not-activated
+  // accounts. Each entry names the site in auth-service.ts it exercises.
+  const pending = { ...admin, state: "pending" as const, passwordHash: null };
+
+  // login(): the credential check.
+  const loginHarness = createHarness();
+  loginHarness.state.loginOperator = pending;
+  const login = await captureServiceError(() =>
+    loginHarness.service.login({
+      normalizedEmail: pending.emailNormalized,
+      password: "correct horse battery staple",
+      networkIdentifier: "network-a",
+      previousSessionToken: undefined,
+    }),
+  );
+  assert.equal(login.code, "INVALID_CREDENTIALS");
+  // Verified against the dummy hash, exactly like an unknown address: a
+  // credential-less account is refused for its state, not for its shape.
+  assert.deepEqual(loginHarness.passwordVerifications, ["hash:dummy value"]);
+
+  // resolveSession(): the authoritative session recheck.
+  const sessionHarness = createHarness();
+  sessionHarness.state.authoritativeSession = {
+    sessionId: "session-id",
+    operatorId: pending.id,
+    organizationId: pending.organizationId,
+    organizationName: pending.organizationName,
+    emailNormalized: pending.emailNormalized,
+    displayName: pending.displayName,
+    state: "pending",
+    role: "admin",
+    csrfHash: "csrf:valid-csrf",
+    idleExpiresAt: new Date(now.getTime() + 10_000),
+    absoluteExpiresAt: new Date(now.getTime() + 20_000),
+  };
+  const resolved = await captureServiceError(() =>
+    sessionHarness.service.resolveSession({ sessionToken: "session-token" }),
+  );
+  assert.equal(resolved.code, "AUTH_REQUIRED");
+
+  // bootstrapSession(): the read-only variant of the same recheck.
+  const bootstrapHarness = createHarness();
+  bootstrapHarness.state.authoritativeSession =
+    sessionHarness.state.authoritativeSession;
+  const bootstrapped = await captureServiceError(() =>
+    bootstrapHarness.service.bootstrapSession("session-token"),
+  );
+  assert.equal(bootstrapped.code, "AUTH_REQUIRED");
+
+  // resolveActiveOperatorIdByEmail(): password-reset issuance.
+  const issuanceHarness = createHarness();
+  issuanceHarness.state.loginOperator = pending;
+  assert.equal(
+    await issuanceHarness.service.resolveActiveOperatorIdByEmail(
+      pending.emailNormalized,
+    ),
+    null,
+  );
+
+  // isOperatorEligibleForPasswordReset(): password-reset redemption.
+  assert.equal(
+    await issuanceHarness.service.isOperatorEligibleForPasswordReset(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    false,
+  );
+
+  // completePasswordReset(): a reset can never activate a pending account.
+  const resetHarness = createHarness();
+  resetHarness.state.loginOperator = pending;
+  const reset = await captureServiceError(() =>
+    resetHarness.service.completePasswordReset({
+      operatorId: pending.id,
+      addressNormalized: pending.emailNormalized,
+      newPassword: "a fresh strong password",
+    }),
+  );
+  assert.equal(reset.code, "FORBIDDEN");
+  assert.equal(resetHarness.state.operatorUpdates.length, 0);
+
+  // updateOperator(): an administrator cannot edit one into usability.
+  const updateHarness = createHarness();
+  updateHarness.state.updateResult = { kind: "not_activated" };
+  const updated = await captureServiceError(() =>
+    updateHarness.service.updateOperator(
+      {
+        sessionId: "session-id",
+        operatorId: admin.id,
+        organizationId: admin.organizationId,
+        organizationName: admin.organizationName,
+        email: admin.emailNormalized,
+        displayName: admin.displayName,
+        state: "active",
+        role: "admin",
+        permissions: [],
+        csrfToken: "csrf",
+      },
+      pending.id,
+      { state: "active", password: "an administrator chosen password" },
+    ),
+  );
+  assert.equal(updated.code, "OPERATOR_NOT_ACTIVATED");
+  assert.equal(updated.status, 409);
+  assert.equal(updateHarness.audits.at(-1)?.outcome, "blocked");
+});
+
+test("invitation redemption activates only the pending account the link was bound to", async () => {
+  const { service, state, audits } = createHarness();
+  const pending = { ...admin, state: "pending" as const, passwordHash: null };
+  state.loginOperator = pending;
+
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    true,
+  );
+  // A different subject behind the same address, and an account that is no
+  // longer pending, are both ineligible.
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      "00000000-0000-4000-8000-0000000000ff",
+      pending.emailNormalized,
+    ),
+    false,
+  );
+  state.loginOperator = { ...pending, state: "active" };
+  assert.equal(
+    await service.isOperatorEligibleForInvitation(
+      pending.id,
+      pending.emailNormalized,
+    ),
+    false,
+  );
+
+  state.loginOperator = pending;
+  const activated = await service.activateInvitedOperator({
+    operatorId: pending.id,
+    addressNormalized: pending.emailNormalized,
+    newPassword: "a chosen strong password",
+  });
+  assert.equal(activated.operator.state, "active");
+  assert.equal(state.activations.length, 1);
+  assert.equal(state.activations[0]?.passwordHash, "hash:a chosen strong password");
+  const audit = audits.at(-1);
+  assert.equal(audit?.action, "operator.invitation_accept");
+  assert.equal(audit?.outcome, "success");
+  assert.doesNotMatch(JSON.stringify(audits), /a chosen strong password|hash:/);
+});
+
+test("redeeming for a cancelled or already-activated account is refused before any write", async () => {
+  const cancelled = createHarness();
+  cancelled.state.loginOperator = {
+    ...admin,
+    state: "cancelled",
+    passwordHash: null,
+  };
+  const refused = await captureServiceError(() =>
+    cancelled.service.activateInvitedOperator({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a chosen strong password",
+    }),
+  );
+  assert.equal(refused.code, "FORBIDDEN");
+  assert.equal(cancelled.state.activations.length, 0);
+
+  // A cancellation that lands between the eligibility check and the write:
+  // the guarded update refuses, and the outcome is the same refusal.
+  const raced = createHarness();
+  raced.state.loginOperator = { ...admin, state: "pending", passwordHash: null };
+  raced.state.activateResult = { kind: "not_pending" };
+  const lost = await captureServiceError(() =>
+    raced.service.activateInvitedOperator({
+      operatorId: admin.id,
+      addressNormalized: admin.emailNormalized,
+      newPassword: "a chosen strong password",
+    }),
+  );
+  assert.equal(lost.code, "FORBIDDEN");
+  assert.equal(raced.audits.at(-1)?.outcome, "blocked");
+  assert.doesNotMatch(JSON.stringify(raced.audits), /a chosen strong password/);
+});
+
+test("cancelling an invitation is admin-only, terminal, and audited", async () => {
+  const { service, state, audits } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const cancelled = await service.cancelInvitedOperator(actor, summary().id);
+  assert.equal(cancelled.operator.state, "cancelled");
+  assert.equal(state.cancellations.length, 1);
+  assert.equal(audits.at(-1)?.action, "operator.invitation_cancel");
+  assert.equal(audits.at(-1)?.outcome, "success");
+
+  const forbidden = await captureServiceError(() =>
+    service.cancelInvitedOperator(
+      { ...actor, role: "data_operator" },
+      summary().id,
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+
+  // An account that already works is not a pending invitation to withdraw.
+  state.cancelResult = { kind: "not_pending" };
+  const missing = await captureServiceError(() =>
+    service.cancelInvitedOperator(actor, summary().id),
+  );
+  assert.equal(missing.code, "OPERATOR_NOT_FOUND");
+  assert.equal(missing.status, 404);
+});
+
+test("reissue resolves the account's own address and refuses non-pending targets", async () => {
+  const { service, state } = createHarness();
+  const actor = {
+    sessionId: "session-id",
+    operatorId: admin.id,
+    organizationId: admin.organizationId,
+    organizationName: admin.organizationName,
+    email: admin.emailNormalized,
+    displayName: admin.displayName,
+    state: "active" as const,
+    role: "admin" as const,
+    permissions: [],
+    csrfToken: "csrf",
+  };
+
+  const resolved = await service.resolvePendingOperatorForReissue(
+    actor,
+    summary().id,
+  );
+  assert.equal(resolved.email, "operator@packscout.test");
+
+  state.operatorById = summary({ state: "active" });
+  const active = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(actor, summary().id),
+  );
+  assert.equal(active.code, "OPERATOR_NOT_FOUND");
+
+  state.operatorById = null;
+  const unknown = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(actor, summary().id),
+  );
+  assert.equal(unknown.code, "OPERATOR_NOT_FOUND");
+
+  const forbidden = await captureServiceError(() =>
+    service.resolvePendingOperatorForReissue(
+      { ...actor, role: "data_operator" },
+      summary().id,
+    ),
+  );
+  assert.equal(forbidden.code, "FORBIDDEN");
+});
+
+test("a completed reset stays completed when its audit write fails", async () => {
+  // The password is changed, every session the operator held is revoked, and
+  // the one-time link that authorized it is spent. Reporting unavailability
+  // because the ledger refused would tell the operator their password is
+  // unchanged when it is changed, and the link can never be presented again:
+  // they would be locked out of an account whose new password they were told
+  // did not take.
+  const { service, state, audits, auditFailures } = createHarness({
+    auditFailsOn: (event) =>
+      event.action === "operator.password_reset" && event.outcome === "success",
+  });
+
+  await service.completePasswordReset({
+    operatorId: admin.id,
+    addressNormalized: admin.emailNormalized,
+    newPassword: "a fresh strong password",
+  });
+
+  // The credential update — and its session revocation — still happened once.
+  assert.equal(state.operatorUpdates.length, 1);
+  assert.equal(state.operatorUpdates[0]?.passwordHash, "hash:a fresh strong password");
+  assert.equal(
+    audits.some((event) => event.action === "operator.password_reset"),
+    false,
+  );
+
+  // The gap is reported on its own, naming nothing the reset was holding.
+  assert.deepEqual(auditFailures, [
+    {
+      action: "operator.password_reset",
+      outcome: "success",
+      afterCommit: true,
+    },
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(auditFailures),
+    /fresh strong password|hash:|@/,
+  );
 });

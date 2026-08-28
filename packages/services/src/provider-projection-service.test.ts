@@ -50,7 +50,7 @@ test("projection composition routes provider-neutral candidate families without 
             externalId: "pack-1",
             parentExternalId: null,
             name: "Pack",
-            availability: "active",
+            availability: "available",
           },
         ],
       })
@@ -105,8 +105,8 @@ test("projection composition rejects empty or mixed families before either handl
         dataQualityEvidence: [],
       },
       {
-        candidateKind: "sale",
-        source: { ...source, recordKind: "sale" },
+        candidateKind: "market_event",
+        source: { ...source, recordKind: "trade" },
         eventType: "sale",
         transactionKey: "tx-1",
         assetExternalId: null,

@@ -4,11 +4,13 @@ import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
   catalogSheetInspectorInitiallyOpen,
+  clearCatalogRepackSelection,
   nextCatalogPage,
   parseCatalogViewLayout,
   parseCatalogQueryState,
   previousCatalogPage,
   resetCatalogPagination,
+  selectCatalogRepack,
   serializeCatalogQueryState,
   serializeCatalogViewState,
   serializeDashboardFilters,
@@ -16,6 +18,7 @@ import {
 
 const CATEGORY_ID = "00000000-0000-5000-8000-000000000101";
 const COLLECTIBLE_ID = "00000000-0000-5000-8000-000000000201";
+const REPACK_ID = "00000000-0000-5000-8000-000000000301";
 
 test("the empty URL restores the complete default repack query", () => {
   const parsed = parseCatalogQueryState(new URLSearchParams());
@@ -56,11 +59,11 @@ test("query state is normalized and serialized in canonical order", () => {
   );
 });
 
-test("sold-out repacks stay hidden unless the URL opts into every availability", () => {
+test("non-available repacks stay hidden unless the URL opts into every availability", () => {
   const parsed = parseCatalogQueryState(new URLSearchParams());
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.query.filters.availability, "active");
+  assert.equal(parsed.query.filters.availability, "available");
 
   const including = parseCatalogQueryState(new URLSearchParams("availability=all"));
   assert.equal(including.ok, true);
@@ -70,6 +73,46 @@ test("sold-out repacks stay hidden unless the URL opts into every availability",
     serializeCatalogQueryState(including.query),
     "/packs?availability=all",
   );
+});
+
+test("selected repack survives canonical URL parsing until filters are revised", () => {
+  const selected = selectCatalogRepack(DEFAULT_CATALOG_QUERY, REPACK_ID);
+  expectSelectionLifecycle(selected);
+
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams(`selected=${REPACK_ID}`),
+  );
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  expectSelectionLifecycle(parsed.query);
+
+  function expectSelectionLifecycle(
+    query: ReturnType<typeof selectCatalogRepack>,
+  ) {
+    assert.equal(query.selectedPublicRepackId, REPACK_ID);
+    assert.equal(
+      serializeCatalogQueryState(query),
+      `/packs?selected=${REPACK_ID}`,
+    );
+    const revised = resetCatalogPagination(query, {
+      filters: { ...query.filters, availability: "all" },
+    });
+    assert.equal(revised.selectedPublicRepackId, null);
+    assert.equal(
+      serializeCatalogQueryState(revised),
+      "/packs?availability=all",
+    );
+  }
+});
+
+test("closing the sheet clears only the selected repack from the query", () => {
+  const selected = selectCatalogRepack(
+    nextCatalogPage(DEFAULT_CATALOG_QUERY, "page-two", "d".repeat(64)),
+    REPACK_ID,
+  );
+  const cleared = clearCatalogRepackSelection(selected);
+  assert.deepEqual(cleared, { ...selected, selectedPublicRepackId: null });
+  assert.equal(serializeCatalogQueryState(cleared).includes("selected"), false);
 });
 
 test("catalog page size and view are constrained, canonical URL state", () => {
@@ -94,9 +137,11 @@ test("malformed singleton, partial price, unknown key, and cursor state are reje
     "surprise=true",
     "cursor=page-two",
     "sort=probability",
-    "availability=active",
+    "availability=available",
     "availability=sold_out",
-    "availability=all&availability=active",
+    "availability=all&availability=available",
+    "selected=not-a-public-repack-id",
+    `selected=${REPACK_ID}&selected=${REPACK_ID}`,
     "pageSize=25&pageSize=50",
     "view=table&view=cards",
   ]) {
@@ -119,6 +164,7 @@ test("search, filters, and sorting reset cursor navigation together", () => {
     cursor: "page-two",
     cursorStack: "WyJwYWdlLW9uZSJd",
     queryFingerprint: "a".repeat(64),
+    selectedPublicRepackId: REPACK_ID,
   };
   const reset = resetCatalogPagination(paged, { search: "pokemon" });
   assert.equal(reset.search, "pokemon");

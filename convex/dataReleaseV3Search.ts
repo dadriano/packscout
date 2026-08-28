@@ -7,6 +7,7 @@ import {
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
+import { publicPackAvailabilityValidator } from "./publicRepackValidation";
 
 /**
  * data_release_v3 search rows (task buyback-adjusted-ev/008).
@@ -62,7 +63,13 @@ export const dataReleaseV3SearchRowValidator = v.object({
   normalizedName: v.string(),
   normalizedVendor: v.string(),
   normalizedCategories: v.string(),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  // The canonical four-state pack availability, identical to the validator
+  // `publicRepackDetailV3Validator` uses for the detail this row projects.
+  // data_release_v3 rows are written only by this feature's own staging path,
+  // so they carry the current vocabulary exactly and never the retired
+  // active/disabled values that `storedPackAvailabilityValidator` tolerates
+  // for pre-existing v2 tables.
+  availability: publicPackAvailabilityValidator,
   priceMinor: nullableNumberValidator,
   priceNullRank: nullRankValidator,
   buybackRateBasisPoints: nullableNumberValidator,

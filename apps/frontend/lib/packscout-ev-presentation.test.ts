@@ -34,7 +34,7 @@ function input(
   return {
     estimate,
     price: buildV3Price(),
-    availability: "active",
+    availability: "available",
     ...overrides,
   };
 }
@@ -190,6 +190,61 @@ test("sold-out historical estimates keep values, timestamps, and no outbound act
   assert.match(presentation.accessibleLabel, /Sold out · historical estimate/);
 });
 
+test("only an available pack exposes an outbound action across the four-state matrix", () => {
+  for (const availability of [
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ] as const) {
+    const current = presentPackScoutEvV3(
+      input(buildV3CurrentEv(8_500), { availability }),
+    );
+    assert.equal(current.outboundActionAllowed, false, availability);
+
+    const unavailableEstimate = presentPackScoutEvV3(
+      input(buildV3UnavailableEv("BUYBACK_UNAVAILABLE"), { availability }),
+    );
+    assert.equal(unavailableEstimate.outboundActionAllowed, false, availability);
+  }
+
+  assert.equal(
+    presentPackScoutEvV3(
+      input(buildV3CurrentEv(8_500), { availability: "available" }),
+    ).outboundActionAllowed,
+    true,
+  );
+});
+
+test("pack availability and PackScout EV availability stay separate axes", () => {
+  // An available pack whose estimate is unavailable keeps its outbound action
+  // and still reports an unavailable estimate.
+  const availablePackUnavailableEstimate = presentPackScoutEvV3(
+    input(buildV3UnavailableEv("BUYBACK_UNAVAILABLE"), {
+      availability: "available",
+    }),
+  );
+  assert.equal(availablePackUnavailableEstimate.availability, "unavailable");
+  assert.equal(availablePackUnavailableEstimate.status, "unavailable");
+  assert.equal(availablePackUnavailableEstimate.outboundActionAllowed, true);
+
+  // A pack the platform no longer presents as available, or whose availability
+  // is unknown, keeps a presentable current estimate — it is discoverable and
+  // its numbers are unchanged — but never an outbound action, and it is never
+  // relabeled as sold out.
+  for (const availability of ["unavailable", "unknown"] as const) {
+    const presentation = presentPackScoutEvV3(
+      input(buildV3CurrentEv(8_500), { availability }),
+    );
+    assert.equal(presentation.availability, "available", availability);
+    assert.equal(presentation.status, "current", availability);
+    assert.equal(presentation.statusLabel, "Current estimate", availability);
+    assert.equal(presentation.grossEvDollars.displayValue, "$85.00", availability);
+    assert.equal(presentation.outboundActionAllowed, false, availability);
+    assert.equal(presentation.freshness.soldOutAt, null, availability);
+    assert.doesNotMatch(presentation.accessibleLabel, /sold out/i, availability);
+  }
+});
+
 test("unknown source time is an explicit state, not a fabricated timestamp", () => {
   const presentation = presentPackScoutEvV3(
     input(buildV3UnknownTimeUnavailableEv()),
@@ -333,7 +388,7 @@ test("inconsistent public values throw in development instead of rendering", () 
     packScoutMetricConsistencyIssuesV3({
       estimate: corrupted,
       price: buildV3Price(),
-      availability: "active",
+      availability: "available",
     }).length,
     0,
   );
@@ -342,7 +397,7 @@ test("inconsistent public values throw in development instead of rendering", () 
       presentPackScoutEvV3({
         estimate: corrupted,
         price: buildV3Price(),
-        availability: "active",
+        availability: "available",
       }),
     MetricPresentationConsistencyError,
   );
@@ -392,7 +447,8 @@ test("presentation output never carries protected calculation evidence", () => {
   ]) {
     const presentation = presentPackScoutEvV3(
       input(estimate, {
-        availability: estimate.status === "sold_out_historical" ? "sold_out" : "active",
+        availability:
+          estimate.status === "sold_out_historical" ? "sold_out" : "available",
       }),
     );
     assert.equal(containsProtectedEvPublicationKeyV3(presentation), false);

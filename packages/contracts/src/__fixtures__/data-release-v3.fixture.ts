@@ -5,6 +5,7 @@ import {
   type PackScoutBuybackEvConfidenceLimitationCodeV1,
   type PackScoutBuybackEvPublicReasonCodeV1,
 } from "../buyback-adjusted-ev-v1.ts";
+import type { PublicPackAvailability } from "../public-pack-availability-v1.ts";
 import { unavailableRepackHeat } from "../repack-heat.ts";
 import {
   dataReleaseV3IdentitySchema,
@@ -45,6 +46,10 @@ export const DATA_RELEASE_V3_PRIMARY_REPACK_ID =
   "00000000-0000-5000-8000-000000000301";
 export const DATA_RELEASE_V3_SECONDARY_REPACK_ID =
   "00000000-0000-5000-8000-000000000302";
+export const DATA_RELEASE_V3_UNAVAILABLE_REPACK_ID =
+  "00000000-0000-5000-8000-000000000303";
+export const DATA_RELEASE_V3_UNKNOWN_REPACK_ID =
+  "00000000-0000-5000-8000-000000000304";
 
 function usd(minorUnits: number) {
   return { minorUnits, currency: "USD" as const };
@@ -319,7 +324,7 @@ export function buildPublicRepackDetailV3(
       { publicCategoryId: DATA_RELEASE_V3_CARDS_CATEGORY_ID, label: "Cards" },
     ],
     collectibleTypes: ["card"],
-    availability: "active",
+    availability: "available",
     price: {
       displayMoney: usd(DATA_RELEASE_V3_PACK_PRICE_MINOR_UNITS),
       usdComparison: {
@@ -372,6 +377,26 @@ export function buildSoldOutPublicRepackDetailV3(
   });
 }
 
+/**
+ * A discoverable pack outside both `available` and `sold_out`.
+ *
+ * It deliberately keeps the default current, positive PackScout estimate:
+ * pack availability and PackScout EV availability are independent axes, so
+ * this is a legal projection that must still never rank, never count toward
+ * a positive-EV summary, and never carry an outbound purchase link.
+ */
+export function buildNonPurchasablePublicRepackDetailV3(
+  availability: Exclude<PublicPackAvailability, "available" | "sold_out">,
+  overrides: Partial<PublicRepackDetailV3> = {},
+): PublicRepackDetailV3 {
+  return buildPublicRepackDetailV3({
+    availability,
+    actionAvailability: { promo: true, repackLink: false },
+    actions: { promo: { code: "SCOUT", label: "Use SCOUT" } },
+    ...overrides,
+  });
+}
+
 export function buildPublicRepackViewDetailV3(
   overrides: Partial<PublicRepackDetailV3> = {},
 ): PublicRepackViewDetailV3 {
@@ -392,7 +417,7 @@ export function buildDataReleaseV3Identity(): DataReleaseV3Identity {
   });
 }
 
-/** Two active current-EV repacks ranked by signed EV dollars descending. */
+/** Two available current-EV repacks ranked by signed EV dollars descending. */
 export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
   const primary = buildPublicRepackViewDetailV3();
   const secondary = buildPublicRepackViewDetailV3({
@@ -430,6 +455,46 @@ export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
     ],
     details: [primary, soldOut],
     selectedRepack: primary,
+    selectedRepackEligible: true,
+    desiredCollectible: null,
+    desiredChaseMatches: [],
+  });
+}
+
+/**
+ * One list page carrying every public pack availability state. All four
+ * states stay discoverable as rows; only the `available` row is purchasable,
+ * so it is the only legal selection for a purchase-oriented flow.
+ */
+export function buildAllAvailabilityStatesPublicRepackListPageV3(): PublicRepackListPageV3 {
+  const available = buildPublicRepackViewDetailV3();
+  const soldOut = publicRepackViewDetailV3Schema.parse({
+    ...buildSoldOutPublicRepackDetailV3({
+      publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
+      name: "Pokémon Vault Repack",
+    }),
+    heat: unavailableRepackHeat(),
+  });
+  const unavailable = publicRepackViewDetailV3Schema.parse({
+    ...buildNonPurchasablePublicRepackDetailV3("unavailable", {
+      publicRepackId: DATA_RELEASE_V3_UNAVAILABLE_REPACK_ID,
+      name: "Pokémon Withdrawn Gacha",
+    }),
+    heat: unavailableRepackHeat(),
+  });
+  const unknown = publicRepackViewDetailV3Schema.parse({
+    ...buildNonPurchasablePublicRepackDetailV3("unknown", {
+      publicRepackId: DATA_RELEASE_V3_UNKNOWN_REPACK_ID,
+      name: "Pokémon Unverified Gacha",
+    }),
+    heat: unavailableRepackHeat(),
+  });
+  const details = [available, soldOut, unavailable, unknown];
+  return publicRepackListPageV3Schema.parse({
+    release: buildDataReleaseV3Identity(),
+    rows: details.map(publicRepackViewSummaryV3FromDetail),
+    details,
+    selectedRepack: available,
     selectedRepackEligible: true,
     desiredCollectible: null,
     desiredChaseMatches: [],

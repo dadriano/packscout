@@ -4,6 +4,10 @@ import type {
   DataReleaseV3Identity,
   SearchPublicCollectiblesInput,
 } from "@packscout/contracts";
+import {
+  createAccessGuardedHandler,
+  type VisitorAccessDecision,
+} from "@/lib/access-gate.server";
 import { createDesiredCollectibleSearchHandler } from "@/lib/desired-collectible-search-route.server";
 
 const ORIGIN = "https://packscout.example";
@@ -97,4 +101,42 @@ test("maps bounded public read errors without leaking search text", async () => 
     assert.equal(response.status, expectedStatus);
     assert.doesNotMatch(JSON.stringify(await responseBody(response)), /private-search-term/);
   }
+});
+
+test("the deployed route shape gates before parsing: refusal first, reads only for admitted callers", async () => {
+  // The route composes createAccessGuardedHandler around this same search
+  // handler with the request-scoped resolver (see app/route-access-gate
+  // .source.test.ts); here the composition runs with injected decisions.
+  let reads = 0;
+  const inner = createDesiredCollectibleSearchHandler(async () => {
+    reads += 1;
+    return {
+      ok: true,
+      data: { release: {} as DataReleaseV3Identity, matches: [] },
+    };
+  });
+
+  const refused = createAccessGuardedHandler(
+    async (): Promise<VisitorAccessDecision> => ({ outcome: "signed_out" }),
+    inner,
+  );
+  for (const query of ["q=charizard", ""]) {
+    const refusal = await refused(request(query));
+    assert.equal(refusal.status, 401, query);
+    assert.deepEqual(await responseBody(refusal), {
+      ok: false,
+      code: "ACCESS_REQUIRED",
+      error: "An approved beta account is required.",
+      retryable: false,
+    });
+  }
+  assert.equal(reads, 0);
+
+  const admitted = createAccessGuardedHandler(
+    async (): Promise<VisitorAccessDecision> => ({ outcome: "admitted" }),
+    inner,
+  );
+  const response = await admitted(request("q=charizard"));
+  assert.equal(response.status, 200);
+  assert.equal(reads, 1);
 });

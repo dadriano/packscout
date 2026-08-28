@@ -22,11 +22,16 @@ import {
   type PublicRepackFilters,
   type PublicRepackViewDetailV3,
   type PackScoutPublicEvV3,
+  type PublicPackAvailability,
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { query, type QueryCtx } from "./_generated/server";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
+import {
+  catalogReadAuthorized,
+  catalogReadTokenArg,
+} from "./publicCatalogReadAccess";
 import {
   loadActiveDataReleaseV3State,
   loadDataReleaseV3ByPublicReleaseId,
@@ -75,6 +80,22 @@ function directArgs(args: Record<string, unknown>): Record<string, unknown> {
 
 function currentTimeIsValid(currentTime: number): boolean {
   return Number.isSafeInteger(currentTime) && currentTime >= 0;
+}
+
+/**
+ * The one pack-availability state a repack may be ranked, counted, or acted on
+ * from. `available` is exhaustively opposed by `sold_out`, `unavailable`, and
+ * `unknown`: all three stay fully discoverable in the catalog and all three
+ * stay out of every opportunity ranking, positive-EV KPI, and outbound action.
+ * Nothing falls into an `else` branch that assumes availability — a state this
+ * code has never seen reads as not-purchasable, never as purchasable.
+ *
+ * Pack availability is a separate axis from PackScout EV availability: an
+ * `available` repack may carry an unavailable estimate, and a repack that is
+ * not purchasable may still carry a presentable historical estimate.
+ */
+function packIsPurchasable(availability: PublicPackAvailability): boolean {
+  return availability === "available";
 }
 
 export type ActiveDataReleaseV3 = Readonly<{
@@ -309,7 +330,12 @@ function rowMatchesFilters(
     readonly ignoreCollectibleTypes?: boolean;
   } = {},
 ): boolean {
-  if (filters.availability === "active" && row.availability !== "active") {
+  // The "available" filter admits only purchasable packs; "all" is the only
+  // way sold-out, unavailable, and unknown packs become visible.
+  if (
+    filters.availability === "available" &&
+    !packIsPurchasable(row.availability)
+  ) {
     return false;
   }
   if (
@@ -498,22 +524,35 @@ function medianPackScoutEvPercent(
   return { status: "available", basisPoints };
 }
 
+function purchasableRepackRows(
+  rows: readonly DataReleaseV3SearchRow[],
+): DataReleaseV3SearchRow[] {
+  return rows.filter((row) => packIsPurchasable(row.availability));
+}
+
+/**
+ * Every ranked, counted, or headline KPI reads from `purchasableRows` so a
+ * `sold_out`, `unavailable`, or `unknown` pack can never supply a number the
+ * dashboard presents as an opportunity. Only `totalRepacks` stays ungated: it
+ * counts the catalog the filters matched, and all four states stay
+ * discoverable there.
+ */
 function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
-  const chaseValues = rows.flatMap((row) =>
+  const purchasableRows = purchasableRepackRows(rows);
+  const chaseValues = purchasableRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
   return {
     totalRepacks: rows.length,
-    positiveEvRepacks: rows.filter(
+    positiveEvRepacks: purchasableRows.filter(
       (row) =>
-        row.availability === "active" &&
         row.packScoutEvDollarsMinor !== null &&
         row.packScoutEvDollarsMinor > 0,
     ).length,
-    medianPackScoutEvPercent: medianPackScoutEvPercent(rows),
+    medianPackScoutEvPercent: medianPackScoutEvPercent(purchasableRows),
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
-    highConfidenceRepacks: rows.filter(
+    highConfidenceRepacks: purchasableRows.filter(
       (row) =>
         row.packScoutConfidenceBasisPoints !== null &&
         row.packScoutConfidenceBasisPoints >= 8_000,
@@ -552,7 +591,9 @@ function repackSummaries(
       key,
       label: value.label,
       repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianPackScoutEvPercent(value.rows),
+      medianPackScoutEvPercent: medianPackScoutEvPercent(
+        purchasableRepackRows(value.rows),
+      ),
     }))
     .sort(
       (left, right) =>
@@ -707,11 +748,23 @@ async function loadDesiredChases(
 
 // --- public queries ---
 
+/**
+ * Every v3 catalog read runs the same closed-beta two-caller check the v1/v2
+ * reads run (closed-beta-access/005), refusing with the identical non-leaking
+ * `RELEASE_UNAVAILABLE` result. The frontend reads exclusively from these
+ * queries, so leaving them ungated would leave main's closed catalog read
+ * model protecting nothing.
+ */
+
 export const getPublicShellStatusV3 = query({
-  args: {},
+  args: { ...catalogReadTokenArg },
   handler: async (
     ctx,
+    args,
   ): Promise<PublicResult<{ release: DataReleaseV3Identity }>> => {
+    if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const active = await loadActiveDataReleaseV3(ctx);
     return active === null
       ? publicReadError("RELEASE_UNAVAILABLE")
@@ -724,9 +777,13 @@ export const getDashboardBundleV3 = query({
     filters: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args) => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     let request;
     try {
@@ -743,12 +800,15 @@ export const getDashboardBundleV3 = query({
     const matchingRows = allRows.filter((row) =>
       rowMatchesFilters(row, request.filters),
     );
-    // Opportunities are actionable buys: only active repacks with a current,
-    // unexpired PackScout estimate rank, by signed EV dollars descending.
+    // Opportunities are actionable buys: only available repacks with a
+    // current, unexpired PackScout estimate rank, by signed EV dollars
+    // descending. Sold-out, unavailable, and unknown packs stay visible in the
+    // catalog and never rank here.
     const opportunityRows = [...matchingRows]
       .filter(
         (row) =>
-          row.availability === "active" && row.packScoutEvDollarsMinor !== null,
+          packIsPurchasable(row.availability) &&
+          row.packScoutEvDollarsMinor !== null,
       )
       .sort((left, right) =>
         compareRows(left, right, {
@@ -873,9 +933,13 @@ export const listPublicRepacksV3 = query({
     desiredPublicCollectibleId: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args) => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     let request: ListPublicRepacksInput;
     try {
@@ -1018,8 +1082,12 @@ export const getPublicRepackV3 = query({
     publicRepackId: v.any(),
     publicReleaseId: v.any(),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args) => {
+    if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(args.currentTime)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -1049,10 +1117,15 @@ export const searchPublicCollectiblesV3 = query({
     search: v.any(),
     collectibleTypes: v.optional(v.any()),
     limit: v.optional(v.any()),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args) => {
+    const { catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     const request = searchPublicCollectiblesInputSchema.safeParse(
-      directArgs(args),
+      directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
     const active = await loadActiveDataReleaseV3(ctx);
@@ -1110,9 +1183,13 @@ export const findRepacksByDesiredCollectibleV3 = query({
     direction: v.optional(v.any()),
     limit: v.optional(v.any()),
     currentTime: v.number(),
+    ...catalogReadTokenArg,
   },
   handler: async (ctx, args) => {
-    const { currentTime, ...queryArgs } = args;
+    const { currentTime, catalogReadToken, ...queryArgs } = args;
+    if (!(await catalogReadAuthorized(ctx, catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
     if (!currentTimeIsValid(currentTime)) return publicReadError("INVALID_QUERY");
     const request = findRepacksByDesiredCollectibleInputSchema.safeParse(
       directArgs(queryArgs),

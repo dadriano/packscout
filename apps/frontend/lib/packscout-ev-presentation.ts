@@ -10,6 +10,7 @@ import {
   type VendorReportedEvV3,
 } from "@packscout/contracts";
 import { presentConfidenceLimitations } from "./confidence-limitations";
+import { presentPackAvailability } from "./pack-availability-presentation";
 import {
   BUYBACK_SUMMARY_COPY,
   ESTIMATE_STATUS_COPY,
@@ -523,6 +524,22 @@ export function packScoutMetricConsistencyIssuesV3(
 
 // --- the PackScout estimate presentation ---------------------------------------
 
+/**
+ * Pack availability is a separate axis from PackScout EV availability: a pack
+ * the platform still presents as available can carry an unavailable estimate,
+ * and a pack that is `unavailable`, `unknown`, or `sold_out` can still carry a
+ * presentable estimate. Only the shared pack-availability presenter decides
+ * whether an outbound purchase action may be exposed, so `available` is the
+ * one state that permits it and the three non-available states — including the
+ * `unavailable` and `unknown` states this surface never saw before — all
+ * withhold it without being conflated with a sold-out pack.
+ */
+function packPurchaseActionsAllowed(
+  availability: PackScoutEvV3PresentationInput["availability"],
+): boolean {
+  return presentPackAvailability(availability).purchaseActionsAvailable;
+}
+
 function unavailableStatus(
   reason: PublicMetricReason,
 ): Readonly<{ status: PackScoutEvStatusKind; statusLabel: string }> {
@@ -560,7 +577,7 @@ function unavailablePackScoutPresentation(
     freshness,
     reason,
     reasonCopy,
-    outboundActionAllowed: input.availability === "active",
+    outboundActionAllowed: packPurchaseActionsAllowed(input.availability),
     accessibleLabel: [
       `${METRIC_TRUST_COPY.estimateLabel}: ${statusLabel}.`,
       reasonCopy,
@@ -653,7 +670,8 @@ export function presentPackScoutEvV3(
     packPrice,
     confidence: confidencePresentation,
     freshness,
-    outboundActionAllowed: input.availability === "active" && !historical,
+    outboundActionAllowed:
+      packPurchaseActionsAllowed(input.availability) && !historical,
     accessibleLabel: [
       `${METRIC_TRUST_COPY.estimateLabel}: ${statusLabel}.`,
       ...(historical && freshness.soldOutLabel

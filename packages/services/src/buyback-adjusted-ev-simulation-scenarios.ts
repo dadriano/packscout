@@ -192,7 +192,7 @@ interface ProductShape {
   readonly description: string;
   readonly priceUsdCents: number;
   readonly buyback: DataReleaseV3CanonicalProduct["buyback"];
-  readonly availability: "active" | "sold_out";
+  readonly availability: DataReleaseV3CanonicalProduct["availability"];
   readonly soldOutAt: string | null;
   readonly sourceUpdatedAt: string;
   readonly vendorReportedEv?: DataReleaseV3CanonicalProduct["vendorReportedEv"];
@@ -391,7 +391,7 @@ function courtyardUniformPriceShift(
         "the $100/85% methodology example, repriced to $80 from frame 1 onward",
       priceUsdCents: salePriceUsd * 100,
       buyback: { kind: "uniform_rate", rateBasisPoints: 8_500 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
       topChase: chase,
@@ -515,7 +515,7 @@ function clutchpacksPoolPulls(
         "verified remaining inventory depleted deterministically by the pull ledger",
       priceUsdCents: 5_000,
       buyback: { kind: "varies_by_outcome" },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -585,7 +585,7 @@ function gamestopFixedOffers(
         "exact stated values with tier-level guaranteed cash offers beside an independent vendor-reported EV",
       priceUsdCents: 5_000,
       buyback: { kind: "fixed_or_final_payout" },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
       vendorReportedEv: {
@@ -646,7 +646,7 @@ function trovePerDrawFinalPayout(
       description: "five draws per pack priced on guaranteed instant payouts",
       priceUsdCents: 2_500,
       buyback: { kind: "fixed_or_final_payout" },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -710,7 +710,7 @@ function beezieUsdcParity(
       description: "USDC-priced machine compared at documented 1:1 parity",
       priceUsdCents: 2_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 10_000 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -746,7 +746,7 @@ function courtyardZeroPayout(
       description: "a documented 0% uniform buyback rate",
       priceUsdCents: 1_500,
       buyback: { kind: "uniform_rate", rateBasisPoints: 0 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -782,7 +782,7 @@ function courtyardNoBuyback(
       description: "discoverable listing without any documented buyback",
       priceUsdCents: 2_500,
       buyback: { kind: "not_documented" },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -872,7 +872,7 @@ function clutchpacksOddsConflict(
       description: "published odds materially disagree with the verified pool",
       priceUsdCents: 3_000,
       buyback: { kind: "varies_by_outcome" },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -911,7 +911,7 @@ function courtyardIncompleteValues(
       description: "one bucket publishes no value bounds",
       priceUsdCents: 4_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 8_000 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -955,7 +955,7 @@ function courtyardDelayed(
       description: `evidence observed ${delayMinutes} minutes before its calculation clock`,
       priceUsdCents: 4_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 8_500 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),
@@ -1056,7 +1056,7 @@ function courtyardSourceAgeExpiry(
       description: "one frozen observation aging past the 60-minute window",
       priceUsdCents: 5_000,
       buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
-      availability: "active",
+      availability: "available",
       soldOutAt: null,
       sourceUpdatedAt: observedAt,
     }),

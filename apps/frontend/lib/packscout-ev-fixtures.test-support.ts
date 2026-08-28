@@ -251,7 +251,7 @@ export function buildV3ViewDetail(
     contentMode: "focused",
     categories: [{ publicCategoryId: FIXTURE_CATEGORY_ID, label: "Cards" }],
     collectibleTypes: ["card"],
-    availability: "active",
+    availability: "available",
     price: buildV3Price(),
     buyback: { kind: "uniform_rate", rateBasisPoints: 8_500 },
     primaryImage: {

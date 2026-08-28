@@ -1,0 +1,98 @@
+/* Beta-allowlist surfaces, on the shared admin template. */
+
+.beta-allowlist__search {
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+
+.beta-allowlist__identifier {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.beta-allowlist__identifier-secondary {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.78rem;
+}
+
+.beta-allowlist__operator-reference {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.76rem;
+}
+
+.beta-allowlist__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.beta-allowlist__facts div {
+  min-width: 0;
+}
+
+.beta-allowlist__facts dt {
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.beta-allowlist__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.beta-allowlist__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.beta-allowlist__note {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--admin-warning-border);
+  border-radius: 1rem;
+  background: var(--admin-warning-bg-light);
+  color: var(--admin-warning-text);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .admin-ledger__rows article:has(.beta-allowlist__facts) {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-ledger__rows article:has(.beta-allowlist__facts)
+    > .beta-allowlist__row-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .beta-allowlist__row-actions {
+    justify-content: flex-start;
+  }
+
+  .beta-allowlist__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .beta-allowlist__search {
+    flex-basis: 100%;
+  }
+}

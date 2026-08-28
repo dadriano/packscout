@@ -22,12 +22,33 @@ import {
   publicRepackFormatSchema,
 } from "./data-release-v2-entities.ts";
 import { packScoutBuybackEvMetricsAreConsistentV1 } from "./buyback-adjusted-ev-v1-calculation.ts";
+import type { PublicPackAvailability } from "./public-pack-availability-v1.ts";
 import {
   containsProtectedEvPublicationKeyV3,
   packScoutPublicEvV3IsPresentableAt,
   publicBuybackSummaryV3Schema,
   publicEvEstimatesV3Schema,
 } from "./data-release-v3-ev-estimates.ts";
+
+/**
+ * The single availability gate for this release. `available` is the only
+ * public pack availability that may rank in EV opportunities, count toward
+ * positive-EV summaries, or expose an outbound purchase action.
+ *
+ * `unavailable`, `unknown`, and `sold_out` all stay discoverable and all sit
+ * on the excluded side. The predicate is written against `available` alone,
+ * so a state added to {@link PublicPackAvailability} later fails closed into
+ * the excluded side instead of silently inheriting purchasable behavior.
+ *
+ * Pack availability is a separate axis from PackScout EV availability: a
+ * purchasable pack may carry an unavailable estimate, and a pack that is not
+ * purchasable may still carry a current one. Never derive one from the other.
+ */
+export function packAvailabilityIsPurchasableV3(
+  availability: PublicPackAvailability,
+): boolean {
+  return availability === "available";
+}
 
 const repackSummaryV3Shape = {
   publicRepackId: publicRepackIdSchema,
@@ -113,11 +134,20 @@ function validateRepackSummaryV3(
     }
   }
 
-  if (repack.availability === "active" && packScout.status === "sold_out_historical") {
+  // A frozen sold-out historical estimate asserts one exact fact: this pack
+  // stopped being sellable and its EV was frozen at that moment. Only the
+  // authoritative `sold_out` state carries that fact. `available` is the
+  // original violation (a purchasable pack cannot present a frozen estimate),
+  // and `unavailable` and `unknown` are rejected for the same reason on the
+  // other side: neither asserts a sellout, so a frozen sold-out estimate
+  // beside them would publish a sold-out claim the availability evidence does
+  // not support. The check is therefore keyed on the sold-out state itself
+  // rather than on any list of the states that may not carry it.
+  if (repack.availability !== "sold_out" && packScout.status === "sold_out_historical") {
     context.addIssue({
       code: "custom",
       path: ["evEstimates", "packScout", "status"],
-      message: "data_release_v3.historical_on_active_repack",
+      message: "data_release_v3.historical_on_non_sold_out_repack",
     });
   }
   if (repack.availability === "sold_out" && packScout.status === "current") {
@@ -161,11 +191,19 @@ export const publicRepackDetailV3Schema = z
         message: "data_release_v3.action_availability_mismatch",
       });
     }
-    if (repack.availability === "sold_out" && repack.actions.repackLink) {
+    // Outbound purchase links belong to purchasable packs only. `sold_out`
+    // was the sole excluded state under the retired two-state vocabulary;
+    // `unavailable` and `unknown` join it here, so a pack the platform no
+    // longer presents as buyable never ships a purchase link. Promos stay
+    // governed by `actionAvailability` alone, unchanged by this release.
+    if (
+      !packAvailabilityIsPurchasableV3(repack.availability) &&
+      repack.actions.repackLink
+    ) {
       context.addIssue({
         code: "custom",
         path: ["actions", "repackLink"],
-        message: "data_release_v3.sold_out_actionable",
+        message: "data_release_v3.non_purchasable_actionable",
       });
     }
   });

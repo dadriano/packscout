@@ -660,7 +660,7 @@ test("historical pre-buyback revisions keep their original method identity and a
       name: "Ironman Repack",
       description: null,
       category: "fixture",
-      availability: "active",
+      availability: "available",
       price: { amount: 100, currency: "usd" },
       providerReportedEv: null,
       relationships: [],
@@ -724,7 +724,13 @@ test("historical pre-buyback revisions keep their original method identity and a
     const oldMethod = await estimatedEvService.recalculate({
       organizationId: ids.organization,
       providerId: ids.provider,
-      configurationRevisionId: ids.configuration,
+      // This case drives the pre-buyback estimated-EV method through the
+      // configuration revision the page above was committed under, so it is the
+      // legacy origin rather than a provider source revision.
+      origin: {
+        kind: "legacy_configuration",
+        configurationRevisionId: ids.configuration,
+      },
       platformKey: PLATFORM_KEY,
       packExternalId: PRODUCT_KEY,
       evInputExternalId: `${PRODUCT_KEY}:odds-v1`,

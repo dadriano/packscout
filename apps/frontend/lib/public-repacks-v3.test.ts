@@ -21,7 +21,7 @@ const DEFAULT_FILTERS = {
   vendors: [],
   categories: [],
   collectibleTypes: [],
-  availability: "active",
+  availability: "available",
   price: { mode: "full", minMinor: 1_000, maxMinor: 1_200_000 },
 } as const;
 

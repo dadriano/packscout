@@ -1,49 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { getAdminHealth } from "../api/health";
+import { listProviders } from "../api/providers";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { StatusBadge, type StatusTone } from "../components/StatusBadge";
+import { StatusBadge } from "../components/StatusBadge";
 import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
 type ServiceState = "checking" | "online" | "offline";
 
-const guardrails: Array<{
-  index: string;
-  guardrail: string;
-  proof: string;
-  label: string;
-  tone: StatusTone;
-}> = [
-  {
-    index: "01",
-    guardrail: "Runtime boundaries",
-    proof: "Browser and server imports are checked independently.",
-    label: "Enforced",
-    tone: "ready",
-  },
-  {
-    index: "02",
-    guardrail: "HTTP error contract",
-    proof: "Unknown routes and invalid JSON return stable error codes.",
-    label: "Enforced",
-    tone: "ready",
-  },
-  {
-    index: "03",
-    guardrail: "Behavior coverage",
-    proof: "Tests are discovered by convention and scenarios map to proof.",
-    label: "Active",
-    tone: "ready",
-  },
-  {
-    index: "04",
-    guardrail: "Architecture ratchet",
-    proof: "New drift fails the zero-debt framework baseline.",
-    label: "Zero debt",
-    tone: "ready",
-  },
-];
+/** `null` while the count is unknown — loading, or the read failed. */
+type ProviderCount = number | null;
+
+function providerLabel(count: ProviderCount): string {
+  if (count === null) return "Unavailable";
+  if (count === 0) return "None yet";
+  return `${count} configured`;
+}
 
 function serviceBadge(state: ServiceState) {
   if (state === "online") return <StatusBadge label="Online" tone="ready" />;
@@ -55,6 +29,16 @@ export function OverviewPage() {
   const { showToast } = useToast();
   const { status } = useSession();
   const [serviceState, setServiceState] = useState<ServiceState>("checking");
+  const [providerCount, setProviderCount] = useState<ProviderCount>(null);
+
+  // Setup guidance is only true for an operator who may actually create a
+  // provider. `data_operator` holds `providers:view` without
+  // `providers:manage`, and the providers page hides its create action from
+  // that role, so prompting it to configure a source sends it to a page that
+  // offers no way to do it.
+  const canManageProviders =
+    status.phase === "authenticated" &&
+    status.session.permissions.includes("providers:manage");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,6 +49,16 @@ export function OverviewPage() {
         setServiceState("offline");
       });
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    // A failed read leaves the count unknown rather than zero: claiming no
+    // providers exist is worse than saying nothing about them.
+    listProviders()
+      .then((result) => { if (active) setProviderCount(result.items.length); })
+      .catch(() => { if (active) setProviderCount(null); });
+    return () => { active = false; };
   }, []);
 
   const recheckService = useCallback(async () => {
@@ -82,13 +76,13 @@ export function OverviewPage() {
   return (
     <div className="admin-page">
       <PageHeader
-        eyebrow="Overview / 001"
-        title="Data operations, under control."
-        description="Protected operator access, stable service boundaries, and repository guardrails keep PackScout's provider work deliberate and auditable."
+        eyebrow="Workspace / Overview"
+        title="Overview"
+        description="Whether the admin service is reachable, and what to do next."
         actions={
           <button
             type="button"
-            className="admin-button admin-button--secondary"
+            className="admin-button admin-button-secondary"
             onClick={() => void recheckService()}
             disabled={serviceState === "checking"}
           >
@@ -97,90 +91,45 @@ export function OverviewPage() {
         }
       />
 
-      <section className="admin-metrics" aria-label="Foundation status">
-        <article>
-          <span className="admin-metric__index">A</span>
+      <section className="admin-overview-grid" aria-label="Service status">
+        <article className="admin-metric-card admin-metric-card--inline">
           <div>
             <small>Admin service</small>
             <strong>{serviceState === "online" ? "Reachable" : serviceState === "offline" ? "Needs attention" : "Connecting"}</strong>
           </div>
           {serviceBadge(serviceState)}
         </article>
-        <article>
-          <span className="admin-metric__index">B</span>
+        <article className="admin-metric-card admin-metric-card--inline">
           <div>
-            <small>Framework baseline</small>
-            <strong>Zero accepted drift</strong>
+            <small>Providers</small>
+            <strong>{providerLabel(providerCount)}</strong>
           </div>
-          <StatusBadge label="Ratchet on" tone="ready" />
-        </article>
-        <article>
-          <span className="admin-metric__index">C</span>
-          <div>
-            <small>Operator access</small>
-            <strong>
-              {status.phase === "authenticated" &&
-              status.session.membership.role === "admin"
-                ? "Administrator session"
-                : "Data operator session"}
-            </strong>
-          </div>
-          <StatusBadge label="Protected" tone="ready" />
+          <Link className="admin-button admin-button-secondary" to="/providers">
+            View
+          </Link>
         </article>
       </section>
 
-      <div className="admin-overview-grid">
-        <section className="admin-ledger" aria-labelledby="guardrail-title">
-          <header className="admin-section-heading">
-            <div>
-              <span className="admin-eyebrow">System ledger</span>
-              <h2 id="guardrail-title">Guardrails carried forward</h2>
-            </div>
-            <span className="admin-section-count">04 controls</span>
-          </header>
-          <div className="admin-ledger__rows">
-            {guardrails.map((item) => (
-              <article key={item.index}>
-                <span>{item.index}</span>
-                <div>
-                  <strong>{item.guardrail}</strong>
-                  <p>{item.proof}</p>
-                </div>
-                <StatusBadge label={item.label} tone={item.tone} />
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <aside className="admin-contract" aria-labelledby="contract-title">
-          <span className="admin-eyebrow">Boundary contract</span>
-          <h2 id="contract-title">What the base does not pretend</h2>
-          <dl>
-            <div>
-              <dt>Authentication</dt>
-              <dd>Session protected</dd>
-            </div>
-            <div>
-              <dt>Persistence</dt>
-              <dd>PostgreSQL owned</dd>
-            </div>
-            <div>
-              <dt>Shared services</dt>
-              <dd>Contracts enforced</dd>
-            </div>
-          </dl>
-          <p>
-            Each boundary arrives with its authorization, validation, and direct
-            regression tests—not as a placeholder dependency.
-          </p>
-        </aside>
-      </div>
-
-      <EmptyState
-        eyebrow="Next waypoint / 002"
-        title="Provider operations are the next waypoint."
-        description="Configure and test a provider before activation, then follow each import through its durable evidence and current projection."
-      />
+      {providerCount === 0 ? (
+        canManageProviders ? (
+          <EmptyState
+            eyebrow="Next step"
+            title="Set up your first provider."
+            description="Configure a source and test it before enabling imports."
+            action={
+              <Link className="admin-button admin-button-primary" to="/providers/new">
+                Add provider
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            eyebrow="Next step"
+            title="No providers are configured yet."
+            description="An administrator adds and enables a source before imports can run."
+          />
+        )
+      ) : null}
     </div>
   );
 }

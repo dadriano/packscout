@@ -26,6 +26,7 @@ import {
   presentVendorReportedEvV3,
 } from "@/lib/packscout-ev-presentation";
 import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
@@ -89,10 +90,13 @@ function RepackDestinationAction({
     repack.actions.repackLink,
     repack.availability,
   );
+  const availability = presentPackAvailability(repack.availability);
   const vendorCatalogHref = catalogHrefForSummary(
     {
       ...DEFAULT_CATALOG_QUERY.filters,
-      availability: repack.availability === "sold_out" ? "all" : "active",
+      availability: availability.purchaseActionsAvailable
+        ? "available"
+        : "all",
     },
     { type: "vendor", key: repack.vendorKey },
   );
@@ -130,7 +134,9 @@ function RepackDestinationAction({
       <p>
         {outbound.ok
           ? "Opens the vendor listing in a new tab."
-          : "This listing has no published direct link."}
+          : availability.purchaseActionsAvailable
+            ? "This listing has no published direct link. Browse the vendor catalog for current options."
+            : `${availability.description} Browse the vendor catalog for current options.`}
       </p>
     </div>
   );
@@ -145,6 +151,9 @@ function PartnerActions({
     "idle" | "copied" | "manual"
   >("idle");
   const manualCodeRef = useRef<HTMLInputElement>(null);
+  // Promos are governed by `actionAvailability` alone. Pack availability gates
+  // the outbound purchase link above and nothing else, so a pack that is
+  // `unavailable`, `unknown`, or `sold_out` still shows a published promo.
   const promo = repack.actions.promo;
 
   async function copyPromo() {
@@ -234,6 +243,7 @@ export function RepackInspector({
   const buyback = presentBuybackSummaryV3(repack.buyback);
   const releaseDataAsOf = presentReleaseDataAsOf(release);
   const coverage = presentEstimateCoverage(repack.contentSummary);
+  const availability = presentPackAvailability(repack.availability);
   const showsDesiredChase = highlightedChase !== undefined;
   const chaseValueLabel = showsDesiredChase
     ? "Desired Chase Value"
@@ -335,9 +345,21 @@ export function RepackInspector({
           variant="pack"
         />
         <div className={styles.identity}>
-          <span className={styles.availability} data-state={repack.availability}>
-            {repack.availability === "active" ? "Available" : "Sold out"}
-          </span>
+          <div className={styles.availabilityStatus}>
+            <span
+              aria-describedby={`${headingId}-availability-description`}
+              className={styles.availability}
+              data-state={repack.availability}
+            >
+              {availability.label}
+            </span>
+            <p
+              className={styles.availabilityDescription}
+              id={`${headingId}-availability-description`}
+            >
+              {availability.description}
+            </p>
+          </div>
           <p className={styles.category}>
             {repack.categories.length > 0
               ? repack.categories.map(({ label }) => label).join(" · ")

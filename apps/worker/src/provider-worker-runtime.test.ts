@@ -62,6 +62,8 @@ function retentionRunner(calls?: string[]) {
         knownRemaining: 0,
         deferredOrganizations: 0,
         capReached: false,
+        prunedRecords: 0,
+        prunedFailures: 0,
       };
     },
   };
@@ -391,6 +393,99 @@ test("graceful stop finishes an in-flight import and takes no new claim", async 
   );
 });
 
+test("a failing supervisor stop still stops presence and logs shutdown", async () => {
+  const events: ProviderWorkerLogEvent[] = [];
+  const calls: string[] = [];
+  let releaseImport: (() => void) | undefined;
+  let markImportStarted: (() => void) | undefined;
+  const importGate = new Promise<void>((resolve) => {
+    releaseImport = resolve;
+  });
+  const importStarted = new Promise<void>((resolve) => {
+    markImportStarted = resolve;
+  });
+  let releaseSupervisorStart: (() => void) | undefined;
+  const supervisorStopRequested = new Promise<void>((resolve) => {
+    releaseSupervisorStart = resolve;
+  });
+  const stopFailure = new Error("supervisor stop refused");
+  let supervisorStop: Promise<void> | undefined;
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: {
+      async runOnce(): Promise<ProviderSchedulerResult> {
+        return {
+          kind: "started",
+          organizationId: "organization-1",
+          providerId: "provider-1",
+          configRevisionId: "revision-1",
+          runId: "run-1",
+          nextDueAt: new Date(now.getTime() + 300_000),
+        };
+      },
+    },
+    imports: {
+      async executeImport() {
+        markImportStarted?.();
+        await importGate;
+        return terminalRun();
+      },
+      async executeNextImport() {
+        return { kind: "idle" as const };
+      },
+    },
+    retention: retentionRunner(),
+    sourceSupervisor: {
+      async start() {
+        calls.push("supervisor.start");
+        await supervisorStopRequested;
+      },
+      stop() {
+        calls.push("supervisor.stop");
+        releaseSupervisorStart?.();
+        supervisorStop ??= Promise.reject(stopFailure);
+        return supervisorStop;
+      },
+    },
+    presence: {
+      async start() {
+        calls.push("presence.start");
+      },
+      activity() {},
+      async stop() {
+        calls.push("presence.stop");
+      },
+    },
+    logger: capturingLogger(events),
+    workerId: "worker:1",
+    pollIntervalMilliseconds: 100,
+  });
+
+  const running = runtime.start();
+  await importStarted;
+  runtime.stop();
+  releaseImport?.();
+  await assert.rejects(running, (error: unknown) => error === stopFailure);
+
+  assert.equal(calls.includes("presence.stop"), true);
+  assert.deepEqual(
+    events
+      .filter(({ event }) => event.startsWith("provider_worker_"))
+      .map(({ event }) => event),
+    ["provider_worker_started", "provider_worker_stopped"],
+  );
+  const stopFailureIndex = events.findIndex(({ failureCode }) =>
+    failureCode === "PROVIDER_SOURCE_SUPERVISOR_STOP_ERROR"
+  );
+  const stoppedIndex = events.findIndex(({ event }) =>
+    event === "provider_worker_stopped"
+  );
+  assert.equal(
+    events[stopFailureIndex]?.event,
+    "provider_source_supervisor_runtime_failed",
+  );
+  assert.equal(stopFailureIndex >= 0 && stopFailureIndex < stoppedIndex, true);
+});
+
 test("a cycle drains only its configured bounded claim count", async () => {
   let schedulerCalls = 0;
   const runtime = new ProviderWorkerRuntime({
@@ -514,6 +609,8 @@ test("bounded retention failures are surfaced without changing import counts", a
           knownRemaining: 5,
           deferredOrganizations: 1,
           capReached: true,
+          prunedRecords: 2,
+          prunedFailures: 0,
         };
       },
     },
@@ -544,6 +641,8 @@ test("bounded retention failures are surfaced without changing import counts", a
       retentionFailures: 1,
       retentionDeferredOrganizations: 1,
       retentionCapReached: true,
+      retentionPruned: 2,
+      retentionPruneFailures: 0,
       failureCode: "RETENTION_BATCH_FAILED",
     },
   );

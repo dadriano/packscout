@@ -36,10 +36,13 @@ test("always presents four overview KPIs with buyback-adjusted meaning", () => {
     presentation.map(({ value }) => value),
     ["1,248", "612", "+1.80%", "Unavailable"],
   );
-  assert.equal(presentation[1]?.helper, "Active repacks with EV $ above zero");
+  assert.equal(
+    presentation[1]?.helper,
+    "Available repacks with EV $ above zero",
+  );
   assert.match(
     presentation[1]?.accessibleLabel ?? "",
-    /Excludes unavailable, expired, and sold-out repacks/,
+    /Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired/,
   );
   assert.equal(
     presentation[2]?.helper,

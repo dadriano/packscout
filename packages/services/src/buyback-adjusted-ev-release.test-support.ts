@@ -155,7 +155,7 @@ export function buildReleaseProduct(
     contentMode: "focused",
     categories: [{ publicCategoryId: RELEASE_CATEGORY_ID, label: "Cards" }],
     collectibleTypes: ["card"],
-    availability: "active",
+    availability: "available",
     soldOutAt: null,
     price: {
       displayMoney: usd(10_000),

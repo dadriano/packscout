@@ -120,7 +120,7 @@ export type NormalizedReplaceProviderRevisionRequest = z.output<
 export interface ProviderConnectionRecordCounts {
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
 }
 
 export type ProviderConnectionVerdict =

@@ -7,6 +7,7 @@ import { QuarantineStatus, dateTime, humanize } from "../components/operations/O
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useConfirm } from "../providers/confirm";
+import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
 
 function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
@@ -21,7 +22,10 @@ function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
 export function QuarantineDetailPage() {
   const { quarantineId = "" } = useParams();
   const { confirm } = useConfirm();
+  const { status } = useSession();
   const { showToast } = useToast();
+  const canRetry = status.phase === "authenticated" &&
+    status.session.permissions.includes("imports:retry");
   const [entry, setEntry] = useState<QuarantineEntryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +72,7 @@ export function QuarantineDetailPage() {
   }
 
   if (loading && !entry) return <div className="ops-loading" aria-busy="true">Loading safe quarantine evidence…</div>;
-  if (!entry) return <div className="ops-error" role="alert"><p>{error ?? "Quarantine entry not found."}</p><Link className="admin-button admin-button--secondary" to="/quarantine">Return to quarantine</Link></div>;
+  if (!entry) return <div className="ops-error" role="alert"><p>{error ?? "Quarantine entry not found."}</p><Link className="admin-button admin-button-secondary" to="/quarantine">Return to quarantine</Link></div>;
 
   const retryable = entry.state === "open";
   return (
@@ -77,19 +81,20 @@ export function QuarantineDetailPage() {
         eyebrow={`Quarantine / ${entry.platformKey}`}
         title={entry.externalId ?? `${humanize(entry.recordKind)} record ${entry.recordIndex + 1}`}
         description={`${entry.reasonCode} · ${entry.fieldPath ?? "Record-level failure"}`}
-        actions={<><Link className="admin-button admin-button--secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable ? <button type="button" className="admin-button admin-button--primary" onClick={() => void retry()}>Retry record</button> : null}</>}
+        actions={<><Link className="admin-button admin-button-secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable && canRetry ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retry()}>Retry record</button> : null}</>}
       />
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Try again</button></div> : null}
+      {!canRetry ? <aside className="source-operator-boundary"><strong>Read-only quarantine evidence</strong><p>Your role cannot retry this selected record.</p></aside> : null}
+      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Try again</button></div> : null}
       {outcome ? <section className={`ops-retry-result${outcome.outcome === "failed" || outcome.outcome === "expired" ? " is-failure" : ""}`} aria-live={outcome.outcome === "failed" ? "assertive" : "polite"}><strong>{humanize(outcome.outcome)}</strong><p>{outcomeMessage(outcome.outcome)}</p></section> : null}
 
       <section className="ops-run-lead" aria-labelledby="quarantine-state-title">
-        <div><span className="admin-eyebrow">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? "Source evidence expired; this record cannot be retried. Expired does not mean corrected." : entry.sanitizedSummary}</p></div>
+        <div><span className="admin-kicker">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? "Source evidence expired; this record cannot be retried. Expired does not mean corrected." : entry.sanitizedSummary}</p></div>
         <QuarantineStatus state={entry.state} />
       </section>
 
       <div className="ops-detail-grid">
         <section className="ops-detail" aria-labelledby="quarantine-evidence-title">
-          <header><span className="admin-eyebrow">Sanitized evidence</span><h2 id="quarantine-evidence-title">Record context</h2></header>
+          <header><span className="admin-kicker">Sanitized evidence</span><h2 id="quarantine-evidence-title">Record context</h2></header>
           <dl>
             <div><dt>Platform</dt><dd>{entry.platformKey}</dd></div>
             <div><dt>Record kind</dt><dd>{humanize(entry.recordKind)}</dd></div>
@@ -100,7 +105,7 @@ export function QuarantineDetailPage() {
           </dl>
         </section>
         <section className="ops-detail" aria-labelledby="quarantine-lifetime-title">
-          <header><span className="admin-eyebrow">Evidence lifetime</span><h2 id="quarantine-lifetime-title">Retry availability</h2></header>
+          <header><span className="admin-kicker">Evidence lifetime</span><h2 id="quarantine-lifetime-title">Retry availability</h2></header>
           <dl>
             <div><dt>First failure</dt><dd>{dateTime(entry.firstFailureAt)}</dd></div>
             <div><dt>Latest failure</dt><dd>{dateTime(entry.latestFailureAt)}</dd></div>
@@ -113,7 +118,7 @@ export function QuarantineDetailPage() {
       </div>
 
       <section className="ops-attempts" aria-labelledby="retry-history-title">
-        <header className="admin-section-heading"><div><span className="admin-eyebrow">Independent attempts</span><h2 id="retry-history-title">Retry history</h2></div><span className="admin-section-count">{entry.attempts.length} attempts</span></header>
+        <header className="admin-section-header"><div><span className="admin-kicker">Independent attempts</span><h2 id="retry-history-title">Retry history</h2></div><span className="admin-section-count">{entry.attempts.length} attempts</span></header>
         {entry.attempts.length === 0 ? <p>No retry attempts have been recorded.</p> : <ol>{entry.attempts.map((attempt) => <li key={attempt.id}><span>{dateTime(attempt.startedAt)}</span><strong>{humanize(attempt.state)}</strong><p>{attempt.sanitizedSummary ?? (attempt.state === "running" ? "Retry in progress." : "No additional diagnostic summary.")}</p>{attempt.failureCode ? <code>{attempt.failureCode}</code> : null}{attempt.canonicalRevisionCount !== null ? <small>{attempt.canonicalRevisionCount} canonical revisions written</small> : null}</li>)}</ol>}
       </section>
     </div>

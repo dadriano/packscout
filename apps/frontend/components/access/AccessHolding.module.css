@@ -1,0 +1,162 @@
+/*
+ * The holding surface (closed-beta-access/008). Same visual family as the
+ * route placeholder it replaced — one calm, bordered band, centered copy —
+ * extended with the identity panel and the session controls. Everything
+ * renders from the shared theme tokens, so both themes come for free, and
+ * nothing here animates.
+ */
+
+.surface {
+  display: grid;
+  min-height: 48vh;
+  place-items: center;
+  margin-top: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: var(--color-surface);
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.inner {
+  width: 100%;
+  max-width: 36rem;
+}
+
+.kicker {
+  margin: 0 0 0.65rem;
+  color: var(--color-action);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0;
+  font-size: clamp(1.7rem, 4vw, 2.65rem);
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.heading:focus {
+  outline: 0;
+}
+
+.body {
+  margin: 0.8rem auto 0;
+  max-width: 34rem;
+  color: var(--color-text-muted);
+  font-size: 1.15rem;
+  line-height: 1.7;
+}
+
+.identity {
+  max-width: 30rem;
+  margin: 1.5rem auto 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.6rem;
+  background: var(--color-surface-subtle);
+  padding: 0.85rem 1rem;
+  text-align: start;
+}
+
+.identityLegend {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.identityNote {
+  margin: 0.45rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.identityRows {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.55rem 0 0;
+}
+
+.identityRow {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.identityTerm {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.identityValue {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.02rem;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.35rem;
+}
+
+.action {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0.48rem;
+  background: var(--color-surface);
+  padding: 0.6rem 1rem;
+  color: var(--color-text);
+  font-size: 0.98rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  border-color: var(--color-action);
+}
+
+.action:disabled {
+  border-color: var(--color-border);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+/* Reserved height so a sign-out failure appearing shifts nothing. */
+.actionStatus {
+  min-height: 1.3em;
+  margin: 0.5rem 0 0;
+  color: var(--color-negative);
+  font-size: 0.95rem;
+}
+
+.guidance {
+  max-width: 32rem;
+  margin: 1.1rem auto 0;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 620px) {
+  .surface {
+    min-height: 42vh;
+    padding: 1.5rem 1rem;
+  }
+}

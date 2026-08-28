@@ -15,6 +15,7 @@ import {
 } from "@/lib/packscout-ev-presentation";
 import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import styles from "./AllRepacksCards.module.css";
 
@@ -52,6 +53,7 @@ function RepackCard({
     displayedChase,
     desiredSearchActive ? "Desired Chase Value" : "Top Chase Value",
   );
+  const availability = presentPackAvailability(repack.availability);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -69,6 +71,13 @@ function RepackCard({
         <span className={styles.identity}>
           <span className={styles.vendor}>{repack.vendorDisplayName}</span>
           <span className={styles.name}>{repack.name}</span>
+          <span
+            className={styles.availability}
+            data-state={repack.availability}
+          >
+            {availability.label}
+            <span className="sr-only">. {availability.description}</span>
+          </span>
           <span className={styles.category}>
             {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
           </span>

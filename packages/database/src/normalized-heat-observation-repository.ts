@@ -20,12 +20,15 @@ import type {
   PublicRepackIdentityMappingRow as MappingRow,
 } from "./public-repack-identity-mapping-repository.ts";
 
-const sevenDaysInMilliseconds = 7 * 24 * 60 * 60 * 1_000;
 const maximumAvailableChaseCount = 10_000;
 const maximumWriteCandidates = 1_000;
+// Canonical revisions persisted before the availability rename still hold
+// active/disabled; both vocabularies stay readable.
 const canonicalAvailabilities = new Set([
   "active",
   "disabled",
+  "available",
+  "unavailable",
   "sold_out",
   "unknown",
 ]);
@@ -167,8 +170,11 @@ function requireCanonicalTimestamp(value: string, field: string): Date {
   return parsed;
 }
 
-function retainedUntil(occurredAt: Date): Date {
-  return new Date(occurredAt.getTime() + sevenDaysInMilliseconds);
+export function normalizedHeatRetainedUntilSql(occurredAt: Date): Prisma.Sql {
+  // The schema defines retention as seven PostgreSQL calendar days. Compute
+  // the value in the same database session so daylight-saving boundaries do
+  // not disagree with the table check constraint.
+  return Prisma.sql`${occurredAt} + interval '7 days'`;
 }
 
 function mappingKey(platformKey: string, packExternalId: string): string {
@@ -715,13 +721,13 @@ function classifyHeatCandidate(
 function catalogContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "catalog_asset"
-    && content.availability === "active";
+    && (content.availability === "active" || content.availability === "available");
 }
 
 function packContentIsActive(content: unknown): boolean {
   return isObject(content)
     && content.entityType === "pack"
-    && content.availability === "active";
+    && (content.availability === "active" || content.availability === "available");
 }
 
 function pullValues(
@@ -921,7 +927,7 @@ async function loadCatalogAssetsAsOfCauses(
         where asset_revision.content_json ->> 'relatedPackExternalId'
           = requested.pack_external_id
           and asset_revision.content_json ->> 'entityType' = 'catalog_asset'
-          and asset_revision.content_json ->> 'availability' = 'active'
+          and asset_revision.content_json ->> 'availability' in ('active', 'available')
       )
       select candidate_key as "candidateKey",
              platform_key as "platformKey",
@@ -1288,7 +1294,8 @@ export async function persistNormalizedHeatObservationsForCanonicalWrites(
       ${observation.realizedReturnBasisPoints},
       ${observation.valueMultipleBasisPoints},
       ${observation.availableChaseCount}, ${textArray(observation.outcomeKeys)},
-      ${retainedUntil(observation.revision.occurredAt)}, ${input.createdAt}
+      ${normalizedHeatRetainedUntilSql(observation.revision.occurredAt)},
+      ${input.createdAt}
     )`);
     const inserted = await database.$queryRaw<
       Array<{ observationId: string; observationKey: string }>
@@ -1335,7 +1342,8 @@ export async function persistNormalizedHeatObservationsForCanonicalWrites(
       ${outcome.mapping ? uuid(outcome.mapping.publicRepackId) : Prisma.sql`null::uuid`},
       ${outcome.status}, ${outcome.reasonCode},
       ${outcome.observationId ? uuid(outcome.observationId) : Prisma.sql`null::uuid`},
-      ${retainedUntil(outcome.revision.occurredAt)}, ${input.createdAt}
+      ${normalizedHeatRetainedUntilSql(outcome.revision.occurredAt)},
+      ${input.createdAt}
     )`);
     await database.$executeRaw(Prisma.sql`
       insert into public.normalized_heat_observation_outcomes (

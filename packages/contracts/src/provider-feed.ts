@@ -43,7 +43,7 @@ export const pullEnvelopeV1Schema = z.object({
   data: opaqueDataSchema,
 });
 
-export const saleEnvelopeV1Schema = z.object({
+export const tradeEnvelopeV1Schema = z.object({
   platform: nonBlankStringSchema,
   external_id: nonBlankStringSchema,
   event_type: nonBlankStringSchema,
@@ -58,7 +58,7 @@ export const saleEnvelopeV1Schema = z.object({
 export const providerFeedPageV1Schema = z.object({
   catalog: z.array(catalogEnvelopeV1Schema),
   pulls: z.array(pullEnvelopeV1Schema),
-  sales: z.array(saleEnvelopeV1Schema),
+  trades: z.array(tradeEnvelopeV1Schema),
   next_cursor: opaqueCursorSchema,
   has_more: z.boolean(),
 });
@@ -67,7 +67,7 @@ export const providerFeedPageStructureV1Schema = z
   .object({
     catalog: z.array(z.unknown()),
     pulls: z.array(z.unknown()),
-    sales: z.array(z.unknown()),
+    trades: z.array(z.unknown()),
     next_cursor: opaqueCursorSchema,
     has_more: z.boolean(),
   })
@@ -75,7 +75,7 @@ export const providerFeedPageStructureV1Schema = z
 
 export type CatalogEnvelopeV1 = z.infer<typeof catalogEnvelopeV1Schema>;
 export type PullEnvelopeV1 = z.infer<typeof pullEnvelopeV1Schema>;
-export type SaleEnvelopeV1 = z.infer<typeof saleEnvelopeV1Schema>;
+export type TradeEnvelopeV1 = z.infer<typeof tradeEnvelopeV1Schema>;
 export type ProviderFeedPageV1 = z.infer<typeof providerFeedPageV1Schema>;
 export type ProviderFeedPageStructureV1 = z.infer<
   typeof providerFeedPageStructureV1Schema
@@ -83,8 +83,8 @@ export type ProviderFeedPageStructureV1 = z.infer<
 export type ProviderFeedEnvelopeV1 =
   | CatalogEnvelopeV1
   | PullEnvelopeV1
-  | SaleEnvelopeV1;
-export type ProviderFeedRecordKind = "catalog" | "pull" | "sale";
+  | TradeEnvelopeV1;
+export type ProviderFeedRecordKind = "catalog" | "pull" | "trade";
 
 export type ProviderFeedValidationIssueCode =
   | "cursor_cycle"
@@ -174,7 +174,7 @@ function prefixRecordIssue(
       ? "catalog"
       : recordKind === "pull"
         ? "pulls"
-        : "sales";
+        : "trades";
   const recordPath = `${groupName}[${recordIndex}]`;
   return Object.freeze({
     code: issue.code,
@@ -188,7 +188,7 @@ function paginationIssues(
 ): ProviderFeedValidationIssue[] {
   if (!page.has_more) return [];
   const issues: ProviderFeedValidationIssue[] = [];
-  const recordCount = page.catalog.length + page.pulls.length + page.sales.length;
+  const recordCount = page.catalog.length + page.pulls.length + page.trades.length;
   if (recordCount === 0) {
     issues.push({ code: "empty_continuing_page", path: "has_more" });
   }
@@ -291,16 +291,16 @@ export function validateProviderFeedRecordsV1(
     pullEnvelopeV1Schema,
     context.requestedPlatform,
   );
-  const sales = validateRecordGroup(
-    "sale",
-    rawPage.sales,
-    saleEnvelopeV1Schema,
+  const trades = validateRecordGroup(
+    "trade",
+    rawPage.trades,
+    tradeEnvelopeV1Schema,
     context.requestedPlatform,
   );
   const recordOutcomes = [
     ...catalog.outcomes,
     ...pulls.outcomes,
-    ...sales.outcomes,
+    ...trades.outcomes,
   ];
   const invalidRecords = recordOutcomes.filter(
     (outcome): outcome is ProviderFeedInvalidRecordOutcomeV1 =>
@@ -311,7 +311,7 @@ export function validateProviderFeedRecordsV1(
     validPage: {
       catalog: catalog.validRecords,
       pulls: pulls.validRecords,
-      sales: sales.validRecords,
+      trades: trades.validRecords,
       next_cursor: rawPage.next_cursor,
       has_more: rawPage.has_more,
     },

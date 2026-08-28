@@ -6,8 +6,11 @@ import type {
 } from "@packscout/contracts";
 import { AdminApiError } from "../api/client";
 import {
-  createOperator,
+  cancelOperatorInvitation,
+  createOperatorWithPassword,
+  inviteOperator,
   listOperators,
+  reissueOperatorInvitation,
   updateOperator,
 } from "../api/operators";
 import { EmptyState } from "../components/EmptyState";
@@ -32,6 +35,15 @@ interface ActiveDialog {
 function errorMessage(error: unknown): string {
   if (error instanceof AdminApiError) return error.message;
   return "PackScout Admin is temporarily unavailable. Your account has not been changed.";
+}
+
+function isAmbiguousDirectCreationFailure(error: unknown): boolean {
+  return !(
+    error instanceof AdminApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.code !== "INVALID_RESPONSE"
+  );
 }
 
 function roleName(role: OperatorRole): string {
@@ -97,10 +109,32 @@ export function OperatorsPage() {
     setDialogPending(true);
     setDialogError(null);
     try {
-      if (submission.mode === "create") {
-        const result = await createOperator(submission.input);
+      if (submission.mode === "invite") {
+        const result = await inviteOperator(submission.input);
         replaceOperator(result.operator);
-        showToast(`${result.operator.displayName} can now sign in.`);
+        showToast(
+          `Invitation sent to ${result.operator.email}. They choose their own password.`,
+        );
+      } else if (submission.mode === "create") {
+        const result = await createOperatorWithPassword(submission.input);
+        replaceOperator(result.operator);
+        if (result.notification.status === "enqueued") {
+          showToast(
+            `${result.operator.displayName} can now sign in. Account email queued; share the initial password separately.`,
+          );
+        } else if (
+          result.notification.reason === "EMAIL_OUTBOX_UNAVAILABLE"
+        ) {
+          showToast(
+            `${result.operator.displayName} can now sign in, but email queueing could not be confirmed. Check Messages before sending sign-in details and the initial password through a secure channel.`,
+            "error",
+          );
+        } else {
+          showToast(
+            `${result.operator.displayName} can now sign in, but the account email was not queued. Share the sign-in details and initial password through a secure channel.`,
+            "error",
+          );
+        }
       } else if (submission.mode === "role" && activeDialog?.operator) {
         const result = await updateOperator(activeDialog.operator.id, {
           role: submission.role,
@@ -118,7 +152,20 @@ export function OperatorsPage() {
       }
       setActiveDialog(null);
     } catch (error) {
-      setDialogError(errorMessage(error));
+      if (
+        submission.mode === "create" &&
+        isAmbiguousDirectCreationFailure(error)
+      ) {
+        setActiveDialog(null);
+        setLoading(true);
+        setRefreshIndex((current) => current + 1);
+        showToast(
+          "PackScout could not confirm whether the account was created or the email was queued. Check the operators list and Messages before trying again.",
+          "error",
+        );
+      } else {
+        setDialogError(errorMessage(error));
+      }
     } finally {
       setDialogPending(false);
     }
@@ -155,6 +202,36 @@ export function OperatorsPage() {
     }
   }
 
+  /**
+   * Sending a fresh invitation supersedes the account's outstanding one, so
+   * the older link stops working. Nothing about the link reaches the browser:
+   * the response carries only when it was sent and when it stops working.
+   */
+  async function reissueInvitation(operator: OperatorSummary) {
+    try {
+      const result = await reissueOperatorInvitation(operator.id);
+      replaceOperator({ ...operator, invitation: result.invitation });
+      showToast(`A new invitation is on its way to ${operator.email}.`);
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    }
+  }
+
+  async function cancelInvitation(operator: OperatorSummary) {
+    await confirm({
+      tier: "danger",
+      title: `Cancel the invitation for ${operator.displayName}?`,
+      description:
+        "Their invitation link stops working immediately and the account cannot be used.",
+      confirmLabel: "Cancel invitation",
+      successMessage: `Invitation cancelled for ${operator.displayName}.`,
+      action: async () => {
+        const result = await cancelOperatorInvitation(operator.id);
+        replaceOperator(result.operator);
+      },
+    });
+  }
+
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -167,7 +244,7 @@ export function OperatorsPage() {
         <PageHeader
           eyebrow="Workspace / Operators"
           title="Operator access"
-          description="Provision and maintain invite-only access to PackScout operations."
+          description="Provision and maintain operator access to PackScout operations."
         />
         <AuthRestrictedState />
       </div>
@@ -179,23 +256,35 @@ export function OperatorsPage() {
       <PageHeader
         eyebrow="Workspace / Operators"
         title="Operator access"
-        description="Provision operator accounts, assign the least access needed, and end sessions when responsibilities change."
+        description="Invite operators to choose their own password, or create an active account with an initial password. Assign the least access needed and end sessions when responsibilities change."
         actions={
-          <button
-            type="button"
-            className="admin-button admin-button--primary"
-            onClick={() => {
-              setDialogError(null);
-              setActiveDialog({ mode: "create" });
-            }}
-          >
-            Add operator
-          </button>
+          <>
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              onClick={() => {
+                setDialogError(null);
+                setActiveDialog({ mode: "create" });
+              }}
+            >
+              Create with password
+            </button>
+            <button
+              type="button"
+              className="admin-button admin-button-primary"
+              onClick={() => {
+                setDialogError(null);
+                setActiveDialog({ mode: "invite" });
+              }}
+            >
+              Invite operator
+            </button>
+          </>
         }
       />
 
-      <form className="admin-ledger" aria-label="Filter operators" onSubmit={applyFilters}>
-        <div className="admin-section-heading">
+      <form className="admin-surface admin-panel" aria-label="Filter operators" onSubmit={applyFilters}>
+        <div className="admin-section-header">
           <div className="admin-field">
             <label htmlFor="operator-search">Search name or email</label>
             <input
@@ -229,19 +318,21 @@ export function OperatorsPage() {
               }
             >
               <option value="">All states</option>
+              <option value="pending">Awaiting activation</option>
               <option value="active">Active</option>
               <option value="disabled">Disabled</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
-          <button className="admin-button admin-button--secondary" type="submit">
+          <button className="admin-button admin-button-secondary" type="submit">
             Apply filters
           </button>
         </div>
       </form>
 
       {loading ? (
-        <section className="admin-ledger" aria-busy="true" aria-live="polite">
-          <span className="admin-eyebrow">Loading access ledger…</span>
+        <section className="admin-surface admin-panel" aria-busy="true" aria-live="polite">
+          <span className="admin-kicker">Loading access ledger…</span>
         </section>
       ) : loadError ? (
         <EmptyState
@@ -251,7 +342,7 @@ export function OperatorsPage() {
           action={
             <button
               type="button"
-              className="admin-button admin-button--secondary"
+              className="admin-button admin-button-secondary"
               onClick={() => {
                 setLoading(true);
                 setRefreshIndex((current) => current + 1);
@@ -265,15 +356,30 @@ export function OperatorsPage() {
         <EmptyState
           eyebrow="Access ledger"
           title="No other operators yet"
-          description="Add an operator to grant invite-only access. Initial credentials are delivered outside PackScout."
+          description="Send an invitation so the operator chooses their own password, or create an active account and share its initial password securely."
           action={
-            <button
-              type="button"
-              className="admin-button admin-button--primary"
-              onClick={() => setActiveDialog({ mode: "create" })}
-            >
-              Add operator
-            </button>
+            <div className="admin-form-actions">
+              <button
+                type="button"
+                className="admin-button admin-button-secondary"
+                onClick={() => {
+                  setDialogError(null);
+                  setActiveDialog({ mode: "create" });
+                }}
+              >
+                Create with password
+              </button>
+              <button
+                type="button"
+                className="admin-button admin-button-primary"
+                onClick={() => {
+                  setDialogError(null);
+                  setActiveDialog({ mode: "invite" });
+                }}
+              >
+                Invite operator
+              </button>
+            </div>
           }
         />
       ) : (
@@ -289,6 +395,8 @@ export function OperatorsPage() {
             setActiveDialog({ mode: "credential", operator });
           }}
           onToggleState={(operator) => void toggleState(operator)}
+          onReissueInvitation={(operator) => void reissueInvitation(operator)}
+          onCancelInvitation={(operator) => void cancelInvitation(operator)}
         />
       )}
 

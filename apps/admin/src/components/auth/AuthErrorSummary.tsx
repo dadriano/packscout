@@ -9,7 +9,7 @@ export const AuthErrorSummary = forwardRef<HTMLDivElement, AuthErrorSummaryProps
     return (
       <div
         ref={ref}
-        className="admin-inline-error"
+        className="admin-form-error"
         role="alert"
         tabIndex={-1}
       >

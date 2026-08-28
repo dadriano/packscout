@@ -6,13 +6,21 @@ import { userInfo } from "node:os";
 import { test } from "node:test";
 import type { Express } from "express";
 import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
+  providerIdentityNamespaceByLaunchProvider,
+  providerSourceLaunchBounds,
+} from "@packscout/contracts";
+import {
   DatabaseLoginAttemptLimiter,
   PrismaAuthAuditSink,
   PrismaAuthRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
+import { launchSourceMapperDescriptors } from "@packscout/services";
 import { createAdminApp } from "./app.ts";
 import { createNodeAuthSecurity } from "./auth/crypto.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
@@ -117,8 +125,8 @@ async function createHarness() {
   await setup.createProviderSource({
     id: ids.provider,
     organizationId: ids.organization,
-    platformKey: "beezie",
-    displayName: "Beezie",
+    platformKey: "courtyard",
+    displayName: "Courtyard",
     createdAt: now,
   });
   await setup.createConfigRevision({
@@ -159,7 +167,7 @@ async function createHarness() {
     createdAt: now,
   });
   const pull = {
-    platform: "beezie",
+    platform: "courtyard",
     external_id: "pull-1",
     pack_external_id: null,
     occurred_at: "2026-08-06T11:55:00.000Z",
@@ -184,7 +192,7 @@ async function createHarness() {
     requestedCursor: "raw-cursor-in-private-user",
     nextCursor: "raw-cursor-out-0xprivate-wallet",
     hasMore: false,
-    payload: { catalog: [], pulls: [pull], sales: [], rawSecret },
+    payload: { catalog: [], pulls: [pull], trades: [], rawSecret },
     records: [],
     quarantines: [{
       recordKind: "pull",
@@ -206,6 +214,74 @@ async function createHarness() {
       failure_code: "IMPORT_MAPPING_FAILED",
       failure_summary: `unsafe ${rawSecret}`,
     },
+  });
+
+  const sourceManifest = dataforrestEventsV1SourceAdapterManifest;
+  const mapper = launchSourceMapperDescriptors.find(
+    ({ provider }) => provider === "courtyard",
+  );
+  assert.ok(mapper);
+  const sourceLifecycle = new ProviderSourceLifecycleRepository(
+    harness.database,
+  );
+  const connection = await sourceLifecycle.createConnectionProfileRevision({
+    organizationId: ids.organization,
+    sourceTypeKey: sourceManifest.sourceTypeKey,
+    connectionTypeKey: sourceManifest.compatibleConnectionTypeKey,
+    displayName: "DataForrest admin runtime",
+    requestLimit: providerSourceLaunchBounds.stablePlatformRequestCap,
+    sourceAdapterVersion: sourceManifest.adapterVersion,
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "actor:admin",
+    createdAt: now,
+  });
+  const source = await sourceLifecycle.createSourceInstanceRevision({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    connectionProfileId: connection.profileId,
+    sourceTypeKey: sourceManifest.sourceTypeKey,
+    sourceAdapterVersion: sourceManifest.adapterVersion,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    mapperKey: mapper.mapperKey,
+    mapperVersion: mapper.mapperVersion,
+    identityNamespaceKey:
+      providerIdentityNamespaceByLaunchProvider.courtyard,
+    cursorCodecVersion: sourceManifest.cursorCodecKey,
+    revisionNumber: 1,
+    intervalSeconds: 60,
+    configuration: { platform: "courtyard" },
+    configurationHash: "b".repeat(64),
+    recordIdScopes: [
+      "catalog-pack-v1",
+      "catalog-card-v1",
+      "pull-v1",
+      "trade-v1",
+    ],
+    actorKey: "actor:admin",
+    createdAt: now,
+  });
+  await harness.database.$transaction(async (transaction) => {
+    await transaction.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: { state: "active", activated_at: now },
+    });
+    await transaction.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+        updated_at: now,
+      },
+    });
+    await transaction.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: { state: "active", activated_at: now, updated_at: now },
+    });
   });
 
   const authRepository = new PrismaAuthRepository(harness.database);
@@ -243,8 +319,6 @@ async function createHarness() {
     importOperations: createAdminImportOperationsRuntime({
       database: harness.database,
       actorPseudonymKey,
-      credentialKey: new Uint8Array(32).fill(7),
-      environment: "test",
     }),
   });
   const quarantine = await harness.database.quarantine_records.findFirst({
@@ -252,10 +326,15 @@ async function createHarness() {
     select: { id: true },
   });
   assert.ok(quarantine);
-  return { ...harness, app, quarantineId: quarantine.id };
+  return {
+    ...harness,
+    app,
+    quarantineId: quarantine.id,
+    sourceRevisionId: source.sourceRevisionId,
+  };
 }
 
-test("real admin composition reads safe operations, coalesces manual runs, and resolves quarantine independently", async () => {
+test("real admin composition reads safe operations, queues source runs, and excludes legacy quarantine", async () => {
   const harness = await createHarness();
   try {
     await withServer(harness.app, async (baseUrl) => {
@@ -278,10 +357,6 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
         "X-CSRF-Token": session.csrfToken,
       };
 
-      const overview = await fetch(`${baseUrl}/api/operations/providers?limit=25`, {
-        headers: readHeaders,
-      });
-      assert.equal(overview.status, 200);
       const runs = await fetch(`${baseUrl}/api/import-runs?limit=25`, {
         headers: readHeaders,
       });
@@ -296,7 +371,6 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       );
       assert.equal(quarantineBefore.status, 200);
       const safeReadBody = [
-        await overview.text(),
         await runs.text(),
         await detailBefore.text(),
         await quarantineBefore.text(),
@@ -319,11 +393,8 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
             summary: attemptRecord.sanitized_summary,
           }
         : null;
-      assert.equal(
-        retryBody.outcome.outcome,
-        "resolved",
-        JSON.stringify({ retryBody, attempt }),
-      );
+      assert.equal(retryBody.outcome.outcome, "not_found");
+      assert.equal(attempt, null);
       const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
         headers: readHeaders,
       });
@@ -331,10 +402,10 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
         run: { state: string; counters: { resolvedQuarantines: number } };
       };
       assert.equal(historical.run.state, "incomplete");
-      assert.equal(historical.run.counters.resolvedQuarantines, 1);
+      assert.equal(historical.run.counters.resolvedQuarantines, 0);
 
       const manualRequest = JSON.stringify({
-        expectedConfigurationRevisionId: ids.revision,
+        expectedSourceRevisionId: harness.sourceRevisionId,
       });
       const staleManual = await fetch(
         `${baseUrl}/api/data-providers/${ids.provider}/import-runs`,
@@ -342,7 +413,7 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
           method: "POST",
           headers: mutationHeaders,
           body: JSON.stringify({
-            expectedConfigurationRevisionId:
+            expectedSourceRevisionId:
               "72000000-0000-4000-8000-000000000099",
           }),
         },
@@ -350,7 +421,7 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       assert.equal(staleManual.status, 409);
       assert.equal(
         (await staleManual.json() as { code: string }).code,
-        "CONFIG_REVISION_CONFLICT",
+        "SOURCE_REVISION_CONFLICT",
       );
       const firstManual = await fetch(
         `${baseUrl}/api/data-providers/${ids.provider}/import-runs`,
@@ -410,6 +481,10 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
           PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: Buffer.alloc(32, 9).toString(
             "base64",
           ),
+          PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: Buffer.alloc(32, 11).toString(
+            "base64",
+          ),
+          PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: "1",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

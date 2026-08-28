@@ -8,8 +8,14 @@ import {
 } from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { repackSearchRowValidator } from "./publicRepackValidation";
+import { betaAllowlistEntryDocumentValidator } from "./betaAllowlistRecords";
 import { dataReleaseV3SearchRowValidator } from "./dataReleaseV3Search";
+import { productUserDocumentValidator } from "./productUserRecords";
+import {
+  publicPackAvailabilityValidator,
+  storedPackAvailabilityValidator,
+  storedRepackSearchRowValidator,
+} from "./publicRepackValidation";
 
 const sha256Validator = v.string();
 const timestampValidator = v.string();
@@ -493,7 +499,9 @@ const publicRepackDetailValidator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  // Stored details may predate the availability rename; reads translate the
+  // legacy vocabulary before it reaches any public result.
+  availability: storedPackAvailabilityValidator,
   price: priceValidator,
   evEstimates: v.object({
     vendorReported: vendorReportedEvEstimateValidator,
@@ -673,7 +681,10 @@ export const publicRepackDetailV3Validator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  // data_release_v3 details are written only by this feature's own staging
+  // path, so they carry the current availability vocabulary exactly — no
+  // legacy active/disabled values can predate these tables.
+  availability: publicPackAvailabilityValidator,
   price: priceValidator,
   buyback: publicBuybackSummaryV3Validator,
   primaryImage: nullableImageValidator,
@@ -879,10 +890,7 @@ export const globalCatalogProviderActiveObservationValidator = v.object({
   latestAffectedSourceHeadSequence: v.string(),
   initialBackfillComplete: v.boolean(),
   affectedDerivationsSettled: v.boolean(),
-  settledSourceFreshness: v.union(
-    v.literal("fresh"),
-    v.literal("delayed"),
-  ),
+  settledSourceFreshness: v.union(v.literal("fresh"), v.literal("delayed")),
   lastSuccessfulObservationAt: timestampValidator,
   staleAt: timestampValidator,
 });
@@ -958,15 +966,12 @@ export default defineSchema({
       "lifecycle",
       "retentionEligibleAt",
     ])
-    .index(
-      "by_platform_lifecycle_retention_public_id",
-      [
-        "platformKey",
-        "lifecycle",
-        "retentionEligibleAt",
-        "publicProviderReleaseId",
-      ],
-    )
+    .index("by_platform_lifecycle_retention_public_id", [
+      "platformKey",
+      "lifecycle",
+      "retentionEligibleAt",
+      "publicProviderReleaseId",
+    ])
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
@@ -992,10 +997,7 @@ export default defineSchema({
   providerCatalogTerminalReceiptProofs: defineTable({
     releaseId: v.id("providerCatalogReleases"),
     operationId: v.string(),
-    operationKind: v.union(
-      v.literal("finalize"),
-      v.literal("confirmReuse"),
-    ),
+    operationKind: v.union(v.literal("finalize"), v.literal("confirmReuse")),
     requestDigest: sha256Validator,
     platformKey: v.string(),
     publicProviderReleaseId: v.string(),
@@ -1161,7 +1163,7 @@ export default defineSchema({
     rowCount: v.number(),
     byteCount: v.number(),
     contentHash: sha256Validator,
-    rows: v.array(repackSearchRowValidator),
+    rows: v.array(storedRepackSearchRowValidator),
   }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
 
   providerCatalogSearchShardProofs: defineTable({
@@ -1467,10 +1469,7 @@ export default defineSchema({
       "signalSetId",
       "publicRepackId",
     ])
-    .index("by_signal_set_id_and_repack_id", [
-      "signalSetId",
-      "repackId",
-    ]),
+    .index("by_signal_set_id_and_repack_id", ["signalSetId", "repackId"]),
 
   repackHeatPublications: defineTable({
     publicationId: v.string(),
@@ -1515,10 +1514,7 @@ export default defineSchema({
     acceptedAt: timestampValidator,
     operationId: v.string(),
   })
-    .index("by_publication_id_and_batch_index", [
-      "publicationId",
-      "batchIndex",
-    ])
+    .index("by_publication_id_and_batch_index", ["publicationId", "batchIndex"])
     .index("by_idempotency_key", ["idempotencyKey"])
     .index("by_manifest_id", ["manifestId"]),
 
@@ -1556,6 +1552,41 @@ export default defineSchema({
     "ownerTokenIdentifier",
     "publicCollectibleId",
   ]),
+
+  // The decision-state index serves the operator review queue (identities in
+  // one decision state, oldest decision first) and the bounded
+  // awaiting-review count. Records that predate the closed beta store no
+  // `access` at all: they sit in that index's undefined segment, ordered by
+  // creation time (their first sign-in), and the queue reads merge them into
+  // awaiting review — which is what absence already means.
+  productUsers: defineTable(productUserDocumentValidator)
+    .index("by_subject", ["subject"])
+    .index("by_last_seen_at", ["lastSeenAt"])
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_access_state_and_access_decided_at", [
+      "access.state",
+      "access.decidedAt",
+    ])
+    // Welcome-dispatch discovery (messaging/007): the `due` segment lists
+    // identities awaiting their one welcome, and the `claimed` segment is
+    // range-scanned by claim expiry so a crashed dispatcher's claims lapse
+    // back into discovery. Records with no marker sit in the undefined
+    // segment and are never scanned.
+    .index("by_welcome_state_and_welcome_claim_expires_at", [
+      "welcome.state",
+      "welcome.claimExpiresAt",
+    ]),
+
+  // The closed-beta allowlist. The identifier indexes serve exact-match
+  // admission (establishment-time and retroactive), uniqueness checks, and
+  // bounded prefix search; the update-time index serves recency-ordered
+  // listing. Uniqueness of a normalized identifier across entries is an
+  // application invariant enforced by the allowlist mutations.
+  betaAllowlistEntries: defineTable(betaAllowlistEntryDocumentValidator)
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_updated_at", ["updatedAt"]),
 
   dataReleaseV3Releases: defineTable({
     publicReleaseId: v.string(),

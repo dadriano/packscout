@@ -1,0 +1,175 @@
+/* Product-user directory surfaces, on the shared admin template. */
+
+/*
+ * The two parallel views over the directory — the full ledger and the review
+ * queue. The active view is marked with the primary family so the mode reads
+ * at a glance without inventing a second control vocabulary.
+ */
+.product-users__views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.product-users__views .admin-button.is-active {
+  border-color: var(--admin-primary);
+  background: var(--admin-primary-bg-muted);
+  color: var(--admin-primary);
+}
+
+.product-users__search {
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+
+.product-users__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.product-users__label:hover,
+.product-users__label:focus-visible {
+  color: var(--admin-primary);
+  text-decoration: underline;
+}
+
+.product-users__identity {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.78rem;
+}
+
+.product-users__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.product-users__facts div {
+  min-width: 0;
+}
+
+.product-users__facts dt {
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.product-users__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/*
+ * Standing, and the one control that changes it, kept together so the badge an
+ * administrator reads and the button they press are never separated.
+ */
+.product-users__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.product-users__note {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--admin-warning-border);
+  border-radius: 1rem;
+  background: var(--admin-warning-bg-light);
+  color: var(--admin-warning-text);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+/* Saved-item collections on the user detail view. */
+
+.saved-items__rows {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--admin-border);
+  list-style: none;
+}
+
+.saved-items__rows li {
+  padding: 0.9rem 0.15rem;
+  border-bottom: 1px solid var(--admin-table-border);
+}
+
+.saved-items__rows li:last-child {
+  border-bottom: 0;
+}
+
+.saved-items__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+}
+
+.saved-items__heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.saved-items__heading time {
+  color: var(--admin-text-muted);
+  font-size: 0.78rem;
+}
+
+.saved-items__unresolved {
+  color: var(--admin-warning-text);
+}
+
+.saved-items__identifier {
+  font-family: var(--admin-font-mono);
+  font-size: 0.76rem;
+}
+
+.saved-items__count {
+  margin: 0.85rem 0 0;
+  color: var(--admin-text-muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 620px) {
+  .admin-row-list article:has(.product-users__facts) {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-row-list article:has(.product-users__facts) > .admin-pill,
+  .admin-row-list article:has(.product-users__facts)
+    > .product-users__row-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .product-users__row-actions {
+    justify-content: flex-start;
+  }
+
+  .product-users__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .product-users__search {
+    flex-basis: 100%;
+  }
+}

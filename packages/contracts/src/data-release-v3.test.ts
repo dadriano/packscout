@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  buildAllAvailabilityStatesPublicRepackListPageV3,
   buildDataReleaseV3Identity,
   buildDesiredCollectibleRepackResultsV3,
+  buildNonPurchasablePublicRepackDetailV3,
   buildPackScoutPublicEvCurrentV3,
   buildPackScoutPublicEvMetricsV3,
   buildPackScoutPublicEvNegativeV3,
@@ -26,6 +28,7 @@ import {
   publicRepackDetailV3Schema,
   publicRepackListPageV3Schema,
   publicRepackSummaryV3FromDetail,
+  publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3MatchesDetail,
@@ -148,7 +151,7 @@ test("availability and buyback couplings fail closed", () => {
       }),
     }).success,
     false,
-    "an active repack cannot present a sold-out historical estimate",
+    "an available repack cannot present a sold-out historical estimate",
   );
   assert.equal(
     publicRepackDetailV3Schema.safeParse({
@@ -184,6 +187,88 @@ test("availability and buyback couplings fail closed", () => {
     publicRepackDetailV3Schema.safeParse(soldOutActionable).success,
     false,
     "a sold-out repack never exposes an outbound action",
+  );
+});
+
+test("packs that are not available stay discoverable but never rank or act", () => {
+  for (const availability of ["unavailable", "unknown"] as const) {
+    const detail = buildNonPurchasablePublicRepackDetailV3(availability);
+    assert.equal(detail.availability, availability);
+    assert.equal(
+      detail.evEstimates.packScout.status,
+      "current",
+      "pack availability and PackScout EV availability stay independent axes",
+    );
+    assert.equal(detail.actionAvailability.repackLink, false);
+
+    assert.equal(
+      publicRepackDetailV3Schema.safeParse({
+        ...detail,
+        actionAvailability: { promo: true, repackLink: true },
+        actions: {
+          promo: { code: "SCOUT", label: "Use SCOUT" },
+          repackLink: {
+            listingUrl: "https://vendor.example/repacks/pokemon",
+            listingHost: "vendor.example",
+            referralParameters: [{ name: "utm_source", value: "packscout" }],
+          },
+        },
+      }).success,
+      false,
+      "a pack that is not available never exposes an outbound action",
+    );
+
+    assert.equal(
+      publicRepackDetailV3Schema.safeParse({
+        ...detail,
+        evEstimates: buildPublicEvEstimatesV3({
+          packScout: buildPackScoutPublicEvSoldOutHistoricalV3(),
+        }),
+      }).success,
+      false,
+      "a frozen sold-out estimate requires the authoritative sold-out state",
+    );
+
+    const view = publicRepackViewDetailV3Schema.parse({
+      ...detail,
+      heat: unavailableRepackHeat(),
+    });
+    assert.equal(
+      publicDashboardBundleV3Schema.safeParse({
+        release: buildDataReleaseV3Identity(),
+        opportunities: [publicRepackViewSummaryV3FromDetail(view)],
+        details: [view],
+        selectedRepack: view,
+      }).success,
+      false,
+      "a current estimate on a pack that cannot be bought never ranks",
+    );
+
+    const row = repackEvSortRowV3FromDetail(detail);
+    assert.equal(row.availability, availability);
+    assert.equal(row.packScoutEvDollarsMinor, null);
+    assert.equal(row.packScoutEvDollarsNullRank, 1);
+    assert.equal(row.packScoutGrossEvMinor, null);
+    assert.equal(row.packScoutConfidenceBand, null);
+    assert.equal(row.vendorReportedEvUsdMinor, null);
+    assert.equal(row.vendorReportedEvUsdNullRank, 1);
+    assert.equal(repackEvSortRowV3MatchesDetail(row, detail), true);
+
+    assert.equal(
+      repackEvSortRowV3Schema.safeParse({
+        ...repackEvSortRowV3FromDetail(buildPublicRepackDetailV3()),
+        availability,
+      }).success,
+      false,
+      "materialized sort values never survive a pack that cannot be bought",
+    );
+  }
+
+  const page = buildAllAvailabilityStatesPublicRepackListPageV3();
+  assert.deepEqual(
+    page.rows.map(({ availability }) => availability),
+    ["available", "sold_out", "unavailable", "unknown"],
+    "every availability state stays discoverable in the complete catalog",
   );
 });
 

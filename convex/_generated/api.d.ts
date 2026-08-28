@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as betaAllowlist from "../betaAllowlist.js";
+import type * as betaAllowlistRecords from "../betaAllowlistRecords.js";
 import type * as catalogManifestActivate from "../catalogManifestActivate.js";
 import type * as catalogManifestBlock from "../catalogManifestBlock.js";
 import type * as catalogManifestErrors from "../catalogManifestErrors.js";
@@ -39,6 +41,14 @@ import type * as mockDataReleaseSeed from "../mockDataReleaseSeed.js";
 import type * as mockHeatSimulationFixture from "../mockHeatSimulationFixture.js";
 import type * as mockHeatSimulationPublisher from "../mockHeatSimulationPublisher.js";
 import type * as mockProviderCatalogFixture from "../mockProviderCatalogFixture.js";
+import type * as productUserAccess from "../productUserAccess.js";
+import type * as productUserAccessReview from "../productUserAccessReview.js";
+import type * as productUserCapabilityGate from "../productUserCapabilityGate.js";
+import type * as productUserDirectory from "../productUserDirectory.js";
+import type * as productUserRecords from "../productUserRecords.js";
+import type * as productUserSavedItems from "../productUserSavedItems.js";
+import type * as productUserWelcome from "../productUserWelcome.js";
+import type * as productUsers from "../productUsers.js";
 import type * as productionDataReleaseAuth from "../productionDataReleaseAuth.js";
 import type * as productionDataReleaseErrors from "../productionDataReleaseErrors.js";
 import type * as productionHeatActiveState from "../productionHeatActiveState.js";
@@ -50,6 +60,7 @@ import type * as productionHeatRetention from "../productionHeatRetention.js";
 import type * as productionPublicationKeyConfig from "../productionPublicationKeyConfig.js";
 import type * as providerCatalogDependentWrites from "../providerCatalogDependentWrites.js";
 import type * as providerCatalogEntityWrites from "../providerCatalogEntityWrites.js";
+import type * as providerCatalogInspection from "../providerCatalogInspection.js";
 import type * as providerReleaseBatch from "../providerReleaseBatch.js";
 import type * as providerReleaseBlock from "../providerReleaseBlock.js";
 import type * as providerReleaseCleanup from "../providerReleaseCleanup.js";
@@ -65,6 +76,7 @@ import type * as providerReleaseState from "../providerReleaseState.js";
 import type * as publicCatalogHeatReadModel from "../publicCatalogHeatReadModel.js";
 import type * as publicCatalogManifestReadModel from "../publicCatalogManifestReadModel.js";
 import type * as publicCatalogPagination from "../publicCatalogPagination.js";
+import type * as publicCatalogReadAccess from "../publicCatalogReadAccess.js";
 import type * as publicProviderCatalogReadModel from "../publicProviderCatalogReadModel.js";
 import type * as publicRepackAggregates from "../publicRepackAggregates.js";
 import type * as publicRepackValidation from "../publicRepackValidation.js";
@@ -81,6 +93,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  betaAllowlist: typeof betaAllowlist;
+  betaAllowlistRecords: typeof betaAllowlistRecords;
   catalogManifestActivate: typeof catalogManifestActivate;
   catalogManifestBlock: typeof catalogManifestBlock;
   catalogManifestErrors: typeof catalogManifestErrors;
@@ -112,6 +126,14 @@ declare const fullApi: ApiFromModules<{
   mockHeatSimulationFixture: typeof mockHeatSimulationFixture;
   mockHeatSimulationPublisher: typeof mockHeatSimulationPublisher;
   mockProviderCatalogFixture: typeof mockProviderCatalogFixture;
+  productUserAccess: typeof productUserAccess;
+  productUserAccessReview: typeof productUserAccessReview;
+  productUserCapabilityGate: typeof productUserCapabilityGate;
+  productUserDirectory: typeof productUserDirectory;
+  productUserRecords: typeof productUserRecords;
+  productUserSavedItems: typeof productUserSavedItems;
+  productUserWelcome: typeof productUserWelcome;
+  productUsers: typeof productUsers;
   productionDataReleaseAuth: typeof productionDataReleaseAuth;
   productionDataReleaseErrors: typeof productionDataReleaseErrors;
   productionHeatActiveState: typeof productionHeatActiveState;
@@ -123,6 +145,7 @@ declare const fullApi: ApiFromModules<{
   productionPublicationKeyConfig: typeof productionPublicationKeyConfig;
   providerCatalogDependentWrites: typeof providerCatalogDependentWrites;
   providerCatalogEntityWrites: typeof providerCatalogEntityWrites;
+  providerCatalogInspection: typeof providerCatalogInspection;
   providerReleaseBatch: typeof providerReleaseBatch;
   providerReleaseBlock: typeof providerReleaseBlock;
   providerReleaseCleanup: typeof providerReleaseCleanup;
@@ -138,6 +161,7 @@ declare const fullApi: ApiFromModules<{
   publicCatalogHeatReadModel: typeof publicCatalogHeatReadModel;
   publicCatalogManifestReadModel: typeof publicCatalogManifestReadModel;
   publicCatalogPagination: typeof publicCatalogPagination;
+  publicCatalogReadAccess: typeof publicCatalogReadAccess;
   publicProviderCatalogReadModel: typeof publicProviderCatalogReadModel;
   publicRepackAggregates: typeof publicRepackAggregates;
   publicRepackValidation: typeof publicRepackValidation;

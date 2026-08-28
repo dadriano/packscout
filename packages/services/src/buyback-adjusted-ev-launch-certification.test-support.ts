@@ -165,7 +165,7 @@ function certificationPackContent(fixture: CertificationProviderFixtureV1) {
     name: fixture.packName,
     category: null,
     description: "A sanitized launch-certification pack.",
-    availability: "active",
+    availability: "available",
     sourceStatus: null,
     priceValueMinor: fixture.packPriceMinorUnits,
     priceCurrency: "USD",

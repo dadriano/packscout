@@ -104,7 +104,7 @@ test("fails when every discovered test in a lane is quarantined", (t) => {
   assert.match(result.stderr, /every discovered test quarantined/);
 });
 
-test("runs process integration files only after the parallel root lane", (t) => {
+test("runs process integration files only after the parallel tooling lane", (t) => {
   const root = createFixture(t);
   const markerPath = path.join(root, "parallel-complete");
   writeFileSync(
@@ -121,7 +121,7 @@ test("runs process integration files only after the parallel root lane", (t) => 
       `test("isolated", () => assert.equal(existsSync(${JSON.stringify(markerPath)}), true));\n`,
   );
 
-  const result = runTarget(root, "root");
+  const result = runTarget(root, "tooling");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(
     result.stdout,

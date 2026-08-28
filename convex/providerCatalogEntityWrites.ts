@@ -306,7 +306,11 @@ export async function writeProviderRepacks(
           parsedHttpsUrl(detail.primaryImage.url)?.origin ?? "",
         )) ||
       canonicalJson(detail.actions.promo ?? null) !==
-        canonicalJson(vendor.detail.publicPromo) ||
+        canonicalJson(
+          detail.availability === "available"
+            ? vendor.detail.publicPromo
+            : null,
+        ) ||
       (detail.actions.repackLink !== undefined &&
         (!vendor.detail.listingHosts.includes(
           detail.actions.repackLink.listingHost,

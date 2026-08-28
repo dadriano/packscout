@@ -113,7 +113,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <>
               <button
                 type="button"
-                className="admin-button admin-button--secondary"
+                className="admin-button admin-button-secondary"
                 onClick={cancel}
                 disabled={pending}
               >
@@ -122,7 +122,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <button
                 ref={confirmButtonRef}
                 type="button"
-                className={`admin-button admin-button--${tier === "standard" ? "primary" : "danger"}`}
+                className={`admin-button admin-button-${tier === "standard" ? "primary" : "danger"}`}
                 onClick={() => void runAction()}
                 disabled={pending || !typedSatisfied}
               >
@@ -146,7 +146,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             </div>
           ) : null}
           {actionError ? (
-            <p className="admin-inline-error" role="alert">
+            <p className="admin-form-error" role="alert">
               The action failed: {actionError}
             </p>
           ) : null}

@@ -3,7 +3,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   containsProtectedPublicationField,
+  packAvailabilityIsPurchasableV3,
+  publicRepackDetailV3Schema,
+  repackEvSortRowV3FromDetail,
   type ApprovedPublicCatalogConfigurationV1,
+  type PublicPackAvailability,
+  type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import {
   DataReleaseV3CanonicalSourceError,
@@ -18,6 +23,7 @@ import {
   type MigratedTestDatabase,
 } from "@packscout/database/test-support";
 import { DataReleaseV3ReleaseAssembler } from "./buyback-adjusted-ev-release-assembler.ts";
+import { buildPublishableEligibility } from "./buyback-adjusted-ev-release.test-support.ts";
 import type { DataReleaseV3CanonicalCatalogPort } from "./buyback-adjusted-ev-release-types.ts";
 import {
   DataReleaseV3CanonicalCatalogAdapter,
@@ -32,6 +38,10 @@ const publicCategoryId = "83222222-2222-5222-8222-222222222222";
 const publicCollectibleId = "83333333-3333-5333-8333-333333333333";
 const publicRepackIdActive = "83444444-4444-5444-8444-444444444444";
 const publicRepackIdSoldOut = "83555555-5555-5555-8555-555555555555";
+const publicRepackIdUnavailable = "83666666-6666-5666-8666-666666666666";
+const publicRepackIdUnknown = "83777777-7777-5777-8777-777777777777";
+const publicRepackIdLegacyActive = "83888888-8888-5888-8888-888888888888";
+const publicRepackIdLegacyDisabled = "83999999-9999-5999-8999-999999999999";
 
 const CONFIG_APPROVED_AT = "2026-08-18T01:00:00.000Z";
 const LIFECYCLE_AT = "2026-08-18T01:20:00.000Z";
@@ -101,6 +111,10 @@ function configuration(): ApprovedPublicCatalogConfigurationV1 {
       categoryMappings: [],
       collectibleTypeMappings: [],
     }],
+    // Strictly sorted by `platformKey` then `packExternalId`, as the approved
+    // configuration contract requires. The availability-coverage identities sit
+    // in that order alongside the baseline two; a configured repack with no
+    // canonical revision projects nothing, so they leave the baseline untouched.
     repacks: [
       {
         platformKey: "vendor",
@@ -109,8 +123,28 @@ function configuration(): ApprovedPublicCatalogConfigurationV1 {
       },
       {
         platformKey: "vendor",
+        packExternalId: "pack-legacy-active",
+        publicRepackId: publicRepackIdLegacyActive,
+      },
+      {
+        platformKey: "vendor",
+        packExternalId: "pack-legacy-disabled",
+        publicRepackId: publicRepackIdLegacyDisabled,
+      },
+      {
+        platformKey: "vendor",
         packExternalId: "pack-soldout",
         publicRepackId: publicRepackIdSoldOut,
+      },
+      {
+        platformKey: "vendor",
+        packExternalId: "pack-unavailable",
+        publicRepackId: publicRepackIdUnavailable,
+      },
+      {
+        platformKey: "vendor",
+        packExternalId: "pack-unknown",
+        publicRepackId: publicRepackIdUnknown,
       },
     ],
     collectibles: [{
@@ -137,7 +171,12 @@ function configuration(): ApprovedPublicCatalogConfigurationV1 {
 
 function packContent(input: {
   name: string;
-  availability: "active" | "sold_out";
+  /**
+   * Widened past the public union on purpose: canonical rows persisted before
+   * the rename still carry `active`/`disabled`, and a row outside both
+   * vocabularies is exactly what the adapter has to refuse.
+   */
+  availability: PublicPackAvailability | "active" | "disabled" | "retired";
   priceValueMinor: number | null;
   buybackPercent: number | null;
   providerReportedEvValueMinor?: number | null;
@@ -173,7 +212,7 @@ function assetContent() {
     parentExternalId: null,
     name: "Charizard ex #199",
     category: null,
-    availability: "active",
+    availability: "available",
     sourceStatus: null,
     providerValueMinor: 85_000,
     providerValueCurrency: "USD",
@@ -396,6 +435,7 @@ async function seedCanonicalRevisions(
 
 async function seedGovernedCatalog(
   harness: MigratedTestDatabase,
+  extraRevisions: readonly CanonicalRevisionSeed[] = [],
 ): Promise<SeededCanonicalIngestion> {
   await harness.client.organizations.create({
     data: { id: organizationId, slug: "v3-canonical", name: "V3 Canonical" },
@@ -447,7 +487,7 @@ async function seedGovernedCatalog(
       revisionNumber: 1,
       content: packContent({
         name: "Pokemon Grail Gacha",
-        availability: "active",
+        availability: "available",
         priceValueMinor: 10_000,
         buybackPercent: 85,
         providerReportedEvValueMinor: 12_000,
@@ -461,7 +501,7 @@ async function seedGovernedCatalog(
       revisionNumber: 1,
       content: packContent({
         name: "Pokemon Vault Repack",
-        availability: "active",
+        availability: "available",
         priceValueMinor: 20_000,
         buybackPercent: null,
       }),
@@ -512,9 +552,77 @@ async function seedGovernedCatalog(
       sourceUpdatedAt: ASSET_UPDATED_AT,
       occurredAt: PROJECTION_AT,
     },
+    ...extraRevisions,
   ], READ_AT);
   return ingestion;
 }
+
+/**
+ * One pack per availability state the four-state vocabulary can hold, plus one
+ * per retired `active`/`disabled` value. Every pack is priced at 10_000 USD
+ * with a documented buyback so a publishable estimate stays contract-valid
+ * against `buildPublishableEligibility()`.
+ */
+const AVAILABILITY_COVERAGE_PACKS: readonly CanonicalRevisionSeed[] = [
+  {
+    recordKind: "pack",
+    externalId: "pack-unavailable",
+    revisionNumber: 1,
+    content: packContent({
+      name: "Vendor Withdrew This Pack",
+      availability: "unavailable",
+      priceValueMinor: 10_000,
+      buybackPercent: 85,
+    }),
+    sourceUpdatedAt: ACTIVE_UPDATED_AT,
+    occurredAt: PROJECTION_AT,
+  },
+  {
+    recordKind: "pack",
+    externalId: "pack-unknown",
+    revisionNumber: 1,
+    content: packContent({
+      name: "Vendor Reported No Availability",
+      availability: "unknown",
+      priceValueMinor: 10_000,
+      buybackPercent: 85,
+    }),
+    sourceUpdatedAt: ACTIVE_UPDATED_AT,
+    occurredAt: PROJECTION_AT,
+  },
+  {
+    recordKind: "pack",
+    externalId: "pack-legacy-active",
+    revisionNumber: 1,
+    content: packContent({
+      name: "Legacy Active Vocabulary",
+      availability: "active",
+      priceValueMinor: 10_000,
+      buybackPercent: 85,
+    }),
+    sourceUpdatedAt: ACTIVE_UPDATED_AT,
+    occurredAt: PROJECTION_AT,
+  },
+  {
+    recordKind: "pack",
+    externalId: "pack-legacy-disabled",
+    revisionNumber: 1,
+    content: packContent({
+      name: "Legacy Disabled Vocabulary",
+      availability: "disabled",
+      priceValueMinor: 10_000,
+      buybackPercent: 85,
+    }),
+    sourceUpdatedAt: ACTIVE_UPDATED_AT,
+    occurredAt: PROJECTION_AT,
+  },
+];
+
+const OUTBOUND_REPACK_LINK = {
+  listingUrl: "https://vendor.example/listings/pack",
+  listingHost: "vendor.example",
+  referralParameters: [],
+} as const;
 
 async function seedShadowTenant(harness: MigratedTestDatabase): Promise<void> {
   await harness.client.organizations.create({
@@ -535,7 +643,7 @@ async function seedShadowTenant(harness: MigratedTestDatabase): Promise<void> {
     revisionNumber: 1,
     content: packContent({
       name: "Shadow Tenant Pack",
-      availability: "active",
+      availability: "available",
       priceValueMinor: 5_000,
       buybackPercent: 50,
     }),
@@ -569,7 +677,7 @@ test("the Prisma canonical adapter serves one repeatable, sanitized, assembler-c
     )!;
     assert.equal(active.platformKey, "vendor");
     assert.equal(active.productKey, "pack-active");
-    assert.equal(active.availability, "active");
+    assert.equal(active.availability, "available");
     assert.equal(active.soldOutAt, null);
     assert.deepEqual(active.price.usdComparison, {
       status: "available",
@@ -657,6 +765,149 @@ test("the Prisma canonical adapter serves one repeatable, sanitized, assembler-c
   }
 });
 
+test("every availability state stays discoverable in the release while only `available` can rank or link out", async () => {
+  const harness = await createMigratedTestDatabase();
+  try {
+    const ingestion = await seedGovernedCatalog(
+      harness,
+      AVAILABILITY_COVERAGE_PACKS,
+    );
+    const adapter = new DataReleaseV3CanonicalCatalogAdapter(
+      new PrismaDataReleaseV3CanonicalCatalogSource(
+        harness.client,
+        organizationId,
+      ),
+    );
+    const snapshot = await adapter.loadCatalogSnapshot({ readAt: READ_AT });
+
+    // All four states survive the projection with their exact value, and the
+    // retired vocabulary lands on its renamed state rather than being dropped.
+    assert.deepEqual(
+      Object.fromEntries(
+        snapshot.products.map(({ productKey, availability }) => [
+          productKey,
+          availability,
+        ]),
+      ),
+      {
+        "pack-active": "available",
+        "pack-soldout": "sold_out",
+        "pack-unavailable": "unavailable",
+        "pack-unknown": "unknown",
+        "pack-legacy-active": "available",
+        "pack-legacy-disabled": "unavailable",
+      },
+    );
+    for (const product of snapshot.products) {
+      // Only an authoritative sellout freezes a timestamp, and the canonical
+      // projection never proposes an outbound purchase action for any state.
+      assert.equal(
+        product.soldOutAt !== null,
+        product.availability === "sold_out",
+        `${product.productKey} froze the wrong sold-out timestamp`,
+      );
+      assert.equal(product.actionAvailability.repackLink, false);
+      assert.equal(product.actions.repackLink, undefined);
+    }
+
+    // The two axes are independent: a pack that is not purchasable may still
+    // hold a current PackScout estimate. Give the non-purchasable packs one, so
+    // the downstream guards are exercised against real published rows instead
+    // of being assumed.
+    const eligibleProductKeys = new Set([
+      "pack-active",
+      "pack-unavailable",
+      "pack-unknown",
+    ]);
+    const plan = await new DataReleaseV3ReleaseAssembler(adapter, {
+      async getPublicationEligibleRevision({ productKey }) {
+        return eligibleProductKeys.has(productKey)
+          ? buildPublishableEligibility()
+          : null;
+      },
+    }).assemble({ readAt: READ_AT });
+    assert.equal(plan.classification, "publish");
+    if (plan.classification !== "publish") return;
+    assert.equal(plan.manifest.counts.repacks, 6);
+
+    const details = plan.batches
+      .filter(({ kind }) => kind === "repacks")
+      .flatMap(({ records }) => records as readonly PublicRepackDetailV3[]);
+    const detailById = new Map(
+      details.map((detail) => [detail.publicRepackId, detail]),
+    );
+    const unavailable = detailById.get(publicRepackIdUnavailable)!;
+    const available = detailById.get(publicRepackIdActive)!;
+    assert.equal(unavailable.availability, "unavailable");
+    assert.equal(unavailable.evEstimates.packScout.status, "current");
+    assert.equal(available.evEstimates.packScout.status, "current");
+
+    // Published, estimated, and still unrankable: the sort row materializes
+    // nulls for every EV value the dashboard could order or total by.
+    assert.equal(packAvailabilityIsPurchasableV3(unavailable.availability), false);
+    const unavailableRow = repackEvSortRowV3FromDetail(unavailable);
+    assert.deepEqual(
+      [
+        unavailableRow.packScoutEvDollarsMinor,
+        unavailableRow.packScoutGrossEvMinor,
+        unavailableRow.packScoutEvPercentBasisPoints,
+        unavailableRow.packScoutConfidenceBasisPoints,
+        unavailableRow.packScoutConfidenceBand,
+        unavailableRow.vendorReportedEvUsdMinor,
+      ],
+      [null, null, null, null, null, null],
+    );
+    assert.equal(unavailableRow.packScoutEvDollarsNullRank, 1);
+    // The purchasable pack with the identical estimate does rank, so the nulls
+    // above come from the availability gate and not from a missing estimate.
+    assert.notEqual(
+      repackEvSortRowV3FromDetail(available).packScoutEvDollarsMinor,
+      null,
+    );
+
+    // The outbound purchase link is refused on the published non-purchasable
+    // pack and accepted on the purchasable one, so the refusal is the
+    // availability rule rather than the link shape.
+    const withOutboundLink = (detail: PublicRepackDetailV3) => ({
+      ...detail,
+      actionAvailability: { ...detail.actionAvailability, repackLink: true },
+      actions: { ...detail.actions, repackLink: OUTBOUND_REPACK_LINK },
+    });
+    assert.equal(
+      publicRepackDetailV3Schema.safeParse(withOutboundLink(unavailable)).success,
+      false,
+    );
+    assert.equal(
+      publicRepackDetailV3Schema.safeParse(withOutboundLink(available)).success,
+      true,
+    );
+
+    // A value outside both vocabularies is still refused rather than coerced
+    // into a publishable state.
+    await seedCanonicalRevisions(harness, organizationId, ingestion, [{
+      recordKind: "pack",
+      externalId: "pack-active",
+      revisionNumber: 2,
+      content: packContent({
+        name: "Pokemon Grail Gacha",
+        availability: "retired",
+        priceValueMinor: 10_000,
+        buybackPercent: 85,
+      }),
+      sourceUpdatedAt: LATER_UPDATED_AT,
+      occurredAt: LATER_AT,
+    }], LATER_AT);
+    await assert.rejects(
+      adapter.loadCatalogSnapshot({ readAt: LATER_AT }),
+      (error: unknown) =>
+        error instanceof DataReleaseV3CanonicalCatalogError &&
+        error.code === "CANONICAL_PROJECTION_INVALID",
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("the same readAt stays byte-equal after later canonical writes and moves only with a later readAt", async () => {
   const harness = await createMigratedTestDatabase();
   try {
@@ -675,7 +926,7 @@ test("the same readAt stays byte-equal after later canonical writes and moves on
       revisionNumber: 2,
       content: packContent({
         name: "Pokemon Grail Gacha",
-        availability: "active",
+        availability: "available",
         priceValueMinor: 20_000,
         buybackPercent: 85,
         providerReportedEvValueMinor: 12_000,

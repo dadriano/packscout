@@ -59,7 +59,7 @@ export function AlertsPage() {
       <PageHeader
         eyebrow="Data pipeline / Attention"
         title="Operational alerts"
-        description="Repeated conditions stay grouped. Freshness, data quality, and recoveries remain separate so the right remediation stays visible."
+        description="Conditions that need attention, grouped so a repeating problem counts once."
       />
       <form className="alerts-filter" aria-label="Filter operational alerts" onSubmit={applyFilter}>
         <div className="admin-field">
@@ -71,13 +71,13 @@ export function AlertsPage() {
             <option value="resolved">Resolved</option>
           </select>
         </div>
-        <button type="submit" className="admin-button admin-button--secondary">Apply filter</button>
+        <button type="submit" className="admin-button admin-button-secondary">Apply filter</button>
       </form>
       {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading operational alerts…</div> : null}
       {error ? (
         <div className="ops-error" role="alert">
           <p>{error}</p>
-          <button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button>
+          <button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button>
         </div>
       ) : null}
       {!loading && !error && alerts.length === 0 ? (

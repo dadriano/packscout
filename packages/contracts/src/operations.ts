@@ -14,6 +14,26 @@ export const operationalEventKindSchema = z.enum([
   "promotion_settlement_blocked",
   "promotion_failed",
   "promotion_recovered",
+  "worker_fleet_silent",
+  "import_run_stalled",
+  "provider_schedule_overdue",
+  "recomputation_backlogged",
+  "retention_overdue",
+  "machinery_recovered",
+]);
+
+/**
+ * Kinds raised by the machinery conditions rather than by a data outcome. They
+ * carry the threshold that was crossed alongside the observed value, which is
+ * what the two extra evidence measures below exist for.
+ */
+export const machineryEventKinds = new Set<string>([
+  "worker_fleet_silent",
+  "import_run_stalled",
+  "provider_schedule_overdue",
+  "recomputation_backlogged",
+  "retention_overdue",
+  "machinery_recovered",
 ]);
 
 export const operationalSeveritySchema = z.enum(["info", "warning", "critical"]);
@@ -69,6 +89,10 @@ export const operationalNotificationSchema = z
         outcome: operationalStableCodeSchema.optional(),
         count: z.number().int().nonnegative().optional(),
         durationMs: z.number().int().nonnegative().optional(),
+        /** The duration threshold a machinery condition crossed. */
+        thresholdMs: z.number().int().nonnegative().optional(),
+        /** The count threshold a machinery condition crossed. */
+        thresholdCount: z.number().int().nonnegative().optional(),
         lane: promotionLaneSchema.optional(),
         platformKey: providerPlatformKeySchema.optional(),
         condition: promotionOperationalConditionSchema.optional(),
@@ -89,6 +113,20 @@ export const operationalNotificationSchema = z
       event.evidence.attemptId,
       event.evidence.platformKey,
     ];
+    const machineryEvidence = [
+      event.evidence.thresholdMs,
+      event.evidence.thresholdCount,
+    ];
+    if (
+      !machineryEventKinds.has(event.kind) &&
+      machineryEvidence.some((value) => value !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Machinery evidence is not valid for this event kind.",
+        path: ["evidence"],
+      });
+    }
     if (!event.kind.startsWith("promotion_")) {
       if (promotionEvidence.some((value) => value !== undefined)) {
         context.addIssue({

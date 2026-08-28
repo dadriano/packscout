@@ -88,13 +88,32 @@ test("sort headers toggle deterministically and disappear during relevance order
   );
 });
 
-test("sold-out rows never expose an outbound repack action", () => {
-  const repack = {
-    availability: "sold_out",
-    actionAvailability: { promo: true, repackLink: true },
-  } as PublicRepackSummaryV3;
-  assert.deepEqual(publicRowActions(repack), {
-    promo: true,
-    repackLink: false,
-  });
+test("only available rows expose the outbound repack link, and promos are never gated by it", () => {
+  for (const availability of ["unavailable", "unknown", "sold_out"] as const) {
+    const repack = {
+      availability,
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummaryV3;
+    // The pack stays discoverable and keeps its promo; only the way to buy it
+    // is withheld.
+    assert.deepEqual(publicRowActions(repack), {
+      promo: true,
+      repackLink: false,
+    });
+  }
+  assert.deepEqual(
+    publicRowActions({
+      availability: "available",
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummaryV3),
+    { promo: true, repackLink: true },
+  );
+  // A published promo is the only thing that puts a promo action on a row.
+  assert.deepEqual(
+    publicRowActions({
+      availability: "available",
+      actionAvailability: { promo: false, repackLink: false },
+    } as PublicRepackSummaryV3),
+    { promo: false, repackLink: false },
+  );
 });

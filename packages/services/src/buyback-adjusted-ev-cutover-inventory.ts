@@ -402,6 +402,101 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
       note:
         "Stored pre-buyback results keep their original method identity; they are never relabeled, selected, or mixed into the buyback-adjusted release.",
     }),
+    item({
+      itemKey: "projection:data-inspection-record-kinds",
+      kind: "projection",
+      path: "packages/contracts/src/data-inspection.ts",
+      elements: ["estimated_ev inspectable record kind"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
+      note:
+        "Operator data inspection lists the pre-buyback record kind; the new method inspects buyback EV revisions.",
+    }),
+    item({
+      itemKey: "projection:provider-source-record-kinds",
+      kind: "projection",
+      path: "packages/contracts/src/provider-source-contract-v1.ts",
+      elements: ["estimated_ev provider-source record kind"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
+      note:
+        "The provider-source contract still names the pre-buyback derived record kind.",
+    }),
+    item({
+      itemKey: "projection:worker-presence-lanes",
+      kind: "projection",
+      path: "packages/contracts/src/worker-presence.ts",
+      elements: ["estimated_ev worker lane"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-processor.ts",
+      note:
+        "Worker liveness reports a pre-buyback lane; the buyback EV processor supplies the replacement lane.",
+    }),
+    item({
+      itemKey: "projection:worker-presence-repository",
+      kind: "projection",
+      path: "packages/database/src/worker-presence-repository.ts",
+      elements: ["estimated_ev worker lane persistence"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-processor.ts",
+      note: "Persistence side of the same pre-buyback worker lane.",
+    }),
+    item({
+      itemKey: "projection:background-work-queue-read",
+      kind: "projection",
+      path: "packages/database/src/background-work-repository.ts",
+      elements: [
+        "estimated_ev_recomputation_requests",
+        "estimated_ev_recomputation_state",
+      ],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/database/src/buyback-ev-revision-repository.ts",
+      note:
+        "Admin background-work reads the pre-buyback durable queue; the buyback EV path persists through the immutable revision repository.",
+    }),
+    item({
+      itemKey: "projection:provider-source-page-enqueue",
+      kind: "projection",
+      path: "packages/database/src/provider-source-page-repository.ts",
+      elements: ["enqueueSourceEstimatedEvRecomputationInTransaction"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
+      note:
+        "Provider-source page commits enqueue pre-buyback recomputation; V3 work items carry task-004 evidence outcomes.",
+    }),
+    item({
+      itemKey: "projection:provider-source-quarantine-enqueue",
+      kind: "projection",
+      path: "packages/database/src/provider-source-quarantine-repository.ts",
+      elements: ["enqueueSourceEstimatedEvRecomputationInTransaction"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
+      note: "Same enqueue integration on the quarantine recovery path.",
+    }),
+    item({
+      itemKey: "projection:provider-catalog-release-validation",
+      kind: "projection",
+      path:
+        "packages/services/src/provider-catalog-release-public-projection-validation.ts",
+      elements: [
+        "calculatePackScoutEstimatedEv",
+        "estimatedEvCalculationFingerprint",
+        "CanonicalEstimatedEvProjectionContent",
+        "ESTIMATED_EV_UNAVAILABLE_REASONS",
+      ],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-release-assembler.ts",
+      note:
+        "V2 release validation recomputes the pre-buyback estimate; V3 validates eligibility at one release clock.",
+    }),
     // -----------------------------------------------------------------
     // Public fields
     // -----------------------------------------------------------------
@@ -470,6 +565,58 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
       replacementPath: null,
       note:
         "V3 publishes methodVersion and confidencePolicyVersion; the modelVersion spelling ends with V2.",
+    }),
+    item({
+      itemKey: "public-field:product-user-saved-estimate",
+      kind: "public_field",
+      path: "packages/contracts/src/product-users.ts",
+      elements: [
+        "ProductUserEstimatedEv",
+        "savedItem.estimatedEv",
+        "describeProductUserEstimatedEv",
+      ],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note:
+        "A saved item snapshots the published pre-buyback estimate; after the cutover the snapshot carries the buyback-adjusted metrics.",
+    }),
+    item({
+      itemKey: "public-field:convex-saved-items",
+      kind: "public_field",
+      path: "convex/productUserSavedItems.ts",
+      elements: ["estimatedEvValidator", "savedItem.estimatedEv"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note:
+        "Convex read model for saved items stores the pre-buyback estimate shape.",
+    }),
+    item({
+      itemKey: "public-field:admin-product-user-directory",
+      kind: "public_field",
+      path: "apps/admin/server/product-user-directory.ts",
+      elements: ["readEstimatedEv", "ProductUserEstimatedEv"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note:
+        "Admin directory reads the pre-buyback estimate off saved items.",
+    }),
+    item({
+      itemKey: "public-field:admin-product-user-route",
+      kind: "public_field",
+      path: "apps/admin/server/routes/product-users.ts",
+      elements: ["estimatedEv response projection"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note: "Admin API projects the pre-buyback estimate fields.",
+    }),
+    item({
+      itemKey: "public-field:admin-product-user-detail-page",
+      kind: "public_field",
+      path: "apps/admin/src/pages/ProductUserDetailPage.tsx",
+      elements: ["describeProductUserEstimatedEv", "item.estimatedEv"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note: "Admin detail page renders the pre-buyback estimate summary.",
     }),
     // -----------------------------------------------------------------
     // Sorts and KPIs
@@ -627,6 +774,28 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
         "packages/services/src/buyback-adjusted-ev-recomputation-service.ts",
       note:
         "Availability telemetry now carries the buyback-adjusted outcome codes.",
+    }),
+    item({
+      itemKey: "telemetry:admin-background-work-code",
+      kind: "telemetry_label",
+      path: "apps/admin/server/routes/background-work.ts",
+      elements: ["ESTIMATED_EV_RECOMPUTATION_FAILED"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-operational-monitor.ts",
+      note:
+        "Admin background-work alert code for the pre-buyback queue; the buyback EV path reports BUYBACK_EV_* codes.",
+    }),
+    item({
+      itemKey: "telemetry:admin-data-inspection-label",
+      kind: "telemetry_label",
+      path: "apps/admin/src/components/data-inspection/kind-presentation.ts",
+      elements: ["estimated_ev operator label"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
+      note:
+        "Operator-facing label for the pre-buyback record kind in data inspection.",
     }),
   ]);
 

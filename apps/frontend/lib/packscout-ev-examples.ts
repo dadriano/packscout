@@ -172,7 +172,7 @@ function presentExample(
   return presentPackScoutEvV3({
     estimate,
     price: examplePrice(priceMinorUnits),
-    availability: "active",
+    availability: "available",
   });
 }
 

@@ -279,7 +279,7 @@ test("one maintenance-gated rollback drill restores the prior code and pointer a
       platformKey: "collector_example",
       productKey: `product-${publicRepackId}`,
       publicRepackId,
-      availability: "active" as const,
+      availability: "available" as const,
       classification: "recomputed_available" as const,
       publicReason: null,
       recomputationOutcome: "created" as const,

@@ -1,0 +1,177 @@
+/* Message-delivery surfaces, on the shared admin template. */
+
+.messages__filters {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1.1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 1.2rem;
+  background: var(--admin-card-bg);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.messages__filters .admin-field {
+  min-width: min(12rem, 100%);
+}
+
+.messages__filters .messages__search {
+  flex: 1 1 20rem;
+  min-width: min(16rem, 100%);
+}
+
+.messages__metric-danger {
+  background: var(--admin-danger-bg);
+  color: var(--admin-danger-text);
+}
+
+.messages__recipient {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+h2.messages__recipient {
+  font-size: 1.05rem;
+}
+
+/* The recipient heading is a flex child; without the cap it refuses to
+   shrink below the nowrap address and widens the page. No flex-basis here:
+   the shared heading turns into a column at narrow widths, where a basis
+   would become height. */
+.messages__summary-lead {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.messages__kind {
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+}
+
+.messages__code {
+  overflow-wrap: anywhere;
+  font-family: var(--admin-font-mono);
+  font-size: 0.78rem;
+}
+
+.messages__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.messages__facts--summary {
+  padding: 0 1.25rem 1.1rem;
+  margin: 0;
+}
+
+.messages__facts div {
+  min-width: 0;
+}
+
+.messages__facts dt {
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.messages__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.messages__row-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.messages__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Attempt history is tabular evidence; wide content scrolls inside the
+   region rather than widening the page. */
+.messages-attempts {
+  overflow-x: auto;
+  border: 1px solid var(--admin-border);
+  border-radius: 1.2rem;
+  background: var(--admin-card-bg);
+  box-shadow: var(--admin-shadow);
+}
+
+.messages-attempts table {
+  width: 100%;
+  min-width: 52rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.messages-attempts th,
+.messages-attempts td {
+  padding: 0.9rem 1rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.messages-attempts th {
+  border-bottom: 1px solid var(--admin-border);
+  background: var(--admin-table-header-bg);
+  color: var(--admin-text-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.messages-attempts td {
+  border-bottom: 1px solid var(--admin-table-border);
+  color: var(--admin-text-secondary);
+  font-size: 0.9rem;
+}
+
+.messages-attempts tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 620px) {
+  .admin-ledger__rows article:has(.messages__facts) {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .admin-ledger__rows article:has(.messages__facts) > .messages__row-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .messages__row-status {
+    justify-content: flex-start;
+  }
+
+  .messages__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .messages__filters .messages__search {
+    flex-basis: 100%;
+  }
+}

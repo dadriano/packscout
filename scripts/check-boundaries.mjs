@@ -4,6 +4,7 @@ import { builtinModules } from "node:module";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isIgnoredDirectoryName } from "./ignored-directories.mjs";
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
@@ -27,17 +28,6 @@ const zones = new Map([
 ]);
 
 const sourceExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
-const skipDirectories = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  ".next-dev",
-  ".next-build",
-  ".turbo",
-  ".git",
-  "coverage",
-]);
 const builtinNames = new Set(
   builtinModules.flatMap((name) => [name, name.replace(/^node:/, "")]),
 );
@@ -72,7 +62,7 @@ function isNodeBuiltin(specifier) {
 }
 
 function isGeneratedDirectory(name) {
-  return skipDirectories.has(name) || name.startsWith(".next-");
+  return isIgnoredDirectoryName(name);
 }
 
 async function collectFiles(directory, files = []) {

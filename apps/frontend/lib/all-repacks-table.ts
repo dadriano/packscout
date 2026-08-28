@@ -3,6 +3,7 @@ import type {
   PublicRepackSummaryV3,
 } from "@packscout/contracts";
 import type { GlossaryFieldKey } from "./metric-vocabulary";
+import { presentPackAvailability } from "./pack-availability-presentation";
 
 export type CatalogSortDirection = "asc" | "desc";
 
@@ -57,6 +58,14 @@ export function catalogHeaderAriaSort(
   return currentDirection === "asc" ? "ascending" : "descending";
 }
 
+/**
+ * Pack availability gates the outbound purchase link and nothing else. Only
+ * `available` opens that link, decided by the shared presenter so a future
+ * state is excluded by default. Promos stay governed by `actionAvailability`
+ * alone, exactly as the data_release_v3 contract states: a pack that is
+ * `unavailable`, `unknown`, or `sold_out` stays discoverable, keeps its promo,
+ * and only loses the way to buy it.
+ */
 export function publicRowActions(repack: PublicRepackSummaryV3): Readonly<{
   promo: boolean;
   repackLink: boolean;
@@ -64,6 +73,7 @@ export function publicRowActions(repack: PublicRepackSummaryV3): Readonly<{
   return Object.freeze({
     promo: repack.actionAvailability.promo,
     repackLink:
-      repack.availability === "active" && repack.actionAvailability.repackLink,
+      presentPackAvailability(repack.availability).purchaseActionsAvailable &&
+      repack.actionAvailability.repackLink,
   });
 }

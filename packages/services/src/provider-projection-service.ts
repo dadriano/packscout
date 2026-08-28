@@ -4,7 +4,7 @@ import type {
 } from "./provider-import-types.ts";
 
 const catalogKinds = new Set(["catalog_asset", "ev_input", "pack"]);
-const eventKinds = new Set(["pull", "sale"]);
+const eventKinds = new Set(["pull", "market_event"]);
 
 export class ProviderProjectionService implements ProviderProjectionPort {
   constructor(

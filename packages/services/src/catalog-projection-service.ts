@@ -113,8 +113,8 @@ function normalizedAvailability(
   path: string,
 ): CanonicalAvailability {
   if (
-    value === "active" ||
-    value === "disabled" ||
+    value === "available" ||
+    value === "unavailable" ||
     value === "sold_out" ||
     value === "unknown"
   ) {
@@ -136,10 +136,23 @@ function packContent(candidate: CanonicalPackCandidate): CanonicalPackProjection
     schemaVersion: CATALOG_PROJECTION_VERSION,
     entityType: "pack",
     parentExternalId: optionalIdentity(candidate.parentExternalId, "candidates.pack.parentExternalId"),
+    firstSeenAt: normalizeCanonicalTimestamp(
+      candidate.source.sourceTimestamp,
+      "candidates.pack.source.sourceTimestamp",
+    ).toISOString(),
     name,
     category: normalizeOptionalText(candidate.category, "candidates.pack.category", 500),
     description: normalizeOptionalText(candidate.description, "candidates.pack.description", 10_000),
     availability: normalizedAvailability(candidate.availability, "candidates.pack.availability"),
+    availabilityProvenance: candidate.availability === "sold_out"
+      ? {
+          kind: "explicit_authoritative_sold_out",
+          authority: "provider_explicit_sold_out",
+        }
+      : {
+          kind: "canonical_provider_observation",
+          observedAvailability: candidate.availability,
+        },
     sourceStatus: normalizeOptionalText(candidate.sourceStatus, "candidates.pack.sourceStatus", 256),
     priceValueMinor: price?.amountMinor ?? null,
     priceCurrency: price?.currency ?? null,
@@ -169,7 +182,12 @@ function assetContent(candidate: CatalogAssetCandidate): CanonicalCatalogAssetPr
       candidate.parentExternalId,
       "candidates.catalogAsset.parentExternalId",
     ),
+    firstSeenAt: normalizeCanonicalTimestamp(
+      candidate.source.sourceTimestamp,
+      "candidates.catalogAsset.source.sourceTimestamp",
+    ).toISOString(),
     name: normalizeOptionalText(candidate.name, "candidates.catalogAsset.name", 500),
+    description: null,
     category: normalizeOptionalText(candidate.category, "candidates.catalogAsset.category", 500),
     availability: normalizedAvailability(
       candidate.availability,

@@ -18,6 +18,7 @@ import {
 } from "@/lib/packscout-ev-presentation";
 import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -100,6 +101,7 @@ function RepackRow({
     ? presentChaseMatchEvidence(desiredChase)
     : null;
   const actions = publicRowActions(repack);
+  const availability = presentPackAvailability(repack.availability);
   const showStatusNote = estimate.status !== "current";
 
   return (
@@ -117,14 +119,18 @@ function RepackRow({
           <span className={styles.packIdentity}>
             <span className={styles.packName}>{repack.name}</span>
             {estimate.simulatedLabel ? (
-              <span className={styles.soldOut}>{estimate.simulatedLabel}</span>
+              <span className={styles.secondaryBadge}>{estimate.simulatedLabel}</span>
             ) : null}
             {repack.contentMode === "mixed" ? (
-              <span className={styles.soldOut}>Mixed content</span>
+              <span className={styles.secondaryBadge}>Mixed content</span>
             ) : null}
-            {repack.availability === "sold_out" ? (
-              <span className={styles.soldOut}>Sold out</span>
-            ) : null}
+            <span
+              className={styles.availabilityBadge}
+              data-state={repack.availability}
+            >
+              {availability.label}
+              <span className="sr-only">. {availability.description}</span>
+            </span>
           </span>
         </button>
       </td>

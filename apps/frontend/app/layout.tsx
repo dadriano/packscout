@@ -3,6 +3,10 @@ import { headers } from "next/headers";
 import { AuthProviderBoundary } from "@/components/auth/AuthProviderBoundary.client";
 import { resolvePublicAuthConfiguration } from "@/components/auth/auth-config";
 import { AppShell } from "@/components/shell/AppShell";
+import {
+  resolveVisitorAccess,
+  shellSurfaceForDecision,
+} from "@/lib/access-gate.server";
 import { readPublicConvexOrigin } from "@/lib/security-policy.server";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme-bootstrap";
 import "./globals.css";
@@ -37,6 +41,11 @@ export default async function RootLayout({
     privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
     convexUrl: readPublicConvexOrigin() ?? undefined,
   });
+  // The same request-scoped resolution the page consumes (React cache dedupes
+  // the two), so the shell's first paint already wears the right face:
+  // product chrome for visitors the product renders for, the pared-back
+  // gateway shell around the landing and holding surfaces.
+  const initialSurface = shellSurfaceForDecision(await resolveVisitorAccess());
 
   return (
     <html data-scroll-behavior="smooth" lang="en" suppressHydrationWarning>
@@ -50,7 +59,7 @@ export default async function RootLayout({
       </head>
       <body>
         <AuthProviderBoundary configuration={configuration} nonce={nonce}>
-          <AppShell>{children}</AppShell>
+          <AppShell initialSurface={initialSurface}>{children}</AppShell>
         </AuthProviderBoundary>
       </body>
     </html>

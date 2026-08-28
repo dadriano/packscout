@@ -12,8 +12,8 @@ interface QuarantineLedgerProps {
 export function QuarantineLedger({ entries, selectable, selected, onSelectionChange }: QuarantineLedgerProps) {
   return (
     <section className="ops-ledger" aria-labelledby="quarantine-ledger-title">
-      <header className="admin-section-heading">
-        <div><span className="admin-eyebrow">Record-scoped recovery</span><h2 id="quarantine-ledger-title">Quarantined records</h2></div>
+      <header className="admin-section-header">
+        <div><span className="admin-kicker">Record-scoped recovery</span><h2 id="quarantine-ledger-title">Quarantined records</h2></div>
         <span className="admin-section-count">{String(entries.length).padStart(2, "0")} on page</span>
       </header>
       <div className="ops-ledger__rows">

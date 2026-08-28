@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { publicRepackIdSchema } from "./data-release-v2-values.ts";
 import { publicRepackAvailabilitySchema } from "./data-release-v2-entities.ts";
-import type { PublicRepackDetailV3 } from "./data-release-v3-entities.ts";
+import {
+  packAvailabilityIsPurchasableV3,
+  type PublicRepackDetailV3,
+} from "./data-release-v3-entities.ts";
 
 const safeIntegerSchema = z.number().int().safe();
 const nullRankSchema = z.union([z.literal(0), z.literal(1)]);
@@ -9,9 +12,12 @@ const nullRankSchema = z.union([z.literal(0), z.literal(1)]);
 /**
  * The only sortable EV values a public read may materialize: bounded
  * integers plus null ranks. Default opportunity ranking uses signed
- * PackScout EV dollars. Only a current PackScout estimate is rankable;
- * sold-out historical and unavailable estimates materialize nulls, so a
- * historical estimate can never rank.
+ * PackScout EV dollars. Two independent gates must both open for a row to
+ * carry sortable values: the pack availability must be purchasable
+ * (`available` only, per {@link packAvailabilityIsPurchasableV3}) and the
+ * PackScout estimate status must be `current`. A row that fails either gate
+ * materializes nulls, so neither a sold-out-historical or unavailable
+ * estimate nor an `unavailable`, `unknown`, or `sold_out` pack can rank.
  */
 export const repackEvSortRowV3Schema = z
   .object({
@@ -77,14 +83,18 @@ export const repackEvSortRowV3Schema = z
         message: "data_release_v3.confidence_band_mismatch",
       });
     }
+    // Every pack that is not purchasable must carry fully null sort values,
+    // not just `sold_out`: an `unavailable` or `unknown` pack may still hold
+    // a current PackScout estimate, and materializing it here would let it
+    // sort beside buyable packs.
     if (
-      row.availability === "sold_out" &&
+      !packAvailabilityIsPurchasableV3(row.availability) &&
       (nullCount !== packScoutValues.length || row.vendorReportedEvUsdMinor !== null)
     ) {
       context.addIssue({
         code: "custom",
         path: ["availability"],
-        message: "data_release_v3.sold_out_rankable",
+        message: "data_release_v3.non_purchasable_rankable",
       });
     }
   });
@@ -96,7 +106,7 @@ export function repackEvSortRowV3FromDetail(
 ): RepackEvSortRowV3 {
   const packScout = detail.evEstimates.packScout;
   const vendorReported = detail.evEstimates.vendorReported;
-  const rankable = detail.availability === "active";
+  const rankable = packAvailabilityIsPurchasableV3(detail.availability);
   const current = rankable && packScout.status === "current" ? packScout : null;
   const vendorUsd =
     rankable &&

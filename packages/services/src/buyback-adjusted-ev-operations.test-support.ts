@@ -8,6 +8,7 @@ import {
   PrismaCatalogReleaseSourceRepository,
 } from "@packscout/database";
 import type { MigratedTestDatabase } from "@packscout/database/test-support";
+import type { CanonicalAvailability } from "./catalog-projection-contracts.ts";
 import {
   finalizePackScoutBuybackEvEvidenceV1,
   type PackScoutBuybackEvEvidenceDraftV1,
@@ -160,7 +161,7 @@ function approvedConfiguration(
 
 function packContent(input: {
   readonly name: string;
-  readonly availability: "active" | "sold_out";
+  readonly availability: CanonicalAvailability;
   readonly priceValueMinor: number | null;
   readonly buybackPercent: number | null;
   readonly sourceStatus?: string | null;
@@ -194,7 +195,7 @@ function assetContent() {
     parentExternalId: null,
     name: "Charizard ex #199",
     category: null,
-    availability: "active",
+    availability: "available",
     sourceStatus: null,
     providerValueMinor: 85_000,
     providerValueCurrency: "USD",
@@ -465,7 +466,7 @@ export async function seedBuybackEvOperationsCatalog(
         revisionNumber: 1,
         content: packContent({
           name: "Pokemon Grail Gacha",
-          availability: "active",
+          availability: "available",
           priceValueMinor: 10_000,
           buybackPercent: 85,
         }),
@@ -477,7 +478,7 @@ export async function seedBuybackEvOperationsCatalog(
         revisionNumber: 1,
         content: packContent({
           name: "Vault Repack Without Buyback",
-          availability: "active",
+          availability: "available",
           priceValueMinor: 20_000,
           buybackPercent: null,
         }),
@@ -489,7 +490,7 @@ export async function seedBuybackEvOperationsCatalog(
         revisionNumber: 1,
         content: packContent({
           name: "Slow Feed Repack",
-          availability: "active",
+          availability: "available",
           priceValueMinor: 15_000,
           buybackPercent: 80,
         }),
@@ -501,7 +502,7 @@ export async function seedBuybackEvOperationsCatalog(
         revisionNumber: 1,
         content: packContent({
           name: "Fresh Listing Repack",
-          availability: "active",
+          availability: "available",
           priceValueMinor: 5_000,
           buybackPercent: 90,
         }),
@@ -513,7 +514,7 @@ export async function seedBuybackEvOperationsCatalog(
         revisionNumber: 1,
         content: packContent({
           name: "Frozen Sellout Repack",
-          availability: "active",
+          availability: "available",
           priceValueMinor: 12_000,
           buybackPercent: 85,
         }),

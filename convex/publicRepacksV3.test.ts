@@ -1,15 +1,24 @@
 /// <reference types="vite/client" />
 
+import {
+  publicCollectibleSchema,
+  publicRepackChaseSchema,
+  type PublicCollectible,
+  type PublicRepackChase,
+} from "@packscout/contracts";
 import { convexTest, type TestConvex } from "convex-test";
 import { describe, expect, test } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import {
+  buildV3Chase,
+  buildV3Collectible,
   buildV3CurrentEv,
   buildV3Detail,
   buildV3FixturePlan,
   buildV3SoldOutDetail,
   buildV3UnavailableEv,
+  buildV3UnpurchasableDetail,
   v3ActivateRequest,
   v3BatchRequest,
   v3Body,
@@ -43,9 +52,51 @@ function unavailableVendorEv() {
 
 /**
  * Fixture set: B ranks first (+$25 EV), A second (+$20 EV), C is sold out
- * with visible history, D is active without an estimate.
+ * with visible history, D is available without an estimate.
  */
 const V3_REPACK_ID_D = "00000000-0000-5000-8000-000000000304";
+const V3_REPACK_ID_E = "00000000-0000-5000-8000-000000000305";
+const V3_REPACK_ID_F = "00000000-0000-5000-8000-000000000306";
+
+/**
+ * A second collectible worth far more than the default fixture chase. A pack
+ * whose top chase is this collectible outbids every other fixture pack on
+ * chase value, so a headline chase KPI that forgets its availability gate
+ * reports this value instead of the available pack's.
+ */
+const V3_GRAIL_COLLECTIBLE_ID = "00000000-0000-5000-8000-000000000202";
+const V3_GRAIL_CHASE_VALUE_MINOR = 250_000;
+const V3_DEFAULT_CHASE_VALUE_MINOR = 85_000;
+
+function grailCollectible(): PublicCollectible {
+  const base = buildV3Collectible();
+  const money = { minorUnits: V3_GRAIL_CHASE_VALUE_MINOR, currency: "USD" as const };
+  return publicCollectibleSchema.parse({
+    ...base,
+    publicCollectibleId: V3_GRAIL_COLLECTIBLE_ID,
+    valuation: {
+      ...base.valuation!,
+      displayMoney: money,
+      usdComparison: { status: "available", value: money },
+    },
+  });
+}
+
+function grailChase(publicRepackId: string): PublicRepackChase {
+  const collectible = grailCollectible();
+  return publicRepackChaseSchema.parse({
+    ...buildV3Chase(publicRepackId),
+    publicCollectibleId: collectible.publicCollectibleId,
+    collectible: {
+      publicCollectibleId: collectible.publicCollectibleId,
+      name: collectible.name,
+      collectibleType: collectible.collectibleType,
+      publicCategoryIds: collectible.publicCategoryIds,
+      primaryImage: collectible.primaryImage,
+      valuation: collectible.valuation,
+    },
+  });
+}
 
 function fixtureDetails() {
   return [
@@ -74,10 +125,15 @@ function fixtureDetails() {
   ];
 }
 
-async function publishFixture(t: V3Test): Promise<V3FixturePlan> {
+async function publishFixture(
+  t: V3Test,
+  details = fixtureDetails(),
+  collectibles: readonly PublicCollectible[] = [buildV3Collectible()],
+): Promise<V3FixturePlan> {
   const plan = await buildV3FixturePlan({
     publicReleaseId: RELEASE_ID_1,
-    details: fixtureDetails(),
+    details,
+    collectibles,
   });
   await t.mutation(
     internal.dataReleaseV3Lifecycle.start,
@@ -145,7 +201,7 @@ describe("data_release_v3 public reads", () => {
     ]);
     expect(data.selectedRepack?.publicRepackId).toBe(V3_REPACK_ID_B);
     expect(data.kpis.totalRepacks).toBe(4);
-    // Positive-EV counts admit only active repacks with a current estimate.
+    // Positive-EV counts admit only available repacks with a current estimate.
     expect(data.kpis.positiveEvRepacks).toBe(2);
     // Median excludes unavailable and sold-out estimates: (2000+2500)/2.
     expect(data.kpis.medianPackScoutEvPercent).toEqual({
@@ -259,6 +315,115 @@ describe("data_release_v3 public reads", () => {
     expect((unsupported as { code?: string }).code).toBe("INVALID_QUERY");
   });
 
+  test("the availability filter admits only available packs and keeps the other three states discoverable", async () => {
+    const t = convexTest(schema, modules);
+    // Every non-available pack here carries a *current* PackScout estimate, so
+    // only the availability guard itself can keep them out of the filtered
+    // list, the opportunity ranking, and the positive-EV count. All three also
+    // out-chase the available pack, so any headline KPI that reads an ungated
+    // row reports their number instead of the available pack's.
+    await publishFixture(
+      t,
+      [
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_A }),
+        buildV3SoldOutDetail({
+          publicRepackId: V3_REPACK_ID_C,
+          name: "Pokemon Vault Repack",
+          topChase: grailChase(V3_REPACK_ID_C),
+        }),
+        buildV3UnpurchasableDetail("unavailable", {
+          publicRepackId: V3_REPACK_ID_E,
+          name: "Pokemon Paused Repack",
+          topChase: grailChase(V3_REPACK_ID_E),
+        }),
+        buildV3UnpurchasableDetail("unknown", {
+          publicRepackId: V3_REPACK_ID_F,
+          name: "Pokemon Unverified Repack",
+          topChase: grailChase(V3_REPACK_ID_F),
+        }),
+      ],
+      [buildV3Collectible(), grailCollectible()],
+    );
+
+    // The default filter is "available": nothing else may appear.
+    const filtered = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+      currentTime: NOW,
+    })) as AnyResult;
+    expect(filtered.ok).toBe(true);
+    const filteredData = filtered.data as {
+      rows: { publicRepackId: string }[];
+      range: { total: number };
+    };
+    expect(filteredData.rows.map(({ publicRepackId }) => publicRepackId)).toEqual(
+      [V3_REPACK_ID_A],
+    );
+    expect(filteredData.range.total).toBe(1);
+
+    // "all" is the only way the other three states become visible, each
+    // presented with its exact public availability value.
+    const everything = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+      filters: { availability: "all" },
+      currentTime: NOW,
+    })) as AnyResult;
+    expect(everything.ok).toBe(true);
+    const everythingData = everything.data as {
+      rows: { publicRepackId: string }[];
+      details: {
+        publicRepackId: string;
+        availability: string;
+        actions?: { repackLink?: unknown };
+      }[];
+      range: { total: number };
+    };
+    expect(everythingData.range.total).toBe(4);
+    expect(
+      Object.fromEntries(
+        everythingData.details.map(({ publicRepackId, availability }) => [
+          publicRepackId,
+          availability,
+        ]),
+      ),
+    ).toEqual({
+      [V3_REPACK_ID_A]: "available",
+      [V3_REPACK_ID_C]: "sold_out",
+      [V3_REPACK_ID_E]: "unavailable",
+      [V3_REPACK_ID_F]: "unknown",
+    });
+    // Only an available pack may expose an outbound purchase action.
+    for (const detail of everythingData.details) {
+      expect(
+        detail.actions?.repackLink === undefined,
+        `${detail.publicRepackId} (${detail.availability}) action exposure`,
+      ).toBe(detail.availability !== "available");
+    }
+
+    // Ranking and the positive-EV KPI admit the available pack alone.
+    const dashboard = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+      filters: { availability: "all" },
+      currentTime: NOW,
+    })) as AnyResult;
+    expect(dashboard.ok).toBe(true);
+    const dashboardData = dashboard.data as {
+      opportunities: { publicRepackId: string }[];
+      kpis: {
+        totalRepacks: number;
+        positiveEvRepacks: number;
+        highestChaseValueUsdMinor: number | null;
+      };
+    };
+    expect(
+      dashboardData.opportunities.map(({ publicRepackId }) => publicRepackId),
+    ).toEqual([V3_REPACK_ID_A]);
+    // The catalog total stays ungated: all four states remain discoverable.
+    expect(dashboardData.kpis.totalRepacks).toBe(4);
+    expect(dashboardData.kpis.positiveEvRepacks).toBe(1);
+    // The headline chase value reports the available pack's chase, never the
+    // richer chase sitting inside a sold_out, unavailable, or unknown pack.
+    expect(dashboardData.kpis.highestChaseValueUsdMinor).toBe(
+      V3_DEFAULT_CHASE_VALUE_MINOR,
+    );
+  });
+
   test("a current estimate past its deadline fails closed at read time without any new transition", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
@@ -320,7 +485,7 @@ describe("data_release_v3 public reads", () => {
       desiredChaseMatches: { publicRepackId: string }[];
       desiredCollectible: { publicCollectibleId: string } | null;
     };
-    // Active-only default filter: A, B, D chase the collectible; C is sold out.
+    // Available-only default filter: A, B, D chase it; C is sold out.
     expect(data.rows.map(({ publicRepackId }) => publicRepackId)).toEqual([
       V3_REPACK_ID_B,
       V3_REPACK_ID_A,

@@ -126,7 +126,7 @@ function createHarness(
         checkedAt: "2026-08-06T12:01:00.000Z",
         latencyMs: 42,
         responseStatus: 200,
-        recordCounts: { catalog: 2, pulls: 1, sales: 1 },
+        recordCounts: { catalog: 2, pulls: 1, trades: 1 },
         hasMore: false,
         nextCursorPresent: false,
         sanitizedCode: null,

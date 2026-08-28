@@ -24,7 +24,7 @@ function render(
       presentation={presentPackScoutEvV3({
         estimate,
         price: buildV3Price(),
-        availability: "active",
+        availability: "available",
         ...overrides,
       })}
     />,

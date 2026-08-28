@@ -14,14 +14,23 @@ import {
   PipelineSetupRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
+import { CanonicalInspectionService } from "@packscout/services";
+import { PrismaCanonicalInspectionRepository } from "@packscout/database";
 import { createAdminApp } from "../../apps/admin/server/app.ts";
+import { createAdminBackgroundWorkRuntime } from "../../apps/admin/server/background-work-runtime.ts";
 import { createNodeAuthSecurity } from "../../apps/admin/server/auth/crypto.ts";
 import { createAdminAuthRuntime } from "../../apps/admin/server/auth/runtime.ts";
 import { createAdminImportOperationsRuntime } from "../../apps/admin/server/import-operations-runtime.ts";
+import { createAdminMessageDeliveryRuntime } from "../../apps/admin/server/message-delivery-runtime.ts";
 import { createAdminOperationalRuntime } from "../../apps/admin/server/operational-runtime.ts";
+import { createAdminOperatorAccountCreatedNoticeRuntime } from "../../apps/admin/server/operator-account-created-notice-runtime.ts";
+import { createProductUserAuditSink } from "../../apps/admin/server/product-user-audit.ts";
+import { createProductUserDirectoryReader } from "../../apps/admin/server/product-user-directory.ts";
 import { createProviderAdminRuntime } from "../../apps/admin/server/provider-runtime.ts";
+import { createAdminWorkerFleetRuntime } from "../../apps/admin/server/worker-fleet-runtime.ts";
 import {
   readPort,
+  readProductUserDirectoryConfig,
   readRequiredSecret,
 } from "../../apps/admin/server/runtime-config.ts";
 
@@ -175,12 +184,49 @@ async function main(): Promise<void> {
       importOperations: createAdminImportOperationsRuntime({
         database: harness.database,
         actorPseudonymKey: providerActorKey,
-        credentialKey: providerCredentialKey,
-        environment: "local",
-        operational,
       }),
+      backgroundWork: createAdminBackgroundWorkRuntime({
+        database: harness.database,
+        actorPseudonymKey: providerActorKey,
+      }),
+      workerFleet: createAdminWorkerFleetRuntime({ database: harness.database }),
+      // The Data section's canonical reads, over this harness's own migrated
+      // database. The published half needs the product backend's integration
+      // secret, which a local throwaway admin has no business holding, so
+      // parity stays unconfigured and the compare surface says so rather than
+      // guessing.
+      canonical: new CanonicalInspectionService(
+        new PrismaCanonicalInspectionRepository(harness.database),
+      ),
+      // The Users navigation item this harness shows must reach a mounted
+      // route. With no product-backend settings the reader is simply
+      // unconfigured, so the page renders the bounded "not connected" state
+      // instead of an unmounted endpoint's route-not-found.
+      productUsers: {
+        directory: createProductUserDirectoryReader({
+          config: readProductUserDirectoryConfig({
+            baseUrl: process.env.PACKSCOUT_ADMIN_DIRECTORY_URL,
+            token: process.env.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
+          }),
+        }),
+        audit: createProductUserAuditSink({
+          database: harness.database,
+          actorPseudonymKey: providerActorKey,
+        }),
+      },
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },
+      // Direct account creation commits its informational email to the same
+      // durable outbox the Messages area reads. No worker or provider delivery
+      // runs in this disposable harness.
+      operatorAccountCreatedNotifier:
+        createAdminOperatorAccountCreatedNoticeRuntime({
+          database: harness.database,
+        }),
+      messages: createAdminMessageDeliveryRuntime({
+        database: harness.database,
+        actorPseudonymKey: providerActorKey,
+      }),
     });
     const adminRoot = path.join(repositoryRoot, "apps", "admin");
     const { createServer: createViteServer } = await import("vite");

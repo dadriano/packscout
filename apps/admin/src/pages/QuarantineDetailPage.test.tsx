@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { QuarantineEntryDetail } from "@packscout/contracts";
+import * as React from "react";
+import type { AuthSessionResponse, QuarantineEntryDetail } from "@packscout/contracts";
 import { act } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ConfirmProvider } from "../providers/confirm.tsx";
+import { SessionProvider } from "../providers/session.tsx";
 import { ToastProvider } from "../providers/toast.tsx";
 import {
   cleanupPage,
@@ -16,6 +18,8 @@ import {
   stubFetch,
 } from "../testing/react-page-test.tsx";
 import { QuarantineDetailPage } from "./QuarantineDetailPage.tsx";
+
+Object.assign(globalThis, { React });
 
 const entry: QuarantineEntryDetail = {
   id: "00000000-0000-4000-8000-000000000040",
@@ -40,15 +44,33 @@ const entry: QuarantineEntryDetail = {
   attempts: [],
 };
 
+const session: AuthSessionResponse = {
+  operator: {
+    id: "00000000-0000-4000-8000-000000000050",
+    email: "operator@example.test",
+    displayName: "Data Operator",
+    state: "active",
+  },
+  membership: {
+    organizationId: "00000000-0000-4000-8000-000000000051",
+    organizationName: "PackScout",
+    role: "data_operator",
+  },
+  permissions: ["providers:view", "imports:start", "imports:retry"],
+  csrfToken: "fixture-csrf",
+};
+
 function route() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <MemoryRouter initialEntries={[`/quarantine/${entry.id}`]}>
-          <Routes>
-            <Route path="/quarantine/:quarantineId" element={<QuarantineDetailPage />} />
-          </Routes>
-        </MemoryRouter>
+        <SessionProvider initialSession={session}>
+          <MemoryRouter initialEntries={[`/quarantine/${entry.id}`]}>
+            <Routes>
+              <Route path="/quarantine/:quarantineId" element={<QuarantineDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </SessionProvider>
       </ConfirmProvider>
     </ToastProvider>
   );

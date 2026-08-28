@@ -64,8 +64,10 @@ function countLabel(count: number): string {
 
 /**
  * Formats the server-materialized dashboard KPIs. The positive-EV count is
- * computed server-side over active current estimates above zero only; the
- * browser never recounts or re-ranks.
+ * computed server-side over available packs with a current estimate above zero
+ * only — `unavailable`, `unknown`, and `sold_out` packs are all excluded from
+ * the count while staying discoverable in the catalog — and the browser never
+ * recounts or re-ranks.
  */
 export function presentDashboardKpis(
   kpis: DashboardKpis,
@@ -97,8 +99,8 @@ export function presentDashboardKpis(
       id: "positiveEv",
       label: "Positive EV",
       value: countLabel(kpis.positiveEvRepacks),
-      helper: "Active repacks with EV $ above zero",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} active repacks have a current PackScout estimate with EV $ above zero. Excludes unavailable, expired, and sold-out repacks.`,
+      helper: "Available repacks with EV $ above zero",
+      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} available repacks have a current PackScout estimate with EV $ above zero. Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired.`,
       state: "positive",
       stateLabel: "Positive",
     },

@@ -1,8 +1,9 @@
 import type { ProviderCanonicalProjectionCommand } from "./provider-import-types.ts";
+import type { EstimatedEvRecomputationOrigin } from "./estimated-ev-projection-contracts.ts";
 
 export interface EstimatedEvCanonicalIdentity {
   readonly platformKey: string;
-  readonly recordKind: "catalog_asset" | "estimated_ev" | "ev_input" | "pack" | "platform" | "pull" | "sale";
+  readonly recordKind: "catalog_asset" | "estimated_ev" | "ev_input" | "market_event" | "pack" | "platform" | "pull";
   readonly externalId: string;
 }
 
@@ -11,7 +12,9 @@ export interface EstimatedEvCanonicalProjectionSnapshot {
   readonly entityId: string;
   readonly revisionId: string;
   readonly revisionNumber: number;
-  readonly sourceRecordId: string;
+  readonly sourceRecordId: string | null;
+  readonly originSemanticObservationId: string | null;
+  readonly originEvRecomputationRequestId: string | null;
   readonly content: Record<string, unknown>;
   readonly provenance: Record<string, unknown>;
   readonly sourceUpdatedAt: Date;
@@ -33,7 +36,9 @@ interface CurrentCanonicalProjectionSnapshot {
 
 interface CanonicalProjectionRevisionSnapshot
   extends CurrentCanonicalProjectionSnapshot {
-  readonly sourceRecordId: string;
+  readonly sourceRecordId: string | null;
+  readonly originSemanticObservationId: string | null;
+  readonly originEvRecomputationRequestId: string | null;
 }
 
 export interface EstimatedEvCanonicalHistoryPort {
@@ -48,8 +53,8 @@ export interface EstimatedEvCanonicalHistoryPort {
   projectDerivedSourceRecord(input: {
     organizationId: string;
     providerId: string;
-    configurationRevisionId: string;
-    sourceRecordId: string;
+    origin: EstimatedEvRecomputationOrigin;
+    sourceRecordId: string | null;
     projections: readonly ProviderCanonicalProjectionCommand[];
     acceptedAt: Date;
     recomputation?: Readonly<{
@@ -74,8 +79,8 @@ export interface EstimatedEvCalculationInputSet {
 export interface PersistEstimatedEvProjectionInput {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configurationRevisionId: string;
-  readonly sourceRecordId: string;
+  readonly origin: EstimatedEvRecomputationOrigin;
+  readonly sourceRecordId: string | null;
   readonly projection: ProviderCanonicalProjectionCommand;
   readonly acceptedAt: Date;
   readonly recomputation?: Readonly<{
@@ -123,7 +128,12 @@ async function currentRevision(
   if (!revision) {
     throw new Error("Current canonical projection has no immutable revision evidence.");
   }
-  return { ...current, sourceRecordId: revision.sourceRecordId };
+  return {
+    ...current,
+    sourceRecordId: revision.sourceRecordId,
+    originSemanticObservationId: revision.originSemanticObservationId,
+    originEvRecomputationRequestId: revision.originEvRecomputationRequestId,
+  };
 }
 
 export class CanonicalEstimatedEvProjectionRepository
@@ -179,14 +189,21 @@ export class CanonicalEstimatedEvProjectionRepository
         externalId: input.packExternalId,
       }),
     ]);
-    return { pack, calculation };
+    const packContent = pack?.content as Readonly<Record<string, unknown>> | undefined;
+    const calculationIsEligible = pack?.originSemanticObservationId === null
+      ? pack?.sourceRecordId !== null
+      : packContent?.evInputStatus === "ready";
+    return {
+      pack,
+      calculation: calculationIsEligible ? calculation : null,
+    };
   }
 
   async persistCalculation(input: PersistEstimatedEvProjectionInput) {
     const result = await this.canonical.projectDerivedSourceRecord({
       organizationId: input.organizationId,
       providerId: input.providerId,
-      configurationRevisionId: input.configurationRevisionId,
+      origin: input.origin,
       sourceRecordId: input.sourceRecordId,
       projections: [input.projection],
       acceptedAt: input.acceptedAt,

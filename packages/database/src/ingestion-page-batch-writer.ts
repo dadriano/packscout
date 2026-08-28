@@ -62,13 +62,30 @@ function assertCanonicalWriteTransaction(
   }
 }
 
-interface CanonicalProjectionWriteInput {
+export type CanonicalProjectionWriteOrigin =
+  | Readonly<{
+      kind: "legacy_source_record";
+      configurationRevisionId: string;
+      sourceRecordId: string;
+    }>
+  | Readonly<{
+      kind: "semantic_observation";
+      sourceRevisionId: string;
+      semanticObservationId: string;
+    }>
+  | Readonly<{
+      kind: "ev_recomputation";
+      sourceRevisionId: string;
+      recomputationRequestId: string;
+    }>;
+
+export interface CanonicalProjectionWriteInput {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configRevisionId: string;
-  readonly sourceRecordId: string;
+  readonly origin: CanonicalProjectionWriteOrigin;
   readonly projection: CanonicalProjectionInput;
   readonly projectionIndex: number;
+  readonly becomesCurrent: boolean;
   readonly acceptedAt: Date;
   readonly publicChangeKind: PublicChangeKind;
 }
@@ -121,7 +138,9 @@ interface ExistingCanonicalRevision {
 
 interface CanonicalRevisionInsert extends ExistingCanonicalRevision {
   readonly organizationId: string;
-  readonly sourceRecordId: string;
+  readonly sourceRecordId: string | null;
+  readonly originSemanticObservationId: string | null;
+  readonly originEvRecomputationRequestId: string | null;
   readonly content: Record<string, unknown>;
   readonly provenance: Record<string, unknown>;
   readonly actorKey: string | null;
@@ -261,6 +280,12 @@ function relationshipIdentityKey(input: {
     input.targetRecordKind,
     input.targetExternalId ?? "<null>",
   ].join("\u0000");
+}
+
+function canonicalSourceRevisionKey(origin: CanonicalProjectionWriteOrigin): string {
+  return origin.kind === "legacy_source_record"
+    ? origin.configurationRevisionId
+    : origin.sourceRevisionId;
 }
 
 async function resolveSourceRecords(
@@ -484,13 +509,15 @@ export async function writeCanonicalProjectionBatch(
       (input) =>
         input.organizationId !== scope.organizationId ||
         input.providerId !== scope.providerId ||
-        input.configRevisionId !== scope.configRevisionId ||
+        input.origin.kind !== scope.origin.kind ||
+        canonicalSourceRevisionKey(input.origin) !==
+          canonicalSourceRevisionKey(scope.origin) ||
         input.publicChangeKind !== scope.publicChangeKind ||
         input.acceptedAt.getTime() !== scope.acceptedAt.getTime(),
     )
   ) {
     throw new Error(
-      "Canonical projection batches cannot span tenant, provider, configuration, or commit scopes.",
+      "Canonical projection batches cannot span tenant, provider, source origin, or commit scopes.",
     );
   }
   const providerRows = await database.$queryRaw<Array<{ platformKey: string }>>(
@@ -555,9 +582,25 @@ export async function writeCanonicalProjectionBatch(
     if (!entity) throw new Error("Canonical entity insert returned no identity.");
     const provenance = {
       ...(input.projection.provenance ?? {}),
-      configRevisionId: input.configRevisionId,
       providerId: input.providerId,
-      sourceRecordId: input.sourceRecordId,
+      sourceOrigin:
+        input.origin.kind === "legacy_source_record"
+          ? {
+              kind: input.origin.kind,
+              configurationRevisionId: input.origin.configurationRevisionId,
+              sourceRecordId: input.origin.sourceRecordId,
+            }
+          : input.origin.kind === "semantic_observation"
+            ? {
+                kind: input.origin.kind,
+                sourceRevisionId: input.origin.sourceRevisionId,
+                semanticObservationId: input.origin.semanticObservationId,
+              }
+            : {
+                kind: input.origin.kind,
+                sourceRevisionId: input.origin.sourceRevisionId,
+                recomputationRequestId: input.origin.recomputationRequestId,
+              },
     };
     return {
       ...input,
@@ -623,7 +666,18 @@ export async function writeCanonicalProjectionBatch(
       organizationId: projection.organizationId,
       entityId: projection.entityId,
       revisionNumber,
-      sourceRecordId: projection.sourceRecordId,
+      sourceRecordId:
+        projection.origin.kind === "legacy_source_record"
+          ? projection.origin.sourceRecordId
+          : null,
+      originSemanticObservationId:
+        projection.origin.kind === "semantic_observation"
+          ? projection.origin.semanticObservationId
+          : null,
+      originEvRecomputationRequestId:
+        projection.origin.kind === "ev_recomputation"
+          ? projection.origin.recomputationRequestId
+          : null,
       content: projection.projection.content,
       contentHash: projection.contentHash,
       provenance: projection.provenance,
@@ -643,7 +697,9 @@ export async function writeCanonicalProjectionBatch(
     revisionsByIdentity.set(revisionKey, revision);
     revisionsToInsert.push(revision);
     projectionByRevisionId.set(revisionId, projection);
-    currentRevisionByEntity.set(projection.entityId, revisionId);
+    if (projection.becomesCurrent) {
+      currentRevisionByEntity.set(projection.entityId, revisionId);
+    }
     results.push({ revisionId, created: true, publicChangeSequence: 0n });
   }
 
@@ -656,7 +712,7 @@ export async function writeCanonicalProjectionBatch(
         changeKind: projection.publicChangeKind,
         entityKey: canonicalPublicEntityKey(revision.entityId),
         sourceKey: projection.projection.platformKey,
-        sourceRevisionKey: projection.configRevisionId,
+        sourceRevisionKey: canonicalSourceRevisionKey(projection.origin),
         metadata: { canonicalRevisionId: revision.id },
         occurredAt: projection.acceptedAt,
         catalogImpact: canonicalProjectionCatalogImpact(projection.projection),
@@ -695,7 +751,13 @@ export async function writeCanonicalProjectionBatch(
       ${uuid(revision.organizationId)},
       ${uuid(revision.entityId)},
       ${revision.revisionNumber},
-      ${uuid(revision.sourceRecordId)},
+      ${revision.sourceRecordId ? uuid(revision.sourceRecordId) : Prisma.sql`null::uuid`},
+      ${revision.originSemanticObservationId
+        ? uuid(revision.originSemanticObservationId)
+        : Prisma.sql`null::uuid`},
+      ${revision.originEvRecomputationRequestId
+        ? uuid(revision.originEvRecomputationRequestId)
+        : Prisma.sql`null::uuid`},
       ${jsonValue(revision.content)},
       ${revision.contentHash},
       ${jsonValue(revision.provenance)},
@@ -709,6 +771,7 @@ export async function writeCanonicalProjectionBatch(
     await database.$executeRaw(Prisma.sql`
       insert into public.canonical_revisions (
         id, organization_id, entity_id, revision_number, source_record_id,
+        origin_semantic_observation_id, origin_ev_recomputation_request_id,
         content_json, content_hash, provenance_json, provenance_hash, actor_key,
         source_updated_at, source_collected_at, accepted_at,
         public_change_sequence
@@ -730,13 +793,18 @@ export async function writeCanonicalProjectionBatch(
     `);
   }
 
-  const projectionLinks: ProjectionLinkInsert[] = prepared.map((projection, index) => ({
-    sourceRecordId: projection.sourceRecordId,
-    canonicalRevisionId: results[index]!.revisionId,
-    organizationId: projection.organizationId,
-    projectionIndex: projection.projectionIndex,
-    createdAt: projection.acceptedAt,
-  }));
+  const projectionLinks: ProjectionLinkInsert[] = prepared.flatMap(
+    (projection, index) =>
+      projection.origin.kind === "legacy_source_record"
+        ? [{
+            sourceRecordId: projection.origin.sourceRecordId,
+            canonicalRevisionId: results[index]!.revisionId,
+            organizationId: projection.organizationId,
+            projectionIndex: projection.projectionIndex,
+            createdAt: projection.acceptedAt,
+          }]
+        : [],
+  );
   for (const batch of batches(projectionLinks)) {
     const rows = batch.map((link) => Prisma.sql`(
       ${uuid(link.sourceRecordId)},
@@ -839,7 +907,7 @@ export async function writeCanonicalProjectionBatch(
       changeKind: "relationship_resolution",
       entityKey: relationshipPublicEntityKey(relationship),
       sourceKey: relationship.targetPlatformKey,
-      sourceRevisionKey: scope.configRevisionId,
+      sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
       metadata: { relationshipState: relationship.targetEntityId ? "resolved" : "unresolved" },
       occurredAt: relationship.createdAt,
       catalogImpact: relationshipCatalogImpact(
@@ -929,29 +997,34 @@ export async function writeCanonicalProjectionBatch(
         and relationship.target_entity_id is null
       for update of relationship
     `);
-    const resolutionCauses = await allocatePublicChangeCauses(database, {
-      organizationId: scope.organizationId,
-      changes: unresolved.map((relationship) => ({
-        changeKind: "relationship_resolution",
-        entityKey: relationshipPublicEntityKey(relationship),
-        sourceKey: relationship.targetPlatformKey,
-        sourceRevisionKey: scope.configRevisionId,
-        metadata: { relationshipState: "resolved" },
-        occurredAt: scope.acceptedAt,
-        catalogImpact: relationshipCatalogImpact(
-          relationship.sourcePlatformKey,
-          relationship.targetPlatformKey,
-        ),
-      })),
-    });
-    const resolutionRows = unresolved.map((relationship, index) => {
-      const sequence = resolutionCauses[index]?.sequence;
-      if (sequence === undefined) throw new Error("Resolution cause is missing.");
-      return Prisma.sql`(
-        ${uuid(relationship.id)}, ${uuid(relationship.targetEntityId)}, ${sequence}
-      )`;
-    });
-    if (resolutionRows.length > 0) {
+    // One newly delivered catalog entity can resolve an unbounded backlog of
+    // relationships accumulated across earlier pages. Keep every cause and
+    // update in this page transaction, but honor both the public-change
+    // allocator and SQL write bounds instead of treating the fan-out as one
+    // allocation.
+    for (const resolutionBatch of batches(unresolved)) {
+      const resolutionCauses = await allocatePublicChangeCauses(database, {
+        organizationId: scope.organizationId,
+        changes: resolutionBatch.map((relationship) => ({
+          changeKind: "relationship_resolution",
+          entityKey: relationshipPublicEntityKey(relationship),
+          sourceKey: relationship.targetPlatformKey,
+          sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
+          metadata: { relationshipState: "resolved" },
+          occurredAt: scope.acceptedAt,
+          catalogImpact: relationshipCatalogImpact(
+            relationship.sourcePlatformKey,
+            relationship.targetPlatformKey,
+          ),
+        })),
+      });
+      const resolutionRows = resolutionBatch.map((relationship, index) => {
+        const sequence = resolutionCauses[index]?.sequence;
+        if (sequence === undefined) throw new Error("Resolution cause is missing.");
+        return Prisma.sql`(
+          ${uuid(relationship.id)}, ${uuid(relationship.targetEntityId)}, ${sequence}
+        )`;
+      });
       await database.$executeRaw(Prisma.sql`
         update public.canonical_relationships as relationship
         set target_entity_id = resolutions.target_entity_id,
@@ -1052,10 +1125,14 @@ export async function persistPageRecordsInBatches(
       : record.input.projections.map((projection, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: input.providerId,
-          configRevisionId: input.configRevisionId,
-          sourceRecordId: record.sourceRecordId,
+          origin: {
+            kind: "legacy_source_record" as const,
+            configurationRevisionId: input.configRevisionId,
+            sourceRecordId: record.sourceRecordId,
+          },
           projection,
           projectionIndex,
+          becomesCurrent: true,
           acceptedAt: input.committedAt,
           publicChangeKind: "provider_projection" as const,
           sourcePosition: record.sourcePosition,

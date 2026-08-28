@@ -15,6 +15,7 @@ import {
 } from "./repack-heat.ts";
 import { DATA_RELEASE_V3_SCHEMA_VERSION } from "./data-release-v3-ev-estimates.ts";
 import {
+  packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
   publicRepackDetailV3Schema,
   publicRepackSummaryV3FromDetail,
@@ -127,7 +128,7 @@ function validateSelectedRepackV3(
 
 /**
  * The dashboard opportunity projection. Opportunities carry the byte-
- * equivalent PackScout projection of their details, admit only active
+ * equivalent PackScout projection of their details, admit only purchasable
  * repacks with a current estimate, and rank by signed EV dollars.
  */
 export const publicDashboardBundleV3Schema = z
@@ -141,8 +142,12 @@ export const publicDashboardBundleV3Schema = z
   .superRefine((bundle, context) => {
     validateSummaryDetailPairsV3(bundle.opportunities, bundle.details, context);
     bundle.opportunities.forEach((repack, index) => {
+      // Eligibility keeps its exact original intent under the wider enum:
+      // both axes must hold. The pack must be purchasable (`available`
+      // alone, so `unavailable` and `unknown` are excluded beside
+      // `sold_out`) and its PackScout estimate must be current.
       if (
-        repack.availability !== "active" ||
+        !packAvailabilityIsPurchasableV3(repack.availability) ||
         repack.evEstimates.packScout.status !== "current"
       ) {
         context.addIssue({

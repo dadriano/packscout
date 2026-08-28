@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { createDirectorySkipPredicate } from "./ignored-directories.mjs";
 
 const root = process.cwd();
 const summaryOnly = process.argv.includes("--summary");
@@ -48,6 +49,7 @@ const surfaces = [
   { name: "frontend", directory: "apps/frontend" },
   { name: "admin", directory: "apps/admin" },
   { name: "worker", directory: "apps/worker" },
+  { name: "ops-panel", directory: "apps/ops-panel" },
   { name: "contracts", directory: "packages/contracts" },
   { name: "database", directory: "packages/database" },
   { name: "services", directory: "packages/services" },
@@ -59,21 +61,7 @@ function surfaceForFile(relativePath) {
   );
   return surface ? surface.name : relativePath.split("/")[0];
 }
-const ignoredDirectories = new Set([
-  ".git",
-  ".turbo",
-  ".worktrees",
-  ".next",
-  ".next-build",
-  ".next-dev",
-  "build",
-  "dist",
-  "node_modules",
-  "playwright-report",
-  "test-results",
-  "coverage",
-  "_generated",
-]);
+const shouldIgnoreDirectory = createDirectorySkipPredicate(["_generated"]);
 const sourceExtensions = new Set([
   ".ts",
   ".tsx",
@@ -98,10 +86,6 @@ function readOption(name) {
 
 function relative(filePath) {
   return path.relative(root, filePath).split(path.sep).join("/");
-}
-
-function shouldIgnoreDirectory(name) {
-  return ignoredDirectories.has(name) || name.startsWith(".next-");
 }
 
 function walk(directory) {

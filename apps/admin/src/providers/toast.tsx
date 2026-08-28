@@ -68,9 +68,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className={`admin-toast admin-toast--${toast.variant}`}
             role={toast.variant === "error" ? "alert" : "status"}
           >
-            <span>{toast.message}</span>
+            <span className="admin-toast__message">{toast.message}</span>
             <button
               type="button"
+              className="admin-toast__dismiss"
               aria-label="Dismiss notification"
               onClick={() => dismissToast(toast.id)}
             >
