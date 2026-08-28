@@ -28,7 +28,7 @@ import { providerSourceTransactionTime } from
   "./provider-source-database-clock.ts";
 import { validateProviderSourceCanonicalProjections } from
   "./provider-source-page-validation.ts";
-import { advanceSettledPublicWatermark } from
+import { advanceSettledPublicWatermarkWriteOnly } from
   "./public-change-settlement-repository.ts";
 
 type SourceQuarantineState = "open" | "retrying" | "resolved" | "expired";
@@ -617,7 +617,7 @@ export class ProviderSourceQuarantineRepository {
           occurred_at: authoritativeNow,
         },
       });
-      await advanceSettledPublicWatermark(transaction, {
+      await advanceSettledPublicWatermarkWriteOnly(transaction, {
         organizationId: input.organizationId,
         settledAt: authoritativeNow,
       });

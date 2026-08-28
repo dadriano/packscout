@@ -5,7 +5,7 @@ import {
   type PackscoutTransactionClient,
 } from "./database.ts";
 import { hashJson } from "./security.ts";
-import { advanceSettledPublicWatermark } from "./public-change-settlement-repository.ts";
+import { advanceSettledPublicWatermarkWriteOnly } from "./public-change-settlement-repository.ts";
 import { createPublicDerivationObligations } from "./public-change-settlement-repository.ts";
 
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
@@ -339,7 +339,7 @@ export async function completeEstimatedEvRecomputation(
   if (acknowledged.length === 0 || BigInt(acknowledged.length) !== totals[0]?.count) {
     throw new Error("Estimated EV obligations did not share the active claim.");
   }
-  await advanceSettledPublicWatermark(database, {
+  await advanceSettledPublicWatermarkWriteOnly(database, {
     organizationId: request.organizationId,
     settledAt: input.completedAt,
   });

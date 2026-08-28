@@ -11,7 +11,7 @@ import type {
 } from "./database.ts";
 import { isPrismaUniqueConstraintError } from "./prisma-error.ts";
 import {
-  advanceSettledPublicWatermark,
+  advanceSettledPublicWatermarkWriteOnly,
   allocatePublicChangeCauses,
   providerPublicEntityKey,
 } from "./public-change-settlement-repository.ts";
@@ -527,7 +527,7 @@ export class PrismaProviderConfigurationRepository {
             },
           }],
         });
-        await advanceSettledPublicWatermark(transaction, {
+        await advanceSettledPublicWatermarkWriteOnly(transaction, {
           organizationId: input.organizationId,
           settledAt: input.activatedAt,
         });
@@ -618,7 +618,7 @@ export class PrismaProviderConfigurationRepository {
           },
         }],
       });
-      await advanceSettledPublicWatermark(transaction, {
+      await advanceSettledPublicWatermarkWriteOnly(transaction, {
         organizationId: input.organizationId,
         settledAt: input.changedAt,
       });
