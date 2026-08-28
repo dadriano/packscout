@@ -2,6 +2,7 @@ import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   buildPublicCollectibleSearchText,
+  canonicalJson,
   normalizePublicSearchText,
   sha256CanonicalJson,
   type PublicCategory,
@@ -333,7 +334,16 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
       acceptedBatchChainHash: string;
       acceptedEntityChainHashes: Record<string, string>;
       acceptedCounts: Record<string, number>;
+      // The same split tally the real lifecycle keeps: `declared` is what the
+      // staged repack details advertise, `verified` is what staged chase rows
+      // canonically confirm. Modelling only the declared half would make this
+      // double accept releases `convex/dataReleaseV3Lifecycle.ts` refuses at
+      // finalize, so every services test would be validating against a more
+      // permissive server than production.
       acceptedTopChaseCount: number;
+      acceptedVerifiedTopChaseCount: number;
+      /** publicRepackId -> canonical JSON of the top chase it declares. */
+      declaredTopChases: Map<string, string>;
       acceptedSearchRowCount: number;
       acceptedSearchRowSetHash: string;
       completedAt: string | null;
@@ -401,6 +411,7 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
       acceptedSearchRowCount: release.acceptedSearchRowCount,
       acceptedSearchRowSetHash: release.acceptedSearchRowSetHash,
       acceptedTopChaseCount: release.acceptedTopChaseCount,
+      acceptedVerifiedTopChaseCount: release.acceptedVerifiedTopChaseCount,
       completedAt: release.completedAt,
     };
   }
@@ -439,6 +450,8 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
           searchShards: 0,
         },
         acceptedTopChaseCount: 0,
+        acceptedVerifiedTopChaseCount: 0,
+        declaredTopChases: new Map(),
         acceptedSearchRowCount: 0,
         acceptedSearchRowSetHash: EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
         completedAt: null,
@@ -508,9 +521,42 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
           "packscout.test.search-row-set",
           { previous: release.acceptedSearchRowSetHash, batch: request.batchHash },
         );
-        release.acceptedTopChaseCount += (
-          request.records as readonly { topChase: unknown | null }[]
-        ).filter(({ topChase }) => topChase !== null).length;
+        // A repack detail advertising a top chase only *declares* one; the
+        // chase row that proves it arrives in a later batch.
+        for (const record of request.records as readonly {
+          publicRepackId: string;
+          topChase: unknown | null;
+        }[]) {
+          if (record.topChase === null) continue;
+          release.acceptedTopChaseCount += 1;
+          release.declaredTopChases.set(
+            record.publicRepackId,
+            canonicalJson(record.topChase),
+          );
+        }
+      } else if (request.kind === "chases") {
+        // Mirrors `assertStagedReferences` in `convex/dataReleaseV3Lifecycle.ts`:
+        // a chase row verifies a declared top chase only when it canonically
+        // equals the repack detail's own `topChase`. Chase keys are unique per
+        // (repack, collectible) across a release and a match requires equality
+        // with that single declared value, so `verified` can never exceed
+        // `declared`.
+        for (const record of request.records as readonly {
+          publicRepackId: string;
+          role: string;
+        }[]) {
+          if (record.role !== "top_chase") continue;
+          // Production refuses outright rather than merely declining to
+          // count, so the double must too: a double that accepts a release
+          // the real server rejects makes every test through it meaningless.
+          if (
+            release.declaredTopChases.get(record.publicRepackId) !==
+            canonicalJson(record)
+          ) {
+            throw new Error("PUBLICATION_REFERENCE_INVALID");
+          }
+          release.acceptedVerifiedTopChaseCount += 1;
+        }
       }
     }
     return this.receipt({
@@ -544,6 +590,12 @@ export class InMemoryDataReleaseV3Port implements DataReleaseV3PublicationPort {
         release.acceptedBatchCount === manifest.batchCount &&
         release.acceptedBatchChainHash === manifest.batchChainHash &&
         release.acceptedTopChaseCount === manifest.topChaseCount &&
+        // The server-derived halves must agree with each other, not just with
+        // the manifest — the guard at `convex/dataReleaseV3Lifecycle.ts`
+        // finalize. Without it this double completes releases production
+        // refuses.
+        release.acceptedVerifiedTopChaseCount ===
+          release.acceptedTopChaseCount &&
         JSON.stringify(release.acceptedEntityChainHashes) ===
           JSON.stringify(manifest.entityChainHashes);
       if (!reconciles) throw new Error("PUBLICATION_RECONCILIATION_FAILED");

@@ -218,7 +218,21 @@ export const status = internalMutation({
           acceptedEntityChainHashes: release.acceptedEntityChainHashes,
           acceptedSearchRowCount: release.acceptedSearchRowCount,
           acceptedSearchRowSetHash: release.acceptedSearchRowSetHash,
+          // Declared and verified top chases are both reported: when the
+          // verified guard is what refuses a finalize, the declared count
+          // still matches the manifest, so this pair is the only thing that
+          // explains a `PUBLICATION_RECONCILIATION_FAILED` to an operator.
+          // The verified count is reported verbatim and its key omitted when
+          // the field is absent, so a release staged before the counter
+          // existed stays distinguishable from one this server verified as
+          // zero — the publisher's divergence checks are presence-guarded.
           acceptedTopChaseCount: release.acceptedTopChaseCount,
+          ...(release.acceptedVerifiedTopChaseCount === undefined
+            ? {}
+            : {
+              acceptedVerifiedTopChaseCount:
+                release.acceptedVerifiedTopChaseCount,
+            }),
           completedAt: release.completedAt,
         },
       },

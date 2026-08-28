@@ -79,11 +79,38 @@ export interface CatalogReleaseSourceSnapshot {
   readonly repackIdentities: readonly GovernedPublicRepackIdentity[];
 }
 
+export interface CatalogReleaseSourceLoadInput {
+  /**
+   * Inclusive public-change sequence ceiling. On its own this selects a
+   * sequence prefix, which is a point-in-time snapshot only when `occurred_at`
+   * is monotonic with `sequence`.
+   */
+  throughSequence: bigint;
+  /** Bounds the backfill `import_runs.finished_at` join. */
+  throughOccurredAt: Date;
+  /**
+   * Opt-in point-in-time bound on every member of the snapshot.
+   *
+   * Nothing orders `public_change_causes.occurred_at` by `sequence`: causes
+   * take their time from three unsynchronized clocks (the PostgreSQL clock read
+   * when an ingestion transaction takes its page lock, the admin service clock,
+   * and an operator-supplied approval time) while `sequence` is allocated later
+   * inside the committing transaction, so a higher-sequenced cause can carry an
+   * earlier time. A caller that has a read clock rather than a settled prefix
+   * must therefore filter each row on its own authoritative cause row instead of
+   * collapsing the clock into a maximum sequence.
+   *
+   * Omitting it emits exactly the sequence-prefix SQL, which is what the v2
+   * catalog release assembler needs: it passes the settled watermark, a genuine
+   * complete prefix, and never converts a time into a sequence.
+   */
+  occurredAtBound?: Date;
+}
+
 export interface CatalogReleaseSourceRepository {
-  loadSnapshot(input: {
-    throughSequence: bigint;
-    throughOccurredAt: Date;
-  }): Promise<CatalogReleaseSourceSnapshot>;
+  loadSnapshot(
+    input: CatalogReleaseSourceLoadInput,
+  ): Promise<CatalogReleaseSourceSnapshot>;
 }
 
 export interface ApprovedPublicRepackIdentityMaterializer {
@@ -237,10 +264,37 @@ export class PrismaCatalogReleaseSourceRepository
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
 
-  async loadSnapshot(input: {
-    throughSequence: bigint;
-    throughOccurredAt: Date;
-  }): Promise<CatalogReleaseSourceSnapshot> {
+  /**
+   * The `occurred_at` predicate for one snapshot member, expressed against the
+   * authoritative cause row the member's `public_change_sequence` points at.
+   *
+   * Every table this repository reads carries a foreign key onto
+   * `public.public_change_causes (organization_id, sequence)`, whose primary key
+   * makes the match exactly one row, so this is the declared join written as a
+   * semi-join: it can neither drop a governed row nor duplicate one, and it
+   * leaves the surrounding `distinct on` and window frames untouched.
+   *
+   * Returns `Prisma.empty` when no bound was requested, so the emitted SQL is
+   * byte for byte the prior sequence-prefix query.
+   */
+  private causeOccurredAtBound(
+    owner: string,
+    occurredAtBound: Date | undefined,
+  ): Prisma.Sql {
+    if (occurredAtBound === undefined) return Prisma.empty;
+    return Prisma.sql`
+        and exists (
+          select 1
+          from public.public_change_causes cause
+          where cause.organization_id = ${Prisma.raw(`${owner}.organization_id`)}
+            and cause.sequence = ${Prisma.raw(`${owner}.public_change_sequence`)}
+            and cause.occurred_at <= ${occurredAtBound}
+        )`;
+  }
+
+  async loadSnapshot(
+    input: CatalogReleaseSourceLoadInput,
+  ): Promise<CatalogReleaseSourceSnapshot> {
     return this.database.$transaction(async (transaction) => {
       await transaction.$executeRaw(Prisma.sql`set transaction read only`);
       const configurationRows = await transaction.$queryRaw<ConfigRow[]>(Prisma.sql`
@@ -249,19 +303,18 @@ export class PrismaCatalogReleaseSourceRepository
                public_change_sequence as "publicChangeSequence"
         from public.approved_public_catalog_configurations
         where organization_id = ${uuid(this.organizationId)}
-          and public_change_sequence <= ${input.throughSequence}
+          and public_change_sequence <= ${input.throughSequence}${
+            this.causeOccurredAtBound(
+              "approved_public_catalog_configurations",
+              input.occurredAtBound,
+            )
+          }
         order by public_change_sequence desc, revision desc
         limit 1
       `);
-      const revisions = await this.loadRevisions(
-        transaction,
-        input.throughSequence,
-      );
+      const revisions = await this.loadRevisions(transaction, input);
       const providers = await this.loadProviders(transaction, input);
-      const identities = await this.loadRepackIdentities(
-        transaction,
-        input.throughSequence,
-      );
+      const identities = await this.loadRepackIdentities(transaction, input);
       const row = configurationRows[0];
       const parsed = row === undefined
         ? null : approvedPublicCatalogConfigurationV1Schema.safeParse(
@@ -290,7 +343,10 @@ export class PrismaCatalogReleaseSourceRepository
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  private loadRevisions(database: PackscoutQueryClient, throughSequence: bigint) {
+  private loadRevisions(
+    database: PackscoutQueryClient,
+    input: CatalogReleaseSourceLoadInput,
+  ) {
     return database.$queryRaw<CatalogCanonicalRevisionSnapshot[]>(Prisma.sql`
       select distinct on (entity.id)
              entity.id as "entityId", entity.platform_key as "platformKey",
@@ -304,7 +360,9 @@ export class PrismaCatalogReleaseSourceRepository
       join public.canonical_revisions revision on revision.entity_id = entity.id
       where entity.organization_id = ${uuid(this.organizationId)}
         and revision.organization_id = ${uuid(this.organizationId)}
-        and revision.public_change_sequence <= ${throughSequence}
+        and revision.public_change_sequence <= ${input.throughSequence}${
+          this.causeOccurredAtBound("revision", input.occurredAtBound)
+        }
         and entity.record_kind in ('platform', 'pack', 'catalog_asset', 'ev_input', 'estimated_ev')
       order by entity.id, revision.public_change_sequence desc, revision.revision_number desc
     `);
@@ -312,7 +370,7 @@ export class PrismaCatalogReleaseSourceRepository
 
   private loadProviders(
     database: PackscoutQueryClient,
-    input: { throughSequence: bigint; throughOccurredAt: Date },
+    input: CatalogReleaseSourceLoadInput,
   ) {
     return database.$queryRaw<CatalogProviderReadinessSnapshot[]>(Prisma.sql`
       with lifecycle as (
@@ -323,7 +381,14 @@ export class PrismaCatalogReleaseSourceRepository
                cause.metadata_json->>'configurationRevisionId' as "configurationRevisionId"
         from public.public_change_causes cause
         where cause.organization_id = ${uuid(this.organizationId)}
-          and cause.sequence <= ${input.throughSequence}
+          and cause.sequence <= ${input.throughSequence}${
+            // The lifecycle read already drives off the authoritative cause
+            // row, so the point-in-time bound is a direct predicate here.
+            input.occurredAtBound === undefined
+              ? Prisma.empty
+              : Prisma.sql`
+          and cause.occurred_at <= ${input.occurredAtBound}`
+          }
           and cause.change_kind in ('provider_lifecycle', 'public_configuration')
           and cause.source_key is not null
           and cause.metadata_json ? 'platformKey'
@@ -355,7 +420,7 @@ export class PrismaCatalogReleaseSourceRepository
 
   private loadRepackIdentities(
     database: PackscoutQueryClient,
-    throughSequence: bigint,
+    input: CatalogReleaseSourceLoadInput,
   ) {
     return database.$queryRaw<GovernedPublicRepackIdentity[]>(Prisma.sql`
       select platform_key as "platformKey", pack_external_id as "packExternalId",
@@ -365,7 +430,12 @@ export class PrismaCatalogReleaseSourceRepository
              approved_at as "approvedAt"
       from public.public_repack_identity_mappings
       where organization_id = ${uuid(this.organizationId)}
-        and public_change_sequence <= ${throughSequence}
+        and public_change_sequence <= ${input.throughSequence}${
+          this.causeOccurredAtBound(
+            "public_repack_identity_mappings",
+            input.occurredAtBound,
+          )
+        }
       order by platform_key, pack_external_id
     `);
   }

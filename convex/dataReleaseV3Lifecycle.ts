@@ -559,6 +559,7 @@ export const start = internalMutation({
         chases: EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
       },
       acceptedTopChaseCount: 0,
+      acceptedVerifiedTopChaseCount: 0,
       acceptedBatchCount: 0,
       acceptedBatchChainHash: EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
       acceptedSearchRowCount: 0,
@@ -601,12 +602,30 @@ function recordKey(
   }
 }
 
+/**
+ * Top-chase accounting for one batch, split by provenance.
+ *
+ * `declared` counts top chases advertised by staged repack details;
+ * `verified` counts staged chase rows that canonically match the top chase of
+ * the repack they point at. Both are derived by the server from staged bytes,
+ * never read from the publisher's manifest, and finalize requires the running
+ * totals to agree. Collapsing them into one number lets a release that
+ * advertises a top chase whose chase row was never staged reconcile and
+ * activate, leaving the desired-collectible lookup unable to resolve it.
+ */
+interface StagedTopChaseTally {
+  readonly declared: number;
+  readonly verified: number;
+}
+
+const NO_TOP_CHASES: StagedTopChaseTally = { declared: 0, verified: 0 };
+
 async function assertStagedReferences(
   ctx: MutationCtx,
   releaseId: Id<"dataReleaseV3Releases">,
   request: DataReleaseV3ApplyBatchRequest,
-): Promise<number> {
-  if (request.kind === "categories") return 0;
+): Promise<StagedTopChaseTally> {
+  if (request.kind === "categories") return NO_TOP_CHASES;
   if (request.kind === "collectibles") {
     for (const record of request.records) {
       for (const publicCategoryId of record.publicCategoryIds) {
@@ -621,7 +640,7 @@ async function assertStagedReferences(
         if (category === null) refuse("PUBLICATION_REFERENCE_INVALID");
       }
     }
-    return 0;
+    return NO_TOP_CHASES;
   }
   if (request.kind === "repacks") {
     for (const record of request.records) {
@@ -651,7 +670,13 @@ async function assertStagedReferences(
         if (collectible === null) refuse("PUBLICATION_REFERENCE_INVALID");
       }
     }
-    return request.records.filter(({ topChase }) => topChase !== null).length;
+    // A repack detail advertising a top chase only *declares* one: its chase
+    // row arrives in a later batch and is verified there.
+    return {
+      declared: request.records.filter(({ topChase }) => topChase !== null)
+        .length,
+      verified: 0,
+    };
   }
   let topChaseMatches = 0;
   for (const record of request.records) {
@@ -698,7 +723,11 @@ async function assertStagedReferences(
       topChaseMatches += 1;
     }
   }
-  return topChaseMatches;
+  // Chase keys are `${publicRepackId}:${publicCollectibleId}` and are strictly
+  // ascending across the whole release, and a match requires the row to equal
+  // the repack's own `topChase`, so at most one chase row can verify each
+  // declared top chase: `verified` can never exceed `declared`.
+  return { declared: 0, verified: topChaseMatches };
 }
 
 async function insertBatchRecords(
@@ -862,11 +891,7 @@ export const applyBatch = internalMutation({
       refuse("PUBLICATION_RECONCILIATION_FAILED");
     }
 
-    const topChaseMatches = await assertStagedReferences(
-      ctx,
-      release._id,
-      request,
-    );
+    const topChases = await assertStagedReferences(ctx, release._id, request);
     const { searchShard } = await insertBatchRecords(ctx, release, request);
 
     const acceptedBatchChainHash = await sha256CanonicalJson(
@@ -905,8 +930,14 @@ export const applyBatch = internalMutation({
       },
       acceptedEntityChainHashes,
       acceptedTopChaseCount:
-        release.acceptedTopChaseCount +
-        (request.kind === "repacks" ? topChaseMatches : 0),
+        release.acceptedTopChaseCount + topChases.declared,
+      // `?? 0` covers only a release staged before the verified counter
+      // existed (the field is `v.optional` in the schema for exactly that
+      // reason). Restarting the verified tally at 0 while the declared tally
+      // carries on is the fail-safe direction: such a release can only end up
+      // with verified < declared, and finalize refuses it.
+      acceptedVerifiedTopChaseCount:
+        (release.acceptedVerifiedTopChaseCount ?? 0) + topChases.verified,
       acceptedBatchCount: release.acceptedBatchCount + 1,
       acceptedBatchChainHash,
       acceptedSearchRowCount:
@@ -998,6 +1029,18 @@ export const finalize = internalMutation({
         canonicalJson(release.expectedEntityChainHashes) &&
       release.acceptedTopChaseCount === request.expectedTopChaseCount &&
       release.acceptedTopChaseCount === release.expectedTopChaseCount &&
+      // Both sides of this equality are derived by the server from staged
+      // bytes: every top chase a staged repack detail advertises must have a
+      // staged chase row that canonically matches it. The manifest comparisons
+      // above cannot stand in for this — they only prove the publisher's own
+      // declared number matches what its repack details declare.
+      //
+      // `?? 0` covers a release staged before the verified counter existed.
+      // It refuses such a release whenever it declared a top chase, and admits
+      // it only when it declared none — the one case where nothing needed
+      // verifying.
+      (release.acceptedVerifiedTopChaseCount ?? 0) ===
+        release.acceptedTopChaseCount &&
       release.acceptedBatchCount === request.expectedBatchCount &&
       release.acceptedBatchCount === release.expectedBatchCount &&
       release.acceptedBatchChainHash === request.expectedBatchChainHash &&
@@ -1240,7 +1283,21 @@ export const status = internalQuery({
       acceptedEntityChainHashes: release.acceptedEntityChainHashes,
       acceptedSearchRowCount: release.acceptedSearchRowCount,
       acceptedSearchRowSetHash: release.acceptedSearchRowSetHash,
+      // Both top-chase counters are exposed so a reconciliation refusal is
+      // diagnosable from outside Convex. When the verified guard is what
+      // trips, the declared count still equals the manifest, so every check
+      // the publisher can run on its own passes and the refusal is otherwise
+      // opaque. The verified count is reported verbatim and the key is
+      // omitted when the field is absent: a release staged before the counter
+      // existed must stay distinguishable from one this server verified as
+      // zero, because the publisher's divergence checks are presence-guarded.
       acceptedTopChaseCount: release.acceptedTopChaseCount,
+      ...(release.acceptedVerifiedTopChaseCount === undefined
+        ? {}
+        : {
+          acceptedVerifiedTopChaseCount:
+            release.acceptedVerifiedTopChaseCount,
+        }),
       completedAt: release.completedAt,
     };
   },

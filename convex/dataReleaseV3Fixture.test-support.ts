@@ -344,6 +344,13 @@ export async function buildV3FixturePlan(input: {
   readonly categories?: readonly PublicCategory[];
   readonly collectibles?: readonly PublicCollectible[];
   readonly chases?: readonly PublicRepackChase[];
+  /**
+   * Overrides the manifest's declared top-chase count, which otherwise follows
+   * the staged repack details. Only a dishonest-publisher fixture should set
+   * this; the manifest stays internally consistent because the content hash and
+   * release fingerprint are derived from whatever value lands here.
+   */
+  readonly topChaseCount?: number;
 }): Promise<V3FixturePlan> {
   const dataAsOf = input.dataAsOf ?? V3_OBSERVED_AT;
   const categories = input.categories ?? [buildV3Category()];
@@ -409,7 +416,9 @@ export async function buildV3FixturePlan(input: {
       );
     }
   }
-  const topChaseCount = details.filter(({ topChase }) => topChase !== null).length;
+  const topChaseCount =
+    input.topChaseCount ??
+    details.filter(({ topChase }) => topChase !== null).length;
   const counts = {
     categories: categories.length,
     collectibles: collectibles.length,

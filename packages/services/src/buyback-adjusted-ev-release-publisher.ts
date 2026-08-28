@@ -6,6 +6,7 @@ import {
   type DataReleaseV3PublicationPort,
   type DataReleaseV3PublishPlan,
   type DataReleaseV3Receipt,
+  type DataReleaseV3ReleaseStatus,
 } from "./buyback-adjusted-ev-release-types.ts";
 
 /**
@@ -69,18 +70,51 @@ function fail(
   throw new DataReleaseV3PublisherError(stage, code, message);
 }
 
-/** Wraps transport failures with the publish stage they interrupted. */
+/**
+ * Wraps transport failures with the publish stage they interrupted.
+ *
+ * `diagnose` is consulted only on failure, and only to append context to the
+ * message; it can never turn a refusal into a success or change the stage and
+ * code the caller sees.
+ */
 async function step<T>(
   stage: DataReleaseV3PublisherErrorStage,
   operation: Promise<T>,
+  diagnose?: () => Promise<string>,
 ): Promise<T> {
   try {
     return await operation;
   } catch (error) {
     if (error instanceof DataReleaseV3PublisherError) throw error;
     const message = error instanceof Error ? error.message : String(error);
-    fail(stage, "PORT_REFUSED", message);
+    // Structurally guarantee the documented invariant: a diagnostic supplier
+    // may only add context, never replace the failure the caller is promised.
+    const context = diagnose === undefined
+      ? ""
+      : await diagnose().catch(() => "");
+    fail(stage, "PORT_REFUSED", `${message}${context}`);
   }
+}
+
+/**
+ * Declared-vs-verified top chases: the one reconciliation input the publisher
+ * cannot infer from its own plan. Both counts are derived by the server from
+ * staged bytes, and in the case the verified guard catches, the *declared*
+ * count still equals the manifest — so every check the publisher can run on
+ * its own passes and `PUBLICATION_RECONCILIATION_FAILED` names nothing an
+ * operator can act on. `unreported` distinguishes a server that predates the
+ * verified counter from one reporting a genuine 0.
+ */
+function topChaseSummary(
+  plan: DataReleaseV3PublishPlan,
+  status: DataReleaseV3ReleaseStatus | null,
+): string {
+  const verified = status?.acceptedVerifiedTopChaseCount;
+  return (
+    ` (top chases: manifest ${plan.manifest.topChaseCount},` +
+    ` declared ${status === null ? "unknown" : status.acceptedTopChaseCount},` +
+    ` verified ${verified === undefined ? "unreported" : verified})`
+  );
 }
 
 async function verifyReceipt(
@@ -106,6 +140,21 @@ async function verifyReceipt(
 
 export class DataReleaseV3ReleasePublisher {
   constructor(private readonly port: DataReleaseV3PublicationPort) {}
+
+  /**
+   * Reads the staged status back purely to explain a finalize refusal. It can
+   * never change the outcome: it runs only after the refusal is already
+   * committed to, and a status read that itself fails contributes an unknown
+   * rather than replacing the original error.
+   */
+  private async topChaseDiagnostic(
+    plan: DataReleaseV3PublishPlan,
+  ): Promise<string> {
+    const status = await this.port
+      .status(plan.publicReleaseId)
+      .catch(() => null);
+    return topChaseSummary(plan, status);
+  }
 
   /**
    * Publishes one plan end to end. Activation is the only step that changes
@@ -182,7 +231,7 @@ export class DataReleaseV3ReleasePublisher {
         expectedTopChaseCount: plan.manifest.topChaseCount,
         expectedBatchCount: plan.manifest.batchCount,
         expectedBatchChainHash: plan.manifest.batchChainHash,
-      })),
+      }), () => this.topChaseDiagnostic(plan)),
       {
         operationKind: "finalize",
         operationId: `${plan.publicReleaseId}:finalize`,
@@ -196,6 +245,12 @@ export class DataReleaseV3ReleasePublisher {
       status.acceptedBatchCount !== plan.manifest.batchCount ||
       status.acceptedBatchChainHash !== plan.manifest.batchChainHash ||
       status.acceptedTopChaseCount !== plan.manifest.topChaseCount ||
+      // A server that reports the verified counter must report it agreeing
+      // with the declared one on a complete release; a server that predates
+      // the counter reports nothing and is not held to it.
+      (status.acceptedVerifiedTopChaseCount !== undefined &&
+        status.acceptedVerifiedTopChaseCount !==
+          status.acceptedTopChaseCount) ||
       status.acceptedSearchRowCount !== plan.manifest.counts.repacks ||
       JSON.stringify(status.acceptedCounts) !==
         JSON.stringify(plan.manifest.counts) ||
@@ -203,7 +258,11 @@ export class DataReleaseV3ReleasePublisher {
         JSON.stringify(plan.manifest.entityChainHashes) ||
       status.completedAt === null
     ) {
-      fail("read_back", "STAGED_RELEASE_DIVERGENT");
+      fail(
+        "read_back",
+        "STAGED_RELEASE_DIVERGENT",
+        `read_back:STAGED_RELEASE_DIVERGENT${topChaseSummary(plan, status)}`,
+      );
     }
 
     const activateOperationId = `${plan.publicReleaseId}:activate:${expectedActivePublicReleaseId ?? "genesis"}`;
