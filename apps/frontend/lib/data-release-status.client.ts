@@ -1,5 +1,3 @@
-import type { DataReleaseMetadata } from "@packscout/contracts";
-
 export type DataReleaseStatusValue =
   | { readonly state: "loading" }
   | { readonly state: "unavailable" }
@@ -7,7 +5,7 @@ export type DataReleaseStatusValue =
       readonly state: "fresh" | "delayed";
       readonly updatedAt: string;
       readonly staleAt: string;
-      readonly dataSource: DataReleaseMetadata["dataSource"];
+      readonly dataSource?: "canonical" | "mock";
     };
 
 export type DataReleaseStatusPresentation = Readonly<{

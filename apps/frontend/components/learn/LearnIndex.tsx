@@ -2,8 +2,11 @@ import Link from "next/link";
 import {
   formatReadingTime,
   learnGuideHref,
+  PACKSCOUT_EV_METHOD,
   type LearnGuide,
 } from "@/lib/learn-content";
+import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import { ResponsiblePlayNotice } from "./ResponsiblePlayNotice";
 import styles from "./Learn.module.css";
 
 export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
@@ -53,6 +56,44 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
         </article>
       ) : null}
 
+      <section
+        aria-labelledby="packscout-ev-method-heading"
+        className={styles.methodSection}
+      >
+        <p className={styles.eyebrow}>{PACKSCOUT_EV_METHOD.title}</p>
+        <h2 className={styles.methodHeading} id="packscout-ev-method-heading">
+          How PackScout EV works
+        </h2>
+        <p className={styles.methodSummary}>{PACKSCOUT_EV_METHOD.summary}</p>
+
+        <ol className={styles.methodList}>
+          {PACKSCOUT_EV_METHOD.points.map((point, index) => (
+            <li key={point.title}>
+              <span aria-hidden="true" className={styles.methodNumber}>
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <h3>{point.title}</h3>
+                <p>{point.body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <p className={styles.methodDisclaimer} role="note">
+          {PACKSCOUT_EV_METHOD.disclaimer}{" "}
+          {METRIC_TRUST_COPY.adviceLine}.
+        </p>
+
+        <Link
+          className={styles.methodLink}
+          href={PACKSCOUT_EV_METHOD.learnMoreHref}
+        >
+          {PACKSCOUT_EV_METHOD.learnMoreLabel}
+          <span aria-hidden="true">→</span>
+        </Link>
+      </section>
+
       <ol className={styles.guideGrid} aria-label="PackScout articles">
         {articles.map((guide, index) => (
           <li className={styles.guideItem} key={guide.slug}>
@@ -85,9 +126,11 @@ export function LearnIndex({ guides }: { guides: readonly LearnGuide[] }) {
         ))}
       </ol>
 
+      <ResponsiblePlayNotice />
+
       <p className={styles.indexNote}>
-        Educational content only. Opening a repack involves risk and can result
-        in financial loss.
+        Educational content only. PackScout education is vendor-neutral and
+        stays available while catalog data is loading or unavailable.
       </p>
     </section>
   );

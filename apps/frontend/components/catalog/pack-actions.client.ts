@@ -2,6 +2,7 @@ import type {
   PublicPackAvailability,
   PublicRepackActions,
 } from "@packscout/contracts";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 
 type PublicRepackLink = NonNullable<PublicRepackActions["repackLink"]>;
 
@@ -24,18 +25,45 @@ export type PromoClipboardResult =
 
 export type ClipboardWriter = (text: string) => Promise<void>;
 
+type OutboundRefusalCode = Extract<
+  OutboundRepackLinkResult,
+  { readonly ok: false }
+>["code"];
+
+/**
+ * Names why a non-purchasable pack was refused, without deciding whether it
+ * was refused — the shared presenter owns that decision. Any pack availability
+ * state without its own refusal code reports the unknown-availability reason,
+ * which is the honest reading of a state this build cannot interpret.
+ */
+function outboundRefusalCode(
+  availability: PublicPackAvailability,
+): OutboundRefusalCode {
+  switch (availability) {
+    case "sold_out":
+      return "SOLD_OUT";
+    case "unavailable":
+      return "UNAVAILABLE";
+    default:
+      return "AVAILABILITY_UNKNOWN";
+  }
+}
+
 export function buildPublishedRepackHref(
   repackLink: PublicRepackLink | undefined,
   availability: PublicPackAvailability,
 ): OutboundRepackLinkResult {
-  if (availability === "sold_out") {
-    return Object.freeze({ ok: false, code: "SOLD_OUT" });
-  }
-  if (availability === "unavailable") {
-    return Object.freeze({ ok: false, code: "UNAVAILABLE" });
-  }
-  if (availability === "unknown") {
-    return Object.freeze({ ok: false, code: "AVAILABILITY_UNKNOWN" });
+  // Fail closed. Only `available` may expose an outbound purchase link, so the
+  // gate asks the shared presenter for permission rather than enumerating the
+  // states it refuses: a pack availability state added after this code was
+  // written is refused by default instead of falling into the allowed branch.
+  // Promos are deliberately not gated here — the v3 contract governs them by
+  // `actionAvailability` alone.
+  if (!presentPackAvailability(availability).purchaseActionsAvailable) {
+    return Object.freeze({
+      ok: false,
+      code: outboundRefusalCode(availability),
+    });
   }
   if (!repackLink) {
     return Object.freeze({ ok: false, code: "MISSING_LINK" });

@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import type { ListPublicRepacksInput, PublicCollectible } from "@packscout/contracts";
+import type {
+  ListPublicRepacksInput,
+  PublicCollectibleDisplay,
+} from "@packscout/contracts";
 import { DesiredCollectibleSearch } from "@/components/catalog/DesiredCollectibleSearch.client";
 import {
   resetCatalogPagination,
@@ -14,7 +17,7 @@ import type { DashboardHref } from "@/lib/provider-banner";
 
 type DesiredChaseControl = Readonly<{
   query: ListPublicRepacksInput;
-  selected: PublicCollectible | null;
+  selected: PublicCollectibleDisplay | null;
   layout: CatalogViewLayout;
 }>;
 

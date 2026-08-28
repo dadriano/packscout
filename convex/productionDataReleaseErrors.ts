@@ -16,6 +16,7 @@ const SAFE_MESSAGES: Record<ProductionDataReleaseErrorCode, string> = {
   PUBLICATION_STATE_CONFLICT: "The publication state is not valid for this operation.",
   PUBLICATION_PREDECESSOR_CONFLICT: "The active release does not match the expected predecessor.",
   PUBLICATION_SEQUENCE_REGRESSED: "The publication observation sequence did not advance.",
+  PUBLICATION_DATA_REGRESSION: "The candidate release's data is older than the active release's.",
   PUBLICATION_MANIFEST_BLOCKED: "The publication manifest is blocked.",
   PUBLICATION_MANIFEST_MISMATCH: "The publication manifest does not reconcile.",
   PUBLICATION_BATCH_CONFLICT: "The publication batch conflicts with the stored receipt.",

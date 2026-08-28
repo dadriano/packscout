@@ -1,26 +1,36 @@
 import { fetchQuery } from "convex/nextjs";
 import {
-  findRepacksByDesiredCollectibleResultSchema,
-  getDashboardBundleResultSchema,
-  getPublicRepackResultSchema,
-  getPublicShellStatusResultSchema,
-  listPublicRepacksResultSchema,
   publicReadError,
-  searchPublicCollectiblesResultSchema,
   type DashboardQueryInput,
   type FindRepacksByDesiredCollectibleInput,
-  type FindRepacksByDesiredCollectibleResult,
-  type GetDashboardBundleResult,
   type GetPublicRepackInput,
-  type GetPublicRepackResult,
-  type GetPublicShellStatusResult,
   type ListPublicRepacksInput,
-  type ListPublicRepacksResult,
   type SearchPublicCollectiblesInput,
-  type SearchPublicCollectiblesResult,
 } from "@packscout/contracts";
 import { api } from "../../../convex/_generated/api";
+import {
+  parseFindRepacksByDesiredCollectibleV3Result,
+  parseGetDashboardBundleV3Result,
+  parseGetPublicRepackV3Result,
+  parseGetPublicShellStatusV3Result,
+  parseListPublicRepacksV3Result,
+  parseSearchPublicCollectiblesV3Result,
+  type FindRepacksByDesiredCollectibleV3Result,
+  type GetDashboardBundleV3Result,
+  type GetPublicRepackV3Result,
+  type GetPublicShellStatusV3Result,
+  type ListPublicRepacksV3Result,
+  type SearchPublicCollectiblesV3Result,
+} from "./public-repacks-v3";
 import { readPublicConvexOrigin } from "./security-policy.server";
+
+/**
+ * Server-side reads against the data_release_v3 public queries. Every read
+ * carries the server clock so the backend can apply its authoritative
+ * deadline conversion, presents the server-held catalog-read credential on
+ * that same round trip, and re-validates every result against the strict v3
+ * contracts before rendering.
+ */
 
 type PublicRepacksEnvironment = Readonly<{
   NODE_ENV?: string;
@@ -86,13 +96,13 @@ export function catalogReadArguments<T extends Record<string, unknown>>(
     : { ...input, catalogReadToken: credential };
 }
 
-export async function readPublicShellStatus(): Promise<GetPublicShellStatusResult> {
+export async function readPublicShellStatus(): Promise<GetPublicShellStatusV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return getPublicShellStatusResultSchema.parse(
+    return parseGetPublicShellStatusV3Result(
       await fetchQuery(
-        api.publicRepacks.getPublicShellStatus,
+        api.publicRepacksV3.getPublicShellStatusV3,
         catalogReadArguments({}),
         { url },
       ),
@@ -104,12 +114,12 @@ export async function readPublicShellStatus(): Promise<GetPublicShellStatusResul
 
 export async function readDashboardBundle(
   input: DashboardQueryInput,
-): Promise<GetDashboardBundleResult> {
+): Promise<GetDashboardBundleV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return getDashboardBundleResultSchema.parse(
-      await fetchQuery(api.publicRepacks.getDashboardBundle, catalogReadArguments({
+    return parseGetDashboardBundleV3Result(
+      await fetchQuery(api.publicRepacksV3.getDashboardBundleV3, catalogReadArguments({
         ...input,
         currentTime: Date.now(),
       }), { url }),
@@ -121,12 +131,12 @@ export async function readDashboardBundle(
 
 export async function readPublicRepacks(
   input: ListPublicRepacksInput,
-): Promise<ListPublicRepacksResult> {
+): Promise<ListPublicRepacksV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return listPublicRepacksResultSchema.parse(
-      await fetchQuery(api.publicRepacks.listPublicRepacks, catalogReadArguments({
+    return parseListPublicRepacksV3Result(
+      await fetchQuery(api.publicRepacksV3.listPublicRepacksV3, catalogReadArguments({
         ...input,
         currentTime: Date.now(),
       }), { url }),
@@ -138,12 +148,12 @@ export async function readPublicRepacks(
 
 export async function readPublicRepack(
   input: GetPublicRepackInput,
-): Promise<GetPublicRepackResult> {
+): Promise<GetPublicRepackV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return getPublicRepackResultSchema.parse(
-      await fetchQuery(api.publicRepacks.getPublicRepack, catalogReadArguments({
+    return parseGetPublicRepackV3Result(
+      await fetchQuery(api.publicRepacksV3.getPublicRepackV3, catalogReadArguments({
         ...input,
         currentTime: Date.now(),
       }), { url }),
@@ -155,13 +165,13 @@ export async function readPublicRepack(
 
 export async function searchPublicCollectibles(
   input: SearchPublicCollectiblesInput,
-): Promise<SearchPublicCollectiblesResult> {
+): Promise<SearchPublicCollectiblesV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return searchPublicCollectiblesResultSchema.parse(
+    return parseSearchPublicCollectiblesV3Result(
       await fetchQuery(
-        api.publicRepacks.searchPublicCollectibles,
+        api.publicRepacksV3.searchPublicCollectiblesV3,
         catalogReadArguments({ ...input }),
         { url },
       ),
@@ -173,12 +183,12 @@ export async function searchPublicCollectibles(
 
 export async function readRepacksByDesiredCollectible(
   input: FindRepacksByDesiredCollectibleInput,
-): Promise<FindRepacksByDesiredCollectibleResult> {
+): Promise<FindRepacksByDesiredCollectibleV3Result> {
   const url = convexUrl();
   if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
   try {
-    return findRepacksByDesiredCollectibleResultSchema.parse(
-      await fetchQuery(api.publicRepacks.findRepacksByDesiredCollectible, catalogReadArguments({
+    return parseFindRepacksByDesiredCollectibleV3Result(
+      await fetchQuery(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, catalogReadArguments({
         ...input,
         currentTime: Date.now(),
       }), { url }),

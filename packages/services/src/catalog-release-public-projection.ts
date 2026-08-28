@@ -58,7 +58,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 // Canonical revisions persisted before the availability rename still hold
 // active/disabled; translate them at read time and keep rejecting values
 // outside both vocabularies.
-const normalizeLegacyAvailability = (value: unknown): unknown =>
+export const normalizeLegacyAvailability = (value: unknown): unknown =>
   value === "active" ? "available" : value === "disabled" ? "unavailable" : value;
 
 function packContent(value: unknown): PublicAvailabilityPackContent {
