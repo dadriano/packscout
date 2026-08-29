@@ -60,6 +60,12 @@ CREATE TYPE "quarantine_attempt_state" AS ENUM ('running', 'succeeded', 'failed'
 CREATE TYPE "retention_state" AS ENUM ('running', 'succeeded', 'failed');
 
 -- CreateEnum
+CREATE TYPE "ev_recomputation_state" AS ENUM ('queued', 'running', 'completed', 'failed');
+
+-- CreateEnum
+CREATE TYPE "ev_recomputation_result" AS ENUM ('estimated', 'unavailable');
+
+-- CreateEnum
 CREATE TYPE "audit_outcome" AS ENUM ('success', 'failure', 'blocked');
 
 -- CreateEnum
@@ -532,6 +538,30 @@ CREATE TABLE "quarantine_attempts" (
 );
 
 -- CreateTable
+CREATE TABLE "pack_ev_recomputation_requests" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "request_key" TEXT NOT NULL,
+    "pack_id" UUID NOT NULL,
+    "trigger_change_sequence" BIGINT NOT NULL,
+    "input_hash" CHAR(64) NOT NULL,
+    "state" "ev_recomputation_state" NOT NULL DEFAULT 'queued',
+    "result_status" "ev_recomputation_result",
+    "result_pack_version" BIGINT,
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "available_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "claim_owner" TEXT,
+    "claim_token" UUID,
+    "claim_expires_at" TIMESTAMPTZ(6),
+    "failure_code" TEXT,
+    "completed_at" TIMESTAMPTZ(6),
+    "row_version" BIGINT NOT NULL DEFAULT 1,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "pack_ev_recomputation_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "retention_executions" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "policy_key" TEXT NOT NULL,
@@ -836,6 +866,18 @@ CREATE UNIQUE INDEX "quarantine_records_page_kind_record_key" ON "quarantine_rec
 CREATE INDEX "quarantine_attempts_record_started_idx" ON "quarantine_attempts"("quarantine_record_id", "started_at" DESC);
 
 -- CreateIndex
+CREATE UNIQUE INDEX "pack_ev_recomputation_requests_request_key_key" ON "pack_ev_recomputation_requests"("request_key");
+
+-- CreateIndex
+CREATE INDEX "pack_ev_recomputation_requests_claim_idx" ON "pack_ev_recomputation_requests"("state", "available_at", "created_at", "id");
+
+-- CreateIndex
+CREATE INDEX "pack_ev_recomputation_requests_pack_created_idx" ON "pack_ev_recomputation_requests"("pack_id", "created_at" DESC, "id" DESC);
+
+-- CreateIndex
+CREATE INDEX "pack_ev_recomputation_requests_input_hash_idx" ON "pack_ev_recomputation_requests"("input_hash");
+
+-- CreateIndex
 CREATE INDEX "retention_executions_started_state_idx" ON "retention_executions"("started_at" DESC, "state");
 
 -- CreateIndex
@@ -957,6 +999,12 @@ ALTER TABLE "quarantine_records" ADD CONSTRAINT "quarantine_records_page_run_fke
 
 -- AddForeignKey
 ALTER TABLE "quarantine_attempts" ADD CONSTRAINT "quarantine_attempts_record_id_fkey" FOREIGN KEY ("quarantine_record_id") REFERENCES "quarantine_records"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "pack_ev_recomputation_requests" ADD CONSTRAINT "pack_ev_recomputation_requests_pack_id_fkey" FOREIGN KEY ("pack_id") REFERENCES "packs"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "pack_ev_recomputation_requests" ADD CONSTRAINT "pack_ev_recomputation_requests_trigger_change_fkey" FOREIGN KEY ("trigger_change_sequence") REFERENCES "promotion_changes"("sequence") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "local_audit_events" ADD CONSTRAINT "local_audit_events_command_id_fkey" FOREIGN KEY ("command_id") REFERENCES "control_commands"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
@@ -1464,6 +1512,70 @@ ALTER TABLE "quarantine_attempts"
   ),
   ADD CONSTRAINT "quarantine_attempts_time_check" CHECK ("finished_at" IS NULL OR "finished_at" >= "started_at");
 
+ALTER TABLE "pack_ev_recomputation_requests"
+  ADD CONSTRAINT "pack_ev_recomputation_requests_request_key_check" CHECK (
+    "request_key" ~ '^[0-9a-f]{64}$'
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_trigger_check" CHECK (
+    "trigger_change_sequence" > 0
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_input_hash_check" CHECK (
+    "input_hash" ~ '^[0-9a-f]{64}$'
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_attempt_check" CHECK (
+    "attempt_count" >= 0 AND "row_version" > 0
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_claim_check" CHECK (
+    (
+      "claim_owner" IS NULL
+      AND "claim_token" IS NULL
+      AND "claim_expires_at" IS NULL
+    ) OR (
+      "claim_owner" ~ '^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$'
+      AND "claim_token" IS NOT NULL
+      AND "claim_expires_at" IS NOT NULL
+    )
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_failure_code_check" CHECK (
+    "failure_code" IS NULL OR "failure_code" ~ '^[A-Z][A-Z0-9_]{0,127}$'
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_state_check" CHECK (
+    (
+      "state" = 'queued'
+      AND "result_status" IS NULL
+      AND "result_pack_version" IS NULL
+      AND "claim_owner" IS NULL
+      AND "completed_at" IS NULL
+    ) OR (
+      "state" = 'running'
+      AND "attempt_count" > 0
+      AND "result_status" IS NULL
+      AND "result_pack_version" IS NULL
+      AND "claim_owner" IS NOT NULL
+      AND "failure_code" IS NULL
+      AND "completed_at" IS NULL
+    ) OR (
+      "state" = 'completed'
+      AND "result_status" IS NOT NULL
+      AND "result_pack_version" > 0
+      AND "claim_owner" IS NULL
+      AND "failure_code" IS NULL
+      AND "completed_at" IS NOT NULL
+    ) OR (
+      "state" = 'failed'
+      AND "attempt_count" > 0
+      AND "result_status" IS NULL
+      AND "result_pack_version" IS NULL
+      AND "claim_owner" IS NULL
+      AND "failure_code" IS NOT NULL
+      AND "completed_at" IS NOT NULL
+    )
+  ),
+  ADD CONSTRAINT "pack_ev_recomputation_requests_time_check" CHECK (
+    "updated_at" >= "created_at"
+    AND ("completed_at" IS NULL OR "completed_at" >= "created_at")
+  );
+
 ALTER TABLE "retention_executions"
   ADD CONSTRAINT "retention_executions_counts_check" CHECK (
     "batch_size" > 0
@@ -1658,6 +1770,8 @@ CREATE TRIGGER "provider_runs_row_version_trigger" BEFORE UPDATE ON "provider_ru
 CREATE TRIGGER "control_commands_row_version_trigger" BEFORE UPDATE ON "control_commands"
   FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
 CREATE TRIGGER "quarantine_records_row_version_trigger" BEFORE UPDATE ON "quarantine_records"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
+CREATE TRIGGER "pack_ev_recomputation_requests_row_version_trigger" BEFORE UPDATE ON "pack_ev_recomputation_requests"
   FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
 CREATE TRIGGER "provider_change_consumers_row_version_trigger" BEFORE UPDATE ON "provider_change_consumers"
   FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
@@ -2492,6 +2606,46 @@ $$;
 CREATE TRIGGER "quarantine_attempts_guard_trigger"
   BEFORE UPDATE OR DELETE ON "quarantine_attempts"
   FOR EACH ROW EXECUTE FUNCTION "packscout_guard_quarantine_attempt"();
+
+CREATE FUNCTION "packscout_guard_ev_recomputation_request"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'pack_ev_recomputation_request_delete_forbidden';
+  END IF;
+  IF ROW(
+    NEW.id, NEW."request_key", NEW."pack_id", NEW."trigger_change_sequence",
+    NEW."input_hash", NEW."created_at"
+  ) IS DISTINCT FROM ROW(
+    OLD.id, OLD."request_key", OLD."pack_id", OLD."trigger_change_sequence",
+    OLD."input_hash", OLD."created_at"
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'pack_ev_recomputation_request_identity_immutable';
+  END IF;
+  IF OLD."state" = 'completed'
+     AND to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD) THEN
+    RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'pack_ev_recomputation_request_completed_immutable';
+  END IF;
+  IF NEW."state" IS DISTINCT FROM OLD."state"
+     AND NOT (
+       (OLD."state" = 'queued' AND NEW."state" = 'running')
+       OR (OLD."state" = 'running' AND NEW."state" IN ('queued', 'completed', 'failed'))
+       OR (OLD."state" = 'failed' AND NEW."state" = 'queued')
+     ) THEN
+    RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'pack_ev_recomputation_request_transition_invalid';
+  END IF;
+  IF NEW."attempt_count" < OLD."attempt_count" THEN
+    RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'pack_ev_recomputation_attempt_count_regression';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "pack_ev_recomputation_requests_state_guard_trigger"
+  BEFORE UPDATE OR DELETE ON "pack_ev_recomputation_requests"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_guard_ev_recomputation_request"();
 
 CREATE FUNCTION "packscout_guard_retention_execution"()
 RETURNS trigger

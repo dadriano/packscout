@@ -132,6 +132,18 @@ enum retention_state {
   failed
 }
 
+enum ev_recomputation_state {
+  queued
+  running
+  completed
+  failed
+}
+
+enum ev_recomputation_result {
+  estimated
+  unavailable
+}
+
 enum audit_outcome {
   success
   failure
@@ -239,10 +251,11 @@ model packs {
   created_at                             DateTime           @default(now()) @db.Timestamptz(6)
   updated_at                             DateTime           @default(now()) @db.Timestamptz(6)
 
-  category      categories?     @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "packs_category_id_fkey")
-  contents      pack_contents[]
-  pulls         pulls[]
-  market_events market_events[]
+  category                  categories?                      @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "packs_category_id_fkey")
+  contents                  pack_contents[]
+  pulls                     pulls[]
+  market_events             market_events[]
+  ev_recomputation_requests pack_ev_recomputation_requests[]
 
   @@index([category_id, lifecycle], map: "packs_category_lifecycle_idx")
   @@index([availability, lifecycle], map: "packs_availability_lifecycle_idx")
@@ -456,6 +469,8 @@ model promotion_changes {
   operation      promotion_operation
   changed_at     DateTime            @db.Timestamptz(6)
   created_at     DateTime            @default(now()) @db.Timestamptz(6)
+
+  ev_recomputation_requests pack_ev_recomputation_requests[]
 
   @@unique([entity_type, entity_id, entity_version, operation], map: "promotion_changes_entity_version_operation_key")
 }
@@ -676,6 +691,34 @@ model quarantine_attempts {
   quarantine_record quarantine_records @relation(fields: [quarantine_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_attempts_record_id_fkey")
 
   @@index([quarantine_record_id, started_at(sort: Desc)], map: "quarantine_attempts_record_started_idx")
+}
+
+model pack_ev_recomputation_requests {
+  id                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  request_key             String                   @unique(map: "pack_ev_recomputation_requests_request_key_key")
+  pack_id                 String                   @db.Uuid
+  trigger_change_sequence BigInt
+  input_hash              String                   @db.Char(64)
+  state                   ev_recomputation_state   @default(queued)
+  result_status           ev_recomputation_result?
+  result_pack_version     BigInt?
+  attempt_count           Int                      @default(0)
+  available_at            DateTime                 @default(now()) @db.Timestamptz(6)
+  claim_owner             String?
+  claim_token             String?                  @db.Uuid
+  claim_expires_at        DateTime?                @db.Timestamptz(6)
+  failure_code            String?
+  completed_at            DateTime?                @db.Timestamptz(6)
+  row_version             BigInt                   @default(1)
+  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                 @default(now()) @db.Timestamptz(6)
+
+  pack           packs             @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_ev_recomputation_requests_pack_id_fkey")
+  trigger_change promotion_changes @relation(fields: [trigger_change_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "pack_ev_recomputation_requests_trigger_change_fkey")
+
+  @@index([state, available_at, created_at, id], map: "pack_ev_recomputation_requests_claim_idx")
+  @@index([pack_id, created_at(sort: Desc), id(sort: Desc)], map: "pack_ev_recomputation_requests_pack_created_idx")
+  @@index([input_hash], map: "pack_ev_recomputation_requests_input_hash_idx")
 }
 
 model retention_executions {

@@ -5,7 +5,7 @@ CREATE SCHEMA IF NOT EXISTS "public";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- CreateEnum
-CREATE TYPE "operator_state" AS ENUM ('active', 'disabled');
+CREATE TYPE "operator_state" AS ENUM ('pending', 'active', 'disabled', 'cancelled');
 
 -- CreateEnum
 CREATE TYPE "operator_role" AS ENUM ('admin', 'data_operator');
@@ -70,6 +70,25 @@ CREATE TYPE "manifest_operation" AS ENUM ('advance', 'add', 'remove', 'rollback'
 -- CreateEnum
 CREATE TYPE "retention_state" AS ENUM ('running', 'succeeded', 'failed');
 
+-- CreateEnum
+CREATE TYPE "worker_instance_state" AS ENUM ('running', 'stopped');
+
+-- CreateEnum
+CREATE TYPE "worker_activity_kind" AS ENUM (
+  'idle', 'scheduling', 'importing', 'estimated_ev', 'retention', 'message_outbox'
+);
+
+-- CreateEnum
+CREATE TYPE "email_message_intent_state" AS ENUM (
+  'pending', 'retrying', 'sent', 'skipped', 'failed'
+);
+
+-- CreateEnum
+CREATE TYPE "email_message_attempt_outcome" AS ENUM ('sent', 'skipped', 'failed');
+
+-- CreateEnum
+CREATE TYPE "email_link_purpose" AS ENUM ('operator_password_reset', 'operator_invitation');
+
 -- CreateTable
 CREATE TABLE "database_identity" (
     "singleton_key" BOOLEAN NOT NULL DEFAULT true,
@@ -97,8 +116,9 @@ CREATE TABLE "operators" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "email_normalized" TEXT NOT NULL,
     "display_name" TEXT NOT NULL,
-    "password_hash" TEXT NOT NULL,
+    "password_hash" TEXT,
     "state" "operator_state" NOT NULL DEFAULT 'active',
+    "row_version" BIGINT NOT NULL DEFAULT 1,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -157,6 +177,117 @@ CREATE TABLE "audit_events" (
     "occurred_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "audit_events_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "worker_instances" (
+    "instance_id" TEXT NOT NULL,
+    "state" "worker_instance_state" NOT NULL DEFAULT 'running',
+    "version" TEXT NOT NULL,
+    "host" TEXT NOT NULL,
+    "runtime_version" TEXT NOT NULL,
+    "started_at" TIMESTAMPTZ(6) NOT NULL,
+    "last_heartbeat_at" TIMESTAMPTZ(6) NOT NULL,
+    "stopped_at" TIMESTAMPTZ(6),
+    "activity_kind" "worker_activity_kind" NOT NULL DEFAULT 'idle',
+    "activity_organization_id" UUID,
+    "activity_provider_id" UUID,
+    "activity_run_id" UUID,
+    "activity_started_at" TIMESTAMPTZ(6),
+    "heartbeat_interval_ms" INTEGER NOT NULL,
+    "presence_stale_after_ms" INTEGER NOT NULL,
+    "run_heartbeat_stale_after_ms" INTEGER NOT NULL,
+    "schedule_claim_lease_ms" INTEGER NOT NULL,
+    "import_run_lease_ms" INTEGER NOT NULL,
+    "protected_payload_retention_days" INTEGER NOT NULL,
+    "presence_retention_days" INTEGER NOT NULL,
+    "row_version" BIGINT NOT NULL DEFAULT 1,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "worker_instances_pkey" PRIMARY KEY ("instance_id")
+);
+
+-- CreateTable
+CREATE TABLE "email_message_intents" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "kind" TEXT NOT NULL,
+    "input_json" JSONB NOT NULL,
+    "recipient" TEXT NOT NULL,
+    "idempotency_key" TEXT NOT NULL,
+    "source" TEXT NOT NULL,
+    "state" "email_message_intent_state" NOT NULL DEFAULT 'pending',
+    "due_at" TIMESTAMPTZ(6) NOT NULL,
+    "attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "claim_owner" TEXT,
+    "claim_token" UUID,
+    "claim_expires_at" TIMESTAMPTZ(6),
+    "last_provider" TEXT,
+    "last_error_code" TEXT,
+    "last_skip_reason" TEXT,
+    "last_attempted_at" TIMESTAMPTZ(6),
+    "finalized_at" TIMESTAMPTZ(6),
+    "row_version" BIGINT NOT NULL DEFAULT 1,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "email_message_intents_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "email_message_attempts" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "intent_id" UUID NOT NULL,
+    "attempt_number" INTEGER NOT NULL,
+    "attempted_at" TIMESTAMPTZ(6) NOT NULL,
+    "outcome" "email_message_attempt_outcome" NOT NULL,
+    "provider" TEXT,
+    "provider_message_id" TEXT,
+    "error_code" TEXT,
+    "error_message" TEXT,
+    "error_retryable" BOOLEAN,
+    "skip_reason" TEXT,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "email_message_attempts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "email_link_tokens" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "purpose" "email_link_purpose" NOT NULL,
+    "selector" TEXT NOT NULL,
+    "verifier_hash" TEXT NOT NULL,
+    "subject_id" UUID NOT NULL,
+    "address_normalized" TEXT NOT NULL,
+    "issued_at" TIMESTAMPTZ(6) NOT NULL,
+    "expires_at" TIMESTAMPTZ(6) NOT NULL,
+    "redeemed_at" TIMESTAMPTZ(6),
+    "superseded_at" TIMESTAMPTZ(6),
+    "row_version" BIGINT NOT NULL DEFAULT 1,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "email_link_tokens_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "global_activity_events" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "organization_id" UUID NOT NULL,
+    "event_digest" CHAR(64) NOT NULL,
+    "event_type" TEXT NOT NULL,
+    "severity" "severity" NOT NULL,
+    "dedupe_key" TEXT NOT NULL,
+    "recovery_key" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "summary" TEXT NOT NULL,
+    "evidence" JSONB NOT NULL DEFAULT '{}',
+    "event_at" TIMESTAMPTZ(6) NOT NULL,
+    "received_at" TIMESTAMPTZ(6) NOT NULL,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "global_activity_events_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -340,6 +471,7 @@ CREATE TABLE "admin_alerts" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "organization_id" UUID NOT NULL,
     "latest_activity_event_id" UUID,
+    "latest_global_activity_event_id" UUID,
     "kind" TEXT NOT NULL,
     "severity" "severity" NOT NULL,
     "state" "alert_state" NOT NULL DEFAULT 'active',
@@ -736,6 +868,60 @@ CREATE INDEX "operator_sessions_operator_idx" ON "operator_sessions"("operator_i
 CREATE INDEX "audit_events_organization_occurred_idx" ON "audit_events"("organization_id", "occurred_at" DESC);
 
 -- CreateIndex
+CREATE INDEX "worker_instances_heartbeat_idx" ON "worker_instances"("last_heartbeat_at" DESC);
+
+-- CreateIndex
+CREATE INDEX "worker_instances_state_heartbeat_idx" ON "worker_instances"("state", "last_heartbeat_at" DESC);
+
+-- CreateIndex
+CREATE INDEX "worker_instances_activity_provider_idx" ON "worker_instances"("activity_organization_id", "activity_provider_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "email_message_intents_idempotency_key_unique" ON "email_message_intents"("idempotency_key");
+
+-- CreateIndex
+CREATE INDEX "email_message_intents_state_due_idx" ON "email_message_intents"("state", "due_at", "id");
+
+-- CreateIndex
+CREATE INDEX "email_message_intents_source_state_idx" ON "email_message_intents"("source", "state");
+
+-- CreateIndex
+CREATE INDEX "email_message_intents_created_idx" ON "email_message_intents"("created_at" DESC, "id" DESC);
+
+-- CreateIndex
+CREATE INDEX "email_message_intents_state_finalized_idx" ON "email_message_intents"("state", "finalized_at");
+
+-- CreateIndex
+CREATE INDEX "email_message_intents_recipient_created_idx" ON "email_message_intents"("recipient", "created_at" DESC);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "email_message_attempts_intent_attempt_unique" ON "email_message_attempts"("intent_id", "attempt_number");
+
+-- CreateIndex
+CREATE INDEX "email_message_attempts_attempted_idx" ON "email_message_attempts"("attempted_at" DESC);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "email_link_tokens_selector_unique" ON "email_link_tokens"("selector");
+
+-- CreateIndex
+CREATE INDEX "email_link_tokens_outstanding_idx" ON "email_link_tokens"("purpose", "subject_id");
+
+-- CreateIndex
+CREATE INDEX "email_link_tokens_expiry_idx" ON "email_link_tokens"("expires_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "global_activity_events_organization_id_unique" ON "global_activity_events"("organization_id", "id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "global_activity_events_organization_digest_unique" ON "global_activity_events"("organization_id", "event_digest");
+
+-- CreateIndex
+CREATE INDEX "global_activity_events_organization_event_idx" ON "global_activity_events"("organization_id", "event_at" DESC);
+
+-- CreateIndex
+CREATE INDEX "global_activity_events_dedupe_event_idx" ON "global_activity_events"("organization_id", "dedupe_key", "event_at" DESC);
+
+-- CreateIndex
 CREATE UNIQUE INDEX "providers_provider_key_unique" ON "providers"("provider_key");
 
 -- CreateIndex
@@ -964,6 +1150,10 @@ CREATE UNIQUE INDEX "catalog_versions_complete_content_unique"
   ON "catalog_versions"("schema_version", "content_hash")
   WHERE "lifecycle" = 'complete';
 
+CREATE UNIQUE INDEX "email_link_tokens_one_outstanding_unique"
+  ON "email_link_tokens"("purpose", "subject_id")
+  WHERE "redeemed_at" IS NULL AND "superseded_at" IS NULL;
+
 -- Scalar and shape constraints.
 ALTER TABLE "database_identity"
   ADD CONSTRAINT "database_identity_singleton_check" CHECK ("singleton_key"),
@@ -982,7 +1172,13 @@ ALTER TABLE "operators"
   ADD CONSTRAINT "operators_email_normalized_check" CHECK (
     "email_normalized" = lower(btrim("email_normalized")) AND "email_normalized" <> ''
   ),
-  ADD CONSTRAINT "operators_display_name_nonblank_check" CHECK (btrim("display_name") <> '');
+  ADD CONSTRAINT "operators_display_name_nonblank_check" CHECK (btrim("display_name") <> ''),
+  ADD CONSTRAINT "operators_credential_lifecycle_check" CHECK (
+    ("state" = 'active' AND "password_hash" IS NOT NULL)
+    OR ("state" IN ('pending', 'cancelled') AND "password_hash" IS NULL)
+    OR "state" = 'disabled'
+  ),
+  ADD CONSTRAINT "operators_row_version_check" CHECK ("row_version" > 0);
 
 ALTER TABLE "operator_sessions"
   ADD CONSTRAINT "operator_sessions_expiry_order_check" CHECK (
@@ -997,6 +1193,198 @@ ALTER TABLE "audit_events"
     btrim("actor_key") <> '' AND btrim("action") <> '' AND btrim("subject_type") <> ''
   ),
   ADD CONSTRAINT "audit_events_metadata_object_check" CHECK (jsonb_typeof("metadata_json") = 'object');
+
+ALTER TABLE "worker_instances"
+  ADD CONSTRAINT "worker_instances_descriptor_check" CHECK (
+    "instance_id" ~ '^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$'
+    AND length(btrim("version")) BETWEEN 1 AND 128
+    AND length(btrim("host")) BETWEEN 1 AND 128
+    AND length(btrim("runtime_version")) BETWEEN 1 AND 64
+  ),
+  ADD CONSTRAINT "worker_instances_state_time_check" CHECK (
+    ("state" = 'running' AND "stopped_at" IS NULL)
+    OR ("state" = 'stopped' AND "stopped_at" IS NOT NULL AND "stopped_at" >= "started_at")
+  ),
+  ADD CONSTRAINT "worker_instances_heartbeat_order_check" CHECK (
+    "last_heartbeat_at" >= "started_at"
+    AND "created_at" <= "started_at"
+    AND "updated_at" >= "created_at"
+  ),
+  ADD CONSTRAINT "worker_instances_activity_check" CHECK (
+    (
+      "activity_kind" = 'idle'
+      AND "activity_organization_id" IS NULL
+      AND "activity_provider_id" IS NULL
+      AND "activity_run_id" IS NULL
+      AND "activity_started_at" IS NULL
+    ) OR (
+      "activity_kind" <> 'idle'
+      AND "activity_started_at" IS NOT NULL
+      AND ("activity_provider_id" IS NULL OR "activity_organization_id" IS NOT NULL)
+      AND ("activity_run_id" IS NULL OR (
+        "activity_organization_id" IS NOT NULL AND "activity_provider_id" IS NOT NULL
+      ))
+    )
+  ),
+  ADD CONSTRAINT "worker_instances_import_activity_check" CHECK (
+    "activity_kind" <> 'importing'
+    OR (
+      "activity_organization_id" IS NOT NULL
+      AND "activity_provider_id" IS NOT NULL
+      AND "activity_run_id" IS NOT NULL
+    )
+  ),
+  ADD CONSTRAINT "worker_instances_settings_check" CHECK (
+    "heartbeat_interval_ms" BETWEEN 1000 AND 300000
+    AND "presence_stale_after_ms" > "heartbeat_interval_ms"
+    AND "presence_stale_after_ms" <= 86400000
+    AND "run_heartbeat_stale_after_ms" BETWEEN 1000 AND 86400000
+    AND "schedule_claim_lease_ms" BETWEEN 1000 AND 3600000
+    AND "import_run_lease_ms" BETWEEN 1000 AND 3600000
+    AND "protected_payload_retention_days" BETWEEN 1 AND 3650
+    AND "presence_retention_days" BETWEEN 1 AND 3650
+  ),
+  ADD CONSTRAINT "worker_instances_row_version_check" CHECK ("row_version" > 0);
+
+ALTER TABLE "email_message_intents"
+  ADD CONSTRAINT "email_message_intents_kind_check" CHECK (
+    "kind" ~ '^[a-z][a-z0-9_]{0,63}$'
+  ),
+  ADD CONSTRAINT "email_message_intents_input_check" CHECK (
+    octet_length("input_json"::text) <= 16384
+  ),
+  ADD CONSTRAINT "email_message_intents_recipient_check" CHECK (
+    length("recipient") BETWEEN 3 AND 320
+    AND "recipient" !~ '[[:space:]]'
+    AND strpos("recipient", '@') > 1
+  ),
+  ADD CONSTRAINT "email_message_intents_idempotency_key_check" CHECK (
+    "idempotency_key" ~ '^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$'
+  ),
+  ADD CONSTRAINT "email_message_intents_source_check" CHECK (
+    "source" ~ '^[a-z][a-z0-9_]{0,63}$'
+  ),
+  ADD CONSTRAINT "email_message_intents_attempt_count_check" CHECK ("attempt_count" >= 0),
+  ADD CONSTRAINT "email_message_intents_claim_check" CHECK (
+    (
+      "claim_owner" IS NULL
+      AND "claim_token" IS NULL
+      AND "claim_expires_at" IS NULL
+    ) OR (
+      "claim_owner" ~ '^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$'
+      AND "claim_token" IS NOT NULL
+      AND "claim_expires_at" IS NOT NULL
+    )
+  ),
+  ADD CONSTRAINT "email_message_intents_last_fields_check" CHECK (
+    ("last_provider" IS NULL OR length(btrim("last_provider")) BETWEEN 1 AND 64)
+    AND ("last_error_code" IS NULL OR "last_error_code" ~ '^[A-Z][A-Z0-9_]{0,127}$')
+    AND (
+      "last_skip_reason" IS NULL
+      OR "last_skip_reason" IN ('delivery_disabled', 'console_mode', 'missing_configuration')
+    )
+  ),
+  ADD CONSTRAINT "email_message_intents_state_check" CHECK (
+    (
+      "state" IN ('pending', 'retrying')
+      AND "finalized_at" IS NULL
+    ) OR (
+      "state" IN ('sent', 'skipped', 'failed')
+      AND "finalized_at" IS NOT NULL
+      AND "claim_owner" IS NULL
+      AND "claim_token" IS NULL
+      AND "claim_expires_at" IS NULL
+    )
+  ),
+  ADD CONSTRAINT "email_message_intents_time_check" CHECK (
+    "updated_at" >= "created_at"
+    AND ("last_attempted_at" IS NULL OR "last_attempted_at" >= "created_at")
+    AND ("finalized_at" IS NULL OR "finalized_at" >= "created_at")
+  ),
+  ADD CONSTRAINT "email_message_intents_row_version_check" CHECK ("row_version" > 0);
+
+ALTER TABLE "email_message_attempts"
+  ADD CONSTRAINT "email_message_attempts_number_check" CHECK ("attempt_number" > 0),
+  ADD CONSTRAINT "email_message_attempts_copy_check" CHECK (
+    ("provider" IS NULL OR length(btrim("provider")) BETWEEN 1 AND 64)
+    AND ("provider_message_id" IS NULL OR length(btrim("provider_message_id")) BETWEEN 1 AND 256)
+    AND ("error_code" IS NULL OR "error_code" ~ '^[A-Z][A-Z0-9_]{0,127}$')
+    AND ("error_message" IS NULL OR length("error_message") <= 200)
+    AND (
+      "skip_reason" IS NULL
+      OR "skip_reason" IN ('delivery_disabled', 'console_mode', 'missing_configuration')
+    )
+  ),
+  ADD CONSTRAINT "email_message_attempts_outcome_check" CHECK (
+    (
+      "outcome" = 'sent'
+      AND "provider" IS NOT NULL
+      AND "error_code" IS NULL
+      AND "error_message" IS NULL
+      AND "error_retryable" IS NULL
+      AND "skip_reason" IS NULL
+    ) OR (
+      "outcome" = 'skipped'
+      AND "skip_reason" IS NOT NULL
+      AND "provider_message_id" IS NULL
+      AND "error_code" IS NULL
+      AND "error_message" IS NULL
+      AND "error_retryable" IS NULL
+    ) OR (
+      "outcome" = 'failed'
+      AND "provider_message_id" IS NULL
+      AND "error_code" IS NOT NULL
+      AND "error_retryable" IS NOT NULL
+      AND "skip_reason" IS NULL
+    )
+  );
+
+ALTER TABLE "email_link_tokens"
+  ADD CONSTRAINT "email_link_tokens_selector_check" CHECK (
+    "selector" ~ '^[A-Za-z0-9_-]{22}$'
+  ),
+  ADD CONSTRAINT "email_link_tokens_verifier_hash_check" CHECK (
+    "verifier_hash" ~ '^[A-Za-z0-9_-]{43}$'
+  ),
+  ADD CONSTRAINT "email_link_tokens_address_check" CHECK (
+    "address_normalized" = lower(btrim("address_normalized"))
+    AND length("address_normalized") BETWEEN 3 AND 320
+    AND "address_normalized" !~ '[[:space:]]'
+    AND strpos("address_normalized", '@') > 1
+  ),
+  ADD CONSTRAINT "email_link_tokens_time_check" CHECK (
+    "expires_at" > "issued_at"
+    AND ("redeemed_at" IS NULL OR (
+      "redeemed_at" >= "issued_at" AND "redeemed_at" < "expires_at"
+    ))
+    AND ("superseded_at" IS NULL OR "superseded_at" >= "issued_at")
+    AND ("redeemed_at" IS NULL OR "superseded_at" IS NULL)
+    AND "issued_at" <= "created_at"
+    AND "updated_at" >= "created_at"
+  ),
+  ADD CONSTRAINT "email_link_tokens_row_version_check" CHECK ("row_version" > 0);
+
+ALTER TABLE "global_activity_events"
+  ADD CONSTRAINT "global_activity_events_digest_check" CHECK (
+    "event_digest" ~ '^[0-9a-f]{64}$'
+  ),
+  ADD CONSTRAINT "global_activity_events_copy_check" CHECK (
+    length(btrim("event_type")) BETWEEN 1 AND 128
+    AND length(btrim("dedupe_key")) BETWEEN 1 AND 256
+    AND length(btrim("recovery_key")) BETWEEN 1 AND 256
+    AND length(btrim("title")) BETWEEN 1 AND 200
+    AND length(btrim("summary")) BETWEEN 1 AND 500
+  ),
+  ADD CONSTRAINT "global_activity_events_evidence_check" CHECK (
+    jsonb_typeof("evidence") = 'object'
+    AND octet_length("evidence"::text) <= 4096
+    AND NOT ("evidence" ?| ARRAY[
+      'raw', 'payload', 'credential', 'databaseUrl', 'externalIdentifier'
+    ])
+  ),
+  ADD CONSTRAINT "global_activity_events_time_check" CHECK (
+    "event_at" <= "received_at" AND "received_at" <= "created_at"
+  );
 
 ALTER TABLE "providers"
   ADD CONSTRAINT "providers_provider_key_check" CHECK ("provider_key" ~ '^[a-z][a-z0-9_]{0,52}$'),
@@ -1144,7 +1532,19 @@ ALTER TABLE "admin_alerts"
     OR ("state" = 'resolved' AND "resolved_at" IS NOT NULL)
   ),
   ADD CONSTRAINT "admin_alerts_activity_provider_pair_check" CHECK (
-    "latest_activity_event_id" IS NULL OR "provider_id" IS NOT NULL
+    NOT (
+      "latest_activity_event_id" IS NOT NULL
+      AND "latest_global_activity_event_id" IS NOT NULL
+    )
+    AND ("latest_activity_event_id" IS NULL OR "provider_id" IS NOT NULL)
+    AND (
+      "latest_global_activity_event_id" IS NULL
+      OR (
+        "provider_id" IS NULL
+        AND "run_id" IS NULL
+        AND "quarantine_id" IS NULL
+      )
+    )
   );
 
 ALTER TABLE "global_categories"
@@ -1481,6 +1881,15 @@ ALTER TABLE "operator_sessions"
 ALTER TABLE "audit_events"
   ADD CONSTRAINT "audit_events_organization_fk" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
+ALTER TABLE "email_message_attempts"
+  ADD CONSTRAINT "email_message_attempts_intent_fk" FOREIGN KEY ("intent_id") REFERENCES "email_message_intents"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+
+ALTER TABLE "email_link_tokens"
+  ADD CONSTRAINT "email_link_tokens_subject_fk" FOREIGN KEY ("subject_id") REFERENCES "operators"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+
+ALTER TABLE "global_activity_events"
+  ADD CONSTRAINT "global_activity_events_organization_fk" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+
 ALTER TABLE "providers"
   ADD CONSTRAINT "providers_organization_fk" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "providers_active_config_fk" FOREIGN KEY ("active_config_version_id", "id") REFERENCES "provider_config_versions"("id", "provider_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
@@ -1522,7 +1931,8 @@ ALTER TABLE "provider_health"
 ALTER TABLE "admin_alerts"
   ADD CONSTRAINT "admin_alerts_organization_fk" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT "admin_alerts_provider_organization_fk" FOREIGN KEY ("provider_id", "organization_id") REFERENCES "providers"("id", "organization_id") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT "admin_alerts_latest_activity_fk" FOREIGN KEY ("provider_id", "latest_activity_event_id") REFERENCES "provider_activity_events"("provider_id", "id") ON DELETE RESTRICT ON UPDATE NO ACTION;
+  ADD CONSTRAINT "admin_alerts_latest_activity_fk" FOREIGN KEY ("provider_id", "latest_activity_event_id") REFERENCES "provider_activity_events"("provider_id", "id") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT "admin_alerts_latest_global_activity_fk" FOREIGN KEY ("organization_id", "latest_global_activity_event_id") REFERENCES "global_activity_events"("organization_id", "id") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 ALTER TABLE "global_categories"
   ADD CONSTRAINT "global_categories_parent_fk" FOREIGN KEY ("parent_category_id") REFERENCES "global_categories"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
@@ -1631,6 +2041,18 @@ $$;
 
 CREATE TRIGGER "providers_row_version_guard"
   BEFORE UPDATE ON "providers"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
+CREATE TRIGGER "operators_row_version_guard"
+  BEFORE UPDATE ON "operators"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
+CREATE TRIGGER "worker_instances_row_version_guard"
+  BEFORE UPDATE ON "worker_instances"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
+CREATE TRIGGER "email_message_intents_row_version_guard"
+  BEFORE UPDATE ON "email_message_intents"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
+CREATE TRIGGER "email_link_tokens_row_version_guard"
+  BEFORE UPDATE ON "email_link_tokens"
   FOR EACH ROW EXECUTE FUNCTION "packscout_enforce_row_version"();
 CREATE TRIGGER "provider_database_nodes_row_version_guard"
   BEFORE UPDATE ON "provider_database_nodes"
@@ -1852,6 +2274,12 @@ CREATE TRIGGER "provider_connection_tests_append_only"
 CREATE TRIGGER "provider_activity_events_append_only"
   BEFORE UPDATE OR DELETE ON "provider_activity_events"
   FOR EACH ROW EXECUTE FUNCTION "packscout_reject_mutation"();
+CREATE TRIGGER "email_message_attempts_update_forbidden"
+  BEFORE UPDATE ON "email_message_attempts"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_reject_mutation"();
+CREATE TRIGGER "global_activity_events_append_only"
+  BEFORE UPDATE OR DELETE ON "global_activity_events"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_reject_mutation"();
 CREATE TRIGGER "collectible_aliases_append_only"
   BEFORE UPDATE OR DELETE ON "collectible_aliases"
   FOR EACH ROW EXECUTE FUNCTION "packscout_reject_mutation"();
@@ -1870,6 +2298,9 @@ CREATE TRIGGER "catalog_version_batches_no_mutation"
 
 CREATE TRIGGER "providers_no_delete"
   BEFORE DELETE ON "providers"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_reject_delete"();
+CREATE TRIGGER "operators_no_delete"
+  BEFORE DELETE ON "operators"
   FOR EACH ROW EXECUTE FUNCTION "packscout_reject_delete"();
 CREATE TRIGGER "provider_credential_versions_no_delete"
   BEFORE DELETE ON "provider_credential_versions"
@@ -1916,6 +2347,159 @@ CREATE TRIGGER "manifest_activation_state_no_delete"
 CREATE TRIGGER "artifact_retention_executions_no_delete"
   BEFORE DELETE ON "artifact_retention_executions"
   FOR EACH ROW EXECUTE FUNCTION "packscout_reject_delete"();
+
+CREATE FUNCTION "packscout_guard_operator_lifecycle"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF ROW(NEW.id, NEW."email_normalized", NEW."created_at")
+     IS DISTINCT FROM ROW(OLD.id, OLD."email_normalized", OLD."created_at") THEN
+    RAISE EXCEPTION 'operator identity is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF OLD."state" = 'cancelled' THEN
+    RAISE EXCEPTION 'cancelled operator is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF OLD."state" = 'pending' AND NEW."state" = 'pending'
+     AND (to_jsonb(NEW) - 'row_version' - 'updated_at')
+         IS DISTINCT FROM (to_jsonb(OLD) - 'row_version' - 'updated_at') THEN
+    RAISE EXCEPTION 'pending operator may only be activated or cancelled' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."state" IS DISTINCT FROM OLD."state" AND NOT (
+    (OLD."state" = 'pending' AND NEW."state" IN ('active', 'cancelled'))
+    OR (OLD."state" = 'active' AND NEW."state" = 'disabled')
+    OR (OLD."state" = 'disabled' AND NEW."state" = 'active')
+  ) THEN
+    RAISE EXCEPTION 'operator lifecycle transition % -> % is not allowed', OLD."state", NEW."state"
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "operators_lifecycle_guard"
+  BEFORE UPDATE ON "operators"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_guard_operator_lifecycle"();
+
+CREATE FUNCTION "packscout_guard_worker_instance"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF ROW(NEW."instance_id", NEW."created_at")
+     IS DISTINCT FROM ROW(OLD."instance_id", OLD."created_at") THEN
+    RAISE EXCEPTION 'worker instance identity is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."last_heartbeat_at" < OLD."last_heartbeat_at"
+     AND NEW."started_at" <= OLD."last_heartbeat_at" THEN
+    RAISE EXCEPTION 'worker heartbeat cannot move backward' USING ERRCODE = '55000';
+  END IF;
+  IF OLD."state" = 'stopped' AND NEW."state" = 'stopped'
+     AND (to_jsonb(NEW) - 'row_version' - 'updated_at')
+         IS DISTINCT FROM (to_jsonb(OLD) - 'row_version' - 'updated_at') THEN
+    RAISE EXCEPTION 'stopped worker instance is immutable until a later restart' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."started_at" IS DISTINCT FROM OLD."started_at" AND NOT (
+    NEW."started_at" > OLD."last_heartbeat_at"
+    AND NEW."last_heartbeat_at" = NEW."started_at"
+    AND NEW."state" = 'running'
+    AND NEW."stopped_at" IS NULL
+    AND NEW."activity_kind" = 'idle'
+    AND NEW."activity_organization_id" IS NULL
+    AND NEW."activity_provider_id" IS NULL
+    AND NEW."activity_run_id" IS NULL
+    AND NEW."activity_started_at" IS NULL
+  ) THEN
+    RAISE EXCEPTION 'worker restart must begin a later clean presence interval' USING ERRCODE = '55000';
+  END IF;
+  IF OLD."state" = 'stopped' AND NEW."state" = 'running'
+     AND NEW."started_at" IS NOT DISTINCT FROM OLD."started_at" THEN
+    RAISE EXCEPTION 'worker restart must begin a later clean presence interval' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."state" IS DISTINCT FROM OLD."state" AND NOT (
+    (OLD."state" = 'running' AND NEW."state" = 'stopped')
+    OR (OLD."state" = 'stopped' AND NEW."state" = 'running')
+  ) THEN
+    RAISE EXCEPTION 'worker lifecycle transition % -> % is not allowed', OLD."state", NEW."state"
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "worker_instances_lifecycle_guard"
+  BEFORE UPDATE ON "worker_instances"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_guard_worker_instance"();
+
+CREATE FUNCTION "packscout_guard_email_message_intent"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF ROW(
+    NEW.id, NEW.kind, NEW."input_json", NEW.recipient, NEW."idempotency_key",
+    NEW.source, NEW."created_at"
+  ) IS DISTINCT FROM ROW(
+    OLD.id, OLD.kind, OLD."input_json", OLD.recipient, OLD."idempotency_key",
+    OLD.source, OLD."created_at"
+  ) THEN
+    RAISE EXCEPTION 'email message intent identity and payload are immutable' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."attempt_count" < OLD."attempt_count" THEN
+    RAISE EXCEPTION 'email message attempt count cannot move backward' USING ERRCODE = '55000';
+  END IF;
+  IF (OLD."state" IN ('sent', 'skipped') OR (
+        OLD."state" = 'failed' AND NEW."state" = 'failed'
+      ))
+     AND to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD) THEN
+    RAISE EXCEPTION 'settled email message intent is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF NEW."state" IS DISTINCT FROM OLD."state" AND NOT (
+    (OLD."state" IN ('pending', 'retrying') AND NEW."state" IN ('retrying', 'sent', 'skipped', 'failed'))
+    OR (OLD."state" = 'failed' AND NEW."state" = 'pending')
+  ) THEN
+    RAISE EXCEPTION 'email message intent transition % -> % is not allowed', OLD."state", NEW."state"
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_message_intents_lifecycle_guard"
+  BEFORE UPDATE ON "email_message_intents"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_guard_email_message_intent"();
+
+CREATE FUNCTION "packscout_guard_email_link_token"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF ROW(
+    NEW.id, NEW.purpose, NEW.selector, NEW."verifier_hash", NEW."subject_id",
+    NEW."address_normalized", NEW."issued_at", NEW."expires_at", NEW."created_at"
+  ) IS DISTINCT FROM ROW(
+    OLD.id, OLD.purpose, OLD.selector, OLD."verifier_hash", OLD."subject_id",
+    OLD."address_normalized", OLD."issued_at", OLD."expires_at", OLD."created_at"
+  ) THEN
+    RAISE EXCEPTION 'email link identity and credential digest are immutable' USING ERRCODE = '55000';
+  END IF;
+  IF (OLD."redeemed_at" IS NOT NULL OR OLD."superseded_at" IS NOT NULL)
+     AND to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD) THEN
+    RAISE EXCEPTION 'settled email link token is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF OLD."redeemed_at" IS NULL AND NEW."redeemed_at" IS NULL
+     AND OLD."superseded_at" IS NULL AND NEW."superseded_at" IS NULL
+     AND (to_jsonb(NEW) - 'row_version' - 'updated_at')
+         IS DISTINCT FROM (to_jsonb(OLD) - 'row_version' - 'updated_at') THEN
+    RAISE EXCEPTION 'outstanding email link may only be redeemed or superseded' USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "email_link_tokens_lifecycle_guard"
+  BEFORE UPDATE ON "email_link_tokens"
+  FOR EACH ROW EXECUTE FUNCTION "packscout_guard_email_link_token"();
 
 CREATE FUNCTION "packscout_enforce_credential_transition"()
 RETURNS trigger

@@ -385,3 +385,149 @@ test("provider writes are promotion-coupled, immutable, receipt-gated, and lease
     await harness.stop();
   }
 });
+
+test("provider EV recomputation requests are local, claimable, versioned, and one-way", { concurrency: false }, async () => {
+  const harness = await createMigratedProviderDatabase();
+  const { db, providerKey } = harness;
+  const localProviderId = "93000000-0000-4000-8000-000000000001";
+  const packId = "93000000-0000-4000-8000-000000000002";
+  const requestId = "93000000-0000-4000-8000-000000000003";
+  const invalidRequestId = "93000000-0000-4000-8000-000000000004";
+  const firstClaimToken = "93000000-0000-4000-8000-000000000005";
+  const secondClaimToken = "93000000-0000-4000-8000-000000000006";
+  try {
+    await db.query(
+      "select initialize_provider_database_identity($1::uuid, $2::text)",
+      [localProviderId, providerKey],
+    );
+    await db.query(`
+      begin;
+      update promotion_ledger set last_sequence = 1 where singleton_key;
+      insert into packs (
+        id, pack_key, display_name, pack_format, availability,
+        content_evidence, packscout_ev_model_version,
+        packscout_ev_confidence_policy_version, source_updated_at
+      ) values (
+        '${packId}', 'fixture-pack', 'Fixture Pack', 'repack', 'available',
+        'complete', 'ev-v1', 'confidence-v1', now()
+      );
+      insert into promotion_changes (
+        sequence, entity_type, entity_id, entity_version, operation, changed_at
+      ) values (1, 'pack', '${packId}', 1, 'upsert', now());
+      commit;
+    `);
+
+    await db.query(`
+      insert into pack_ev_recomputation_requests (
+        id, request_key, pack_id, trigger_change_sequence, input_hash
+      ) values ('${requestId}', '${hashA}', '${packId}', 1, '${hashB}')
+    `);
+    await expectDatabaseError(
+      db.query(`
+        insert into pack_ev_recomputation_requests (
+          id, request_key, pack_id, trigger_change_sequence, input_hash,
+          state, attempt_count
+        ) values (
+          '${invalidRequestId}', '${"c".repeat(64)}', '${packId}', 1,
+          '${hashA}', 'running', 1
+        )
+      `),
+      /pack_ev_recomputation_requests_state_check/,
+    );
+
+    await db.query(`
+      update pack_ev_recomputation_requests
+      set state = 'running', attempt_count = 1,
+          claim_owner = 'worker:ev:1', claim_token = '${firstClaimToken}',
+          claim_expires_at = now() + interval '1 minute', row_version = 2
+      where id = '${requestId}'
+    `);
+    await expectDatabaseError(
+      db.query(`
+        update pack_ev_recomputation_requests
+        set claim_expires_at = now() + interval '2 minutes'
+        where id = '${requestId}'
+      `),
+      /row_version_conflict/,
+    );
+
+    await db.query(`
+      update pack_ev_recomputation_requests
+      set state = 'queued', claim_owner = null, claim_token = null,
+          claim_expires_at = null, failure_code = 'TEMPORARY_FAILURE',
+          available_at = now() + interval '1 minute', row_version = 3
+      where id = '${requestId}';
+      update pack_ev_recomputation_requests
+      set state = 'running', attempt_count = 2,
+          claim_owner = 'worker:ev:2', claim_token = '${secondClaimToken}',
+          claim_expires_at = now() + interval '1 minute',
+          failure_code = null, row_version = 4
+      where id = '${requestId}';
+    `);
+    await expectDatabaseError(
+      db.query(`
+        update pack_ev_recomputation_requests
+        set state = 'queued', attempt_count = 0, row_version = 5
+        where id = '${requestId}'
+      `),
+      /pack_ev_recomputation_attempt_count_regression/,
+    );
+
+    await db.query(`
+      begin;
+      update promotion_ledger set last_sequence = 2 where singleton_key;
+      update packs
+      set packscout_ev_amount = 25,
+          packscout_ev_currency = 'USD',
+          packscout_ev_data_as_of = now(),
+          packscout_ev_calculated_at = now(),
+          row_version = 2
+      where id = '${packId}';
+      insert into promotion_changes (
+        sequence, entity_type, entity_id, entity_version, operation, changed_at
+      ) values (2, 'pack', '${packId}', 2, 'upsert', now());
+      update pack_ev_recomputation_requests
+      set state = 'completed', result_status = 'estimated',
+          result_pack_version = 2, claim_owner = null, claim_token = null,
+          claim_expires_at = null, completed_at = now(), row_version = 5
+      where id = '${requestId}';
+      commit;
+    `);
+
+    await expectDatabaseError(
+      db.query(`delete from pack_ev_recomputation_requests where id = '${requestId}'`),
+      /pack_ev_recomputation_request_delete_forbidden/,
+    );
+    await expectDatabaseError(
+      db.query(`
+        update pack_ev_recomputation_requests
+        set state = 'queued', result_status = null, result_pack_version = null,
+            completed_at = null, row_version = 6
+        where id = '${requestId}'
+      `),
+      /completed_immutable|transition_invalid/,
+    );
+
+    const result = await db.query<{
+      state: string;
+      result_status: string;
+      result_pack_version: string;
+      attempt_count: number;
+      row_version: string;
+    }>(`
+      select state::text, result_status::text, result_pack_version::text,
+             attempt_count, row_version::text
+      from pack_ev_recomputation_requests
+      where id = '${requestId}'
+    `);
+    assert.deepEqual(result.rows, [{
+      state: "completed",
+      result_status: "estimated",
+      result_pack_version: "2",
+      attempt_count: 2,
+      row_version: "5",
+    }]);
+  } finally {
+    await harness.stop();
+  }
+});

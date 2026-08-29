@@ -361,3 +361,222 @@ test("central publication invariants are monotonic, receipt-gated, and lease-fen
     await harness.stop();
   }
 });
+
+test("central admin support state preserves lifecycle, delivery, presence, and global activity invariants", { concurrency: false }, async () => {
+  const harness = await createMigratedDatabase();
+  const { db } = harness;
+  const organizationId = "92000000-0000-4000-8000-000000000001";
+  const operatorId = "92000000-0000-4000-8000-000000000002";
+  const cancelledOperatorId = "92000000-0000-4000-8000-000000000003";
+  const intentId = "92000000-0000-4000-8000-000000000004";
+  const attemptId = "92000000-0000-4000-8000-000000000005";
+  const linkId = "92000000-0000-4000-8000-000000000006";
+  const secondLinkId = "92000000-0000-4000-8000-000000000007";
+  const activityId = "92000000-0000-4000-8000-000000000008";
+  const claimToken = "92000000-0000-4000-8000-000000000009";
+  const at = "2026-08-29T12:00:00.000Z";
+  try {
+    await db.query(`
+      insert into organizations (id, slug, name, created_at)
+      values ('${organizationId}', 'admin-support', 'Admin Support', '${at}');
+
+      insert into operators (
+        id, email_normalized, display_name, password_hash, state,
+        row_version, created_at, updated_at
+      ) values (
+        '${operatorId}', 'invited@packscout.test', 'Invited Operator', null,
+        'pending', 1, '${at}', '${at}'
+      );
+    `);
+    await expectDatabaseError(
+      db.query(`
+        insert into operators (
+          email_normalized, display_name, password_hash, state
+        ) values ('invalid@packscout.test', 'Invalid Active', null, 'active')
+      `),
+      /operators_credential_lifecycle_check/,
+    );
+    await db.query(`
+      update operators
+      set state = 'active', password_hash = 'argon2id$fixture',
+          row_version = 2, updated_at = '${at}'::timestamptz + interval '1 second'
+      where id = '${operatorId}';
+
+      insert into operators (
+        id, email_normalized, display_name, password_hash, state,
+        row_version, created_at, updated_at
+      ) values (
+        '${cancelledOperatorId}', 'cancelled@packscout.test', 'Cancelled Operator',
+        null, 'pending', 1, '${at}', '${at}'
+      );
+      update operators
+      set state = 'cancelled', row_version = 2,
+          updated_at = '${at}'::timestamptz + interval '1 second'
+      where id = '${cancelledOperatorId}';
+    `);
+    await expectDatabaseError(
+      db.query(`
+        update operators
+        set state = 'active', password_hash = 'argon2id$forbidden',
+            row_version = 3,
+            updated_at = '${at}'::timestamptz + interval '2 seconds'
+        where id = '${cancelledOperatorId}'
+      `),
+      /cancelled operator is immutable/,
+    );
+
+    await db.query(`
+      insert into worker_instances (
+        instance_id, state, version, host, runtime_version,
+        started_at, last_heartbeat_at, activity_kind,
+        heartbeat_interval_ms, presence_stale_after_ms,
+        run_heartbeat_stale_after_ms, schedule_claim_lease_ms,
+        import_run_lease_ms, protected_payload_retention_days,
+        presence_retention_days, row_version, created_at, updated_at
+      ) values (
+        'worker:admin-support:1', 'running', '1.0.0', 'worker-host', 'v22',
+        '${at}', '${at}', 'idle', 10000, 30000, 60000, 30000,
+        60000, 90, 30, 1, '${at}', '${at}'
+      );
+      update worker_instances
+      set last_heartbeat_at = '${at}'::timestamptz + interval '1 second',
+          row_version = 2,
+          updated_at = '${at}'::timestamptz + interval '1 second'
+      where instance_id = 'worker:admin-support:1';
+    `);
+    await expectDatabaseError(
+      db.query(`
+        update worker_instances
+        set last_heartbeat_at = '${at}'::timestamptz + interval '2 seconds',
+            updated_at = '${at}'::timestamptz + interval '2 seconds'
+        where instance_id = 'worker:admin-support:1'
+      `),
+      /material update must increment row_version once/,
+    );
+    await db.query(`
+      update worker_instances
+      set state = 'stopped', stopped_at = '${at}'::timestamptz + interval '2 seconds',
+          last_heartbeat_at = '${at}'::timestamptz + interval '2 seconds',
+          row_version = 3,
+          updated_at = '${at}'::timestamptz + interval '2 seconds'
+      where instance_id = 'worker:admin-support:1';
+      update worker_instances
+      set state = 'running', stopped_at = null,
+          started_at = '${at}'::timestamptz + interval '3 seconds',
+          last_heartbeat_at = '${at}'::timestamptz + interval '3 seconds',
+          activity_kind = 'idle', activity_organization_id = null,
+          activity_provider_id = null, activity_run_id = null,
+          activity_started_at = null, row_version = 4,
+          updated_at = '${at}'::timestamptz + interval '3 seconds'
+      where instance_id = 'worker:admin-support:1';
+    `);
+
+    await db.query(`
+      insert into email_message_intents (
+        id, kind, input_json, recipient, idempotency_key, source,
+        state, due_at, row_version, created_at, updated_at
+      ) values (
+        '${intentId}', 'operator_invitation', 'null', 'invited@packscout.test',
+        'operator-invitation:${operatorId}', 'operator_invitations',
+        'pending', '${at}', 1, '${at}', '${at}'
+      );
+      update email_message_intents
+      set claim_owner = 'worker:admin-support:1', claim_token = '${claimToken}',
+          claim_expires_at = '${at}'::timestamptz + interval '1 minute',
+          attempt_count = 1, row_version = 2,
+          updated_at = '${at}'::timestamptz + interval '1 second'
+      where id = '${intentId}';
+      update email_message_intents
+      set state = 'sent', claim_owner = null, claim_token = null,
+          claim_expires_at = null, last_provider = 'fixture',
+          last_attempted_at = '${at}'::timestamptz + interval '2 seconds',
+          finalized_at = '${at}'::timestamptz + interval '2 seconds',
+          row_version = 3,
+          updated_at = '${at}'::timestamptz + interval '2 seconds'
+      where id = '${intentId}';
+      insert into email_message_attempts (
+        id, intent_id, attempt_number, attempted_at, outcome, provider,
+        provider_message_id, created_at
+      ) values (
+        '${attemptId}', '${intentId}', 1,
+        '${at}'::timestamptz + interval '2 seconds', 'sent', 'fixture',
+        'message-1', '${at}'::timestamptz + interval '2 seconds'
+      );
+    `);
+    await expectDatabaseError(
+      db.query(`update email_message_attempts set provider = 'changed' where id = '${attemptId}'`),
+      /append-only/,
+    );
+
+    await db.query(`
+      insert into email_link_tokens (
+        id, purpose, selector, verifier_hash, subject_id, address_normalized,
+        issued_at, expires_at, row_version, created_at, updated_at
+      ) values (
+        '${linkId}', 'operator_password_reset', 'abcdefghijklmnopqrstuv',
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ', '${operatorId}',
+        'invited@packscout.test', '${at}',
+        '${at}'::timestamptz + interval '1 hour', 1, '${at}', '${at}'
+      );
+    `);
+    await expectDatabaseError(
+      db.query(`
+        insert into email_link_tokens (
+          id, purpose, selector, verifier_hash, subject_id, address_normalized,
+          issued_at, expires_at, row_version, created_at, updated_at
+        ) values (
+          '${secondLinkId}', 'operator_password_reset', '1234567890123456789012',
+          '1234567890123456789012345678901234567890123', '${operatorId}',
+          'invited@packscout.test', '${at}',
+          '${at}'::timestamptz + interval '1 hour', 1, '${at}', '${at}'
+        )
+      `),
+      /email_link_tokens_one_outstanding_unique/,
+    );
+    await db.query(`
+      update email_link_tokens
+      set redeemed_at = '${at}'::timestamptz + interval '1 minute',
+          row_version = 2,
+          updated_at = '${at}'::timestamptz + interval '1 minute'
+      where id = '${linkId}';
+    `);
+
+    await db.query(`
+      insert into global_activity_events (
+        id, organization_id, event_digest, event_type, severity,
+        dedupe_key, recovery_key, title, summary, evidence,
+        event_at, received_at, created_at
+      ) values (
+        '${activityId}', '${organizationId}', '${hashA}', 'worker_fleet_unavailable',
+        'critical', 'worker-fleet', 'worker-fleet', 'No live workers',
+        'No centralized worker has a fresh heartbeat.', '{"liveWorkerCount":0}',
+        '${at}', '${at}', '${at}'
+      );
+    `);
+    await expectDatabaseError(
+      db.query(`update global_activity_events set title = 'Changed' where id = '${activityId}'`),
+      /append-only/,
+    );
+    await expectDatabaseError(
+      db.query(`
+        insert into global_activity_events (
+          organization_id, event_digest, event_type, severity, dedupe_key,
+          recovery_key, title, summary, event_at, received_at, created_at
+        ) values (
+          '${organizationId}', '${hashA}', 'worker_fleet_unavailable', 'critical',
+          'worker-fleet', 'worker-fleet', 'Duplicate', 'Duplicate relay',
+          '${at}', '${at}', '${at}'
+        )
+      `),
+      /global_activity_events_organization_digest_unique/,
+    );
+
+    const rows = await db.query<{
+      state: string;
+      row_version: string;
+    }>(`select state::text, row_version::text from operators where id = '${operatorId}'`);
+    assert.deepEqual(rows.rows, [{ state: "active", row_version: "2" }]);
+  } finally {
+    await harness.stop();
+  }
+});

@@ -9,8 +9,10 @@ datasource db {
 }
 
 enum operator_state {
+  pending
   active
   disabled
+  cancelled
 }
 
 enum operator_role {
@@ -148,6 +150,39 @@ enum retention_state {
   failed
 }
 
+enum worker_instance_state {
+  running
+  stopped
+}
+
+enum worker_activity_kind {
+  idle
+  scheduling
+  importing
+  estimated_ev
+  retention
+  message_outbox
+}
+
+enum email_message_intent_state {
+  pending
+  retrying
+  sent
+  skipped
+  failed
+}
+
+enum email_message_attempt_outcome {
+  sent
+  skipped
+  failed
+}
+
+enum email_link_purpose {
+  operator_password_reset
+  operator_invitation
+}
+
 model database_identity {
   singleton_key  Boolean  @id @default(true)
   database_role  String
@@ -168,6 +203,7 @@ model organizations {
   audit_events             audit_events[]
   providers                providers[]
   provider_activity_events provider_activity_events[]
+  global_activity_events   global_activity_events[]
   provider_health          provider_health[]
   admin_alerts             admin_alerts[]
 }
@@ -176,8 +212,9 @@ model operators {
   id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email_normalized String         @unique(map: "operators_email_normalized_unique")
   display_name     String
-  password_hash    String
+  password_hash    String?
   state            operator_state @default(active)
+  row_version      BigInt         @default(1)
   created_at       DateTime       @default(now()) @db.Timestamptz(6)
   updated_at       DateTime       @default(now()) @db.Timestamptz(6)
 
@@ -187,6 +224,7 @@ model operators {
   provider_config_versions         provider_config_versions[]
   provider_connection_tests        provider_connection_tests[]
   manifest_activation_operations   manifest_activation_operations[]
+  email_link_tokens                email_link_tokens[]
 }
 
 model operator_memberships {
@@ -246,6 +284,132 @@ model audit_events {
   organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "audit_events_organization_fk")
 
   @@index([organization_id, occurred_at(sort: Desc)], map: "audit_events_organization_occurred_idx")
+}
+
+model worker_instances {
+  instance_id                      String                @id
+  state                            worker_instance_state @default(running)
+  version                          String
+  host                             String
+  runtime_version                  String
+  started_at                       DateTime              @db.Timestamptz(6)
+  last_heartbeat_at                DateTime              @db.Timestamptz(6)
+  stopped_at                       DateTime?             @db.Timestamptz(6)
+  activity_kind                    worker_activity_kind  @default(idle)
+  activity_organization_id         String?               @db.Uuid
+  activity_provider_id             String?               @db.Uuid
+  activity_run_id                  String?               @db.Uuid
+  activity_started_at              DateTime?             @db.Timestamptz(6)
+  heartbeat_interval_ms            Int
+  presence_stale_after_ms          Int
+  run_heartbeat_stale_after_ms     Int
+  schedule_claim_lease_ms          Int
+  import_run_lease_ms              Int
+  protected_payload_retention_days Int
+  presence_retention_days          Int
+  row_version                      BigInt                @default(1)
+  created_at                       DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime              @default(now()) @db.Timestamptz(6)
+
+  @@index([last_heartbeat_at(sort: Desc)], map: "worker_instances_heartbeat_idx")
+  @@index([state, last_heartbeat_at(sort: Desc)], map: "worker_instances_state_heartbeat_idx")
+  @@index([activity_organization_id, activity_provider_id], map: "worker_instances_activity_provider_idx")
+}
+
+model email_message_intents {
+  id                String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind              String
+  input_json        Json                       @db.JsonB
+  recipient         String
+  idempotency_key   String                     @unique(map: "email_message_intents_idempotency_key_unique")
+  source            String
+  state             email_message_intent_state @default(pending)
+  due_at            DateTime                   @db.Timestamptz(6)
+  attempt_count     Int                        @default(0)
+  claim_owner       String?
+  claim_token       String?                    @db.Uuid
+  claim_expires_at  DateTime?                  @db.Timestamptz(6)
+  last_provider     String?
+  last_error_code   String?
+  last_skip_reason  String?
+  last_attempted_at DateTime?                  @db.Timestamptz(6)
+  finalized_at      DateTime?                  @db.Timestamptz(6)
+  row_version       BigInt                     @default(1)
+  created_at        DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime                   @default(now()) @db.Timestamptz(6)
+
+  attempts email_message_attempts[]
+
+  @@index([state, due_at, id], map: "email_message_intents_state_due_idx")
+  @@index([source, state], map: "email_message_intents_source_state_idx")
+  @@index([created_at(sort: Desc), id(sort: Desc)], map: "email_message_intents_created_idx")
+  @@index([state, finalized_at], map: "email_message_intents_state_finalized_idx")
+  @@index([recipient, created_at(sort: Desc)], map: "email_message_intents_recipient_created_idx")
+}
+
+model email_message_attempts {
+  id                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  intent_id           String                        @db.Uuid
+  attempt_number      Int
+  attempted_at        DateTime                      @db.Timestamptz(6)
+  outcome             email_message_attempt_outcome
+  provider            String?
+  provider_message_id String?
+  error_code          String?
+  error_message       String?
+  error_retryable     Boolean?
+  skip_reason         String?
+  created_at          DateTime                      @default(now()) @db.Timestamptz(6)
+
+  intent email_message_intents @relation(fields: [intent_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "email_message_attempts_intent_fk")
+
+  @@unique([intent_id, attempt_number], map: "email_message_attempts_intent_attempt_unique")
+  @@index([attempted_at(sort: Desc)], map: "email_message_attempts_attempted_idx")
+}
+
+model email_link_tokens {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  purpose            email_link_purpose
+  selector           String             @unique(map: "email_link_tokens_selector_unique")
+  verifier_hash      String
+  subject_id         String             @db.Uuid
+  address_normalized String
+  issued_at          DateTime           @db.Timestamptz(6)
+  expires_at         DateTime           @db.Timestamptz(6)
+  redeemed_at        DateTime?          @db.Timestamptz(6)
+  superseded_at      DateTime?          @db.Timestamptz(6)
+  row_version        BigInt             @default(1)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
+
+  subject operators @relation(fields: [subject_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "email_link_tokens_subject_fk")
+
+  @@index([purpose, subject_id], map: "email_link_tokens_outstanding_idx")
+  @@index([expires_at], map: "email_link_tokens_expiry_idx")
+}
+
+model global_activity_events {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String   @db.Uuid
+  event_digest    String   @db.Char(64)
+  event_type      String
+  severity        severity
+  dedupe_key      String
+  recovery_key    String
+  title           String
+  summary         String
+  evidence        Json     @default("{}") @db.JsonB
+  event_at        DateTime @db.Timestamptz(6)
+  received_at     DateTime @db.Timestamptz(6)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  organization organizations  @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_activity_events_organization_fk")
+  alerts       admin_alerts[] @relation("AlertLatestGlobalActivity")
+
+  @@unique([organization_id, id], map: "global_activity_events_organization_id_unique")
+  @@unique([organization_id, event_digest], map: "global_activity_events_organization_digest_unique")
+  @@index([organization_id, event_at(sort: Desc)], map: "global_activity_events_organization_event_idx")
+  @@index([organization_id, dedupe_key, event_at(sort: Desc)], map: "global_activity_events_dedupe_event_idx")
 }
 
 model providers {
@@ -477,31 +641,33 @@ model provider_health {
 }
 
 model admin_alerts {
-  id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organization_id           String      @db.Uuid
-  latest_activity_event_id  String?     @db.Uuid
-  kind                      String
-  severity                  severity
-  state                     alert_state @default(active)
-  dedupe_key                String
-  recovery_key              String
-  title                     String
-  summary                   String
-  provider_id               String?     @db.Uuid
-  run_id                    String?     @db.Uuid
-  quarantine_id             String?     @db.Uuid
-  first_seen_at             DateTime    @db.Timestamptz(6)
-  last_seen_at              DateTime    @db.Timestamptz(6)
-  occurrence_count          Int         @default(1)
-  reopened_count            Int         @default(0)
-  acknowledged_by_actor_key String?
-  acknowledged_at           DateTime?   @db.Timestamptz(6)
-  resolved_by_actor_key     String?
-  resolved_at               DateTime?   @db.Timestamptz(6)
+  id                              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                 String      @db.Uuid
+  latest_activity_event_id        String?     @db.Uuid
+  latest_global_activity_event_id String?     @db.Uuid
+  kind                            String
+  severity                        severity
+  state                           alert_state @default(active)
+  dedupe_key                      String
+  recovery_key                    String
+  title                           String
+  summary                         String
+  provider_id                     String?     @db.Uuid
+  run_id                          String?     @db.Uuid
+  quarantine_id                   String?     @db.Uuid
+  first_seen_at                   DateTime    @db.Timestamptz(6)
+  last_seen_at                    DateTime    @db.Timestamptz(6)
+  occurrence_count                Int         @default(1)
+  reopened_count                  Int         @default(0)
+  acknowledged_by_actor_key       String?
+  acknowledged_at                 DateTime?   @db.Timestamptz(6)
+  resolved_by_actor_key           String?
+  resolved_at                     DateTime?   @db.Timestamptz(6)
 
-  organization          organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_organization_fk")
-  provider              providers?                @relation("ProviderAlertOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_provider_organization_fk")
-  latest_activity_event provider_activity_events? @relation("AlertLatestActivity", fields: [provider_id, latest_activity_event_id], references: [provider_id, id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_latest_activity_fk")
+  organization                 organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_organization_fk")
+  provider                     providers?                @relation("ProviderAlertOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_provider_organization_fk")
+  latest_activity_event        provider_activity_events? @relation("AlertLatestActivity", fields: [provider_id, latest_activity_event_id], references: [provider_id, id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_latest_activity_fk")
+  latest_global_activity_event global_activity_events?   @relation("AlertLatestGlobalActivity", fields: [organization_id, latest_global_activity_event_id], references: [organization_id, id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_latest_global_activity_fk")
 
   @@unique([organization_id, dedupe_key], map: "admin_alerts_organization_dedupe_unique")
   @@index([organization_id, state, last_seen_at(sort: Desc)], map: "admin_alerts_organization_state_seen_idx")

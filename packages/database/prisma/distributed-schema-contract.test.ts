@@ -16,6 +16,10 @@ const CENTRAL_TABLES = [
   "operator_sessions",
   "auth_rate_limits",
   "audit_events",
+  "worker_instances",
+  "email_message_intents",
+  "email_message_attempts",
+  "email_link_tokens",
   "providers",
   "provider_public_profile_versions",
   "provider_config_versions",
@@ -23,6 +27,7 @@ const CENTRAL_TABLES = [
   "provider_database_nodes",
   "provider_connection_tests",
   "provider_activity_events",
+  "global_activity_events",
   "provider_health",
   "admin_alerts",
   "global_categories",
@@ -70,6 +75,7 @@ const PROVIDER_TABLES = [
   "control_commands",
   "quarantine_records",
   "quarantine_attempts",
+  "pack_ev_recomputation_requests",
   "retention_executions",
   "local_audit_events",
   "provider_activity_outbox",
@@ -82,7 +88,7 @@ const PROVIDER_TABLES = [
 ] as const;
 
 const CENTRAL_ENUMS = {
-  operator_state: ["active", "disabled"],
+  operator_state: ["pending", "active", "disabled", "cancelled"],
   operator_role: ["admin", "data_operator"],
   audit_outcome: ["success", "failure", "blocked"],
   provider_lifecycle: ["draft", "active", "disabled", "archived"],
@@ -127,6 +133,24 @@ const CENTRAL_ENUMS = {
   publication_operation_state: ["pending", "accepted", "ambiguous", "failed"],
   manifest_operation: ["advance", "add", "remove", "rollback"],
   retention_state: ["running", "succeeded", "failed"],
+  worker_instance_state: ["running", "stopped"],
+  worker_activity_kind: [
+    "idle",
+    "scheduling",
+    "importing",
+    "estimated_ev",
+    "retention",
+    "message_outbox",
+  ],
+  email_message_intent_state: [
+    "pending",
+    "retrying",
+    "sent",
+    "skipped",
+    "failed",
+  ],
+  email_message_attempt_outcome: ["sent", "skipped", "failed"],
+  email_link_purpose: ["operator_password_reset", "operator_invitation"],
 } as const;
 
 const PROVIDER_ENUMS = {
@@ -174,6 +198,8 @@ const PROVIDER_ENUMS = {
   quarantine_state: ["open", "resolved", "expired"],
   quarantine_attempt_state: ["running", "succeeded", "failed"],
   retention_state: ["running", "succeeded", "failed"],
+  ev_recomputation_state: ["queued", "running", "completed", "failed"],
+  ev_recomputation_result: ["estimated", "unavailable"],
   audit_outcome: ["success", "failure", "blocked"],
   severity: ["info", "warning", "critical"],
   activity_delivery_state: ["pending", "delivered"],
@@ -190,6 +216,9 @@ const PROVIDER_ENUMS = {
 } as const;
 
 const CENTRAL_SOFT_REFERENCES = [
+  "worker_instances.activity_organization_id",
+  "worker_instances.activity_provider_id",
+  "worker_instances.activity_run_id",
   "provider_activity_events.local_run_id",
   "provider_activity_events.local_quarantine_id",
   "admin_alerts.run_id",
@@ -223,6 +252,9 @@ const PROVIDER_SOFT_REFERENCES = [
 const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "database_identity.provider_id",
   "audit_events.subject_id",
+  "worker_instances.activity_organization_id",
+  "worker_instances.activity_provider_id",
+  "worker_instances.activity_run_id",
   "provider_activity_events.local_run_id",
   "provider_activity_events.local_quarantine_id",
   "admin_alerts.run_id",
@@ -460,8 +492,8 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
 
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
-  assert.equal(centralModels.size, 37);
-  assert.equal(providerModels.size, 30);
+  assert.equal(centralModels.size, 42);
+  assert.equal(providerModels.size, 31);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 
@@ -594,4 +626,68 @@ test("central baseline pins exactly-once and bounded global-correlation evidence
   assert.match(migration, /octet_length\("after_state"::text\) <= 4096/u);
   assert.match(migration, /correlation_suggestions_bounded_rationale_check/u);
   assert.match(migration, /'raw', 'payload', 'credential', 'databaseUrl', 'externalIdentifier'/u);
+});
+
+test("admin support state stays central while recomputation work stays provider-local", () => {
+  const centralSource = readFileSync(centralSchemaPath, "utf8");
+  const providerSource = readFileSync(providerSchemaPath, "utf8");
+  const centralModels = modelMap(centralSource);
+  const providerModels = modelMap(providerSource);
+
+  for (const modelName of [
+    "operators",
+    "worker_instances",
+    "email_message_intents",
+    "email_link_tokens",
+  ]) {
+    const model = centralModels.get(modelName);
+    assert.ok(model, `central ${modelName} is missing`);
+    const fields = fieldsIn(model);
+    for (const fieldName of ["row_version", "created_at", "updated_at"]) {
+      assert.ok(fields.has(fieldName), `${modelName}.${fieldName} is required`);
+    }
+  }
+
+  for (const modelName of [
+    "worker_instances",
+    "email_message_intents",
+    "email_message_attempts",
+    "email_link_tokens",
+    "global_activity_events",
+  ]) {
+    assert.ok(centralModels.has(modelName), `${modelName} must be central`);
+    assert.ok(!providerModels.has(modelName), `${modelName} must not be provider-local`);
+  }
+
+  const recomputation = providerModels.get("pack_ev_recomputation_requests");
+  assert.ok(recomputation, "provider recomputation queue is missing");
+  assert.ok(!centralModels.has("pack_ev_recomputation_requests"));
+  const recomputationFields = fieldsIn(recomputation);
+  for (const fieldName of [
+    "pack_id",
+    "trigger_change_sequence",
+    "input_hash",
+    "state",
+    "row_version",
+    "created_at",
+    "updated_at",
+  ]) {
+    assert.ok(
+      recomputationFields.has(fieldName),
+      `pack_ev_recomputation_requests.${fieldName} is required`,
+    );
+  }
+
+  const centralMigration = baselineMigration("central");
+  assert.match(centralMigration, /operators_credential_lifecycle_check/u);
+  assert.match(centralMigration, /email_link_tokens_one_outstanding_unique/u);
+  assert.match(centralMigration, /global_activity_events_append_only/u);
+  assert.match(centralMigration, /worker_instances_row_version_guard/u);
+
+  const providerMigration = baselineMigration("provider");
+  assert.match(providerMigration, /pack_ev_recomputation_requests_state_check/u);
+  assert.match(providerMigration, /pack_ev_recomputation_requests_claim_idx/u);
+  assert.match(providerMigration, /pack_ev_recomputation_requests_state_guard_trigger/u);
+  assert.match(providerMigration, /pack_ev_recomputation_requests_pack_id_fkey/u);
+  assert.match(providerMigration, /pack_ev_recomputation_requests_trigger_change_fkey/u);
 });
