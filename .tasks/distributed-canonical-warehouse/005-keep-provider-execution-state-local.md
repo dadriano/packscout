@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/018
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including state recovery, lease fencing, command audit, and retention behavior
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -69,22 +69,30 @@ A provider command contains `commandId`, `idempotencyKey`, `commandType`, `expec
 
 ### Authority acceptance
 
-- [ ] Provider runtime, cursor, schedule, worker fence, runs, commands, quarantine, retention, local audit, and promotion checkpoints are provider-local.
-- [ ] No stream, stream-key, per-data-kind cursor, per-data-kind schedule, or per-data-kind worker state exists.
-- [ ] Runtime transition history records state, reason, actor, generation, and correlation without rewriting older events.
-- [ ] A stopped provider records the emergency or operator reason through the general state model.
-- [ ] Central observation loss does not overwrite or reset valid local authority.
+- [x] Provider runtime, cursor, schedule, worker fence, runs, commands, quarantine, retention, local audit, and promotion checkpoints are provider-local.
+- [x] No stream, stream-key, per-data-kind cursor, per-data-kind schedule, or per-data-kind worker state exists.
+- [x] Runtime transition history records state, reason, actor, generation, and correlation without rewriting older events.
+- [x] A stopped provider records the emergency or operator reason through the general state model.
+- [x] Central observation loss does not overwrite or reset valid local authority.
 
 ### Recovery acceptance
 
-- [ ] Duplicate run or command requests return the existing active outcome without creating concurrent provider work.
-- [ ] A stale or expired lease owner cannot commit a page, cursor, command result, or promotion checkpoint.
-- [ ] Restart recovery begins from the last committed cursor and retains immutable historical outcomes.
-- [ ] An unreachable provider returns a bounded failure and never creates a central queued command.
-- [ ] Two provider runtimes can hold independent leases and progress concurrently without shared execution state.
+- [x] Duplicate run or command requests return the existing active outcome without creating concurrent provider work.
+- [x] A stale or expired lease owner cannot commit a page, cursor, command result, or promotion checkpoint.
+- [x] Restart recovery begins from the last committed cursor and retains immutable historical outcomes.
+- [x] An unreachable provider returns a bounded failure and never creates a central queued command.
+- [x] Two provider runtimes can hold independent leases and progress concurrently without shared execution state.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - One provider owns one runtime, cursor, schedule, import lease, and active mixed run; no stream authority is introduced.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- The production worker now composes a central authority reader with an exact, bounded provider-database gateway and provider-local runtime coordinator; it has no central execution, stream, estimated-EV, or legacy retention fallback.
+- Provider-local repositories implement runtime/config synchronization, the operating-state transition matrix and append-only state events, import/promotion leases with monotonic DB-clock fences, immutable run outcomes and pages, commands, quarantine attempts, retention executions, local audit, recovery lineage, and independent promotion checkpoints.
+- Cached authority uses exact provider/config/topology/database/source-credential fingerprints. A pinned active run may continue during central loss, pending routes activate only after the current route is reachable and idle, and expired authority blocks later new or automatic recovery work.
+- Migrated PostgreSQL tests prove duplicate/idempotent runs and commands, exact retry reservation, stale-owner takeover from the last cursor, post-terminal expiry blocking, commit-time fence loss, exact terminal-page replay versus changed-digest conflict, two-provider isolation, and independent leases/checkpoints.
+- Contracts pass 58/58, services 154/154, worker 22/22, provider repository integration 6/6, migration invariants 10/10, Prisma schema 14/14, and database 80 pass with one expected infrastructure skip. Central/provider Prisma validation, focused lint/type checking, the framework ratchet, and `git diff --check` pass.
