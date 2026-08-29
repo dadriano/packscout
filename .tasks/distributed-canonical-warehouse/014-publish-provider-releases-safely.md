@@ -18,6 +18,15 @@ those active contracts and Convex finalization enforces the complete active
 release invariant set. The older `convex/schema.ts` is not integration-ready and
 must not replace the authoritative schema.
 
+The reusable WIP protocol is preserved at commit
+`847ce287bc615ce46b5b841340d39b89c8228b17`. Its provider-local durable
+intent/attempt/receipt state, exact receipt verification, idempotent recovery,
+owner claims, activity outbox, and worker coordination passed focused and full
+changed-surface verification. It is a selective port source, not a completed
+Task 014 implementation. The active finalizer still needs complete category,
+content-mode, timing, chase, and known-collectible graph invariants plus non-empty
+tamper coverage; retry backpressure is still process-local.
+
 ## Start Here
 
 Write the operation transcript for starting, batching, finalizing, and reconciling one provider release, including a duplicate request and a lost final response with the exact receipt expected afterward.
