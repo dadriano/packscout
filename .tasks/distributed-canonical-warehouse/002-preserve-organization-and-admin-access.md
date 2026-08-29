@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/003, distributed-canonical-warehouse/006, distributed-canonical-warehouse/008, distributed-canonical-warehouse/010, distributed-canonical-warehouse/011
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including security, route parity, accessibility, and focused verification
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

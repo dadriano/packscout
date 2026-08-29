@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/005, distributed-canonical-warehouse/006
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including schema invariants, canonical write behavior, and representative data verification
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

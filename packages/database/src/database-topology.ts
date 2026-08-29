@@ -65,6 +65,12 @@ export function assertProviderKey(value: string): void {
   }
 }
 
+export function assertDatabaseUuid(value: string, label = "ID"): void {
+  if (!UUID_PATTERN.test(value)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+}
+
 export function providerDatabaseName(providerKey: string): string {
   assertProviderKey(providerKey);
   return `packscout_${providerKey}`;
@@ -82,9 +88,7 @@ export function providerDatabaseTarget(input: {
   providerId: string;
   providerKey: string;
 }): ProviderDatabaseTargetDescriptor {
-  if (!UUID_PATTERN.test(input.providerId)) {
-    throw new TypeError("Provider ID is invalid.");
-  }
+  assertDatabaseUuid(input.providerId, "Provider ID");
   return Object.freeze({
     databaseRole: "provider",
     databaseName: providerDatabaseName(input.providerKey),

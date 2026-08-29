@@ -1,0 +1,878 @@
+generator provider_client {
+  provider = "prisma-client-js"
+  output   = "../generated/provider"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PACKSCOUT_PROVIDER_DATABASE_URL")
+}
+
+enum entity_lifecycle {
+  active
+  retired
+}
+
+enum availability_state {
+  available
+  sold_out
+  unavailable
+}
+
+enum evidence_state {
+  complete
+  partial
+  unknown
+}
+
+enum pack_format {
+  repack
+  gacha
+}
+
+enum collectible_type {
+  card
+  watch
+  art
+  coin
+  sealed_product
+  memorabilia
+  other
+}
+
+enum content_role {
+  top_chase
+  featured_chase
+  possible_outcome
+  other
+}
+
+enum market_event_type {
+  sale
+  buyback
+  mint
+  burn
+  transfer
+  list
+  unlist
+  swap
+  ship
+  other
+}
+
+enum promotion_operation {
+  upsert
+  retire
+}
+
+enum runtime_state {
+  idle
+  running
+  paused
+  stopped
+  error
+}
+
+enum worker_role {
+  import
+  promotion
+}
+
+enum run_state {
+  queued
+  running
+  succeeded
+  incomplete
+  failed
+}
+
+enum run_trigger {
+  scheduled
+  manual
+  recovery
+}
+
+enum page_continuation {
+  more
+  head
+}
+
+enum command_type {
+  run
+  pause
+  resume
+  stop
+  retry_run
+  retry_quarantine
+}
+
+enum command_state {
+  pending
+  accepted
+  rejected
+  completed
+  failed
+}
+
+enum quarantine_state {
+  open
+  resolved
+  expired
+}
+
+enum quarantine_attempt_state {
+  running
+  succeeded
+  failed
+}
+
+enum retention_state {
+  running
+  succeeded
+  failed
+}
+
+enum audit_outcome {
+  success
+  failure
+  blocked
+}
+
+enum severity {
+  info
+  warning
+  critical
+}
+
+enum activity_delivery_state {
+  pending
+  delivered
+}
+
+enum artifact_lifecycle {
+  building
+  assembled
+  publishing
+  complete
+  blocked
+  failed
+}
+
+enum publication_operation_state {
+  pending
+  accepted
+  ambiguous
+  failed
+}
+
+enum publication_receipt_outcome {
+  accepted
+  rejected
+}
+
+model database_identity {
+  singleton_key  Boolean  @id @default(true)
+  database_role  String
+  schema_version String
+  provider_id    String   @db.Uuid
+  provider_key   String   @db.VarChar(53)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model categories {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parent_category_id String?          @db.Uuid
+  category_key       String           @unique(map: "categories_category_key_key")
+  display_name       String
+  lifecycle          entity_lifecycle @default(active)
+  retired_at         DateTime?        @db.Timestamptz(6)
+  row_version        BigInt           @default(1)
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @default(now()) @db.Timestamptz(6)
+
+  parent       categories?    @relation("category_tree", fields: [parent_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "categories_parent_category_id_fkey")
+  children     categories[]   @relation("category_tree")
+  packs        packs[]
+  collectibles collectibles[]
+
+  @@index([parent_category_id, lifecycle], map: "categories_parent_lifecycle_idx")
+}
+
+model packs {
+  id                                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id                            String?            @db.Uuid
+  pack_key                               String             @unique(map: "packs_pack_key_key")
+  family_key                             String?
+  display_name                           String
+  description                            String?
+  pack_format                            pack_format
+  lifecycle                              entity_lifecycle   @default(active)
+  availability                           availability_state
+  content_evidence                       evidence_state
+  total_inventory                        BigInt?
+  remaining_inventory                    BigInt?
+  price_amount                           Decimal?           @db.Decimal(38, 18)
+  price_currency                         String?            @db.VarChar(42)
+  price_usd_amount                       Decimal?           @db.Decimal(38, 18)
+  price_unavailable_reason               String?
+  buyback_rate                           Decimal?           @db.Decimal(20, 18)
+  buyback_source_kind                    String?
+  vendor_ev_amount                       Decimal?           @db.Decimal(38, 18)
+  vendor_ev_currency                     String?            @db.VarChar(42)
+  vendor_ev_observed_at                  DateTime?          @db.Timestamptz(6)
+  vendor_ev_unavailable_reason           String?
+  packscout_ev_amount                    Decimal?           @db.Decimal(38, 18)
+  packscout_ev_currency                  String?            @db.VarChar(42)
+  packscout_ev_model_version             String
+  packscout_ev_confidence_policy_version String
+  packscout_ev_confidence                Json?              @db.JsonB
+  packscout_ev_data_as_of                DateTime?          @db.Timestamptz(6)
+  packscout_ev_calculated_at             DateTime?          @db.Timestamptz(6)
+  packscout_ev_unavailable_reason        String?
+  primary_image_url                      String?
+  primary_image_alt                      String?
+  listing_url                            String?
+  attributes                             Json               @default("{}") @db.JsonB
+  source_updated_at                      DateTime           @db.Timestamptz(6)
+  retired_at                             DateTime?          @db.Timestamptz(6)
+  row_version                            BigInt             @default(1)
+  created_at                             DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime           @default(now()) @db.Timestamptz(6)
+
+  category      categories?     @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "packs_category_id_fkey")
+  contents      pack_contents[]
+  pulls         pulls[]
+  market_events market_events[]
+
+  @@index([category_id, lifecycle], map: "packs_category_lifecycle_idx")
+  @@index([availability, lifecycle], map: "packs_availability_lifecycle_idx")
+}
+
+model collectibles {
+  id                           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id                  String?          @db.Uuid
+  collectible_key              String           @unique(map: "collectibles_collectible_key_key")
+  collectible_type             collectible_type
+  display_name                 String
+  normalized_name              String
+  year                         Int?
+  brand                        String?
+  set_or_series                String?
+  card_number                  String?
+  reference_number             String?
+  subject                      String?
+  grade                        String?
+  grader                       String?
+  primary_image_url            String?
+  primary_image_alt            String?
+  valuation_amount             Decimal?         @db.Decimal(38, 18)
+  valuation_currency           String?          @db.VarChar(42)
+  valuation_usd_amount         Decimal?         @db.Decimal(38, 18)
+  valuation_unavailable_reason String?
+  valuation_type               String?
+  valuation_observed_at        DateTime?        @db.Timestamptz(6)
+  data_as_of                   DateTime         @db.Timestamptz(6)
+  lifecycle                    entity_lifecycle @default(active)
+  attributes                   Json             @default("{}") @db.JsonB
+  retired_at                   DateTime?        @db.Timestamptz(6)
+  row_version                  BigInt           @default(1)
+  created_at                   DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime         @default(now()) @db.Timestamptz(6)
+
+  category      categories?                @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "collectibles_category_id_fkey")
+  aliases       collectible_name_aliases[]
+  instances     collectible_instances[]
+  pack_contents pack_contents[]
+  pull_items    pull_items[]
+  market_events market_events[]
+
+  @@index([category_id, collectible_type], map: "collectibles_category_type_idx")
+  @@index([normalized_name], map: "collectibles_normalized_name_idx")
+  @@index([lifecycle], map: "collectibles_lifecycle_idx")
+}
+
+model collectible_name_aliases {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectible_id  String           @db.Uuid
+  display_name    String
+  normalized_name String
+  lifecycle       entity_lifecycle @default(active)
+  retired_at      DateTime?        @db.Timestamptz(6)
+  row_version     BigInt           @default(1)
+  created_at      DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
+
+  collectible collectibles @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "collectible_name_aliases_collectible_id_fkey")
+
+  @@index([collectible_id, lifecycle], map: "collectible_aliases_collectible_lifecycle_idx")
+}
+
+model collectible_instances {
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectible_id       String           @db.Uuid
+  instance_key         String           @unique(map: "collectible_instances_instance_key_key")
+  certifier            String?
+  certification_number String?
+  lifecycle            entity_lifecycle @default(active)
+  attributes           Json             @default("{}") @db.JsonB
+  retired_at           DateTime?        @db.Timestamptz(6)
+  row_version          BigInt           @default(1)
+  created_at           DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime         @default(now()) @db.Timestamptz(6)
+
+  collectible   collectibles    @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "collectible_instances_collectible_id_fkey")
+  pack_contents pack_contents[]
+  pull_items    pull_items[]
+  market_events market_events[]
+
+  @@unique([id, collectible_id], map: "collectible_instances_id_collectible_id_key")
+  @@index([collectible_id, lifecycle], map: "collectible_instances_collectible_lifecycle_idx")
+}
+
+model pack_contents {
+  id                            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pack_id                       String           @db.Uuid
+  collectible_id                String           @db.Uuid
+  collectible_instance_id       String?          @db.Uuid
+  total_quantity                BigInt?
+  available_quantity            BigInt?
+  content_role                  content_role
+  probability                   Decimal?         @db.Decimal(20, 18)
+  stated_value_amount           Decimal?         @db.Decimal(38, 18)
+  stated_value_currency         String?          @db.VarChar(42)
+  evidence_kinds                String[]
+  match_confidence_basis_points Int
+  match_confidence_band         String
+  observed_at                   DateTime         @db.Timestamptz(6)
+  display_order                 Int
+  lifecycle                     entity_lifecycle @default(active)
+  retired_at                    DateTime?        @db.Timestamptz(6)
+  row_version                   BigInt           @default(1)
+  created_at                    DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime         @default(now()) @db.Timestamptz(6)
+
+  pack                 packs                  @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_pack_id_fkey")
+  collectible          collectibles           @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_collectible_id_fkey")
+  collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_instance_collectible_fkey")
+
+  @@index([pack_id, lifecycle], map: "pack_contents_pack_lifecycle_idx")
+  @@index([collectible_id, lifecycle], map: "pack_contents_collectible_lifecycle_idx")
+}
+
+model provider_accounts {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  account_key  String           @unique(map: "provider_accounts_account_key_key") @db.Char(64)
+  display_name String?
+  attributes   Json             @default("{}") @db.JsonB
+  lifecycle    entity_lifecycle @default(active)
+  retired_at   DateTime?        @db.Timestamptz(6)
+  row_version  BigInt           @default(1)
+  created_at   DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime         @default(now()) @db.Timestamptz(6)
+
+  pulls              pulls[]
+  market_events_from market_events[] @relation("market_events_from_account")
+  market_events_to   market_events[] @relation("market_events_to_account")
+}
+
+model pulls {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pull_key            String   @unique(map: "pulls_pull_key_key")
+  fact_digest         String   @db.Char(64)
+  pack_id             String   @db.Uuid
+  provider_account_id String?  @db.Uuid
+  occurred_at         DateTime @db.Timestamptz(6)
+  paid_amount         Decimal? @db.Decimal(38, 18)
+  paid_currency       String?  @db.VarChar(42)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  pack             packs              @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pulls_pack_id_fkey")
+  provider_account provider_accounts? @relation(fields: [provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pulls_provider_account_id_fkey")
+  items            pull_items[]
+
+  @@index([pack_id, occurred_at(sort: Desc)], map: "pulls_pack_occurred_idx")
+  @@index([provider_account_id, occurred_at(sort: Desc)], map: "pulls_account_occurred_idx")
+}
+
+model pull_items {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pull_id                 String   @db.Uuid
+  ordinal                 Int
+  collectible_id          String   @db.Uuid
+  collectible_instance_id String?  @db.Uuid
+  quantity                BigInt
+  stated_value_amount     Decimal? @db.Decimal(38, 18)
+  stated_value_currency   String?  @db.VarChar(42)
+  created_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  pull                 pulls                  @relation(fields: [pull_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_pull_id_fkey")
+  collectible          collectibles           @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_collectible_id_fkey")
+  collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_instance_collectible_fkey")
+
+  @@unique([pull_id, ordinal], map: "pull_items_pull_id_ordinal_key")
+}
+
+model market_events {
+  id                       String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_key                String            @unique(map: "market_events_event_key_key")
+  fact_digest              String            @db.Char(64)
+  event_group_id           String?           @db.Uuid
+  event_type               market_event_type
+  pack_id                  String?           @db.Uuid
+  collectible_id           String?           @db.Uuid
+  collectible_instance_id  String?           @db.Uuid
+  from_provider_account_id String?           @db.Uuid
+  to_provider_account_id   String?           @db.Uuid
+  quantity                 BigInt?
+  occurred_at              DateTime          @db.Timestamptz(6)
+  amount                   Decimal?          @db.Decimal(38, 18)
+  currency                 String?           @db.VarChar(42)
+  details                  Json              @default("{}") @db.JsonB
+  created_at               DateTime          @default(now()) @db.Timestamptz(6)
+
+  pack                 packs?                 @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_pack_id_fkey")
+  collectible          collectibles?          @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_collectible_id_fkey")
+  collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_instance_collectible_fkey")
+  from_account         provider_accounts?     @relation("market_events_from_account", fields: [from_provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_from_account_id_fkey")
+  to_account           provider_accounts?     @relation("market_events_to_account", fields: [to_provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_to_account_id_fkey")
+
+  @@index([event_group_id, event_type, occurred_at(sort: Desc)], map: "market_events_group_type_occurred_idx")
+  @@index([pack_id, occurred_at(sort: Desc)], map: "market_events_pack_occurred_idx")
+  @@index([collectible_id, occurred_at(sort: Desc)], map: "market_events_collectible_occurred_idx")
+  @@index([collectible_instance_id, occurred_at(sort: Desc)], map: "market_events_instance_occurred_idx")
+}
+
+model promotion_ledger {
+  singleton_key Boolean  @id @default(true)
+  last_sequence BigInt   @default(0)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model promotion_changes {
+  sequence       BigInt              @id
+  entity_type    String
+  entity_id      String              @db.Uuid
+  entity_version BigInt
+  operation      promotion_operation
+  changed_at     DateTime            @db.Timestamptz(6)
+  created_at     DateTime            @default(now()) @db.Timestamptz(6)
+
+  @@unique([entity_type, entity_id, entity_version, operation], map: "promotion_changes_entity_version_operation_key")
+}
+
+model provider_runtime {
+  singleton_key                Boolean       @id @default(true)
+  central_provider_id          String        @db.Uuid
+  provider_key                 String
+  operating_state              runtime_state @default(idle)
+  state_reason                 String?
+  state_generation             BigInt        @default(0)
+  cached_config_version_id     String?       @db.Uuid
+  cached_config_version_number BigInt?
+  cached_configuration         Json?         @db.JsonB
+  config_expires_at            DateTime?     @db.Timestamptz(6)
+  last_control_sync_at         DateTime?     @db.Timestamptz(6)
+  schedule_seconds             Int?
+  next_due_at                  DateTime?     @db.Timestamptz(6)
+  source_cursor                Json?         @db.JsonB
+  source_cursor_hash           String?       @db.Char(64)
+  freshness_state              String
+  quality_state                String
+  consecutive_failures         Int           @default(0)
+  latest_failure_code          String?
+  last_attempted_at            DateTime?     @db.Timestamptz(6)
+  last_head_reached_at         DateTime?     @db.Timestamptz(6)
+  last_runner_heartbeat_at     DateTime?     @db.Timestamptz(6)
+  recovered_at                 DateTime?     @db.Timestamptz(6)
+  row_version                  BigInt        @default(1)
+  created_at                   DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime      @default(now()) @db.Timestamptz(6)
+}
+
+model provider_state_events {
+  sequence         BigInt         @id @default(autoincrement())
+  from_state       runtime_state?
+  to_state         runtime_state
+  state_generation BigInt         @unique(map: "provider_state_events_state_generation_key")
+  reason           String?
+  actor_type       String
+  actor_id         String
+  correlation_id   String         @db.Uuid
+  occurred_at      DateTime       @db.Timestamptz(6)
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+}
+
+model provider_worker_states {
+  worker_role      worker_role @id
+  lease_owner      String?
+  lease_fence      BigInt      @default(0)
+  heartbeat_at     DateTime?   @db.Timestamptz(6)
+  lease_expires_at DateTime?   @db.Timestamptz(6)
+  row_version      BigInt      @default(1)
+  created_at       DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime    @default(now()) @db.Timestamptz(6)
+}
+
+model provider_runs {
+  id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  control_command_id        String?     @db.Uuid
+  recovery_of_run_id        String?     @db.Uuid
+  idempotency_key           String      @unique(map: "provider_runs_idempotency_key_key")
+  trigger                   run_trigger
+  state                     run_state   @default(queued)
+  requested_by_operator_id  String?     @db.Uuid
+  config_version_id         String      @db.Uuid
+  config_version_number     BigInt
+  worker_fence              BigInt
+  attempt_number            Int         @default(1)
+  requested_cursor          Json?       @db.JsonB
+  requested_cursor_hash     String?     @db.Char(64)
+  final_cursor              Json?       @db.JsonB
+  final_cursor_hash         String?     @db.Char(64)
+  reached_source_head       Boolean     @default(false)
+  page_count                Int         @default(0)
+  catalog_record_count      Int         @default(0)
+  pull_record_count         Int         @default(0)
+  market_event_record_count Int         @default(0)
+  accepted_count            Int         @default(0)
+  duplicate_count           Int         @default(0)
+  quarantined_count         Int         @default(0)
+  material_change_count     Int         @default(0)
+  failure_code              String?
+  failure_class             String?
+  failure_summary           String?
+  heartbeat_at              DateTime?   @db.Timestamptz(6)
+  requested_at              DateTime    @db.Timestamptz(6)
+  started_at                DateTime?   @db.Timestamptz(6)
+  last_progress_at          DateTime?   @db.Timestamptz(6)
+  finished_at               DateTime?   @db.Timestamptz(6)
+  row_version               BigInt      @default(1)
+  created_at                DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime    @default(now()) @db.Timestamptz(6)
+
+  control_command    control_commands?          @relation("provider_runs_control_command", fields: [control_command_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_runs_control_command_id_fkey")
+  recovery_of_run    provider_runs?             @relation("provider_run_recovery", fields: [recovery_of_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_runs_recovery_of_run_id_fkey")
+  recovery_runs      provider_runs[]            @relation("provider_run_recovery")
+  targeted_commands  control_commands[]         @relation("control_commands_target_run")
+  resulting_commands control_commands[]         @relation("control_commands_resulting_run")
+  pages              provider_run_pages[]
+  quarantines        quarantine_records[]
+  activity_events    provider_activity_outbox[]
+
+  @@index([control_command_id], map: "provider_runs_control_command_id_idx")
+  @@index([recovery_of_run_id], map: "provider_runs_recovery_of_run_id_idx")
+  @@index([state, requested_at(sort: Desc)], map: "provider_runs_state_requested_idx")
+}
+
+model provider_run_pages {
+  id                        String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_run_id           String            @db.Uuid
+  page_number               Int
+  contract_version          String
+  requested_cursor          Json?             @db.JsonB
+  requested_cursor_hash     String?           @db.Char(64)
+  next_cursor               Json?             @db.JsonB
+  next_cursor_hash          String?           @db.Char(64)
+  continuation              page_continuation
+  response_digest           String            @db.Char(64)
+  record_count              Int
+  catalog_record_count      Int
+  pull_record_count         Int
+  market_event_record_count Int
+  accepted_count            Int
+  duplicate_count           Int
+  quarantined_count         Int
+  material_change_count     Int
+  committed_at              DateTime          @db.Timestamptz(6)
+  created_at                DateTime          @default(now()) @db.Timestamptz(6)
+
+  provider_run provider_runs        @relation(fields: [provider_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_run_pages_provider_run_id_fkey")
+  quarantines  quarantine_records[]
+
+  @@unique([id, provider_run_id], map: "provider_run_pages_id_provider_run_id_key")
+  @@unique([provider_run_id, page_number], map: "provider_run_pages_run_page_number_key")
+  @@index([provider_run_id, requested_cursor_hash], map: "provider_run_pages_run_requested_cursor_idx")
+}
+
+model control_commands {
+  id                       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  idempotency_key          String        @unique(map: "control_commands_idempotency_key_key")
+  command_type             command_type
+  target_run_id            String?       @db.Uuid
+  target_quarantine_id     String?       @db.Uuid
+  expected_generation      BigInt
+  requested_by_operator_id String        @db.Uuid
+  correlation_id           String        @db.Uuid
+  reason                   String?
+  state                    command_state @default(pending)
+  result                   Json?         @db.JsonB
+  resulting_run_id         String?       @db.Uuid
+  requested_at             DateTime      @db.Timestamptz(6)
+  acknowledged_at          DateTime?     @db.Timestamptz(6)
+  completed_at             DateTime?     @db.Timestamptz(6)
+  row_version              BigInt        @default(1)
+  created_at               DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime      @default(now()) @db.Timestamptz(6)
+
+  target_run        provider_runs?       @relation("control_commands_target_run", fields: [target_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "control_commands_target_run_id_fkey")
+  target_quarantine quarantine_records?  @relation("control_commands_target_quarantine", fields: [target_quarantine_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "control_commands_target_quarantine_id_fkey")
+  resulting_run     provider_runs?       @relation("control_commands_resulting_run", fields: [resulting_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "control_commands_resulting_run_id_fkey")
+  created_runs      provider_runs[]      @relation("provider_runs_control_command")
+  audit_events      local_audit_events[]
+
+  @@index([state, requested_at], map: "control_commands_state_requested_idx")
+}
+
+model quarantine_records {
+  id                       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_run_id          String           @db.Uuid
+  provider_run_page_id     String           @db.Uuid
+  record_index             Int
+  record_kind              String
+  entity_key               String?
+  source_record_key        String?
+  external_id              String?
+  reason_code              String
+  field_path               String?
+  sanitized_summary        String
+  candidate_schema_version String
+  normalized_candidate     Json?            @db.JsonB
+  protected_evidence       Json?            @db.JsonB
+  evidence_expires_at      DateTime         @default(dbgenerated("now() + interval '90 days'")) @db.Timestamptz(6)
+  evidence_expired_at      DateTime?        @db.Timestamptz(6)
+  retry_count              Int              @default(0)
+  last_retry_at            DateTime?        @db.Timestamptz(6)
+  resolved_at              DateTime?        @db.Timestamptz(6)
+  state                    quarantine_state @default(open)
+  row_version              BigInt           @default(1)
+  created_at               DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime         @default(now()) @db.Timestamptz(6)
+
+  provider_run    provider_runs              @relation(fields: [provider_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_provider_run_id_fkey")
+  provider_page   provider_run_pages         @relation(fields: [provider_run_page_id, provider_run_id], references: [id, provider_run_id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_records_page_run_fkey")
+  attempts        quarantine_attempts[]
+  commands        control_commands[]         @relation("control_commands_target_quarantine")
+  activity_events provider_activity_outbox[]
+
+  @@unique([provider_run_page_id, record_kind, record_index], map: "quarantine_records_page_kind_record_key")
+  @@index([state, created_at(sort: Desc)], map: "quarantine_records_state_created_idx")
+  @@index([provider_run_id, provider_run_page_id], map: "quarantine_records_run_page_idx")
+}
+
+model quarantine_attempts {
+  id                       String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quarantine_record_id     String                   @db.Uuid
+  requested_by_operator_id String                   @db.Uuid
+  correlation_id           String                   @db.Uuid
+  state                    quarantine_attempt_state @default(running)
+  failure_code             String?
+  field_path               String?
+  sanitized_summary        String?
+  canonical_change_count   Int?
+  started_at               DateTime                 @db.Timestamptz(6)
+  finished_at              DateTime?                @db.Timestamptz(6)
+  created_at               DateTime                 @default(now()) @db.Timestamptz(6)
+
+  quarantine_record quarantine_records @relation(fields: [quarantine_record_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "quarantine_attempts_record_id_fkey")
+
+  @@index([quarantine_record_id, started_at(sort: Desc)], map: "quarantine_attempts_record_started_idx")
+}
+
+model retention_executions {
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  policy_key            String
+  state                 retention_state @default(running)
+  cutoff_at             DateTime        @db.Timestamptz(6)
+  batch_size            Int
+  selected_count        Int             @default(0)
+  expired_count         Int             @default(0)
+  already_expired_count Int             @default(0)
+  failed_count          Int             @default(0)
+  remaining_count       Int             @default(0)
+  failure_code          String?
+  sanitized_summary     String?
+  started_at            DateTime        @db.Timestamptz(6)
+  finished_at           DateTime?       @db.Timestamptz(6)
+  created_at            DateTime        @default(now()) @db.Timestamptz(6)
+
+  @@index([started_at(sort: Desc), state], map: "retention_executions_started_state_idx")
+}
+
+model local_audit_events {
+  sequence          BigInt        @id @default(autoincrement())
+  command_id        String?       @db.Uuid
+  actor_operator_id String?       @db.Uuid
+  correlation_id    String        @db.Uuid
+  action            String
+  target_type       String
+  target_id         String
+  outcome           audit_outcome
+  details           Json          @default("{}") @db.JsonB
+  occurred_at       DateTime      @db.Timestamptz(6)
+  created_at        DateTime      @default(now()) @db.Timestamptz(6)
+
+  command control_commands? @relation(fields: [command_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "local_audit_events_command_id_fkey")
+
+  @@index([occurred_at(sort: Desc)], map: "local_audit_events_occurred_idx")
+  @@index([correlation_id], map: "local_audit_events_correlation_id_idx")
+}
+
+model provider_activity_outbox {
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_digest             String                  @db.Char(64)
+  event_type               String
+  severity                 severity
+  dedupe_key               String
+  recovery_key             String
+  local_run_id             String?                 @db.Uuid
+  local_quarantine_id      String?                 @db.Uuid
+  title                    String
+  summary                  String
+  evidence                 Json                    @default("{}") @db.JsonB
+  event_at                 DateTime                @db.Timestamptz(6)
+  delivery_state           activity_delivery_state @default(pending)
+  delivery_attempt_count   Int                     @default(0)
+  last_delivery_attempt_at DateTime?               @db.Timestamptz(6)
+  delivered_at             DateTime?               @db.Timestamptz(6)
+  last_failure_code        String?
+  created_at               DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                @default(now()) @db.Timestamptz(6)
+
+  local_run        provider_runs?      @relation(fields: [local_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_outbox_local_run_id_fkey")
+  local_quarantine quarantine_records? @relation(fields: [local_quarantine_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_outbox_local_quarantine_id_fkey")
+
+  @@index([delivery_state, created_at], map: "provider_activity_outbox_delivery_created_idx")
+  @@index([dedupe_key, event_at(sort: Desc)], map: "provider_activity_outbox_dedupe_event_idx")
+}
+
+model provider_change_consumers {
+  consumer_key            String    @id
+  last_confirmed_sequence BigInt    @default(0)
+  confirmation_kind       String?
+  confirmation_id         String?
+  lease_owner             String?
+  lease_fence             BigInt    @default(0)
+  lease_expires_at        DateTime? @db.Timestamptz(6)
+  row_version             BigInt    @default(1)
+  created_at              DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model provider_releases {
+  id                             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  predecessor_id                 String?            @db.Uuid
+  provider_id                    String             @db.Uuid
+  provider_key                   String
+  public_provider_id             String             @db.Uuid
+  through_change_sequence        BigInt
+  catalog_version_id             String             @db.Uuid
+  catalog_content_hash           String             @db.Char(64)
+  central_schema_version         String
+  correlation_event_sequence     BigInt
+  correlation_snapshot_hash      String             @db.Char(64)
+  public_profile_version_id      String             @db.Uuid
+  public_profile_hash            String             @db.Char(64)
+  provider_schema_version        String
+  public_schema_version          String
+  lifecycle                      artifact_lifecycle @default(building)
+  category_count                 Int
+  repack_count                   Int
+  collectible_reference_count    Int
+  chase_count                    Int
+  retired_repack_count           Int
+  batch_count                    Int
+  content_hash                   String             @db.Char(64)
+  index_hash                     String             @db.Char(64)
+  data_as_of                     DateTime           @db.Timestamptz(6)
+  last_successful_observation_at DateTime           @db.Timestamptz(6)
+  stale_at                       DateTime           @db.Timestamptz(6)
+  freshness                      String
+  created_at                     DateTime           @default(now()) @db.Timestamptz(6)
+  assembled_at                   DateTime?          @db.Timestamptz(6)
+  completed_at                   DateTime?          @db.Timestamptz(6)
+
+  predecessor        provider_releases?                @relation("provider_release_predecessor", fields: [predecessor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_releases_predecessor_id_fkey")
+  successors         provider_releases[]               @relation("provider_release_predecessor")
+  batches            provider_release_batches[]
+  operations         provider_publication_operations[]
+  receipts           provider_publication_receipts[]
+  publication_states provider_publication_state[]
+
+  @@index([predecessor_id], map: "provider_releases_predecessor_id_idx")
+  @@index([lifecycle, created_at(sort: Desc)], map: "provider_releases_lifecycle_created_idx")
+}
+
+model provider_release_batches {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_release_id String   @db.Uuid
+  batch_kind          String
+  batch_index         Int
+  payload             Json     @db.JsonB
+  record_count        Int
+  byte_count          Int
+  body_hash           String   @db.Char(64)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  provider_release provider_releases @relation(fields: [provider_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_release_batches_release_id_fkey")
+
+  @@unique([provider_release_id, batch_kind, batch_index], map: "provider_release_batches_release_kind_index_key")
+}
+
+model provider_publication_operations {
+  id                  String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_release_id String                      @db.Uuid
+  operation_kind      String
+  batch_index         Int?
+  idempotency_key     String                      @unique(map: "provider_publication_operations_idempotency_key_key")
+  request_digest      String                      @db.Char(64)
+  request_bytes       Bytes                       @db.ByteA
+  body_hash           String?                     @db.Char(64)
+  lease_fence         BigInt
+  state               publication_operation_state @default(pending)
+  attempt_count       Int                         @default(0)
+  last_attempted_at   DateTime?                   @db.Timestamptz(6)
+  failure_code        String?
+  requested_at        DateTime                    @db.Timestamptz(6)
+  completed_at        DateTime?                   @db.Timestamptz(6)
+
+  provider_release provider_releases              @relation(fields: [provider_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_operations_release_id_fkey")
+  receipt          provider_publication_receipts?
+
+  @@unique([id, provider_release_id], map: "provider_publication_operations_id_release_id_key")
+  @@index([state, requested_at], map: "provider_publication_operations_state_requested_idx")
+}
+
+model provider_publication_receipts {
+  id                    String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operation_id          String                      @unique(map: "provider_publication_receipts_operation_id_key") @db.Uuid
+  provider_release_id   String                      @db.Uuid
+  remote_receipt_id     String                      @unique(map: "provider_publication_receipts_remote_receipt_id_key")
+  outcome               publication_receipt_outcome
+  response_digest       String                      @db.Char(64)
+  response_bytes        Bytes                       @db.ByteA
+  accepted_content_hash String?                     @db.Char(64)
+  accepted_record_count Int?
+  received_at           DateTime                    @db.Timestamptz(6)
+  created_at            DateTime                    @default(now()) @db.Timestamptz(6)
+
+  operation          provider_publication_operations @relation(fields: [operation_id, provider_release_id], references: [id, provider_release_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_receipts_operation_release_fkey")
+  provider_release   provider_releases               @relation(fields: [provider_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_receipts_release_id_fkey")
+  publication_states provider_publication_state[]
+
+  @@unique([operation_id, provider_release_id], map: "provider_publication_receipts_operation_release_key")
+}
+
+model provider_publication_state {
+  singleton_key                     Boolean   @id @default(true)
+  completed_release_id              String?   @db.Uuid
+  completed_through_change_sequence BigInt    @default(0)
+  completion_receipt_id             String?   @db.Uuid
+  completed_at                      DateTime? @db.Timestamptz(6)
+  observed_active_manifest_id       String?
+  last_reconciled_at                DateTime? @db.Timestamptz(6)
+  row_version                       BigInt    @default(1)
+  updated_at                        DateTime  @default(now()) @db.Timestamptz(6)
+
+  completed_release  provider_releases?             @relation(fields: [completed_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_release_id_fkey")
+  completion_receipt provider_publication_receipts? @relation(fields: [completion_receipt_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_receipt_id_fkey")
+}

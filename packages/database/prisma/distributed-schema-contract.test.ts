@@ -1,0 +1,577 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const prismaDirectory = fileURLToPath(new URL(".", import.meta.url));
+const centralSchemaPath = join(prismaDirectory, "central", "schema.prisma");
+const providerSchemaPath = join(prismaDirectory, "provider", "schema.prisma");
+
+const CENTRAL_TABLES = [
+  "database_identity",
+  "organizations",
+  "operators",
+  "operator_memberships",
+  "operator_sessions",
+  "auth_rate_limits",
+  "audit_events",
+  "providers",
+  "provider_public_profile_versions",
+  "provider_config_versions",
+  "provider_credential_versions",
+  "provider_database_nodes",
+  "provider_connection_tests",
+  "provider_activity_events",
+  "provider_health",
+  "admin_alerts",
+  "global_categories",
+  "global_collectibles",
+  "global_collectible_categories",
+  "global_collectible_name_aliases",
+  "provider_category_correlations",
+  "provider_collectible_correlations",
+  "correlation_suggestions",
+  "catalog_ledger",
+  "collectible_aliases",
+  "catalog_decision_events",
+  "catalog_promotion_changes",
+  "provider_release_invalidation_ledger",
+  "provider_release_invalidations",
+  "provider_invalidation_checkpoints",
+  "catalog_consumer_checkpoints",
+  "catalog_versions",
+  "catalog_version_batches",
+  "catalog_publication_operations",
+  "manifest_activation_state",
+  "manifest_activation_operations",
+  "artifact_retention_executions",
+] as const;
+
+const PROVIDER_TABLES = [
+  "database_identity",
+  "categories",
+  "packs",
+  "collectibles",
+  "collectible_name_aliases",
+  "collectible_instances",
+  "pack_contents",
+  "provider_accounts",
+  "pulls",
+  "pull_items",
+  "market_events",
+  "promotion_ledger",
+  "promotion_changes",
+  "provider_runtime",
+  "provider_state_events",
+  "provider_worker_states",
+  "provider_runs",
+  "provider_run_pages",
+  "control_commands",
+  "quarantine_records",
+  "quarantine_attempts",
+  "retention_executions",
+  "local_audit_events",
+  "provider_activity_outbox",
+  "provider_change_consumers",
+  "provider_releases",
+  "provider_release_batches",
+  "provider_publication_operations",
+  "provider_publication_receipts",
+  "provider_publication_state",
+] as const;
+
+const CENTRAL_ENUMS = {
+  operator_state: ["active", "disabled"],
+  operator_role: ["admin", "data_operator"],
+  audit_outcome: ["success", "failure", "blocked"],
+  provider_lifecycle: ["draft", "active", "disabled", "archived"],
+  credential_lifecycle: ["active", "retired", "revoked"],
+  credential_kind: ["source", "database"],
+  connection_test_kind: ["source", "database", "activation"],
+  connection_test_outcome: ["succeeded", "failed"],
+  alert_state: ["active", "acknowledged", "resolved"],
+  severity: ["info", "warning", "critical"],
+  catalog_identity_state: ["provisional", "canonical", "retired"],
+  category_kind: [
+    "vertical",
+    "sport",
+    "league",
+    "franchise",
+    "brand",
+    "set",
+    "other",
+  ],
+  correlation_method: ["deterministic", "manual", "provisional"],
+  suggestion_state: ["pending", "accepted", "rejected", "superseded"],
+  entity_lifecycle: ["active", "retired"],
+  collectible_type: [
+    "card",
+    "watch",
+    "art",
+    "coin",
+    "sealed_product",
+    "memorabilia",
+    "other",
+  ],
+  promotion_operation: ["upsert", "retire"],
+  activity_origin: ["provider", "central"],
+  artifact_lifecycle: [
+    "building",
+    "assembled",
+    "publishing",
+    "complete",
+    "blocked",
+    "failed",
+  ],
+  publication_operation_state: ["pending", "accepted", "ambiguous", "failed"],
+  manifest_operation: ["advance", "add", "remove", "rollback"],
+  retention_state: ["running", "succeeded", "failed"],
+} as const;
+
+const PROVIDER_ENUMS = {
+  entity_lifecycle: ["active", "retired"],
+  availability_state: ["available", "sold_out", "unavailable"],
+  evidence_state: ["complete", "partial", "unknown"],
+  pack_format: ["repack", "gacha"],
+  collectible_type: [
+    "card",
+    "watch",
+    "art",
+    "coin",
+    "sealed_product",
+    "memorabilia",
+    "other",
+  ],
+  content_role: ["top_chase", "featured_chase", "possible_outcome", "other"],
+  market_event_type: [
+    "sale",
+    "buyback",
+    "mint",
+    "burn",
+    "transfer",
+    "list",
+    "unlist",
+    "swap",
+    "ship",
+    "other",
+  ],
+  promotion_operation: ["upsert", "retire"],
+  runtime_state: ["idle", "running", "paused", "stopped", "error"],
+  worker_role: ["import", "promotion"],
+  run_state: ["queued", "running", "succeeded", "incomplete", "failed"],
+  run_trigger: ["scheduled", "manual", "recovery"],
+  page_continuation: ["more", "head"],
+  command_type: [
+    "run",
+    "pause",
+    "resume",
+    "stop",
+    "retry_run",
+    "retry_quarantine",
+  ],
+  command_state: ["pending", "accepted", "rejected", "completed", "failed"],
+  quarantine_state: ["open", "resolved", "expired"],
+  quarantine_attempt_state: ["running", "succeeded", "failed"],
+  retention_state: ["running", "succeeded", "failed"],
+  audit_outcome: ["success", "failure", "blocked"],
+  severity: ["info", "warning", "critical"],
+  activity_delivery_state: ["pending", "delivered"],
+  artifact_lifecycle: [
+    "building",
+    "assembled",
+    "publishing",
+    "complete",
+    "blocked",
+    "failed",
+  ],
+  publication_operation_state: ["pending", "accepted", "ambiguous", "failed"],
+  publication_receipt_outcome: ["accepted", "rejected"],
+} as const;
+
+const CENTRAL_SOFT_REFERENCES = [
+  "provider_activity_events.local_run_id",
+  "provider_activity_events.local_quarantine_id",
+  "admin_alerts.run_id",
+  "admin_alerts.quarantine_id",
+  "provider_category_correlations.local_category_id",
+  "provider_collectible_correlations.local_collectible_id",
+  "correlation_suggestions.local_collectible_id",
+  "provider_invalidation_checkpoints.confirmed_provider_release_id",
+  "manifest_activation_state.active_manifest_id",
+  "manifest_activation_state.previous_manifest_id",
+  "manifest_activation_operations.expected_manifest_id",
+  "manifest_activation_operations.target_provider_release_id",
+] as const;
+
+const PROVIDER_SOFT_REFERENCES = [
+  "database_identity.provider_id",
+  "provider_runtime.central_provider_id",
+  "provider_runtime.cached_config_version_id",
+  "provider_runs.requested_by_operator_id",
+  "provider_runs.config_version_id",
+  "control_commands.requested_by_operator_id",
+  "quarantine_attempts.requested_by_operator_id",
+  "local_audit_events.actor_operator_id",
+  "provider_releases.provider_id",
+  "provider_releases.catalog_version_id",
+  "provider_releases.correlation_event_sequence",
+  "provider_releases.public_profile_version_id",
+  "provider_publication_state.observed_active_manifest_id",
+] as const;
+
+const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
+  "database_identity.provider_id",
+  "audit_events.subject_id",
+  "provider_activity_events.local_run_id",
+  "provider_activity_events.local_quarantine_id",
+  "admin_alerts.run_id",
+  "admin_alerts.quarantine_id",
+  "provider_category_correlations.local_category_id",
+  "provider_collectible_correlations.local_collectible_id",
+  "correlation_suggestions.local_collectible_id",
+  "catalog_promotion_changes.entity_id",
+  "provider_invalidation_checkpoints.confirmed_provider_release_id",
+  "manifest_activation_operations.target_provider_release_id",
+] as const;
+
+const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
+  "database_identity.provider_id",
+  "market_events.event_group_id",
+  "promotion_changes.entity_id",
+  "provider_runtime.central_provider_id",
+  "provider_runtime.cached_config_version_id",
+  "provider_state_events.correlation_id",
+  "provider_runs.requested_by_operator_id",
+  "provider_runs.config_version_id",
+  "control_commands.requested_by_operator_id",
+  "control_commands.correlation_id",
+  "quarantine_attempts.requested_by_operator_id",
+  "quarantine_attempts.correlation_id",
+  "local_audit_events.actor_operator_id",
+  "local_audit_events.correlation_id",
+  "provider_releases.provider_id",
+  "provider_releases.public_provider_id",
+  "provider_releases.catalog_version_id",
+  "provider_releases.public_profile_version_id",
+] as const;
+
+const FORBIDDEN_MODEL_PATTERNS = [
+  /^canonical_(?:entities|revisions|relationships)$/u,
+  /(?:^|_)source_records?(?:_|$)/u,
+  /(?:^|_)legacy(?:_|$)/iu,
+  /(?:^|_)generic(?:_|$)/iu,
+  /(?:^|_)streams?(?:_|$)/u,
+  /(?:^|_)product(?:_|$)/u,
+  /(?:^|_)heat(?:_|$)/iu,
+  /^estimated_ev_recomputation/u,
+] as const;
+
+const FORBIDDEN_FIELD_PATTERNS = [
+  /(?:^|_)legacy(?:_|$)/iu,
+  /(?:^|_)generic(?:_|$)/iu,
+  /(?:^|_)streams?(?:_|$)/u,
+  /(?:^|_)platform(?:_|$)/u,
+  /(?:^|_)site(?:_|$)/u,
+  /(?:^|_)product(?:_|$)/u,
+  /(?:^|_)heat(?:_|$)/iu,
+  /(?:^|_)raw(?:_|$)/u,
+  /(?:^|_)mapper(?:_|$)/u,
+  /(?:^|_)provenance(?:_|$)/u,
+  /^source_(?:adapter|page|payload|staging)(?:_|$)/u,
+  /^source_record_(?!key$)/u,
+  /^canonical_(?:entity|revision|relationship)_id$/u,
+] as const;
+
+interface NamedBlock {
+  readonly name: string;
+  readonly body: string;
+}
+
+function namedBlocks(source: string, kind: "enum" | "generator" | "model"): NamedBlock[] {
+  const blocks: NamedBlock[] = [];
+  const pattern = new RegExp(
+    `^${kind}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\{([\\s\\S]*?)^\\s*\\}`,
+    "gmu",
+  );
+  for (const match of source.matchAll(pattern)) {
+    blocks.push({ name: match[1]!, body: match[2]! });
+  }
+  return blocks;
+}
+
+function fieldsIn(model: NamedBlock): ReadonlyMap<string, string> {
+  const fields = new Map<string, string>();
+  for (const line of model.body.split("\n")) {
+    const trimmed = line.trim();
+    if (
+      trimmed === "" ||
+      trimmed.startsWith("//") ||
+      trimmed.startsWith("@@")
+    ) {
+      continue;
+    }
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s+[^\s]+/u.exec(trimmed);
+    if (match) fields.set(match[1]!, trimmed);
+  }
+  return fields;
+}
+
+function relationScalarFields(model: NamedBlock): ReadonlySet<string> {
+  const fields = new Set<string>();
+  for (const relation of model.body.matchAll(/@relation\s*\(([\s\S]*?)\)/gu)) {
+    const relationFields = /\bfields\s*:\s*\[([^\]]+)\]/u.exec(relation[1]!);
+    if (!relationFields) continue;
+    for (const field of relationFields[1]!.split(",")) {
+      fields.add(field.trim());
+    }
+  }
+  return fields;
+}
+
+function enumInventory(source: string): Readonly<Record<string, readonly string[]>> {
+  return Object.fromEntries(
+    namedBlocks(source, "enum").map((block) => [
+      block.name,
+      block.body
+        .split("\n")
+        .map((line) => line.replace(/\/\/.*$/u, "").trim())
+        .filter((line) => line !== "")
+        .map((line) => /^([A-Za-z_][A-Za-z0-9_]*)\b/u.exec(line)?.[1])
+        .filter((label): label is string => label !== undefined),
+    ]),
+  );
+}
+
+function generatedClientOutput(source: string, role: string): string {
+  const generators = namedBlocks(source, "generator");
+  assert.equal(generators.length, 1, `${role} must define exactly one Prisma generator`);
+  const output = /^\s*output\s*=\s*"([^"]+)"\s*$/mu.exec(generators[0]!.body)?.[1];
+  assert.ok(output, `${role} must use an explicit generated-client output`);
+  return output;
+}
+
+function modelMap(source: string): ReadonlyMap<string, NamedBlock> {
+  return new Map(namedBlocks(source, "model").map((block) => [block.name, block]));
+}
+
+function assertDatabaseIdentity(
+  models: ReadonlyMap<string, NamedBlock>,
+  role: string,
+): void {
+  const identity = models.get("database_identity");
+  assert.ok(identity, `${role} must contain database_identity`);
+  assert.deepEqual(
+    [...fieldsIn(identity).keys()].sort(),
+    [
+      "created_at",
+      "database_role",
+      "provider_id",
+      "provider_key",
+      "schema_version",
+      "singleton_key",
+    ],
+    `${role} database_identity fields drifted`,
+  );
+}
+
+function assertNoForbiddenNames(models: readonly NamedBlock[], role: string): void {
+  for (const model of models) {
+    for (const pattern of FORBIDDEN_MODEL_PATTERNS) {
+      assert.doesNotMatch(model.name, pattern, `${role} has forbidden model ${model.name}`);
+    }
+    for (const field of fieldsIn(model).keys()) {
+      for (const pattern of FORBIDDEN_FIELD_PATTERNS) {
+        assert.doesNotMatch(
+          field,
+          pattern,
+          `${role} has forbidden field ${model.name}.${field}`,
+        );
+      }
+    }
+  }
+}
+
+function assertSoftReferencesHaveNoPrismaRelation(
+  models: ReadonlyMap<string, NamedBlock>,
+  references: readonly string[],
+  role: string,
+): void {
+  for (const reference of references) {
+    const separator = reference.indexOf(".");
+    const modelName = reference.slice(0, separator);
+    const fieldName = reference.slice(separator + 1);
+    const model = models.get(modelName);
+    assert.ok(model, `${role} soft-reference model ${modelName} is missing`);
+    assert.ok(
+      fieldsIn(model).has(fieldName),
+      `${role} soft-reference field ${reference} is missing`,
+    );
+    assert.ok(
+      !relationScalarFields(model).has(fieldName),
+      `${role} soft reference ${reference} must not become a Prisma relation`,
+    );
+  }
+}
+
+function unboundUuidIdentifiers(source: string): string[] {
+  const result: string[] = [];
+  for (const model of namedBlocks(source, "model")) {
+    const relationFields = relationScalarFields(model);
+    for (const [fieldName, definition] of fieldsIn(model)) {
+      if (
+        fieldName !== "id" &&
+        fieldName.endsWith("_id") &&
+        /\bString\??(?=\s)/u.test(definition) &&
+        /@db\.Uuid\b/u.test(definition) &&
+        !relationFields.has(fieldName)
+      ) {
+        result.push(`${model.name}.${fieldName}`);
+      }
+    }
+  }
+  return result.sort();
+}
+
+function migrationFiles(directory: string): string[] {
+  const results: string[] = [];
+  const visit = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && entry.name === "migration.sql") results.push(path);
+    }
+  };
+  visit(directory);
+  return results.sort();
+}
+
+function baselineMigration(role: "central" | "provider"): string {
+  const files = migrationFiles(join(prismaDirectory, role, "migrations"));
+  assert.equal(files.length, 1, `${role} must have exactly one clean baseline migration`);
+  return readFileSync(files[0]!, "utf8");
+}
+
+test("distributed Prisma schemas freeze exact role inventories and enum vocabularies", () => {
+  const centralSource = readFileSync(centralSchemaPath, "utf8");
+  const providerSource = readFileSync(providerSchemaPath, "utf8");
+  const centralModels = modelMap(centralSource);
+  const providerModels = modelMap(providerSource);
+
+  assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
+  assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
+  assert.equal(centralModels.size, 37);
+  assert.equal(providerModels.size, 30);
+  assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
+  assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
+
+  const centralOutput = generatedClientOutput(centralSource, "central");
+  const providerOutput = generatedClientOutput(providerSource, "provider");
+  assert.notEqual(centralOutput, providerOutput, "generated Prisma clients must be distinct");
+  assert.match(centralOutput, /(?:^|\/)generated\/central$/u);
+  assert.match(providerOutput, /(?:^|\/)generated\/provider$/u);
+
+  assertDatabaseIdentity(centralModels, "central");
+  assertDatabaseIdentity(providerModels, "provider");
+  assertNoForbiddenNames([...centralModels.values()], "central");
+  assertNoForbiddenNames([...providerModels.values()], "provider");
+
+  const sharedTables = [...centralModels.keys()].filter((name) => providerModels.has(name));
+  assert.deepEqual(sharedTables, ["database_identity"]);
+});
+
+test("cross-authority identifiers stay soft while every local UUID reference is relational", () => {
+  const centralSource = readFileSync(centralSchemaPath, "utf8");
+  const providerSource = readFileSync(providerSchemaPath, "utf8");
+  const centralModels = modelMap(centralSource);
+  const providerModels = modelMap(providerSource);
+
+  assertSoftReferencesHaveNoPrismaRelation(
+    centralModels,
+    CENTRAL_SOFT_REFERENCES,
+    "central",
+  );
+  assertSoftReferencesHaveNoPrismaRelation(
+    providerModels,
+    PROVIDER_SOFT_REFERENCES,
+    "provider",
+  );
+  assert.deepEqual(
+    unboundUuidIdentifiers(centralSource),
+    [...CENTRAL_ALLOWED_UNBOUND_UUIDS].sort(),
+    "central UUID identifiers without local Prisma relations drifted",
+  );
+  assert.deepEqual(
+    unboundUuidIdentifiers(providerSource),
+    [...PROVIDER_ALLOWED_UNBOUND_UUIDS].sort(),
+    "provider UUID identifiers without local Prisma relations drifted",
+  );
+});
+
+test("clean baselines pin schema identities without hard-coding a provider", () => {
+  const centralMigration = baselineMigration("central");
+  const providerMigration = baselineMigration("provider");
+  const initializerDeclaration = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?initialize_provider_database_identity"?\s*\(\s*p_provider_id\s+UUID\s*,\s*p_provider_key\s+TEXT\s*\)/iu;
+  const initializerStart = providerMigration.search(initializerDeclaration);
+  assert.notEqual(initializerStart, -1, "provider identity initializer is missing");
+  const providerInitializer = providerMigration.slice(initializerStart);
+
+  assert.deepEqual(
+    [...new Set(centralMigration.match(/distributed-(?:central|provider)-v[0-9]+/gu) ?? [])],
+    ["distributed-central-v1"],
+  );
+  assert.deepEqual(
+    [...new Set(providerMigration.match(/distributed-(?:central|provider)-v[0-9]+/gu) ?? [])],
+    ["distributed-provider-v1"],
+  );
+  assert.match(centralMigration, /INSERT\s+INTO\s+(?:"?public"?\.)?"?database_identity"?/iu);
+  assert.equal(
+    centralMigration.match(/INSERT\s+INTO\s+(?:"?public"?\.)?"?database_identity"?/giu)?.length,
+    1,
+    "central baseline must seed database_identity exactly once",
+  );
+  assert.match(centralMigration, /['"]central['"]/u);
+
+  assert.match(
+    providerInitializer,
+    initializerDeclaration,
+  );
+  assert.equal(
+    providerMigration.match(/\bCREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?initialize_provider_database_identity"?\b/giu)?.length,
+    1,
+    "provider baseline must define exactly one identity initializer",
+  );
+  assert.match(providerInitializer, /\bcurrent_database\s*\(\s*\)/iu);
+  assert.match(providerInitializer, /['"]packscout_['"]\s*\|\|\s*p_provider_key\b/iu);
+  assert.match(
+    providerInitializer,
+    /INSERT\s+INTO\s+(?:"?public"?\.)?"?database_identity"?[\s\S]{0,500}\bp_provider_id\b[\s\S]{0,100}\bp_provider_key\b/iu,
+  );
+  assert.match(
+    providerInitializer,
+    /INSERT\s+INTO\s+(?:"?public"?\.)?"?provider_runtime"?[\s\S]{0,500}\bp_provider_id\b[\s\S]{0,100}\bp_provider_key\b/iu,
+  );
+  assert.equal(
+    providerMigration.match(/INSERT\s+INTO\s+(?:"?public"?\.)?"?database_identity"?/giu)?.length,
+    1,
+    "provider identity must only be inserted by its initializer",
+  );
+  assert.equal(
+    providerMigration.match(/INSERT\s+INTO\s+(?:"?public"?\.)?"?provider_runtime"?/giu)?.length,
+    1,
+    "provider runtime must only be inserted by its initializer",
+  );
+  assert.match(providerInitializer, /RAISE\s+EXCEPTION/iu);
+  assert.match(providerInitializer, /(?:ON\s+CONFLICT|IF\s+(?:EXISTS|FOUND))/iu);
+
+  assert.doesNotMatch(
+    providerInitializer,
+    /['"][0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}['"]/iu,
+    "provider migration must not hard-code a provider UUID",
+  );
+  assert.doesNotMatch(
+    providerInitializer,
+    /'packscout_[a-z][a-z0-9_]{0,52}'/u,
+    "provider migration must not hard-code a provider database/key",
+  );
+});

@@ -1,0 +1,881 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/central"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PACKSCOUT_CENTRAL_DATABASE_URL")
+}
+
+enum operator_state {
+  active
+  disabled
+}
+
+enum operator_role {
+  admin
+  data_operator
+}
+
+enum audit_outcome {
+  success
+  failure
+  blocked
+}
+
+enum provider_lifecycle {
+  draft
+  active
+  disabled
+  archived
+}
+
+enum credential_lifecycle {
+  active
+  retired
+  revoked
+}
+
+enum credential_kind {
+  source
+  database
+}
+
+enum connection_test_kind {
+  source
+  database
+  activation
+}
+
+enum connection_test_outcome {
+  succeeded
+  failed
+}
+
+enum alert_state {
+  active
+  acknowledged
+  resolved
+}
+
+enum severity {
+  info
+  warning
+  critical
+}
+
+enum catalog_identity_state {
+  provisional
+  canonical
+  retired
+}
+
+enum category_kind {
+  vertical
+  sport
+  league
+  franchise
+  brand
+  set
+  other
+}
+
+enum correlation_method {
+  deterministic
+  manual
+  provisional
+}
+
+enum suggestion_state {
+  pending
+  accepted
+  rejected
+  superseded
+}
+
+enum entity_lifecycle {
+  active
+  retired
+}
+
+enum collectible_type {
+  card
+  watch
+  art
+  coin
+  sealed_product
+  memorabilia
+  other
+}
+
+enum promotion_operation {
+  upsert
+  retire
+}
+
+enum activity_origin {
+  provider
+  central
+}
+
+enum artifact_lifecycle {
+  building
+  assembled
+  publishing
+  complete
+  blocked
+  failed
+}
+
+enum publication_operation_state {
+  pending
+  accepted
+  ambiguous
+  failed
+}
+
+enum manifest_operation {
+  advance
+  add
+  remove
+  rollback
+}
+
+enum retention_state {
+  running
+  succeeded
+  failed
+}
+
+model database_identity {
+  singleton_key  Boolean  @id @default(true)
+  database_role  String
+  schema_version String
+  provider_id    String?  @db.Uuid
+  provider_key   String?
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model organizations {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug       String   @unique(map: "organizations_slug_unique")
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  operator_memberships     operator_memberships[]
+  operator_sessions        operator_sessions[]
+  audit_events             audit_events[]
+  providers                providers[]
+  provider_activity_events provider_activity_events[]
+  provider_health          provider_health[]
+  admin_alerts             admin_alerts[]
+}
+
+model operators {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email_normalized String         @unique(map: "operators_email_normalized_unique")
+  display_name     String
+  password_hash    String
+  state            operator_state @default(active)
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime       @default(now()) @db.Timestamptz(6)
+
+  operator_memberships             operator_memberships[]
+  operator_sessions                operator_sessions[]
+  provider_public_profile_versions provider_public_profile_versions[]
+  provider_config_versions         provider_config_versions[]
+  provider_connection_tests        provider_connection_tests[]
+  manifest_activation_operations   manifest_activation_operations[]
+}
+
+model operator_memberships {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  operator_id     String        @db.Uuid
+  role            operator_role
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operator_memberships_organization_fk")
+  operator     operators           @relation(fields: [operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operator_memberships_operator_fk")
+  sessions     operator_sessions[] @relation("OperatorSessionMembership")
+
+  @@unique([organization_id, operator_id], map: "operator_memberships_organization_operator_unique")
+  @@index([operator_id], map: "operator_memberships_operator_idx")
+}
+
+model operator_sessions {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String    @db.Uuid
+  operator_id         String    @db.Uuid
+  token_hash          String    @unique(map: "operator_sessions_token_hash_unique")
+  csrf_hash           String
+  idle_expires_at     DateTime  @db.Timestamptz(6)
+  absolute_expires_at DateTime  @db.Timestamptz(6)
+  last_seen_at        DateTime  @db.Timestamptz(6)
+  revoked_at          DateTime? @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operator_sessions_organization_fk")
+  operator     operators            @relation(fields: [operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operator_sessions_operator_fk")
+  membership   operator_memberships @relation("OperatorSessionMembership", fields: [organization_id, operator_id], references: [organization_id, operator_id], onDelete: Restrict, onUpdate: NoAction, map: "operator_sessions_membership_fk")
+
+  @@index([operator_id, created_at], map: "operator_sessions_operator_idx")
+}
+
+model auth_rate_limits {
+  bucket_key        String    @id
+  window_started_at DateTime  @db.Timestamptz(6)
+  attempt_count     Int       @default(0)
+  blocked_until     DateTime? @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model audit_events {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String?       @db.Uuid
+  actor_key       String
+  action          String
+  subject_type    String
+  subject_id      String?       @db.Uuid
+  outcome         audit_outcome
+  metadata_json   Json          @default("{}")
+  occurred_at     DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "audit_events_organization_fk")
+
+  @@index([organization_id, occurred_at(sort: Desc)], map: "audit_events_organization_occurred_idx")
+}
+
+model providers {
+  id                               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                  String             @db.Uuid
+  provider_key                     String             @db.VarChar(53)
+  display_name                     String
+  lifecycle                        provider_lifecycle @default(draft)
+  active_config_version_id         String?            @db.Uuid
+  active_public_profile_version_id String?            @db.Uuid
+  topology_version                 BigInt             @default(1)
+  row_version                      BigInt             @default(1)
+  created_at                       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime           @default(now()) @db.Timestamptz(6)
+
+  organization                  organizations                       @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "providers_organization_fk")
+  active_config_version         provider_config_versions?           @relation("ProviderActiveConfig", fields: [active_config_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_config_fk")
+  active_public_profile_version provider_public_profile_versions?   @relation("ProviderActiveProfile", fields: [active_public_profile_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_profile_fk")
+  public_profile_versions       provider_public_profile_versions[]  @relation("ProviderProfileVersions")
+  config_versions               provider_config_versions[]          @relation("ProviderConfigVersions")
+  credential_versions           provider_credential_versions[]
+  database_nodes                provider_database_nodes[]           @relation("ProviderDatabaseNodes")
+  connection_tests              provider_connection_tests[]         @relation("ProviderConnectionTests")
+  activity_events               provider_activity_events[]          @relation("ProviderActivityOrganization")
+  health                        provider_health[]                   @relation("ProviderHealthOrganization")
+  alerts                        admin_alerts[]                      @relation("ProviderAlertOrganization")
+  category_correlations         provider_category_correlations[]
+  collectible_correlations      provider_collectible_correlations[]
+  correlation_suggestions       correlation_suggestions[]
+  promotion_changes             catalog_promotion_changes[]
+  release_invalidations         provider_release_invalidations[]
+  invalidation_checkpoint       provider_invalidation_checkpoints?
+  manifest_operations           manifest_activation_operations[]
+
+  @@unique([provider_key], map: "providers_provider_key_unique")
+  @@unique([id, organization_id], map: "providers_id_organization_unique")
+}
+
+model provider_public_profile_versions {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id            String   @db.Uuid
+  version_number         BigInt
+  display_name           String
+  logo_url               String?
+  website_url            String?
+  listing_hosts          String[]
+  image_origins          String[]
+  referral_parameters    Json     @default("[]")
+  promo_code             String?
+  promo_label            String?
+  content_hash           String   @db.Char(64)
+  created_by_operator_id String   @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  provider              providers                        @relation("ProviderProfileVersions", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_public_profile_versions_provider_fk")
+  created_by_operator   operators                        @relation(fields: [created_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_public_profile_versions_operator_fk")
+  active_for_providers  providers[]                      @relation("ProviderActiveProfile")
+  release_invalidations provider_release_invalidations[] @relation("InvalidationProfileCause")
+
+  @@unique([provider_id, version_number], map: "provider_public_profile_versions_provider_version_unique")
+  @@unique([id, provider_id], map: "provider_public_profile_versions_id_provider_unique")
+}
+
+model provider_config_versions {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id                  String    @db.Uuid
+  version_number               BigInt
+  adapter_key                  String
+  endpoint_url                 String
+  source_credential_version_id String?   @db.Uuid
+  schedule_seconds             Int
+  stale_after_seconds          Int
+  configuration                Json      @default("{}")
+  expires_at                   DateTime? @db.Timestamptz(6)
+  created_by_operator_id       String    @db.Uuid
+  created_at                   DateTime  @default(now()) @db.Timestamptz(6)
+
+  provider             providers                     @relation("ProviderConfigVersions", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_config_versions_provider_fk")
+  source_credential    provider_credential_versions? @relation("ConfigSourceCredential", fields: [source_credential_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_config_versions_source_credential_fk")
+  created_by_operator  operators                     @relation(fields: [created_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_config_versions_operator_fk")
+  active_for_providers providers[]                   @relation("ProviderActiveConfig")
+  connection_tests     provider_connection_tests[]   @relation("ConnectionTestConfig")
+
+  @@unique([provider_id, version_number], map: "provider_config_versions_provider_version_unique")
+  @@unique([id, provider_id], map: "provider_config_versions_id_provider_unique")
+}
+
+model provider_credential_versions {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id     String               @db.Uuid
+  credential_kind credential_kind
+  version_number  BigInt
+  ciphertext      Bytes
+  nonce           Bytes
+  auth_tag        Bytes
+  key_version     Int
+  lifecycle       credential_lifecycle @default(active)
+  activated_at    DateTime?            @db.Timestamptz(6)
+  retired_at      DateTime?            @db.Timestamptz(6)
+  revoked_at      DateTime?            @db.Timestamptz(6)
+  created_at      DateTime             @default(now()) @db.Timestamptz(6)
+
+  provider                  providers                   @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_credential_versions_provider_fk")
+  source_config_versions    provider_config_versions[]  @relation("ConfigSourceCredential")
+  database_nodes            provider_database_nodes[]   @relation("NodeDatabaseCredential")
+  source_connection_tests   provider_connection_tests[] @relation("ConnectionTestSourceCredential")
+  database_connection_tests provider_connection_tests[] @relation("ConnectionTestDatabaseCredential")
+
+  @@unique([provider_id, credential_kind, version_number], map: "provider_credential_versions_provider_kind_version_unique")
+  @@unique([id, provider_id], map: "provider_credential_versions_id_provider_unique")
+}
+
+model provider_database_nodes {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id           String   @db.Uuid
+  node_key              String
+  node_role             String
+  host                  String
+  port                  Int
+  database_name         String
+  ssl_mode              String
+  credential_version_id String   @db.Uuid
+  region                String?
+  enabled               Boolean
+  row_version           BigInt   @default(1)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  provider         providers                    @relation("ProviderDatabaseNodes", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_database_nodes_provider_fk")
+  credential       provider_credential_versions @relation("NodeDatabaseCredential", fields: [credential_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_database_nodes_credential_fk")
+  connection_tests provider_connection_tests[]  @relation("ConnectionTestDatabaseNode")
+
+  @@unique([provider_id, node_key], map: "provider_database_nodes_provider_node_unique")
+  @@unique([id, provider_id], map: "provider_database_nodes_id_provider_unique")
+}
+
+model provider_connection_tests {
+  id                             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id                    String                  @db.Uuid
+  config_version_id              String                  @db.Uuid
+  source_credential_version_id   String?                 @db.Uuid
+  database_credential_version_id String?                 @db.Uuid
+  topology_version               BigInt
+  database_node_id               String?                 @db.Uuid
+  database_node_row_version      BigInt?
+  target_digest                  String                  @db.Char(64)
+  test_kind                      connection_test_kind
+  outcome                        connection_test_outcome
+  latency_ms                     Int?
+  response_status                Int?
+  sanitized_code                 String?
+  result_summary                 Json                    @default("{}")
+  record_counts                  Json?
+  has_more                       Boolean?
+  next_cursor_present            Boolean?
+  tested_by_operator_id          String                  @db.Uuid
+  tested_at                      DateTime                @db.Timestamptz(6)
+  created_at                     DateTime                @default(now()) @db.Timestamptz(6)
+
+  provider            providers                     @relation("ProviderConnectionTests", fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_provider_fk")
+  config              provider_config_versions      @relation("ConnectionTestConfig", fields: [config_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_config_fk")
+  source_credential   provider_credential_versions? @relation("ConnectionTestSourceCredential", fields: [source_credential_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_source_credential_fk")
+  database_credential provider_credential_versions? @relation("ConnectionTestDatabaseCredential", fields: [database_credential_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_database_credential_fk")
+  database_node       provider_database_nodes?      @relation("ConnectionTestDatabaseNode", fields: [database_node_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_database_node_fk")
+  tested_by_operator  operators                     @relation(fields: [tested_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_connection_tests_operator_fk")
+
+  @@index([provider_id, config_version_id], map: "provider_connection_tests_provider_config_idx")
+  @@index([provider_id, test_kind, tested_at(sort: Desc)], map: "provider_connection_tests_provider_kind_tested_idx")
+}
+
+model provider_activity_events {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String          @db.Uuid
+  provider_id         String          @db.Uuid
+  origin              activity_origin
+  event_digest        String          @db.Char(64)
+  event_type          String
+  severity            severity
+  dedupe_key          String
+  recovery_key        String
+  local_run_id        String?         @db.Uuid
+  local_quarantine_id String?         @db.Uuid
+  title               String
+  summary             String
+  evidence            Json            @default("{}")
+  event_at            DateTime        @db.Timestamptz(6)
+  received_at         DateTime        @db.Timestamptz(6)
+  created_at          DateTime        @default(now()) @db.Timestamptz(6)
+
+  organization organizations     @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_organization_fk")
+  provider     providers         @relation("ProviderActivityOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_provider_organization_fk")
+  health_rows  provider_health[] @relation("HealthLastActivity")
+  alerts       admin_alerts[]    @relation("AlertLatestActivity")
+
+  @@unique([provider_id, id], map: "provider_activity_events_provider_id_unique")
+}
+
+model provider_health {
+  provider_id                   String    @id @db.Uuid
+  organization_id               String    @db.Uuid
+  last_activity_event_id        String?   @db.Uuid
+  last_activity_at              DateTime? @db.Timestamptz(6)
+  observed_state                String
+  freshness_state               String
+  quality_state                 String
+  consecutive_failures          Int       @default(0)
+  open_quarantine_count         Int       @default(0)
+  last_attempted_at             DateTime? @db.Timestamptz(6)
+  last_head_reached_at          DateTime? @db.Timestamptz(6)
+  recovered_at                  DateTime? @db.Timestamptz(6)
+  last_direct_probe_at          DateTime? @db.Timestamptz(6)
+  last_runner_heartbeat_at      DateTime? @db.Timestamptz(6)
+  latest_failure_code           String?
+  recovery_hint                 String?
+  latest_mapping_warning_at     DateTime? @db.Timestamptz(6)
+  mapping_warning_severity      String?
+  mapping_warning_active        Boolean   @default(false)
+  latest_calculation_warning_at DateTime? @db.Timestamptz(6)
+  calculation_warning_severity  String?
+  calculation_warning_active    Boolean   @default(false)
+  publication_lag               BigInt    @default(0)
+  observed_at                   DateTime  @db.Timestamptz(6)
+  row_version                   BigInt    @default(1)
+  updated_at                    DateTime  @default(now()) @db.Timestamptz(6)
+
+  organization        organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_health_organization_fk")
+  provider            providers                 @relation("ProviderHealthOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_health_provider_organization_fk")
+  last_activity_event provider_activity_events? @relation("HealthLastActivity", fields: [provider_id, last_activity_event_id], references: [provider_id, id], onDelete: Restrict, onUpdate: NoAction, map: "provider_health_last_activity_fk")
+}
+
+model admin_alerts {
+  id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String      @db.Uuid
+  latest_activity_event_id  String?     @db.Uuid
+  kind                      String
+  severity                  severity
+  state                     alert_state @default(active)
+  dedupe_key                String
+  recovery_key              String
+  title                     String
+  summary                   String
+  provider_id               String?     @db.Uuid
+  run_id                    String?     @db.Uuid
+  quarantine_id             String?     @db.Uuid
+  first_seen_at             DateTime    @db.Timestamptz(6)
+  last_seen_at              DateTime    @db.Timestamptz(6)
+  occurrence_count          Int         @default(1)
+  reopened_count            Int         @default(0)
+  acknowledged_by_actor_key String?
+  acknowledged_at           DateTime?   @db.Timestamptz(6)
+  resolved_by_actor_key     String?
+  resolved_at               DateTime?   @db.Timestamptz(6)
+
+  organization          organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_organization_fk")
+  provider              providers?                @relation("ProviderAlertOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_provider_organization_fk")
+  latest_activity_event provider_activity_events? @relation("AlertLatestActivity", fields: [provider_id, latest_activity_event_id], references: [provider_id, id], onDelete: Restrict, onUpdate: NoAction, map: "admin_alerts_latest_activity_fk")
+
+  @@unique([organization_id, dedupe_key], map: "admin_alerts_organization_dedupe_unique")
+  @@index([organization_id, state, last_seen_at(sort: Desc)], map: "admin_alerts_organization_state_seen_idx")
+}
+
+model global_categories {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parent_category_id String?          @db.Uuid
+  category_key       String           @unique(map: "global_categories_category_key_unique")
+  display_name       String
+  category_kind      category_kind
+  display_order      Int              @default(0)
+  lifecycle          entity_lifecycle @default(active)
+  retired_at         DateTime?        @db.Timestamptz(6)
+  row_version        BigInt           @default(1)
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @default(now()) @db.Timestamptz(6)
+
+  parent                global_categories?               @relation("GlobalCategoryTree", fields: [parent_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_categories_parent_fk")
+  children              global_categories[]              @relation("GlobalCategoryTree")
+  primary_collectibles  global_collectibles[]            @relation("CollectiblePrimaryCategory")
+  collectible_links     global_collectible_categories[]
+  provider_correlations provider_category_correlations[]
+
+  @@index([parent_category_id, lifecycle, display_order], map: "global_categories_parent_lifecycle_order_idx")
+}
+
+model global_collectibles {
+  id                           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  primary_category_id          String?                @db.Uuid
+  collectible_type             collectible_type
+  identity_state               catalog_identity_state
+  display_name                 String
+  normalized_name              String
+  year                         Int?
+  brand                        String?
+  set_or_series                String?
+  card_number                  String?
+  reference_number             String?
+  subject                      String?
+  grade                        String?
+  grader                       String?
+  primary_image_url            String?
+  primary_image_alt            String?
+  valuation_amount             Decimal?               @db.Decimal(38, 18)
+  valuation_currency           String?                @db.VarChar(42)
+  valuation_usd_amount         Decimal?               @db.Decimal(38, 18)
+  valuation_unavailable_reason String?
+  valuation_type               String?
+  valuation_observed_at        DateTime?              @db.Timestamptz(6)
+  data_as_of                   DateTime               @db.Timestamptz(6)
+  retired_at                   DateTime?              @db.Timestamptz(6)
+  row_version                  BigInt                 @default(1)
+  created_at                   DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime               @default(now()) @db.Timestamptz(6)
+
+  primary_category        global_categories?                  @relation("CollectiblePrimaryCategory", fields: [primary_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_collectibles_primary_category_fk")
+  category_links          global_collectible_categories[]
+  name_aliases            global_collectible_name_aliases[]
+  provider_correlations   provider_collectible_correlations[]
+  provisional_suggestions correlation_suggestions[]           @relation("SuggestionProvisionalCollectible")
+  candidate_suggestions   correlation_suggestions[]           @relation("SuggestionCandidateCollectible")
+  aliases_from            collectible_aliases[]               @relation("CollectibleAliasSource")
+  aliases_to              collectible_aliases[]               @relation("CollectibleAliasTarget")
+
+  @@index([collectible_type, normalized_name], map: "global_collectibles_type_name_idx")
+  @@index([identity_state], map: "global_collectibles_identity_state_idx")
+}
+
+model global_collectible_categories {
+  id                    String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  global_collectible_id String           @db.Uuid
+  global_category_id    String           @db.Uuid
+  lifecycle             entity_lifecycle @default(active)
+  retired_at            DateTime?        @db.Timestamptz(6)
+  row_version           BigInt           @default(1)
+  created_at            DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime         @default(now()) @db.Timestamptz(6)
+
+  collectible global_collectibles @relation(fields: [global_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_collectible_categories_collectible_fk")
+  category    global_categories   @relation(fields: [global_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_collectible_categories_category_fk")
+}
+
+model global_collectible_name_aliases {
+  id                    String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  global_collectible_id String           @db.Uuid
+  display_name          String
+  normalized_name       String
+  lifecycle             entity_lifecycle @default(active)
+  retired_at            DateTime?        @db.Timestamptz(6)
+  row_version           BigInt           @default(1)
+  created_at            DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime         @default(now()) @db.Timestamptz(6)
+
+  collectible global_collectibles @relation(fields: [global_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "global_collectible_name_aliases_collectible_fk")
+}
+
+model provider_category_correlations {
+  id                        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id               String             @db.Uuid
+  local_category_id         String             @db.Uuid
+  local_entity_version      BigInt
+  global_category_id        String             @db.Uuid
+  correlation_version       BigInt
+  rule_version              String
+  method                    correlation_method
+  confidence                Decimal            @db.Decimal(5, 4)
+  valid_from_event_sequence BigInt
+  valid_to_event_sequence   BigInt?
+  valid_from                DateTime           @db.Timestamptz(6)
+  valid_to                  DateTime?          @db.Timestamptz(6)
+  row_version               BigInt             @default(1)
+  created_at                DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime           @default(now()) @db.Timestamptz(6)
+
+  provider         providers                @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_category_correlations_provider_fk")
+  global_category  global_categories        @relation(fields: [global_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_category_correlations_global_category_fk")
+  valid_from_event catalog_decision_events  @relation("CategoryCorrelationValidFrom", fields: [valid_from_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "provider_category_correlations_valid_from_event_fk")
+  valid_to_event   catalog_decision_events? @relation("CategoryCorrelationValidTo", fields: [valid_to_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "provider_category_correlations_valid_to_event_fk")
+
+  @@unique([provider_id, local_category_id, correlation_version], map: "provider_category_correlations_version_unique")
+}
+
+model provider_collectible_correlations {
+  id                        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id               String             @db.Uuid
+  local_collectible_id      String             @db.Uuid
+  local_entity_version      BigInt
+  global_collectible_id     String             @db.Uuid
+  correlation_version       BigInt
+  rule_version              String
+  method                    correlation_method
+  confidence                Decimal            @db.Decimal(5, 4)
+  valid_from_event_sequence BigInt
+  valid_to_event_sequence   BigInt?
+  valid_from                DateTime           @db.Timestamptz(6)
+  valid_to                  DateTime?          @db.Timestamptz(6)
+  row_version               BigInt             @default(1)
+  created_at                DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime           @default(now()) @db.Timestamptz(6)
+
+  provider           providers                @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_collectible_correlations_provider_fk")
+  global_collectible global_collectibles      @relation(fields: [global_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_collectible_correlations_global_collectible_fk")
+  valid_from_event   catalog_decision_events  @relation("CollectibleCorrelationValidFrom", fields: [valid_from_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "provider_collectible_correlations_valid_from_event_fk")
+  valid_to_event     catalog_decision_events? @relation("CollectibleCorrelationValidTo", fields: [valid_to_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "provider_collectible_correlations_valid_to_event_fk")
+
+  @@unique([provider_id, local_collectible_id, correlation_version], map: "provider_collectible_correlations_version_unique")
+}
+
+model correlation_suggestions {
+  id                         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id                String           @db.Uuid
+  local_collectible_id       String           @db.Uuid
+  local_entity_version       BigInt
+  provisional_collectible_id String           @db.Uuid
+  candidate_collectible_id   String           @db.Uuid
+  rule_version               String
+  confidence                 Decimal          @db.Decimal(5, 4)
+  review_state               suggestion_state @default(pending)
+  decision_event_sequence    BigInt
+  rationale                  Json             @default("{}")
+  row_version                BigInt           @default(1)
+  created_at                 DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime         @default(now()) @db.Timestamptz(6)
+
+  provider                providers               @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "correlation_suggestions_provider_fk")
+  provisional_collectible global_collectibles     @relation("SuggestionProvisionalCollectible", fields: [provisional_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "correlation_suggestions_provisional_fk")
+  candidate_collectible   global_collectibles     @relation("SuggestionCandidateCollectible", fields: [candidate_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "correlation_suggestions_candidate_fk")
+  decision_event          catalog_decision_events @relation("SuggestionDecisionEvent", fields: [decision_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "correlation_suggestions_decision_event_fk")
+}
+
+model catalog_ledger {
+  singleton_key Boolean  @id @default(true)
+  last_sequence BigInt   @default(0)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model collectible_aliases {
+  alias_collectible_id     String   @id @db.Uuid
+  canonical_collectible_id String   @db.Uuid
+  decision_event_sequence  BigInt
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+
+  alias_collectible     global_collectibles     @relation("CollectibleAliasSource", fields: [alias_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "collectible_aliases_alias_collectible_fk")
+  canonical_collectible global_collectibles     @relation("CollectibleAliasTarget", fields: [canonical_collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "collectible_aliases_canonical_collectible_fk")
+  decision_event        catalog_decision_events @relation("CollectibleAliasDecisionEvent", fields: [decision_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "collectible_aliases_decision_event_fk")
+}
+
+model catalog_decision_events {
+  sequence     BigInt   @id
+  event_type   String
+  actor_type   String
+  actor_id     String
+  reason       String
+  before_state Json?
+  after_state  Json?
+  occurred_at  DateTime @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  category_correlations_started    provider_category_correlations[]    @relation("CategoryCorrelationValidFrom")
+  category_correlations_closed     provider_category_correlations[]    @relation("CategoryCorrelationValidTo")
+  collectible_correlations_started provider_collectible_correlations[] @relation("CollectibleCorrelationValidFrom")
+  collectible_correlations_closed  provider_collectible_correlations[] @relation("CollectibleCorrelationValidTo")
+  suggestions                      correlation_suggestions[]           @relation("SuggestionDecisionEvent")
+  collectible_aliases              collectible_aliases[]               @relation("CollectibleAliasDecisionEvent")
+  promotion_changes                catalog_promotion_changes[]
+}
+
+model catalog_promotion_changes {
+  sequence                BigInt              @id
+  decision_event_sequence BigInt
+  provider_id             String?             @db.Uuid
+  entity_type             String
+  entity_id               String              @db.Uuid
+  entity_version          BigInt
+  operation               promotion_operation
+  changed_at              DateTime            @db.Timestamptz(6)
+  created_at              DateTime            @default(now()) @db.Timestamptz(6)
+
+  decision_event        catalog_decision_events          @relation(fields: [decision_event_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "catalog_promotion_changes_decision_event_fk")
+  provider              providers?                       @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_promotion_changes_provider_fk")
+  release_invalidations provider_release_invalidations[]
+
+  @@unique([entity_type, entity_id, entity_version, operation], map: "catalog_promotion_changes_entity_version_operation_unique")
+}
+
+model provider_release_invalidation_ledger {
+  singleton_key Boolean  @id @default(true)
+  last_sequence BigInt   @default(0)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model provider_release_invalidations {
+  sequence                  BigInt   @id
+  provider_id               String   @db.Uuid
+  catalog_change_sequence   BigInt?
+  public_profile_version_id String?  @db.Uuid
+  reason                    String
+  created_at                DateTime @default(now()) @db.Timestamptz(6)
+
+  provider       providers                         @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_release_invalidations_provider_fk")
+  catalog_change catalog_promotion_changes?        @relation(fields: [catalog_change_sequence], references: [sequence], onDelete: Restrict, onUpdate: NoAction, map: "provider_release_invalidations_catalog_change_fk")
+  public_profile provider_public_profile_versions? @relation("InvalidationProfileCause", fields: [public_profile_version_id, provider_id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_release_invalidations_public_profile_fk")
+}
+
+model provider_invalidation_checkpoints {
+  provider_id                          String   @id @db.Uuid
+  last_confirmed_invalidation_sequence BigInt   @default(0)
+  confirmed_provider_release_id        String?  @db.Uuid
+  row_version                          BigInt   @default(1)
+  updated_at                           DateTime @default(now()) @db.Timestamptz(6)
+
+  provider providers @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_invalidation_checkpoints_provider_fk")
+}
+
+model catalog_consumer_checkpoints {
+  consumer_key            String    @id
+  last_confirmed_sequence BigInt    @default(0)
+  confirmation_id         String?
+  lease_owner             String?
+  lease_fence             BigInt    @default(0)
+  lease_expires_at        DateTime? @db.Timestamptz(6)
+  row_version             BigInt    @default(1)
+  created_at              DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model catalog_versions {
+  id                      String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  predecessor_id          String?            @db.Uuid
+  through_change_sequence BigInt
+  schema_version          String
+  lifecycle               artifact_lifecycle @default(building)
+  category_count          Int
+  collectible_count       Int
+  alias_count             Int
+  content_hash            String             @db.Char(64)
+  created_at              DateTime           @default(now()) @db.Timestamptz(6)
+  assembled_at            DateTime?          @db.Timestamptz(6)
+  completed_at            DateTime?          @db.Timestamptz(6)
+
+  predecessor            catalog_versions?                @relation("CatalogVersionHistory", fields: [predecessor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_versions_predecessor_fk")
+  successors             catalog_versions[]               @relation("CatalogVersionHistory")
+  batches                catalog_version_batches[]
+  publication_operations catalog_publication_operations[]
+  manifest_operations    manifest_activation_operations[]
+}
+
+model catalog_version_batches {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  catalog_version_id String   @db.Uuid
+  batch_kind         String
+  batch_index        Int
+  payload            Json
+  record_count       Int
+  byte_count         Int
+  body_hash          String   @db.Char(64)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  catalog_version catalog_versions @relation(fields: [catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_version_batches_catalog_version_fk")
+
+  @@unique([catalog_version_id, batch_kind, batch_index], map: "catalog_version_batches_version_kind_index_unique")
+}
+
+model catalog_publication_operations {
+  id                 String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  catalog_version_id String                      @db.Uuid
+  operation_kind     String
+  batch_index        Int?
+  idempotency_key    String                      @unique(map: "catalog_publication_operations_idempotency_unique")
+  request_digest     String                      @db.Char(64)
+  request_bytes      Bytes
+  body_hash          String?                     @db.Char(64)
+  lease_fence        BigInt
+  state              publication_operation_state @default(pending)
+  convex_receipt_id  String?
+  receipt_hash       String?                     @db.Char(64)
+  receipt            Json?
+  failure_code       String?
+  requested_at       DateTime                    @db.Timestamptz(6)
+  completed_at       DateTime?                   @db.Timestamptz(6)
+
+  catalog_version catalog_versions @relation(fields: [catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_publication_operations_catalog_version_fk")
+}
+
+model manifest_activation_state {
+  singleton_key                 Boolean   @id @default(true)
+  active_manifest_id            String?
+  active_manifest_fingerprint   String?   @db.Char(64)
+  previous_manifest_id          String?
+  previous_manifest_fingerprint String?   @db.Char(64)
+  lease_owner                   String?
+  lease_fence                   BigInt    @default(0)
+  lease_expires_at              DateTime? @db.Timestamptz(6)
+  last_receipt_id               String?
+  row_version                   BigInt    @default(1)
+  updated_at                    DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model manifest_activation_operations {
+  id                         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id                String                      @db.Uuid
+  operation                  manifest_operation
+  expected_manifest_id       String?
+  target_provider_release_id String?                     @db.Uuid
+  target_catalog_version_id  String?                     @db.Uuid
+  new_manifest_fingerprint   String                      @db.Char(64)
+  idempotency_key            String                      @unique(map: "manifest_activation_operations_idempotency_unique")
+  request_digest             String                      @db.Char(64)
+  lease_fence                BigInt
+  state                      publication_operation_state @default(pending)
+  convex_receipt_id          String?
+  receipt_hash               String?                     @db.Char(64)
+  receipt                    Json?
+  requested_by_operator_id   String?                     @db.Uuid
+  requested_at               DateTime                    @db.Timestamptz(6)
+  completed_at               DateTime?                   @db.Timestamptz(6)
+
+  provider               providers         @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_provider_fk")
+  target_catalog_version catalog_versions? @relation(fields: [target_catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_catalog_version_fk")
+  requested_by_operator  operators?        @relation(fields: [requested_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_operator_fk")
+}
+
+model artifact_retention_executions {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  state           retention_state @default(running)
+  cutoff_at       DateTime        @db.Timestamptz(6)
+  batch_size      Int
+  selected_count  Int             @default(0)
+  deleted_count   Int             @default(0)
+  protected_count Int             @default(0)
+  failed_count    Int             @default(0)
+  failure_code    String?
+  started_at      DateTime        @db.Timestamptz(6)
+  finished_at     DateTime?       @db.Timestamptz(6)
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+}

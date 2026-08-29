@@ -1,23 +1,31 @@
-# Database Provisioning
+# Distributed Database Provisioning
 
 Status: canonical production and local database workflow
 
-## Supported target
+## Supported topology
 
-PackScout supports a newly created, empty PostgreSQL 16 or newer database. The
-Prisma schema and checked-in Prisma migrations are the only application schema
-and migration history.
+PackScout supports PostgreSQL 16 or newer with two independently managed roles:
 
-This workflow does not preserve, upgrade, or import an existing database managed
-by the removed persistence system. Applying migrations to a non-empty,
-incompatible database must fail rather than silently changing or deleting its
-objects.
+- one central control and shared-catalog database named exactly `packscout`; and
+- one provider database named exactly `packscout_<provider_key>` for every
+  registered provider, normally on an independently reachable PostgreSQL
+  instance or cluster.
 
-Do not reset, replace, or delete a database unless the operator has explicitly
+Each target starts empty. The central and provider Prisma schemas have separate
+migration histories and generated clients. A provider migration is applied to
+one provider database at a time; it is never broadcast implicitly to every
+provider. Cross-database IDs are validated soft references, not foreign keys or
+distributed transactions.
+
+This is a clean pre-launch replacement. It does not upgrade, migrate, dual-run,
+or import the previous single-database schema. Applying either migration history
+to a non-empty incompatible database must fail visibly.
+
+Do not reset, replace, or delete a database unless an operator has explicitly
 confirmed its exact host, port, database name, environment, and disposable
-status. The commands below do not perform a reset.
+status. The commands below never perform a reset.
 
-## Provisioning sequence
+## Validate and generate
 
 From a clean checkout:
 
@@ -25,41 +33,84 @@ From a clean checkout:
 npm ci
 npm run db:prisma:validate
 npm run db:prisma:generate
-PACKSCOUT_DATABASE_URL='<new-empty-postgresql-url>' npm run db:prisma:migrate:deploy
-npm run check:prisma
-npm run verify:framework
 ```
 
-Run the migration deploy command a second time against the same new database.
-It must report that there are no pending migrations. The Prisma schema parity
-suite must still report the expected tables, columns, enums, keys, constraints,
-indexes, and PostgreSQL-native invariants.
+These commands validate and generate the central and provider clients without
+contacting a live target.
 
-Keep the connection URL in the runtime environment or approved secret store. Do
-not commit it, print it in verification output, or copy it into fixtures.
+## Provision the central database
+
+Create an empty database named `packscout`, then deploy only the central
+migration history:
+
+```bash
+PACKSCOUT_CENTRAL_DATABASE_URL='<packscout-postgresql-url>' \
+  npm run db:prisma:migrate:deploy:central
+```
+
+The baseline migration seeds the singleton `database_identity` row with role
+`central`, schema version `distributed-central-v1`, and no provider identity.
+Application startup verifies that row and `current_database()` before serving
+traffic. It never migrates or repairs schema state.
+
+## Provision one provider database
+
+Choose a registered lowercase provider key, create an empty database named
+`packscout_<provider_key>`, and deploy only the provider migration history:
+
+```bash
+PACKSCOUT_PROVIDER_DATABASE_URL='<packscout_provider-postgresql-url>' \
+  npm run db:prisma:migrate:deploy:provider
+```
+
+The provider baseline deliberately leaves its singleton identity unbound. As a
+separate, explicit provisioning step, invoke
+`public.initialize_provider_database_identity(provider_id, provider_key)` once
+using the provider UUID and exact registered key. The function verifies
+`current_database() = 'packscout_' || provider_key`, rejects rebinding, and is
+not called by normal application startup.
+
+Repeat the migration deploy command against the same target. It must report
+that no migrations remain. Repeat this sequence independently for every
+provider; a failure for one target must not prevent another target from being
+provisioned or started.
+
+## Runtime configuration
+
+- Central admin and control-plane processes receive
+  `PACKSCOUT_CENTRAL_DATABASE_URL`.
+- A provider runner or direct admin operation receives only the selected
+  provider URL as `PACKSCOUT_PROVIDER_DATABASE_URL`, resolved from central
+  topology and decrypted server-side.
+- Provider pools are bounded independently. Central and provider transactions
+  use explicit time limits.
+- Connection URLs belong in the runtime environment or approved secret store.
+  Never commit, log, screenshot, or return them in an HTTP error.
+
+The PostgreSQL instance or cluster supplies the environment boundary, so
+database names do not receive development, preproduction, or production
+suffixes.
 
 ## Readiness evidence
 
-Before pointing an application runtime at the database, require all of the
-following:
+Before pointing a runtime at a target, require all of the following:
 
-- Prisma client generation and schema validation complete successfully.
-- The initial migration deploy succeeds and a repeated deploy is a no-op.
-- `npm run check:prisma` passes its clean-migration, parity, constraint, and
-  lifecycle tests against PostgreSQL 16 or newer.
-- `npm run verify:framework` passes without skipped critical regressions or new
-  framework exceptions.
-- Admin and worker smoke flows start against a clean migrated database and close
-  their Prisma client cleanly.
+- both Prisma schemas validate and both generated clients build;
+- the applicable migration deploy succeeds and a repeated deploy is a no-op;
+- the singleton identity matches physical database name, role, schema version,
+  and provider identity (for a provider target);
+- schema contract, native-constraint, lifecycle, and isolation tests pass on
+  PostgreSQL 16 or newer;
+- `npm run verify:framework` passes without a bypass; and
+- central, provider A, and provider B can start and close independently while an
+  unreachable provider returns a sanitized, provider-scoped failure.
 
-After that evidence is recorded, supply `PACKSCOUT_DATABASE_URL` to the admin or
-worker runtime and use the environment-specific start command. Migration deploy
-remains a separate release step; application startup does not mutate the schema.
+Migration deploy remains a release step. Runtime startup performs read-only
+identity/readiness checks and never mutates schema state.
 
 ## Replacement approval
 
-If a target already contains data or application objects, stop. Decide whether
-it may be discarded outside this workflow. A replacement operation requires a
-separate, explicit approval naming the exact disposable database target and a
-recovery or recreation plan. Without that approval, create a different empty
-database and leave the existing target unchanged.
+If a target already contains data or application objects, stop. A replacement
+requires separate explicit approval naming the exact disposable target and a
+recovery or recreation plan. Without that approval, create another empty target
+and leave the existing database unchanged.

@@ -61,11 +61,11 @@ Central callers supply a validated provider ID to the provider locator. The loca
 
 ### Topology acceptance
 
-- [ ] A clean environment provisions and verifies one `packscout` database and at least two `packscout_<provider_key>` databases.
-- [ ] Each database reports its own role and schema version, and a provider mismatch fails closed.
-- [ ] Environment selection changes the PostgreSQL instance or cluster without changing the approved database names.
-- [ ] No schema contains a cross-database foreign key or assumes a transaction can span database authorities.
-- [ ] The existing development database remains untouched.
+- [x] A clean environment provisions and verifies one `packscout` database and at least two `packscout_<provider_key>` databases.
+- [x] Each database reports its own role and schema version, and a provider mismatch fails closed.
+- [x] Environment selection changes the PostgreSQL instance or cluster without changing the approved database names.
+- [x] No schema contains a cross-database foreign key or assumes a transaction can span database authorities.
+- [x] The existing development database remains untouched.
 
 ### Isolation acceptance
 
