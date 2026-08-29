@@ -41,6 +41,7 @@ export * from "./provider-runtime-repository.ts";
 export * from "./provider-worker-lease-repository.ts";
 export * from "./provider-command-repository.ts";
 export * from "./provider-run-repository.ts";
+export * from "./provider-source-request-audit-repository.ts";
 export * from "./admin-provider-runtime-repository.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
 export * from "./first-admin-bootstrap-repository.ts";

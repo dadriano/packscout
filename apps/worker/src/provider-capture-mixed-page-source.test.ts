@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import {
+  PROVIDER_MIXED_PAGE_MAX_BYTES,
   providerMixedPageCanonicalBytes,
   validateProviderMixedPage,
   type ValidatedProviderMixedPage,
@@ -17,9 +18,6 @@ import {
   ProviderCaptureSourceError,
 } from "./provider-capture-source-contract.ts";
 
-const sampleRoot = process.env.PACKSCOUT_PROVIDER_CAPTURE_ROOT
-  ?? "/Users/lains/Documents/packscout-data";
-const samplePath = path.join(sampleRoot, CLUTCHPACKS_CAPTURE_FILE_NAME);
 const providerId = "11111111-1111-4111-8111-111111111111";
 const configVersionId = "22222222-2222-4222-8222-222222222222";
 const runId = "33333333-3333-4333-8333-333333333333";
@@ -27,17 +25,27 @@ const actorHmacKey = Buffer.alloc(32, 0x5a);
 
 async function requireSample(
   context: TestContext,
-): Promise<boolean> {
+): Promise<string | null> {
+  const sampleRoot = process.env.PACKSCOUT_PROVIDER_CAPTURE_ROOT;
+  if (sampleRoot === undefined || sampleRoot.length === 0) {
+    context.skip(
+      "Set PACKSCOUT_PROVIDER_CAPTURE_ROOT to run protected capture tests.",
+    );
+    return null;
+  }
+  if (!path.isAbsolute(sampleRoot)) {
+    throw new Error("PACKSCOUT_PROVIDER_CAPTURE_ROOT must be absolute.");
+  }
   try {
-    await access(samplePath);
-    return true;
+    await access(path.join(sampleRoot, CLUTCHPACKS_CAPTURE_FILE_NAME));
+    return sampleRoot;
   } catch {
     context.skip("The protected ClutchPacks capture is not available.");
-    return false;
+    return null;
   }
 }
 
-function source(root = sampleRoot): ProviderCaptureMixedPageSource {
+function source(root: string): ProviderCaptureMixedPageSource {
   return new ProviderCaptureMixedPageSource({
     captureRoot: root,
     actorHmacKey,
@@ -62,18 +70,22 @@ async function allPages(
   pageSource: ProviderCaptureMixedPageSource,
 ): Promise<readonly { readonly raw: unknown; readonly page: ValidatedProviderMixedPage }[]> {
   const pages: Array<{ raw: unknown; page: ValidatedProviderMixedPage }> = [];
+  let sourceCheckpoint: ValidatedProviderMixedPage["nextCursor"] = null;
   let checkpoint: string | null = null;
   for (let index = 0; index < 20; index += 1) {
     const raw = await pageSource.nextPage({
       authority,
       runId,
       workerFence: 1n,
+      pageNumber: index + 1,
+      sourceCheckpoint,
       sourceCheckpointFingerprint: checkpoint,
       signal: new AbortController().signal,
     });
     const page = validateProviderMixedPage(raw);
     pages.push({ raw, page });
     if (page.continuation === "head") return Object.freeze(pages);
+    sourceCheckpoint = page.nextCursor;
     checkpoint = page.nextCursorFingerprint;
   }
   throw new Error("The capture source did not reach head within its test bound.");
@@ -94,7 +106,8 @@ function collectStrings(value: unknown, destination: Set<string>): void {
 }
 
 test("the pinned ClutchPacks capture strictly validates with exact source counts", async (context) => {
-  if (!await requireSample(context)) return;
+  const sampleRoot = await requireSample(context);
+  if (sampleRoot === null) return;
   const page = await readValidatedProviderCapture({
     captureRoot: sampleRoot,
     fileName: CLUTCHPACKS_CAPTURE_FILE_NAME,
@@ -109,11 +122,19 @@ test("the pinned ClutchPacks capture strictly validates with exact source counts
   }, { catalog: 14, pulls: 15, sales: 15 });
 });
 
-test("the ClutchPacks integration emits deterministic full capture pages and intentional pull quarantines", async (context) => {
-  if (!await requireSample(context)) return;
-  const first = await allPages(source());
-  const replay = await allPages(source());
-  assert.equal(first.length, 5);
+test("the ClutchPacks integration emits one deterministic full capture page and intentional pull quarantines", async (context) => {
+  const sampleRoot = await requireSample(context);
+  if (sampleRoot === null) return;
+  const first = await allPages(source(sampleRoot));
+  const replay = await allPages(source(sampleRoot));
+  assert.equal(first.length, 1);
+  const firstPage = first[0];
+  assert.ok(firstPage);
+  assert.equal(firstPage.page.records.length, 976);
+  assert.ok(
+    providerMixedPageCanonicalBytes(firstPage.raw).byteLength
+      <= PROVIDER_MIXED_PAGE_MAX_BYTES,
+  );
   assert.deepEqual(
     first.map(({ raw }) => providerMixedPageCanonicalBytes(raw).toString("hex")),
     replay.map(({ raw }) => providerMixedPageCanonicalBytes(raw).toString("hex")),
@@ -183,8 +204,12 @@ test("the ClutchPacks integration emits deterministic full capture pages and int
 });
 
 test("normalized pages contain no raw provider actors or transaction identifiers", async (context) => {
-  if (!await requireSample(context)) return;
-  const capture = JSON.parse(await readFile(samplePath, "utf8")) as {
+  const sampleRoot = await requireSample(context);
+  if (sampleRoot === null) return;
+  const capture = JSON.parse(await readFile(
+    path.join(sampleRoot, CLUTCHPACKS_CAPTURE_FILE_NAME),
+    "utf8",
+  )) as {
     readonly pulls: readonly {
       readonly data: Readonly<Record<string, unknown>>;
     }[];
@@ -212,7 +237,7 @@ test("normalized pages contain no raw provider actors or transaction identifiers
     }
   }
   const normalizedValues = new Set<string>();
-  for (const { raw } of await allPages(source())) {
+  for (const { raw } of await allPages(source(sampleRoot))) {
     collectStrings(raw, normalizedValues);
   }
   assert.equal(
@@ -220,7 +245,8 @@ test("normalized pages contain no raw provider actors or transaction identifiers
     false,
   );
 
-  const accounts = (await allPages(source())).flatMap(({ page }) => page.records)
+  const accounts = (await allPages(source(sampleRoot)))
+    .flatMap(({ page }) => page.records)
     .filter((record) => record.entityType === "provider_account");
   assert.equal(accounts.every(({ candidate }) => (
     typeof candidate.accountKey === "string"
@@ -243,6 +269,8 @@ test("unknown capture adapters fail closed before any filesystem read", async ()
       },
       runId,
       workerFence: 1n,
+      pageNumber: 1,
+      sourceCheckpoint: null,
       sourceCheckpointFingerprint: null,
       signal: new AbortController().signal,
     }),
@@ -252,7 +280,8 @@ test("unknown capture adapters fail closed before any filesystem read", async ()
 });
 
 test("the capture reader rejects traversal and hash drift with public-safe codes", async (context) => {
-  if (!await requireSample(context)) return;
+  const sampleRoot = await requireSample(context);
+  if (sampleRoot === null) return;
   await assert.rejects(
     readValidatedProviderCapture({
       captureRoot: sampleRoot,

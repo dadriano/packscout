@@ -88,9 +88,9 @@ test("local composition starts one provider database and consumes one command", 
             return {
               kind: "completed" as const,
               runId: "00000000-0000-4000-8000-000000000030",
-              pageCount: 5,
+              pageCount: 1,
               counters: {
-                pages: 5,
+                pages: 1,
                 catalog: 946,
                 pulls: 15,
                 marketEvents: 15,

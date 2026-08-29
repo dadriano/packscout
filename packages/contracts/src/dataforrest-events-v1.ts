@@ -19,6 +19,7 @@ import {
   type NormalizedProviderFacts,
 } from "./provider-source-facts-v1.ts";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -33,6 +34,7 @@ import {
 export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
 export {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -43,6 +45,8 @@ export const DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY =
   "dataforrest-cursor-v1" as const;
 export const DATAFORREST_EVENTS_V1_ENDPOINT =
   "https://198.204.245.26.sslip.io/v1/events" as const;
+export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
+export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
 
 export const dataforrestIdentityNamespaceByProvider =
   providerIdentityNamespaceByLaunchProvider;
@@ -118,7 +122,8 @@ export const dataforrestOpaqueCursorV1Schema = opaqueCursorValueSchema
 
 export const dataforrestEventsPageV1Schema = z
   .object({
-    records: z.array(dataforrestRawRecordEnvelopeV1Schema).max(5_000),
+    records: z.array(dataforrestRawRecordEnvelopeV1Schema)
+      .max(DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT),
     next_cursor: dataforrestOpaqueCursorV1Schema,
     poll_after_seconds: z.union([z.literal(0), z.literal(60)]),
   })
@@ -159,7 +164,12 @@ function dataforrestEventsSourceAdapterManifest(
   adapterVersion:
     | typeof DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
-    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+    | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  options: Readonly<{
+    pageLimit?: number;
+    supportedProviders?: typeof dataforrestProviderDeclarations;
+  }> = {},
 ) {
   return sourceAdapterManifestV1Schema.parse({
     providerSourceContractVersion: PROVIDER_SOURCE_CONTRACT_VERSION,
@@ -170,7 +180,7 @@ function dataforrestEventsSourceAdapterManifest(
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     operatorLabel: "DataForrest Events V1",
     requestBounds: {
-      pageLimit: providerSourceLaunchBounds.pageTargetRecords,
+      pageLimit: options.pageLimit ?? providerSourceLaunchBounds.pageTargetRecords,
       maximumResponseBytes: providerSourceLaunchBounds.maximumResponseBytes,
       timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
     },
@@ -182,7 +192,8 @@ function dataforrestEventsSourceAdapterManifest(
       pageRead: true,
       cancellation: true,
     },
-    supportedProviders: dataforrestProviderDeclarations,
+    supportedProviders:
+      options.supportedProviders ?? dataforrestProviderDeclarations,
   }) satisfies SourceAdapterManifestV1;
 }
 
@@ -201,10 +212,27 @@ export const dataforrestEventsV1V2SourceAdapterManifest =
 export const dataforrestEventsV1SourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(DATAFORREST_EVENTS_V1_ADAPTER_VERSION);
 
+/**
+ * Provider-local request profile for the pre-launch distributed ClutchPacks
+ * importer. Its distinct adapter identity preserves the shared and historical
+ * 500-record manifests while allowing the approved 2,000-record API request.
+ */
+export const dataforrestClutchpacksDistributedSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "clutchpacks",
+      ),
+    },
+  );
+
 export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1V2SourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestClutchpacksDistributedSourceAdapterManifest,
 ]);
 
 export type DataforrestEventRecordV1 = z.infer<
@@ -287,7 +315,8 @@ export function normalizeDataforrestEventRecordForAdapter(
   if (
     adapterVersion !== DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION &&
-    adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+    adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
   ) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }

@@ -188,7 +188,7 @@ database connection was used.
 
 ### Checkpoint readiness
 
-- [ ] Run now from the authoritative Providers/Operations experience reaches
+- [x] Run now from the authoritative Providers/Operations experience reaches
   the new provider-level command path.
 - [x] An uninstalled provider fails before mutation with
   `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` in an accessible error state.

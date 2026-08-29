@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
@@ -29,6 +30,15 @@ test("provider facts specializations follow the declared adapter versions", () =
   assert.equal(
     readDataforrestProviderFacts(
       DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      "clutchpacks",
+      "pack",
+      {},
+    )?.kind,
+    "pack",
+  );
+  assert.equal(
+    readDataforrestProviderFacts(
+      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
       "clutchpacks",
       "pack",
       {},

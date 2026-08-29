@@ -5,6 +5,7 @@ import {
   PrismaProviderRunRepository,
   PrismaProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
+  validateProviderMixedPage,
   type ProviderPrismaClient,
   type ProviderRunCounters,
 } from "@packscout/database";
@@ -14,9 +15,11 @@ import {
   ProviderCaptureSourceError,
   type ProviderCapturePageSourceInput,
 } from "./provider-capture-source-contract.ts";
+import { ProviderDataforrestSourceError } from
+  "./provider-dataforrest-mixed-page-source.ts";
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
-const MAXIMUM_CAPTURE_PAGES = 20;
+const MAXIMUM_IMPORT_PAGES = 10_000;
 
 export type ClutchpacksManualImportExecutionResult =
   | Readonly<{ kind: "idle" | "contended" }>
@@ -39,8 +42,51 @@ export interface ProviderManualImportPageSource {
 
 function safeFailureCode(error: unknown): string {
   return error instanceof ProviderCaptureSourceError
+    || error instanceof ProviderDataforrestSourceError
     ? error.code
     : "PROVIDER_IMPORT_EXECUTION_FAILED";
+}
+
+/** Selects exactly one installed source implementation from cached authority. */
+export class ProviderManualImportPageSourceRouter
+implements ProviderManualImportPageSource {
+  readonly #sources: readonly ProviderManualImportPageSource[];
+
+  constructor(sources: readonly ProviderManualImportPageSource[]) {
+    if (sources.length < 1) {
+      throw new TypeError("At least one provider page source is required.");
+    }
+    this.#sources = Object.freeze([...sources]);
+  }
+
+  supports(adapterKey: string, providerKey: string): boolean {
+    return this.#matching(adapterKey, providerKey).length === 1;
+  }
+
+  nextPage(input: ProviderCapturePageSourceInput): Promise<unknown> {
+    const adapterKey = input.authority.configuration.adapterKey;
+    if (typeof adapterKey !== "string") {
+      throw new ProviderCaptureSourceError(
+        "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+      );
+    }
+    const matches = this.#matching(adapterKey, input.authority.providerKey);
+    if (matches.length !== 1) {
+      throw new ProviderCaptureSourceError(
+        "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+      );
+    }
+    return matches[0]!.nextPage(input);
+  }
+
+  #matching(
+    adapterKey: string,
+    providerKey: string,
+  ): readonly ProviderManualImportPageSource[] {
+    return this.#sources.filter((source) =>
+      source.supports(adapterKey, providerKey)
+    );
+  }
 }
 
 /**
@@ -161,11 +207,17 @@ export class ClutchpacksManualImportExecutor {
         };
       }
 
-      let checkpoint = started.run.cursorFingerprint;
+      let checkpoint = started.run.requestedCursor;
+      let checkpointFingerprint = started.run.requestedCursorFingerprint;
+      const startingPageNumber = started.run.counters.pages + 1;
       const pages = new PrismaProviderMixedPageRepository(
         this.dependencies.database,
       );
-      for (let index = 0; index < MAXIMUM_CAPTURE_PAGES; index += 1) {
+      for (
+        let index = 0;
+        startingPageNumber + index <= MAXIMUM_IMPORT_PAGES;
+        index += 1
+      ) {
         if (signal.aborted) {
           return this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
@@ -192,9 +244,12 @@ export class ClutchpacksManualImportExecutor {
           },
           runId,
           workerFence: fence,
-          sourceCheckpointFingerprint: checkpoint,
+          pageNumber: startingPageNumber + index,
+          sourceCheckpoint: checkpoint,
+          sourceCheckpointFingerprint: checkpointFingerprint,
           signal,
         });
+        const validatedPage = validateProviderMixedPage(page);
         const committed = await pages.commit({
           workerId: this.#workerId,
           page,
@@ -207,7 +262,8 @@ export class ClutchpacksManualImportExecutor {
             "PROVIDER_MIXED_PAGE_" + committed.kind.toUpperCase(),
           );
         }
-        checkpoint = committed.resultingCursorFingerprint;
+        checkpoint = validatedPage.nextCursor;
+        checkpointFingerprint = committed.resultingCursorFingerprint;
         if (!committed.reachedHead) continue;
         const finished = await runs.finish({
           runId,
@@ -241,7 +297,7 @@ export class ClutchpacksManualImportExecutor {
         runs,
         runId,
         fence,
-        "PROVIDER_CAPTURE_PAGE_LIMIT_EXCEEDED",
+        "PROVIDER_IMPORT_PAGE_LIMIT_EXCEEDED",
       );
     } catch (error) {
       if (runId === null) {
@@ -283,14 +339,21 @@ export function createClutchpacksManualImportExecutor(input: Readonly<{
   captureRoot: string;
   actorHmacKey: Uint8Array;
   workerId: string;
+  liveSource?: ProviderManualImportPageSource;
   leaseMilliseconds?: number;
 }>): ClutchpacksManualImportExecutor {
+  const captureSource = new ProviderCaptureMixedPageSource({
+    captureRoot: input.captureRoot,
+    actorHmacKey: input.actorHmacKey,
+  });
   return new ClutchpacksManualImportExecutor({
     database: input.database,
-    source: new ProviderCaptureMixedPageSource({
-      captureRoot: input.captureRoot,
-      actorHmacKey: input.actorHmacKey,
-    }),
+    source: input.liveSource === undefined
+      ? captureSource
+      : new ProviderManualImportPageSourceRouter([
+          captureSource,
+          input.liveSource,
+        ]),
     workerId: input.workerId,
     ...(input.leaseMilliseconds === undefined
       ? {}

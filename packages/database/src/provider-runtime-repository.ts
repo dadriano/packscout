@@ -150,7 +150,19 @@ function normalizedConfiguration(input: CanonicalJsonObject): CanonicalJsonObjec
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  try {
+    const normalizedLeft = normalizeJsonObject(
+      left as CanonicalJsonObject,
+      "cachedConfiguration",
+    );
+    const normalizedRight = normalizeJsonObject(
+      right as CanonicalJsonObject,
+      "configuration",
+    );
+    return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+  } catch {
+    return false;
+  }
 }
 
 function cachedConfiguration(row: LockedRuntimeRow): ProviderCachedConfigurationSnapshot | null {
@@ -325,6 +337,16 @@ export class PrismaProviderRuntimeRepository {
           };
         }
       }
+      const activeRun = await transaction.provider_runs.findFirst({
+        where: { state: { in: ["queued", "running"] } },
+        select: { id: true },
+      });
+      if (activeRun !== null) {
+        return {
+          kind: "version_conflict" as const,
+          runtime: await projectSnapshot(transaction, row, input.synchronizedAt),
+        };
+      }
       const updated = await transaction.provider_runtime.updateMany({
         where: { singleton_key: true, row_version: row.row_version },
         data: {
@@ -335,6 +357,11 @@ export class PrismaProviderRuntimeRepository {
           last_control_sync_at: input.synchronizedAt,
           schedule_seconds: input.scheduleSeconds,
           next_due_at: input.nextDueAt,
+          // Cursors are scoped to an immutable source configuration. Advancing
+          // that authority always starts the new revision from its own head-
+          // discovery boundary instead of reusing an incompatible checkpoint.
+          source_cursor: ProviderPrisma.DbNull,
+          source_cursor_hash: null,
           row_version: { increment: 1n },
           updated_at: input.synchronizedAt,
         },

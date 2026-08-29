@@ -114,6 +114,7 @@
     "db:inspect:packscout-clutchpacks:local": "NODE_ENV=development PACKSCOUT_LOCAL_REVIEW_CLUSTER_ACTION=inspect PACKSCOUT_LOCAL_REVIEW_CLUSTER_TARGET=clutchpacks node --import tsx scripts/local/provision-clutchpacks-review-databases.mts",
     "db:start:packscout-clutchpacks:local": "NODE_ENV=development PACKSCOUT_LOCAL_REVIEW_CLUSTER_ACTION=start PACKSCOUT_LOCAL_REVIEW_CLUSTER_TARGET=clutchpacks node --import tsx scripts/local/provision-clutchpacks-review-databases.mts",
     "db:stop:packscout-clutchpacks:local": "NODE_ENV=development PACKSCOUT_LOCAL_REVIEW_CLUSTER_ACTION=stop PACKSCOUT_LOCAL_REVIEW_CLUSTER_TARGET=clutchpacks node --import tsx scripts/local/provision-clutchpacks-review-databases.mts",
+    "activate:dataforrest-source:clutchpacks:local": "NODE_ENV=development node --import tsx scripts/local/activate-clutchpacks-dataforrest-source.mts",
     "db:prisma:generate:central": "npm run prisma:generate:central --workspace=@packscout/database",
     "db:prisma:generate:provider": "npm run prisma:generate:provider --workspace=@packscout/database",
     "db:prisma:migrate:deploy:central": "npm run prisma:migrate:deploy:central --workspace=@packscout/database",

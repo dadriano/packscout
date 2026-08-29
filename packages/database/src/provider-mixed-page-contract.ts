@@ -11,11 +11,17 @@ import {
 } from "./provider-mixed-page-shape.ts";
 
 export const PROVIDER_MIXED_PAGE_CONTRACT_VERSION = "packscout.provider-mixed-page.v1";
-export const PROVIDER_MIXED_PAGE_MAX_RECORDS = 500;
-export const PROVIDER_MIXED_PAGE_MAX_BYTES = 1_048_576;
+// A 2,000-record ClutchPacks source page can yield one canonical record and
+// one deduplicated category record per source record. Keep the normalized
+// envelope bounded at that proven 2x translation maximum.
+export const PROVIDER_MIXED_PAGE_MAX_RECORDS = 4_000;
+export const PROVIDER_MIXED_PAGE_MAX_BYTES = 8 * 1_024 * 1_024;
 export const PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES = 262_144;
 export const PROVIDER_MIXED_PAGE_MAX_CURSOR_BYTES = 16_384;
-export const PROVIDER_MIXED_PAGE_MAX_QUARANTINES = 100;
+// One legal source page can contain 2,000 record-local failures (for example,
+// card-only pulls whose pack relationship is unavailable). The byte and
+// normalized-record caps remain independent fail-closed bounds.
+export const PROVIDER_MIXED_PAGE_MAX_QUARANTINES = 2_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -329,9 +335,9 @@ export function validateProviderMixedPage(value: unknown): ValidatedProviderMixe
     invalid("continuation is unsupported.");
   }
   if (
-    (object.continuation === "head" && nextCursor !== null)
-    || (object.continuation === "more" && nextCursor === null)
-    || (object.continuation === "more" && object.nextCursorFingerprint === object.inputCursorFingerprint)
+    (object.continuation === "more" && nextCursor === null)
+    || (object.continuation === "more" && nextCursor !== null
+      && object.nextCursorFingerprint === object.inputCursorFingerprint)
   ) {
     throw new ProviderMixedPageContractError(
       "MIXED_PAGE_CURSOR_MISMATCH",

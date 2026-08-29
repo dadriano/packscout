@@ -1444,7 +1444,7 @@ ALTER TABLE "provider_run_pages"
     AND ("next_cursor_hash" IS NULL OR "next_cursor_hash" ~ '^[0-9a-f]{64}$')
   ),
   ADD CONSTRAINT "provider_run_pages_continuation_check" CHECK (
-    ("continuation" = 'head' AND "next_cursor" IS NULL)
+    "continuation" = 'head'
     OR ("continuation" = 'more' AND "next_cursor" IS NOT NULL)
   ),
   ADD CONSTRAINT "provider_run_pages_digest_check" CHECK ("response_digest" ~ '^[0-9a-f]{64}$'),

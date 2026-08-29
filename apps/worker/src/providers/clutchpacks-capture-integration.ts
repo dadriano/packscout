@@ -1,5 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   dataforrestEventRecordV1Schema,
   normalizeDataforrestEventRecordForAdapter,
@@ -97,6 +98,10 @@ function protectedEvidenceRef(record: DataforrestEventRecordV1): string {
 function mapDataforrestRecord(
   value: unknown,
   providerId: string,
+  adapterVersion:
+    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
+    | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION =
+      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ): CanonicalProviderCandidate {
   const parsed = dataforrestEventRecordV1Schema.safeParse(value);
   if (!parsed.success) invalidRecord();
@@ -104,7 +109,7 @@ function mapDataforrestRecord(
     parsed.data,
     CLUTCHPACKS_PROVIDER_KEY,
     protectedEvidenceRef(parsed.data),
-    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    adapterVersion,
   );
   const outcome = mapperRegistry.map({
     organizationId: TRANSIENT_MAPPING_ORGANIZATION_ID,
@@ -802,6 +807,97 @@ export function translateClutchpacksCapture(input: {
         ({ candidate }) => candidate.packKey === null,
       ).length,
       marketEvents: events.length,
+      packContents: 0,
+    }),
+  });
+}
+
+/**
+ * Translates records already validated by the live DataForrest adapter without
+ * rebuilding the legacy provider-feed envelope. Native record data is only
+ * interpreted by the versioned DataForrest normalizer and ClutchPacks mapper;
+ * live-only callers must not infer provider accounts from unapproved actor
+ * fields in the protected native payload.
+ */
+export function translateClutchpacksDataforrestRecords(input: {
+  readonly records: readonly DataforrestEventRecordV1[];
+  readonly providerId: string;
+  readonly adapterVersion?:
+    typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION;
+}): ProviderCaptureTranslation {
+  const packs: CanonicalObservationPackCandidate[] = [];
+  const cards: CanonicalCatalogAssetCandidate[] = [];
+  const pulls: CanonicalPullCandidate[] = [];
+  const events: CanonicalMarketEventCandidate[] = [];
+
+  const ordered = [...input.records].sort((left, right) => {
+    const streamOrder = { catalog: 0, pulls: 1, trades: 2 } as const;
+    const stream = streamOrder[left.stream] - streamOrder[right.stream];
+    if (stream !== 0) return stream;
+    if (left.stream === "catalog" && right.stream === "catalog") {
+      const entity = (left.entity === "pack" ? 0 : 1) -
+        (right.entity === "pack" ? 0 : 1);
+      if (entity !== 0) return entity;
+    }
+    return left.record_id.localeCompare(right.record_id);
+  });
+
+  for (const record of ordered) {
+    const candidate = mapDataforrestRecord(
+      record,
+      input.providerId,
+      input.adapterVersion,
+    );
+    if (record.stream === "catalog" && record.entity === "pack") {
+      if (candidate.candidateKind !== "pack") invalidRecord();
+      packs.push(candidate);
+      continue;
+    }
+    if (record.stream === "catalog" && record.entity === "card") {
+      if (candidate.candidateKind !== "catalog_asset") invalidRecord();
+      cards.push(candidate);
+      continue;
+    }
+    if (record.stream === "pulls") {
+      if (candidate.candidateKind !== "pull") invalidRecord();
+      pulls.push(candidate);
+      continue;
+    }
+    if (candidate.candidateKind !== "market_event") invalidRecord();
+    events.push(candidate);
+  }
+
+  const categories = categoryDrafts(packs, cards);
+  const pullRecords = pulls.map((candidate) => pullDraft({
+    candidate,
+    accountKey: null,
+    providerId: input.providerId,
+  }));
+  const marketEvents = events.map((candidate) => marketEventDraft({
+    candidate,
+    fromAccountKey: null,
+    toAccountKey: null,
+    providerId: input.providerId,
+  }));
+  const records = Object.freeze([
+    ...categories,
+    ...packs.map(packDraft),
+    ...cards.map(collectibleDraft),
+    ...pullRecords,
+    ...marketEvents,
+  ]);
+  return Object.freeze({
+    records,
+    counts: Object.freeze({
+      categories: categories.length,
+      packs: packs.length,
+      collectibles: cards.length,
+      providerAccounts: 0,
+      pulls: pullRecords.length,
+      pullsWithoutPackKey: pullRecords.filter(
+        ({ candidate }) => candidate.packKey === null,
+      ).length,
+      marketEvents: marketEvents.length,
       packContents: 0,
     }),
   });

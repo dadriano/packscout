@@ -4,9 +4,14 @@ import test from "node:test";
 import type { CanonicalJsonObject } from "./provider-canonical-contract.ts";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+  PROVIDER_MIXED_PAGE_MAX_BYTES,
+  PROVIDER_MIXED_PAGE_MAX_CURSOR_BYTES,
+  PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES,
   PROVIDER_MIXED_PAGE_MAX_RECORDS,
+  PROVIDER_MIXED_PAGE_MAX_QUARANTINES,
   ProviderMixedPageContractError,
   providerMixedCursorFingerprint,
+  providerMixedPageCanonicalBytes,
   providerMixedPageDigest,
   validateProviderMixedPage,
 } from "./provider-mixed-page-contract.ts";
@@ -82,6 +87,76 @@ function providerAccountPage(
     }],
   });
 }
+
+function providerAccountRecordAtByteLength(input: {
+  readonly providerId: string;
+  readonly position: number;
+  readonly byteLength: number;
+}): Record<string, unknown> {
+  const record = (padding: string) => ({
+    position: input.position,
+    providerId: input.providerId,
+    kind: "catalog",
+    operation: "upsert",
+    entityType: "provider_account",
+    candidate: {
+      accountKey: "d".repeat(64),
+      displayName: null,
+      attributes: { padding },
+      expectedRowVersion: null,
+    },
+  });
+  const empty = record("");
+  const paddingLength = input.byteLength
+    - providerMixedPageCanonicalBytes(empty).byteLength;
+  assert.ok(paddingLength >= 0);
+  const result = record("x".repeat(paddingLength));
+  assert.equal(
+    providerMixedPageCanonicalBytes(result).byteLength,
+    input.byteLength,
+  );
+  return result;
+}
+
+function mixedPageAtByteLength(byteLength: number): Record<string, unknown> {
+  const providerId = randomUUID();
+  const recordCount = 40;
+  const page = (paddingLengths: readonly number[]) => mixedPage({
+    providerId,
+    records: paddingLengths.map((paddingLength, position) => ({
+      position,
+      providerId,
+      kind: "catalog",
+      operation: "upsert",
+      entityType: "provider_account",
+      candidate: {
+        accountKey: "d".repeat(64),
+        displayName: null,
+        attributes: { padding: "x".repeat(paddingLength) },
+        expectedRowVersion: null,
+      },
+    })),
+  });
+  const emptyPadding = Array.from({ length: recordCount }, () => 0);
+  const remainingBytes = byteLength
+    - providerMixedPageCanonicalBytes(page(emptyPadding)).byteLength;
+  assert.ok(remainingBytes >= 0);
+  const sharedPadding = Math.floor(remainingBytes / recordCount);
+  const remainder = remainingBytes % recordCount;
+  const result = page(emptyPadding.map((_, index) =>
+    sharedPadding + (index < remainder ? 1 : 0)
+  ));
+  assert.equal(providerMixedPageCanonicalBytes(result).byteLength, byteLength);
+  return result;
+}
+
+test("mixed page contract publishes the exact page, record, and cursor bounds", () => {
+  assert.equal(PROVIDER_MIXED_PAGE_MAX_RECORDS, 4_000);
+  assert.equal(PROVIDER_MIXED_PAGE_MAX_QUARANTINES, 2_000);
+  assert.equal(PROVIDER_MIXED_PAGE_MAX_BYTES, 8 * 1_024 * 1_024);
+  assert.equal(PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES, 256 * 1_024);
+  assert.equal(PROVIDER_MIXED_PAGE_MAX_CURSOR_BYTES, 16 * 1_024);
+});
 
 test("mixed page validator accepts one source-neutral ordered page", () => {
   const page = mixedPage();
@@ -188,8 +263,31 @@ test("mixed page validator rejects provider, position, cursor, head, and digest 
   const cursor = mixedPage({ overrides: { nextCursorFingerprint: "f".repeat(64) } });
   assertContractCode("MIXED_PAGE_CURSOR_MISMATCH", () => validateProviderMixedPage(cursor));
 
-  const head = mixedPage({ continuation: "head" });
-  assertContractCode("MIXED_PAGE_CURSOR_MISMATCH", () => validateProviderMixedPage(head));
+  const liveHead = validateProviderMixedPage(mixedPage({ continuation: "head" }));
+  assert.deepEqual(liveHead.nextCursor, { after: "page-1" });
+
+  const nullHead = validateProviderMixedPage(mixedPage({
+    continuation: "head",
+    nextCursor: null,
+  }));
+  assert.equal(nullHead.nextCursor, null);
+
+  const retainedHeadCursor = { after: "head" };
+  const unchangedHead = validateProviderMixedPage(mixedPage({
+    inputCursor: retainedHeadCursor,
+    nextCursor: retainedHeadCursor,
+    continuation: "head",
+  }));
+  assert.deepEqual(unchangedHead.nextCursor, retainedHeadCursor);
+
+  const missingContinuation = mixedPage({
+    continuation: "more",
+    nextCursor: null,
+  });
+  assertContractCode(
+    "MIXED_PAGE_CURSOR_MISMATCH",
+    () => validateProviderMixedPage(missingContinuation),
+  );
 
   const digest = { ...mixedPage(), responseDigest: "a".repeat(64) };
   assertContractCode("MIXED_PAGE_DIGEST_MISMATCH", () => validateProviderMixedPage(digest));
@@ -198,20 +296,70 @@ test("mixed page validator rejects provider, position, cursor, head, and digest 
   assertContractCode("MIXED_PAGE_INVALID", () => validateProviderMixedPage(version));
 });
 
-test("mixed page validator enforces bounded records and canonical cursor bytes", () => {
+test("mixed page validator accepts exact bounds and rejects one byte or record above them", () => {
   const providerId = randomUUID();
-  const records = Array.from({ length: PROVIDER_MIXED_PAGE_MAX_RECORDS + 1 }, (_, position) => ({
+  const records = Array.from({ length: PROVIDER_MIXED_PAGE_MAX_RECORDS }, (_, position) => ({
     position, providerId, kind: "catalog", operation: "upsert", entityType: "category",
     candidate: {},
   }));
-  assertContractCode(
-    "MIXED_PAGE_OVERSIZED",
-    () => validateProviderMixedPage(mixedPage({ providerId, records })),
+  assert.equal(
+    validateProviderMixedPage(mixedPage({ providerId, records })).records.length,
+    PROVIDER_MIXED_PAGE_MAX_RECORDS,
   );
-  const largeCursor = { value: "x".repeat(17_000) };
   assertContractCode(
     "MIXED_PAGE_OVERSIZED",
-    () => validateProviderMixedPage(mixedPage({ nextCursor: largeCursor })),
+    () => validateProviderMixedPage(mixedPage({
+      providerId,
+      records: [...records, {
+        position: PROVIDER_MIXED_PAGE_MAX_RECORDS,
+        providerId,
+        kind: "catalog",
+        operation: "upsert",
+        entityType: "category",
+        candidate: {},
+      }],
+    })),
+  );
+
+  validateProviderMixedPage(mixedPageAtByteLength(PROVIDER_MIXED_PAGE_MAX_BYTES));
+  assertContractCode(
+    "MIXED_PAGE_OVERSIZED",
+    () => validateProviderMixedPage(
+      mixedPageAtByteLength(PROVIDER_MIXED_PAGE_MAX_BYTES + 1),
+    ),
+  );
+
+  const exactRecord = providerAccountRecordAtByteLength({
+    providerId,
+    position: 0,
+    byteLength: PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES,
+  });
+  validateProviderMixedPage(mixedPage({ providerId, records: [exactRecord] }));
+  const oversizedRecord = providerAccountRecordAtByteLength({
+    providerId,
+    position: 0,
+    byteLength: PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES + 1,
+  });
+  assertContractCode(
+    "MIXED_PAGE_OVERSIZED",
+    () => validateProviderMixedPage(mixedPage({
+      providerId,
+      records: [oversizedRecord],
+    })),
+  );
+
+  const cursorEnvelopeBytes = providerMixedPageCanonicalBytes({ value: "" })
+    .byteLength;
+  const exactCursor = {
+    value: "x".repeat(
+      PROVIDER_MIXED_PAGE_MAX_CURSOR_BYTES - cursorEnvelopeBytes,
+    ),
+  };
+  validateProviderMixedPage(mixedPage({ nextCursor: exactCursor }));
+  const oversizedCursor = { value: `${exactCursor.value}x` };
+  assertContractCode(
+    "MIXED_PAGE_OVERSIZED",
+    () => validateProviderMixedPage(mixedPage({ nextCursor: oversizedCursor })),
   );
   assertContractCode(
     "MIXED_PAGE_INVALID",

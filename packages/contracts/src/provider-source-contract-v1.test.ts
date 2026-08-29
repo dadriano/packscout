@@ -24,6 +24,10 @@ import {
   validateSourceIntervalSeconds,
 } from "./provider-source-contract-v1.ts";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT,
+  dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
 } from "./dataforrest-events-v1.ts";
 
@@ -326,5 +330,30 @@ test("the adapter manifest is credential-free, strict, and uses the launch bound
   assert.equal(
     sourceAdapterManifestV1Schema.safeParse({ ...parsedV1, token: "forbidden" }).success,
     false,
+  );
+});
+
+test("ClutchPacks distributed requests use an isolated 2,000-record profile", () => {
+  const manifest = sourceAdapterManifestV1Schema.parse(
+    dataforrestClutchpacksDistributedSourceAdapterManifest,
+  );
+  assert.equal(DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT, 5_000);
+  assert.equal(DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS, 2_000);
+  assert.equal(
+    manifest.adapterVersion,
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.deepEqual(manifest.requestBounds, {
+    pageLimit: 2_000,
+    maximumResponseBytes: 8_388_608,
+    timeoutMilliseconds: 10_000,
+  });
+  assert.deepEqual(
+    manifest.supportedProviders.map(({ provider }) => provider),
+    ["clutchpacks"],
+  );
+  assert.equal(
+    dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit,
+    500,
   );
 });

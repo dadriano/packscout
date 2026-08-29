@@ -3,7 +3,6 @@ import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
   PROVIDER_MIXED_PAGE_MAX_BYTES,
   PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES,
-  PROVIDER_MIXED_PAGE_MAX_RECORDS,
   providerMixedCursorFingerprint,
   providerMixedPageCanonicalBytes,
   providerMixedPageDigest,
@@ -23,8 +22,8 @@ import {
 import { translateClutchpacksCapture } from
   "./providers/clutchpacks-capture-integration.ts";
 
-const DEFAULT_PAGE_RECORD_LIMIT = 200;
-const PAGE_DRAFT_BYTE_LIMIT = PROVIDER_MIXED_PAGE_MAX_BYTES - 128 * 1_024;
+const DEFAULT_PAGE_RECORD_LIMIT = 2_000;
+const PAGE_DRAFT_BYTE_LIMIT = PROVIDER_MIXED_PAGE_MAX_BYTES - 256 * 1_024;
 
 interface CaptureIntegration {
   readonly adapterKey: string;
@@ -223,7 +222,7 @@ export class ProviderCaptureMixedPageSource {
     if (
       !Number.isInteger(recordLimit)
       || recordLimit < 1
-      || recordLimit > PROVIDER_MIXED_PAGE_MAX_RECORDS
+      || recordLimit > DEFAULT_PAGE_RECORD_LIMIT
     ) {
       throw new ProviderCaptureSourceError(
         "PROVIDER_CAPTURE_CONFIGURATION_INVALID",
@@ -248,6 +247,11 @@ export class ProviderCaptureMixedPageSource {
   async nextPage(input: ProviderCapturePageSourceInput): Promise<unknown> {
     if (input.signal.aborted) {
       throw new ProviderCaptureSourceError("PROVIDER_CAPTURE_ABORTED");
+    }
+    if (!Number.isSafeInteger(input.pageNumber) || input.pageNumber < 1) {
+      throw new ProviderCaptureSourceError(
+        "PROVIDER_CAPTURE_SOURCE_CHECKPOINT_INVALID",
+      );
     }
     const selectedAdapterKey = adapterKey(input.authority.configuration);
     const integration = this.#registry.resolve(
@@ -286,6 +290,16 @@ export class ProviderCaptureMixedPageSource {
           candidate.inputCursorFingerprint === input.sourceCheckpointFingerprint
         ));
     if (page === undefined) {
+      throw new ProviderCaptureSourceError(
+        "PROVIDER_CAPTURE_SOURCE_CHECKPOINT_INVALID",
+      );
+    }
+    if (
+      page.pageNumber !== input.pageNumber
+      || !providerMixedPageCanonicalBytes(page.inputCursor).equals(
+        providerMixedPageCanonicalBytes(input.sourceCheckpoint),
+      )
+    ) {
       throw new ProviderCaptureSourceError(
         "PROVIDER_CAPTURE_SOURCE_CHECKPOINT_INVALID",
       );

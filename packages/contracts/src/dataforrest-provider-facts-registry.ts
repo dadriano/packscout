@@ -3,6 +3,7 @@ import { clutchpacksCardProviderFacts } from
 import { clutchpacksPackProviderFacts } from
   "./dataforrest-clutchpacks-pack-v3.ts";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -41,12 +42,25 @@ const providerFactsAdapters = Object.freeze([
     kind: "pack",
     read: clutchpacksPackProviderFacts,
   },
+  {
+    adapterVersion: DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+    provider: "clutchpacks",
+    kind: "card",
+    read: clutchpacksCardProviderFacts,
+  },
+  {
+    adapterVersion: DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+    provider: "clutchpacks",
+    kind: "pack",
+    read: clutchpacksPackProviderFacts,
+  },
 ] as const satisfies readonly ProviderFactsAdapter[]);
 
 const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
 ]);
 
 export function readDataforrestProviderFacts(

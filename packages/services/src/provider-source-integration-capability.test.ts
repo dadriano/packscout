@@ -1,11 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestEventsV1LegacySourceAdapterManifest,
+} from "@packscout/contracts";
+import {
   ProviderMappingAdapterRegistry,
   ProviderTransportAdapterRegistry,
 } from "./provider-adapter-registry.ts";
-import { ProviderSourceIntegrationCapabilityRegistry } from
-  "./provider-source-integration-capability.ts";
+import {
+  CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+  createClutchpacksSourceIntegrationCapabilities,
+  ProviderSourceIntegrationCapabilityRegistry,
+} from "./provider-source-integration-capability.ts";
+
+test("ClutchPacks advertises capture and only the current live DataForrest adapter", () => {
+  const installed = createClutchpacksSourceIntegrationCapabilities();
+
+  assert.deepEqual(installed.keys(), [
+    dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion,
+    CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+  ].sort());
+  assert.equal(installed.has(CLUTCHPACKS_CAPTURE_ADAPTER_KEY), true);
+  assert.equal(
+    installed.has(
+      dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion,
+    ),
+    true,
+  );
+  assert.equal(
+    installed.has(
+      dataforrestEventsV1LegacySourceAdapterManifest.adapterVersion,
+    ),
+    false,
+  );
+  assert.equal(
+    installed.has(
+      dataforrestClutchpacksDistributedSourceAdapterManifest.sourceTypeKey,
+    ),
+    false,
+  );
+});
 
 test("only explicitly installed source integrations advertise execution capability", () => {
   const installed = new ProviderSourceIntegrationCapabilityRegistry([

@@ -1,3 +1,7 @@
+import {
+  dataforrestClutchpacksDistributedSourceAdapterManifest,
+} from "@packscout/contracts";
+
 const sourceIntegrationKeyPattern =
   /^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$/;
 
@@ -44,11 +48,18 @@ export class ProviderSourceIntegrationCapabilityRegistry {
   }
 }
 
-/** The intentionally narrow first-provider capability set. */
+/** The intentionally narrow first-provider capture and live capability set. */
 export function createClutchpacksSourceIntegrationCapabilities():
 ProviderSourceIntegrationCapabilityRegistry {
-  return new ProviderSourceIntegrationCapabilityRegistry([{
-    adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
-    sourceNeutralPageExecution: true,
-  }]);
+  return new ProviderSourceIntegrationCapabilityRegistry([
+    {
+      adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+      sourceNeutralPageExecution: true,
+    },
+    {
+      adapterKey:
+        dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion,
+      sourceNeutralPageExecution: true,
+    },
+  ]);
 }

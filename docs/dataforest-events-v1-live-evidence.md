@@ -53,6 +53,28 @@ not use that limit. The live launch target is 500 with a 250-record bounded
 retry because response bytes, rather than record count alone, bound memory and
 transport risk.
 
+### Distributed ClutchPacks request profile
+
+The pre-launch distributed ClutchPacks importer has a separate immutable
+adapter identity,
+`dataforrest-clutchpacks-distributed-adapter-v1`. It requests exactly 2,000
+ClutchPacks source records per page while retaining the 8,388,608-byte response
+cap and 10-second timeout. The API contract allows at most 5,000 records, but
+that transport maximum is not the production target.
+
+This profile does not change the shared 500-record adapter or any historical
+adapter manifest. A 2,000-record ClutchPacks page can derive at most one
+category plus one canonical record per source record, so the internal mixed
+page is bounded at 4,000 normalized records and 8 MiB. Up to 2,000 record-local
+quarantines are allowed so one legal source page of unresolved records does not
+abort solely because of the former 100-record quarantine limit. Translation
+still fails closed if either normalized bound is exceeded.
+
+The cursor remains opaque and pinned to the source revision and platform. A
+zero polling hint continues immediately; `poll_after_seconds = 60` marks source
+head while retaining the provider-issued cursor. These are contract and local
+boundary assertions, not a new claim of completed live source-head evidence.
+
 ## Live request and cursor evidence
 
 The profile-only connection probe sent no platform, cursor, source, run, or page
@@ -146,7 +168,7 @@ stable `dataforrest-<platform>-records-v1` provider identity namespace. Changing
 that namespace or its evidenced record-ID scopes requires a separately designed
 identity migration.
 
-The current adapter is `dataforrest-events-adapter-v3`; the provider endpoint
+The shared current adapter is `dataforrest-events-adapter-v3`; the provider endpoint
 and normalized contract remain V1. It copies the two timestamps, outer
 relationships, event code, amount, currency, payment method, and tri-state
 availability into `packscout.provider-observation.v1`.
@@ -169,7 +191,9 @@ nullable, at least one must be present, and relationships remain ordered pack
 before card. A canonical pull receives only the authoritative edge or edges in
 the source record; PackScout never fabricates the missing identity.
 
-Production registers only adapter v3 for every DataForrest provider. A database
+The shared production registry exposes only adapter v3 for every DataForrest
+provider. The distributed ClutchPacks importer additionally composes its
+ClutchPacks-only adapter directly at its provider boundary. A database
 containing adapter-v1 or adapter-v2 connection or source pins must use the
 guarded clean reset and complete reimport; neither historical version is a
 runtime compatibility path.

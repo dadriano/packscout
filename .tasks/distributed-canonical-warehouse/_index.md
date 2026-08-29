@@ -6,7 +6,7 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 10/23 tasks complete
+**Progress:** 8/23 tasks complete
 
 ## Current Build Checkpoint
 
@@ -77,7 +77,10 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 ### Deferred data features
 
-- Provider-specific fetchers, adapters, parsers, mappings, raw payload storage, replay archives, and unresolved source-record staging.
+- Provider-specific fetchers, adapters, parsers, and mappings beyond the
+  approved ClutchPacks DataForrest checkpoint. Raw payload storage, replay
+  archives, and unresolved source-record staging remain deferred for every
+  provider.
 - Product normalization, a global pack identity layer, and global catalog governance screens in the admin application.
 - Heat storage, calculation, publication, or frontend redesign. Catalog availability must not depend on Heat.
 - Publication of exact collectible instances, provider accounts, credentials, raw pulls, raw market-event histories, quarantine evidence, or runtime state to Convex.
@@ -97,8 +100,8 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
 | 001 | Establish distributed database ownership | large | 4–6 days | done | none |
-| 002 | Preserve organization and admin access | large | 3–5 days | done | 001 |
-| 003 | Register and route providers safely | large | 4–6 days | done | 001, 002 |
+| 002 | Preserve organization and admin access | large | 3–5 days | in progress | 001 |
+| 003 | Register and route providers safely | large | 4–6 days | not started | 001, 002 |
 | 004 | Give each provider a canonical warehouse | large | 4–6 days | done | 001 |
 | 005 | Keep provider execution state local | large | 4–6 days | done | 003, 004 |
 

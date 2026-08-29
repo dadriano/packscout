@@ -48,6 +48,8 @@ export interface ProviderRunSummary {
   readonly workerFence: bigint;
   readonly attemptNumber: number;
   readonly recoveryOfRunId: string | null;
+  readonly requestedCursor: CanonicalJsonValue | null;
+  readonly requestedCursorFingerprint: string | null;
   readonly cursorFingerprint: string | null;
   readonly reachedSourceHead: boolean;
   readonly counters: ProviderRunCounters;
@@ -98,6 +100,8 @@ interface RunRow {
   readonly config_version_number: bigint;
   readonly worker_fence: bigint;
   readonly attempt_number: number;
+  readonly requested_cursor: ProviderPrisma.JsonValue | null;
+  readonly requested_cursor_hash: string | null;
   readonly final_cursor_hash: string | null;
   readonly reached_source_head: boolean;
   readonly page_count: number;
@@ -164,6 +168,8 @@ function toSummary(row: RunRow): ProviderRunSummary {
     workerFence: row.worker_fence,
     attemptNumber: row.attempt_number,
     recoveryOfRunId: row.recovery_of_run_id,
+    requestedCursor: row.requested_cursor as CanonicalJsonValue | null,
+    requestedCursorFingerprint: row.requested_cursor_hash,
     cursorFingerprint: row.final_cursor_hash,
     reachedSourceHead: row.reached_source_head,
     counters: {
@@ -203,7 +209,8 @@ async function lockRun(
     select id, control_command_id, recovery_of_run_id, idempotency_key,
            trigger, state, requested_by_operator_id, config_version_id,
            config_version_number, worker_fence, attempt_number,
-           final_cursor_hash, reached_source_head, page_count,
+           requested_cursor, requested_cursor_hash, final_cursor_hash,
+           reached_source_head, page_count,
            catalog_record_count, pull_record_count, market_event_record_count,
            accepted_count, duplicate_count, quarantined_count,
            material_change_count, failure_code, requested_at, started_at,
@@ -218,7 +225,8 @@ async function activeRun(transaction: ProviderTransactionClient): Promise<RunRow
     select id, control_command_id, recovery_of_run_id, idempotency_key,
            trigger, state, requested_by_operator_id, config_version_id,
            config_version_number, worker_fence, attempt_number,
-           final_cursor_hash, reached_source_head, page_count,
+           requested_cursor, requested_cursor_hash, final_cursor_hash,
+           reached_source_head, page_count,
            catalog_record_count, pull_record_count, market_event_record_count,
            accepted_count, duplicate_count, quarantined_count,
            material_change_count, failure_code, requested_at, started_at,
@@ -726,7 +734,7 @@ export class PrismaProviderRunRepository {
     if (input.nextCursorHash !== null && !digestPattern.test(input.nextCursorHash)) {
       throw new TypeError("nextCursorHash is invalid.");
     }
-    if ((input.continuation === "head") !== (input.nextCursor === null)) {
+    if (input.continuation === "more" && input.nextCursor === null) {
       throw new TypeError("Provider page continuation and next cursor disagree.");
     }
     return this.database.$transaction(async (transaction) => {

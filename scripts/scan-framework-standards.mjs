@@ -96,7 +96,7 @@ function walk(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory() && !shouldIgnoreDirectory(entryPath)) {
+    if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
       files.push(...walk(entryPath));
     } else if (
       entry.isFile() &&

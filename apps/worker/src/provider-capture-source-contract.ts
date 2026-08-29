@@ -1,5 +1,6 @@
 import type {
   CanonicalJsonObject,
+  CanonicalJsonValue,
   ProviderMixedPageRecordKind,
 } from "@packscout/database";
 
@@ -44,6 +45,8 @@ export interface ProviderCapturePageSourceInput {
   readonly authority: ProviderCaptureAuthority;
   readonly runId: string;
   readonly workerFence: bigint;
+  readonly pageNumber: number;
+  readonly sourceCheckpoint: CanonicalJsonValue | null;
   readonly sourceCheckpointFingerprint: string | null;
   readonly signal: AbortSignal;
 }

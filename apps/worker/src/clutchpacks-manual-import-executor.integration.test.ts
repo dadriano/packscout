@@ -40,8 +40,6 @@ const prismaExecutable = path.join(
   repositoryRoot,
   "node_modules/prisma/build/index.js",
 );
-const captureRoot = process.env.PACKSCOUT_PROVIDER_CAPTURE_ROOT
-  ?? "/Users/lains/Documents/packscout-data";
 const disposableDatabasePattern =
   /^packscout_clutch_test_[0-9]+_[a-f0-9]{10}$/u;
 
@@ -149,7 +147,7 @@ async function createHarness(): Promise<ProviderHarness> {
   }
 }
 
-function isolatedClutchSource(): ProviderManualImportPageSource {
+function isolatedClutchSource(captureRoot: string): ProviderManualImportPageSource {
   const source = new ProviderCaptureMixedPageSource({
     captureRoot,
     actorHmacKey: Buffer.alloc(32, 0x5a),
@@ -193,10 +191,20 @@ async function enqueue(
   return result.run.id;
 }
 
-test("admin queue executes five isolated Clutch pages and replay stays canonical-idempotent", async (context) => {
+test("admin queue executes one isolated Clutch page and replay stays canonical-idempotent", async (context) => {
   if (process.env.PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION !== "1") {
     context.skip("Set PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION=1 to run the disposable database proof.");
     return;
+  }
+  const captureRoot = process.env.PACKSCOUT_PROVIDER_CAPTURE_ROOT;
+  if (captureRoot === undefined || captureRoot.length === 0) {
+    context.skip(
+      "Set PACKSCOUT_PROVIDER_CAPTURE_ROOT to run the protected capture proof.",
+    );
+    return;
+  }
+  if (!path.isAbsolute(captureRoot)) {
+    throw new Error("PACKSCOUT_PROVIDER_CAPTURE_ROOT must be absolute.");
   }
   try {
     await access(path.join(captureRoot, CLUTCHPACKS_CAPTURE_FILE_NAME));
@@ -208,24 +216,42 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
   const harness = await createHarness();
   try {
     const configVersionId = randomUUID();
-    const synchronized = await new PrismaProviderRuntimeRepository(
-      harness.client,
-    ).synchronizeConfiguration({
+    const configuration = {
+      adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+      settings: {
+        captureDirectory: "clutchpacks",
+        lanes: [{ name: "catalog", enabled: true }],
+      },
+    };
+    const runtime = new PrismaProviderRuntimeRepository(harness.client);
+    const synchronized = await runtime.synchronizeConfiguration({
       centralProviderId: harness.providerId,
       providerKey: harness.providerKey,
       configVersionId,
       configVersionNumber: 1n,
-      configuration: { adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY },
+      configuration,
       expiresAt: null,
       scheduleSeconds: 300,
       nextDueAt: null,
       synchronizedAt: new Date(),
     });
     assert.equal(synchronized.kind, "updated");
+    const unchanged = await runtime.synchronizeConfiguration({
+      centralProviderId: harness.providerId,
+      providerKey: harness.providerKey,
+      configVersionId,
+      configVersionNumber: 1n,
+      configuration,
+      expiresAt: null,
+      scheduleSeconds: 300,
+      nextDueAt: null,
+      synchronizedAt: new Date(),
+    });
+    assert.equal(unchanged.kind, "unchanged");
 
     const executor = new ClutchpacksManualImportExecutor({
       database: harness.client,
-      source: isolatedClutchSource(),
+      source: isolatedClutchSource(captureRoot),
       workerId: "integration:clutchpacks",
       leaseMilliseconds: 30_000,
     });
@@ -254,9 +280,9 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
     assert.deepEqual(first, {
       kind: "completed",
       runId: firstRunId,
-      pageCount: 5,
+      pageCount: 1,
       counters: {
-        pages: 5,
+        pages: 1,
         catalog: 946,
         pulls: 15,
         marketEvents: 15,
@@ -279,7 +305,7 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
       harness.client.quarantine_records.count(),
       harness.client.provider_run_pages.count({ where: { provider_run_id: firstRunId } }),
     ]);
-    assert.deepEqual(counts, [8, 14, 907, 17, 0, 0, 0, 15, 15, 5]);
+    assert.deepEqual(counts, [8, 14, 907, 17, 0, 0, 0, 15, 15, 1]);
     const quarantines = await harness.client.quarantine_records.findMany({
       where: { provider_run_id: firstRunId },
       select: { record_kind: true, reason_code: true, field_path: true },
@@ -334,7 +360,7 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
     assert.equal(replay.kind, "completed");
     assert.equal(replay.runId, secondRunId);
     if (replay.kind !== "completed") throw new Error("Replay did not complete.");
-    assert.equal(replay.pageCount, 5);
+    assert.equal(replay.pageCount, 1);
     assert.equal(replay.counters.duplicate, 961);
     assert.equal(replay.counters.quarantined, 15);
     assert.equal(replay.counters.materialChanges, 0);
@@ -356,6 +382,28 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
       provider_id: harness.providerId,
       provider_key: harness.providerKey,
     });
+
+    const nextConfigurationId = randomUUID();
+    const advanced = await runtime.synchronizeConfiguration({
+      centralProviderId: harness.providerId,
+      providerKey: harness.providerKey,
+      configVersionId: nextConfigurationId,
+      configVersionNumber: 2n,
+      configuration: {
+        adapterKey: "dataforrest-events-adapter-v3",
+        settings: { platform: "clutchpacks" },
+      },
+      expiresAt: null,
+      scheduleSeconds: 300,
+      nextDueAt: null,
+      synchronizedAt: new Date(),
+    });
+    assert.equal(advanced.kind, "updated");
+    assert.equal(advanced.runtime.cursorFingerprint, null);
+    assert.deepEqual(await harness.client.provider_runtime.findUniqueOrThrow({
+      where: { singleton_key: true },
+      select: { source_cursor: true, source_cursor_hash: true },
+    }), { source_cursor: null, source_cursor_hash: null });
   } finally {
     await harness.close();
   }
