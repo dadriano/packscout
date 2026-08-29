@@ -4,7 +4,7 @@
 
 Open task `distributed-canonical-warehouse/001` and produce the database ownership matrix, naming rules, and cross-database boundary contract. The first checkpoint is a clean non-production topology with one `packscout` database and two independently reachable provider databases.
 
-**Progress:** 10/21 tasks complete
+**Progress:** 11/21 tasks complete
 
 ## Current Build Checkpoint
 
@@ -103,7 +103,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 006 | Maintain one shared global catalog | large | 4–6 days | done | 002, 003, 004 |
 | 007 | Complete one mixed-response provider run | large | 4–6 days | in progress | 005 |
 | 008 | Operate provider runs from admin | large | 3–5 days | in progress | 002, 003, 005, 007 |
-| 009 | Diagnose and recover provider work | large | 3–5 days | in progress | 005, 007, 008 |
+| 009 | Diagnose and recover provider work | large | 3–5 days | done | 005, 007, 008 |
 | 010 | Observe provider health and alerts | large | 3–5 days | done | 002, 003, 005, 007 |
 
 ### Diagnostics and publication

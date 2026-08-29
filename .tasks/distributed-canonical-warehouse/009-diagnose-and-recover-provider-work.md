@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including quarantine parity, bulk retry, retention evidence, and recovery failures
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -70,25 +70,44 @@ A bulk retry request contains 1–50 unique `{ providerId, quarantineId }` targe
 
 ### Recovery acceptance
 
-- [ ] Quarantine list and detail preserve current filtering, pagination, safe evidence, lifetime, attempts, and accessible states.
-- [ ] One-record and 1–50 record retries enforce permission, ownership, CSRF, Origin, uniqueness, and idempotency.
-- [ ] Bulk retry returns independent outcomes for resolved, failed, already retrying, already resolved, expired, and missing records.
-- [ ] Attempt rows use `running | succeeded | failed`, independently from the request outcome vocabulary.
-- [ ] A successful retry atomically updates canonical state, promotion changes, quarantine state, attempt history, and local audit.
-- [ ] Expired evidence remains visible but cannot be selected or retried.
+- [x] Quarantine list and detail preserve current filtering, pagination, safe evidence, lifetime, attempts, and accessible states.
+- [x] One-record and 1–50 record retries enforce permission, ownership, CSRF, Origin, uniqueness, and idempotency.
+- [x] Bulk retry returns independent outcomes for resolved, failed, already retrying, already resolved, expired, and missing records.
+- [x] Attempt rows use `running | succeeded | failed`, independently from the request outcome vocabulary.
+- [x] A successful retry atomically updates canonical state, promotion changes, quarantine state, attempt history, and local audit.
+- [x] Expired evidence remains visible but cannot be selected or retried.
 
 ### History acceptance
 
-- [ ] Retry never moves the provider cursor or mutates the originating run or page outcome.
-- [ ] Unreachable provider behavior is bounded and does not affect quarantine access for another provider.
-- [ ] A cross-provider selection fans out by provider, keeps successful groups, and reports unreachable groups per target.
-- [ ] Retention cannot purge unresolved or active-retry evidence ahead of policy.
-- [ ] Browser, log, audit, and alert output contain no raw cursor, payload, credential, or unsafe actor identity.
-- [ ] Run-to-quarantine and quarantine-to-run navigation works after successful, failed, and expired retries.
-- [ ] Every local drill-down requires provider context, and browser quarantine projections always return `externalId: null`.
+- [x] Retry never moves the provider cursor or mutates the originating run or page outcome.
+- [x] Unreachable provider behavior is bounded and does not affect quarantine access for another provider.
+- [x] A cross-provider selection fans out by provider, keeps successful groups, and reports unreachable groups per target.
+- [x] Retention cannot purge unresolved or active-retry evidence ahead of policy.
+- [x] Browser, log, audit, and alert output contain no raw cursor, payload, credential, or unsafe actor identity.
+- [x] Run-to-quarantine and quarantine-to-run navigation works after successful, failed, and expired retries.
+- [x] Every local drill-down requires provider context, and browser quarantine projections always return `externalId: null`.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Retry operates from the provider-neutral normalized candidate and never rewrites the original page, run, or cursor.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- Admin quarantine list, detail, one-record retry, and 1–50 target bulk retry
+  route directly to the selected provider databases through central ownership
+  validation and provider-qualified cursors; the legacy combined operational
+  database runtime is no longer part of admin startup.
+- Each retry uses one provider-local serializable transaction for the candidate
+  canonical write, promotion change, terminal attempt, quarantine resolution,
+  and local audit/activity evidence. Origin run, page, counters, and cursor
+  invariants are covered by migrated PostgreSQL integration tests.
+- Deterministic attempt identity, bounded retry of PostgreSQL serialization
+  conflicts, concurrent same-key replay, expired evidence, active-retry
+  retention, cross-provider partial outcomes, and unreachable isolation are
+  covered by focused database, service, route, and UI tests.
+- Integrated verification passed all affected package type checks, the admin
+  production build, and 12 focused provider-local/admin integration and UI
+  tests. The task branch also passed `npm run verify:framework` before its final
+  focused hardening changes, which were rechecked after integration.
