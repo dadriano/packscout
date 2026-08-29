@@ -401,7 +401,8 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /\/opt\/homebrew\/opt\/postgresql@16\/bin\/pg_ctl/u);
   assert.match(runtime, /--pwfile=\/dev\/fd\/0/u);
   assert.match(runtime, /input: `\$\{clusterAdminPassword\}\\n`/u);
-  assert.match(runtime, /current_setting\('data_directory'\)/u);
+  assert.match(runtime, /host\(inet_server_addr\(\)\)/u);
+  assert.match(runtime, /assertPostmasterBinding/u);
   assert.match(runtime, /pg_control_system\(\)/u);
   assert.match(runtime, /app_connect_databases/u);
   assert.match(runtime, /state === "nonempty"/u);

@@ -541,14 +541,12 @@ export async function readConnectedClusterProof(input: {
       app_connect_databases: string[];
       current_database: string;
       current_role: string;
-      data_directory: string;
       port: number;
       server_address: string;
       system_identifier: string;
     }>(`
       select current_database(), current_user as current_role,
-             current_setting('data_directory') as data_directory,
-             inet_server_addr()::text as server_address,
+             host(inet_server_addr()) as server_address,
              inet_server_port() as port,
              (pg_control_system()).system_identifier::text as system_identifier,
              pg_has_role(current_user, $1, 'MEMBER') as app_is_owner_member,
@@ -644,7 +642,6 @@ export async function readConnectedClusterProof(input: {
       connection.rows.length !== 1 ||
       row?.current_database !== input.cluster.databaseName ||
       row.current_role !== input.cluster.appRoleName ||
-      row.data_directory !== input.cluster.dataDirectory ||
       row.server_address !== "127.0.0.1" ||
       row.port !== input.cluster.port ||
       row.system_identifier !== filesystem.systemIdentifier ||
