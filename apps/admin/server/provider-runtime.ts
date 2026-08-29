@@ -2,6 +2,10 @@ import type {
   ProviderLifecycleState,
   ProviderSourceRootSummary,
 } from "@packscout/contracts";
+import {
+  CentralAdminProviderRepository,
+  type CentralQueryClient,
+} from "@packscout/database";
 import type {
   ProvidersRouterDependencies,
 } from "./routes/providers.ts";
@@ -60,4 +64,13 @@ export function createProviderAdminRuntime(
       },
     },
   };
+}
+
+/** Central-only composition used by the distributed admin runtime. */
+export function createCentralProviderAdminRuntime(
+  central: CentralQueryClient,
+): ReturnType<typeof createProviderAdminRuntime> {
+  return createProviderAdminRuntime({
+    repository: new CentralAdminProviderRepository(central),
+  });
 }

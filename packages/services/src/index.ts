@@ -109,6 +109,7 @@ export * from "./provider-observation-projection.ts";
 export * from "./provider-source-page-planner.ts";
 export * from "./provider-source-page-import-service.ts";
 export * from "./provider-source-import-request-service.ts";
+export * from "./provider-source-import-admission.ts";
 export * from "./provider-source-integration-capability.ts";
 export * from "./provider-source-supervisor.ts";
 export * from "./provider-source-operations-service.ts";

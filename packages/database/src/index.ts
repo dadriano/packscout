@@ -17,6 +17,7 @@ export * from "./email-message-outbox-repository.ts";
 export * from "./database-topology.ts";
 export * from "./role-aware-database.ts";
 export * from "./central-database.ts";
+export * from "./central-admin-provider-repository.ts";
 export * from "./provider-database.ts";
 export * from "./provider-database-locator.ts";
 export * from "./provider-canonical-contract.ts";

@@ -3,7 +3,11 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express, { type Express } from "express";
 import type { QuarantineEntryDetail, QuarantineEntrySummary } from "@packscout/contracts";
-import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
+import {
+  AuthServiceError,
+  ProviderSourceImportRequestError,
+  type AuthenticatedActor,
+} from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { createSameOriginGuard } from "../auth/request-protection.ts";
 import {
@@ -169,6 +173,7 @@ async function withServer(app: Express, runTest: (baseUrl: string) => Promise<vo
 
 function createHarness(
   readOverrides: Partial<ImportOperationsRouterDependencies["reads"]> = {},
+  manualImportError?: unknown,
 ) {
   const calls = { manual: 0, retryOne: 0, retryMany: 0 };
   const organizations: string[] = [];
@@ -223,6 +228,7 @@ function createHarness(
         calls.manual += 1;
         assert.equal(input.actor.organizationId, organizationId);
         assert.equal(input.expectedSourceRevisionId, revisionId);
+        if (manualImportError !== undefined) throw manualImportError;
         return {
           run: { id: runId, providerId, configurationRevisionId: revisionId, trigger: "manual", state: "queued" },
           deduplicated: input.actor.role === "admin",
@@ -317,6 +323,32 @@ test("admin and data operators can request imports while active work deduplicate
     });
   });
   assert.equal(calls.manual, 2);
+});
+
+test("Run now exposes an uninstalled integration as a stable provider-scoped error", async () => {
+  const { app, calls, cookiePolicy } = createHarness(
+    {},
+    new ProviderSourceImportRequestError(
+      "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+      503,
+    ),
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/data-providers/${providerId}/import-runs`,
+      {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "data-session"),
+        body: JSON.stringify({ expectedSourceRevisionId: revisionId }),
+      },
+    );
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "No source integration is installed for this provider.",
+      code: "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+    });
+  });
+  assert.equal(calls.manual, 1);
 });
 
 test("single and bounded bulk retries enforce permissions and return independent safe outcomes", async () => {
