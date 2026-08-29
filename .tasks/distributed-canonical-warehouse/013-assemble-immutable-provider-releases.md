@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/014
 **Estimated scope:** large
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 
