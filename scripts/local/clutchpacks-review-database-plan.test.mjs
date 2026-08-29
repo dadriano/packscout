@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  CLUTCHPACKS_REVIEW_CLUSTER_MARKER_FORMAT,
+  CLUTCHPACKS_REVIEW_CLUSTER_ROOT,
   CLUTCHPACKS_REVIEW_DATABASES,
   CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS,
-  CLUTCHPACKS_REVIEW_REBUILD_CONFIRMATION,
   ClutchpacksReviewProvisionError,
-  assertCreateOnlyInventory,
+  assertClusterMarker,
+  assertCreateClusterInventory,
+  assertDistinctClusterProofs,
   assertNoClutchpacksProvisionArguments,
-  assertProvisionedReviewInventory,
-  assertRebuildRoleInventory,
-  assertVerifiedBackupProofs,
+  assertResumableClusterTopology,
+  buildClusterMarker,
   buildClutchpacksProvisionPlan,
-  parseLocalPostgresAdminUrl,
   readClutchpacksProvisionEnvironment,
   safeClutchpacksProvisionFailure,
 } from "./clutchpacks-review-database-plan.mjs";
@@ -33,22 +35,26 @@ const ids = Object.freeze({
 });
 
 const secrets = Object.freeze({
-  adminUrl:
-    "postgresql://local_admin:admin-only-secret@127.0.0.1:5432/postgres",
-  centralPassword: "central-app-only-secret-1234",
-  providerPassword: "provider-app-only-secret-1234",
+  centralClusterAdminPassword: "control-cluster-admin-secret-1234",
+  providerClusterAdminPassword: "clutch-cluster-admin-secret-1234",
+  centralAppPassword: "control-application-secret-1234",
+  providerAppPassword: "clutch-application-secret-1234",
   adminPassword: "review-admin-only-secret",
   credentialKey: Buffer.alloc(32, 17).toString("base64"),
 });
 
-const validCreateEnvironment = Object.freeze({
+const validProvisionEnvironment = Object.freeze({
   NODE_ENV: "development",
-  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.mode]: "create",
-  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.adminDatabaseUrl]: secrets.adminUrl,
+  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.action]: "provision",
+  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.target]: "all",
+  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.centralClusterAdminPassword]:
+    secrets.centralClusterAdminPassword,
+  [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.providerClusterAdminPassword]:
+    secrets.providerClusterAdminPassword,
   [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.centralAppPassword]:
-    secrets.centralPassword,
+    secrets.centralAppPassword,
   [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.providerAppPassword]:
-    secrets.providerPassword,
+    secrets.providerAppPassword,
   [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.organizationSlug]:
     "packscout-local-review",
   [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.organizationName]:
@@ -65,282 +71,325 @@ function hasCode(code) {
     error instanceof ClutchpacksReviewProvisionError && error.code === code;
 }
 
-function roleInventory(roleName, login) {
-  return {
-    roleName,
-    exists: true,
-    login,
-    superuser: false,
-    createRole: false,
-    createDatabase: false,
-    replication: false,
-    bypassRls: false,
-    membershipCount: 0,
-    foreignOwnedDatabaseCount: 0,
-  };
-}
-
-const boundedRoles = Object.freeze([
-  roleInventory(CLUTCHPACKS_REVIEW_DATABASES.central.ownerRoleName, false),
-  roleInventory(CLUTCHPACKS_REVIEW_DATABASES.central.appRoleName, true),
-  roleInventory(CLUTCHPACKS_REVIEW_DATABASES.provider.ownerRoleName, false),
-  roleInventory(CLUTCHPACKS_REVIEW_DATABASES.provider.appRoleName, true),
-]);
-
-test("review targets are exact, isolated, and never include packscout_dev", () => {
-  const plan = buildClutchpacksProvisionPlan(ids);
-  assert.deepEqual(plan.databaseNames, ["packscout", "packscout_clutchpacks"]);
-  assert.deepEqual(plan.roleNames, [
-    "packscout_control_owner",
-    "packscout_control_app",
-    "packscout_clutchpacks_owner",
-    "packscout_clutchpacks_app",
-  ]);
-  assert.equal(plan.providerIdentity.providerKey, "clutchpacks");
-  assert.equal(plan.providerIdentity.providerId, ids.providerId);
-  assert.equal(plan.providerIdentity.databaseRole, "provider");
-  assert.equal(plan.providerIdentity.schemaVersion, "distributed-provider-v1");
-  assert.doesNotMatch(JSON.stringify(plan), /packscout_dev/u);
+test("two exact fixed clusters replace every shared-cluster target", () => {
+  const expectedRoot = path.join(
+    os.homedir(),
+    "Library/Application Support/PackScout/postgres-review",
+  );
+  assert.equal(CLUTCHPACKS_REVIEW_CLUSTER_ROOT, expectedRoot);
+  assert.deepEqual(
+    {
+      key: CLUTCHPACKS_REVIEW_DATABASES.central.clusterKey,
+      data: CLUTCHPACKS_REVIEW_DATABASES.central.dataDirectory,
+      port: CLUTCHPACKS_REVIEW_DATABASES.central.port,
+      database: CLUTCHPACKS_REVIEW_DATABASES.central.databaseName,
+    },
+    {
+      key: "control",
+      data: path.join(expectedRoot, "control"),
+      port: 55_431,
+      database: "packscout",
+    },
+  );
+  assert.deepEqual(
+    {
+      key: CLUTCHPACKS_REVIEW_DATABASES.provider.clusterKey,
+      data: CLUTCHPACKS_REVIEW_DATABASES.provider.dataDirectory,
+      port: CLUTCHPACKS_REVIEW_DATABASES.provider.port,
+      database: CLUTCHPACKS_REVIEW_DATABASES.provider.databaseName,
+    },
+    {
+      key: "clutchpacks",
+      data: path.join(expectedRoot, "clutchpacks"),
+      port: 55_432,
+      database: "packscout_clutchpacks",
+    },
+  );
+  assert.notEqual(
+    CLUTCHPACKS_REVIEW_DATABASES.central.clusterAdminRoleName,
+    CLUTCHPACKS_REVIEW_DATABASES.provider.clusterAdminRoleName,
+  );
+  assert.doesNotMatch(JSON.stringify(CLUTCHPACKS_REVIEW_DATABASES), /packscout_dev/u);
 });
 
-test("admin admission accepts only the exact local postgres maintenance target", () => {
-  assert.deepEqual(parseLocalPostgresAdminUrl(secrets.adminUrl), {
-    host: "127.0.0.1",
-    port: 5432,
-    url: secrets.adminUrl,
-  });
-  for (const value of [
-    "postgresql://admin@db.example.test:5432/postgres",
-    "postgresql://admin@127.0.0.1:5432/packscout",
-    "postgresql://admin@127.0.0.1:5432/packscout_dev",
-    "postgresql://admin@127.0.0.1:5432/postgres?schema=public",
-    "postgresql://admin@127.0.0.1:5432/postgres#unsafe",
-    "mysql://admin@127.0.0.1:5432/postgres",
-    "postgresql://127.0.0.1:5432/postgres",
-    "postgresql://admin@127.0.0.1:99999/postgres",
-  ]) {
-    assert.throws(() => parseLocalPostgresAdminUrl(value));
-  }
-});
-
-test("mutation inputs are env-only, bounded, and reject target overrides", () => {
+test("actions select only fixed individual lifecycle targets", () => {
   assert.doesNotThrow(() => assertNoClutchpacksProvisionArguments([]));
   assert.throws(
-    () => assertNoClutchpacksProvisionArguments(["--database=packscout"]),
+    () => assertNoClutchpacksProvisionArguments(["--data-dir=/tmp/other"]),
     hasCode("ARGUMENTS_FORBIDDEN"),
   );
-  const parsed = readClutchpacksProvisionEnvironment(validCreateEnvironment);
-  assert.equal(parsed.mode, "create");
-  assert.equal(parsed.bootstrap.adminEmail, "admin@example.test");
-  assert.equal(parsed.credentialKey.version, 1);
-
-  for (const override of [
-    "PACKSCOUT_LOCAL_CENTRAL_DATABASE_NAME",
-    "PACKSCOUT_LOCAL_PROVIDER_DATABASE_NAME",
-    "PACKSCOUT_LOCAL_CENTRAL_OWNER_ROLE_NAME",
-    "PACKSCOUT_LOCAL_CENTRAL_APP_ROLE_NAME",
-    "PACKSCOUT_LOCAL_PROVIDER_OWNER_ROLE_NAME",
-    "PACKSCOUT_LOCAL_PROVIDER_APP_ROLE_NAME",
-    "PACKSCOUT_LOCAL_PROVIDER_KEY",
-  ]) {
-    assert.throws(
-      () => readClutchpacksProvisionEnvironment({
-        ...validCreateEnvironment,
-        [override]: "browser-supplied-target",
-      }),
-      hasCode("TARGET_OVERRIDE_FORBIDDEN"),
-    );
-  }
-});
-
-test("create-only mode refuses every pre-existing exact database or role", () => {
-  assert.doesNotThrow(() =>
-    assertCreateOnlyInventory({
-      databases: [{ exists: false }, { exists: false }],
-      roles: boundedRoles.map((role) => ({ ...role, exists: false })),
+  assert.deepEqual(
+    readClutchpacksProvisionEnvironment({
+      NODE_ENV: "development",
+      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.action]: "stop",
+      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.target]: "control",
     }),
-  );
-  assert.throws(
-    () => assertCreateOnlyInventory({
-      databases: [{ exists: true }, { exists: false }],
-      roles: [],
-    }),
-    hasCode("CREATE_TARGET_EXISTS"),
-  );
-  assert.throws(
-    () => assertCreateOnlyInventory({
-      databases: [],
-      roles: [{ exists: true }],
-    }),
-    hasCode("CREATE_TARGET_EXISTS"),
-  );
-});
-
-test("rebuild accepts only separate bounded NOLOGIN owners and LOGIN apps", () => {
-  assert.doesNotThrow(() =>
-    assertRebuildRoleInventory({ roles: boundedRoles }),
-  );
-  for (const field of [
-    "superuser",
-    "createRole",
-    "createDatabase",
-    "replication",
-    "bypassRls",
-  ]) {
-    assert.throws(
-      () => assertRebuildRoleInventory({
-        roles: [{ ...boundedRoles[0], [field]: true }],
-      }),
-      hasCode("REBUILD_ROLE_STATE_UNEXPECTED"),
-    );
-  }
-  for (const role of [
-    { ...boundedRoles[0], login: true },
-    { ...boundedRoles[1], login: false },
-    { ...boundedRoles[2], membershipCount: 1 },
-    { ...boundedRoles[3], foreignOwnedDatabaseCount: 1 },
-  ]) {
-    assert.throws(
-      () => assertRebuildRoleInventory({ roles: [role] }),
-      hasCode("REBUILD_ROLE_STATE_UNEXPECTED"),
-    );
-  }
-});
-
-test("final topology proof binds each database to its bounded owner and exact schema", () => {
-  const inventory = {
-    databases: [
-      {
-        databaseName: "packscout",
-        exists: true,
-        owner: "packscout_control_owner",
-        migrationState: "ready",
-        identityState: "ready",
-      },
-      {
-        databaseName: "packscout_clutchpacks",
-        exists: true,
-        owner: "packscout_clutchpacks_owner",
-        migrationState: "ready",
-        identityState: "ready",
-      },
-    ],
-    roles: boundedRoles,
-  };
-  assert.doesNotThrow(() => assertProvisionedReviewInventory(inventory));
-  for (const drifted of [
     {
-      ...inventory,
-      databases: inventory.databases.map((database, index) =>
-        index === 0 ? { ...database, owner: "local_admin" } : database
-      ),
+      action: "stop",
+      target: "control",
+      selected: [CLUTCHPACKS_REVIEW_DATABASES.central],
     },
-    {
-      ...inventory,
-      databases: inventory.databases.map((database, index) =>
-        index === 1
-          ? { ...database, migrationState: "checksum_mismatch" }
-          : database
-      ),
-    },
-    {
-      ...inventory,
-      roles: boundedRoles.map((role, index) =>
-        index === 3 ? { ...role, login: false } : role
-      ),
-    },
-  ]) {
-    assert.throws(
-      () => assertProvisionedReviewInventory(drifted),
-      (error) =>
-        hasCode("PROVISION_TOPOLOGY_PROOF_FAILED")(error) ||
-        hasCode("REBUILD_ROLE_STATE_UNEXPECTED")(error),
-    );
-  }
-});
-
-test("rebuild requires the exact confirmation and an absolute private backup path", () => {
-  const rebuild = {
-    ...validCreateEnvironment,
-    [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.mode]: "rebuild",
-  };
-  assert.throws(
-    () => readClutchpacksProvisionEnvironment(rebuild),
-    hasCode("REBUILD_CONFIRMATION_REQUIRED"),
   );
   assert.throws(
     () => readClutchpacksProvisionEnvironment({
-      ...rebuild,
-      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.rebuildConfirmation]:
-        CLUTCHPACKS_REVIEW_REBUILD_CONFIRMATION,
-      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.backupDirectory]: "relative/backups",
+      NODE_ENV: "development",
+      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.action]: "start",
+      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.target]: "all",
     }),
-    hasCode("REBUILD_BACKUP_DIRECTORY_INVALID"),
+    hasCode("CLUSTER_LIFECYCLE_TARGET_MUST_BE_INDIVIDUAL"),
   );
-  const parsed = readClutchpacksProvisionEnvironment({
-    ...rebuild,
-    [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.rebuildConfirmation]:
-      CLUTCHPACKS_REVIEW_REBUILD_CONFIRMATION,
-    [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.backupDirectory]:
-      "/private/tmp/packscout-review-backups",
-  });
-  assert.equal(parsed.mode, "rebuild");
-  assert.equal(
-    parsed.backupDirectory,
-    "/private/tmp/packscout-review-backups",
+  assert.throws(
+    () => readClutchpacksProvisionEnvironment({
+      ...validProvisionEnvironment,
+      [CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.target]: "control",
+    }),
+    hasCode("PROVISION_REQUIRES_BOTH_CLUSTERS"),
+  );
+  assert.deepEqual(
+    readClutchpacksProvisionEnvironment({ NODE_ENV: "development" }),
+    {
+      action: "inspect",
+      target: "all",
+      selected: [
+        CLUTCHPACKS_REVIEW_DATABASES.central,
+        CLUTCHPACKS_REVIEW_DATABASES.provider,
+      ],
+      centralAppPassword: null,
+      providerAppPassword: null,
+    },
   );
 });
 
-test("verified backup proofs exactly cover existing targets before drop", () => {
-  const inventory = {
-    databases: [
-      { databaseName: "packscout", exists: true },
-      { databaseName: "packscout_clutchpacks", exists: false },
-    ],
-  };
-  const backupDirectory = "/private/tmp/packscout-review-backups";
-  const proof = {
-    databaseName: "packscout",
-    path: `${backupDirectory}/packscout-before-rebuild-proof.dump`,
-    bytes: 1024,
-    sha256: "a".repeat(64),
-  };
-  assert.doesNotThrow(() =>
-    assertVerifiedBackupProofs(inventory, backupDirectory, [proof]),
-  );
-  for (const invalidProofs of [
-    [],
-    [{ ...proof, bytes: 0 }],
-    [{ ...proof, sha256: "not-a-digest" }],
-    [{ ...proof, path: "/private/tmp/wrong/packscout.dump" }],
-    [{ ...proof, databaseName: "packscout_dev" }],
+test("provisioning admits four distinct env-only credentials and current admin input", () => {
+  const parsed = readClutchpacksProvisionEnvironment(validProvisionEnvironment);
+  assert.equal(parsed.action, "provision");
+  assert.equal(parsed.target, "all");
+  assert.equal(parsed.selected.length, 2);
+  assert.equal(parsed.bootstrap.adminEmail, "admin@example.test");
+  assert.equal(parsed.credentialKey.version, 1);
+  for (const duplicateKey of [
+    CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.providerClusterAdminPassword,
+    CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.centralAppPassword,
+    CLUTCHPACKS_REVIEW_ENVIRONMENT_KEYS.providerAppPassword,
   ]) {
     assert.throws(
-      () => assertVerifiedBackupProofs(
-        inventory,
-        backupDirectory,
-        invalidProofs,
-      ),
-      hasCode("REBUILD_BACKUP_PROOFS_INCOMPLETE"),
+      () => readClutchpacksProvisionEnvironment({
+        ...validProvisionEnvironment,
+        [duplicateKey]: secrets.centralClusterAdminPassword,
+      }),
+      hasCode("CLUSTER_CREDENTIALS_NOT_DISTINCT"),
     );
   }
 });
 
-test("rebuild plan gates drop behind durable backups and initializes identity after both migrations", () => {
-  const stages = buildClutchpacksProvisionPlan(ids, "rebuild").stages;
-  assert.ok(stages.indexOf("backup_existing_targets") <
-    stages.indexOf("verify_backup_proofs"));
-  assert.ok(stages.indexOf("verify_backup_proofs") <
-    stages.indexOf("drop_exact_targets"));
-  assert.ok(stages.indexOf("migrate_central") <
-    stages.indexOf("initialize_provider_identity"));
-  assert.ok(stages.indexOf("migrate_provider") <
-    stages.indexOf("initialize_provider_identity"));
-  assert.ok(stages.indexOf("initialize_provider_identity") <
-    stages.indexOf("register_clutchpacks"));
+test("legacy shared-cluster and path or port redirect inputs always fail closed", () => {
+  for (const key of [
+    "PACKSCOUT_LOCAL_POSTGRES_ADMIN_URL",
+    "PACKSCOUT_LOCAL_CLUTCHPACKS_DB_MODE",
+    "PACKSCOUT_LOCAL_BACKUP_DIRECTORY",
+    "PACKSCOUT_LOCAL_CLUTCHPACKS_REBUILD_CONFIRMATION",
+    "PACKSCOUT_LOCAL_REVIEW_CLUSTER_ROOT",
+    "PACKSCOUT_LOCAL_CONTROL_DATA_DIRECTORY",
+    "PACKSCOUT_LOCAL_CLUTCHPACKS_DATA_DIRECTORY",
+    "PACKSCOUT_LOCAL_CONTROL_PORT",
+    "PACKSCOUT_LOCAL_CLUTCHPACKS_PORT",
+    "PACKSCOUT_LOCAL_CENTRAL_DATABASE_NAME",
+    "PACKSCOUT_LOCAL_PROVIDER_DATABASE_NAME",
+  ]) {
+    assert.throws(
+      () => readClutchpacksProvisionEnvironment({
+        ...validProvisionEnvironment,
+        [key]: "browser-supplied-redirect",
+      }),
+      hasCode("CLUSTER_REDIRECT_FORBIDDEN"),
+    );
+  }
+  assert.throws(
+    () => readClutchpacksProvisionEnvironment({
+      ...validProvisionEnvironment,
+      HOME: "/tmp/browser-supplied-home",
+    }),
+    hasCode("CLUSTER_REDIRECT_FORBIDDEN"),
+  );
 });
 
-test("executor uses the runtime v1 cipher, revokes PUBLIC initializer access, and syncs the backup directory", () => {
+test("cluster ownership marker binds system id, directory, port, roles, and state", () => {
+  const marker = buildClusterMarker(
+    CLUTCHPACKS_REVIEW_DATABASES.central,
+    "7532189705087112001",
+    "initialized",
+  );
+  assert.equal(marker.format, CLUTCHPACKS_REVIEW_CLUSTER_MARKER_FORMAT);
+  assert.deepEqual(
+    assertClusterMarker(marker, CLUTCHPACKS_REVIEW_DATABASES.central),
+    marker,
+  );
+  for (const drift of [
+    { ...marker, dataDirectory: "/tmp/redirect" },
+    { ...marker, port: 5432 },
+    { ...marker, systemIdentifier: "0" },
+    { ...marker, appRoleName: "packscout_clutchpacks_app" },
+    { ...marker, unexpected: true },
+  ]) {
+    assert.throws(
+      () => assertClusterMarker(drift, CLUTCHPACKS_REVIEW_DATABASES.central),
+      hasCode("CLUSTER_MARKER_INVALID"),
+    );
+  }
+});
+
+test("create preflight accepts only absent or owned-empty targets on free ports", () => {
+  for (const directoryState of ["absent", "empty"]) {
+    assert.doesNotThrow(() =>
+      assertCreateClusterInventory({
+        parentPrivate: true,
+        portOccupied: false,
+        directoryState,
+      }),
+    );
+  }
+  for (const inventory of [
+    { parentPrivate: false, portOccupied: false, directoryState: "absent" },
+    { parentPrivate: true, portOccupied: true, directoryState: "absent" },
+    { parentPrivate: true, portOccupied: false, directoryState: "nonempty" },
+    { parentPrivate: true, portOccupied: false, directoryState: "unsafe" },
+  ]) {
+    assert.throws(
+      () => assertCreateClusterInventory(inventory),
+      hasCode("CLUSTER_CREATE_TARGET_UNSAFE"),
+    );
+  }
+});
+
+test("resume accepts only the exact managed partial role and database topology", () => {
+  const cluster = CLUTCHPACKS_REVIEW_DATABASES.central;
+  const admin = {
+    rolname: cluster.clusterAdminRoleName,
+    rolcanlogin: true,
+    rolsuper: true,
+    rolinherit: true,
+    rolcreaterole: true,
+    rolcreatedb: true,
+    rolreplication: true,
+    rolbypassrls: true,
+    rolconnlimit: -1,
+  };
+  const owner = {
+    rolname: cluster.ownerRoleName,
+    rolcanlogin: false,
+    rolsuper: false,
+    rolinherit: false,
+    rolcreaterole: false,
+    rolcreatedb: false,
+    rolreplication: false,
+    rolbypassrls: false,
+    rolconnlimit: -1,
+  };
+  const app = {
+    ...owner,
+    rolname: cluster.appRoleName,
+    rolcanlogin: true,
+    rolconnlimit: 20,
+  };
+  const baseDatabases = ["postgres", "template0", "template1"].map(
+    (datname) => ({ datname, owner_name: cluster.clusterAdminRoleName }),
+  );
+  assert.deepEqual(
+    assertResumableClusterTopology(cluster, {
+      roles: [admin, owner].sort((left, right) =>
+        left.rolname.localeCompare(right.rolname)
+      ),
+      databases: baseDatabases,
+    }),
+    {
+      appRoleExists: false,
+      ownerRoleExists: true,
+      targetDatabaseExists: false,
+    },
+  );
+  assert.deepEqual(
+    assertResumableClusterTopology(cluster, {
+      roles: [admin, owner, app].sort((left, right) =>
+        left.rolname.localeCompare(right.rolname)
+      ),
+      databases: [
+        { datname: cluster.databaseName, owner_name: cluster.ownerRoleName },
+        ...baseDatabases,
+      ].sort((left, right) => left.datname.localeCompare(right.datname)),
+    }),
+    {
+      appRoleExists: true,
+      ownerRoleExists: true,
+      targetDatabaseExists: true,
+    },
+  );
+  for (const inventory of [
+    { roles: [admin, { ...owner, rolname: "unexpected_role" }], databases: baseDatabases },
+    { roles: [admin, { ...owner, rolsuper: true }], databases: baseDatabases },
+    {
+      roles: [admin, owner, app].sort((left, right) =>
+        left.rolname.localeCompare(right.rolname)
+      ),
+      databases: [
+        ...baseDatabases,
+        { datname: cluster.databaseName, owner_name: cluster.appRoleName },
+      ].sort((left, right) => left.datname.localeCompare(right.datname)),
+    },
+  ]) {
+    assert.throws(
+      () => assertResumableClusterTopology(cluster, inventory),
+      hasCode("FRESH_CLUSTER_TOPOLOGY_UNEXPECTED"),
+    );
+  }
+});
+
+test("cluster isolation requires distinct ports, directories, and system identifiers", () => {
+  const central = {
+    ...CLUTCHPACKS_REVIEW_DATABASES.central,
+    systemIdentifier: "7532189705087112001",
+  };
+  const provider = {
+    ...CLUTCHPACKS_REVIEW_DATABASES.provider,
+    systemIdentifier: "7532189705087112002",
+  };
+  assert.doesNotThrow(() => assertDistinctClusterProofs(central, provider));
+  for (const drift of [
+    { ...provider, port: central.port },
+    { ...provider, dataDirectory: central.dataDirectory },
+    { ...provider, systemIdentifier: central.systemIdentifier },
+    { ...provider, databaseName: "packscout" },
+  ]) {
+    assert.throws(
+      () => assertDistinctClusterProofs(central, drift),
+      hasCode("CLUSTER_ISOLATION_PROOF_FAILED"),
+    );
+  }
+});
+
+test("provision plan has no rebuild/drop path and resumes both clusters before migration", () => {
+  const plan = buildClutchpacksProvisionPlan(ids);
+  const stages = plan.stages;
+  assert.ok(stages.indexOf("initialize_or_resume_control_cluster") <
+    stages.indexOf("start_control_cluster"));
+  assert.ok(stages.indexOf("initialize_or_resume_clutchpacks_cluster") <
+    stages.indexOf("start_clutchpacks_cluster"));
+  assert.ok(stages.indexOf("start_control_cluster") <
+    stages.indexOf("migrate_central"));
+  assert.ok(stages.indexOf("start_clutchpacks_cluster") <
+    stages.indexOf("migrate_provider"));
+  assert.ok(stages.indexOf("initialize_provider_identity") <
+    stages.indexOf("register_clutchpacks"));
+  assert.doesNotMatch(JSON.stringify(plan), /rebuild|backup|drop/iu);
+});
+
+test("executor pins initdb and pg_ctl, proves live identities, and grants explicit tables", () => {
+  const runtime = readFileSync(
+    fileURLToPath(new URL(
+      "./clutchpacks-review-cluster-runtime.mts",
+      import.meta.url,
+    )),
+    "utf8",
+  );
   const executor = readFileSync(
     fileURLToPath(new URL(
       "./provision-clutchpacks-review-databases.mts",
@@ -348,31 +397,47 @@ test("executor uses the runtime v1 cipher, revokes PUBLIC initializer access, an
     )),
     "utf8",
   );
-  assert.match(executor, /new AesGcmProviderCredentialCipher\(/u);
-  assert.match(
-    executor,
-    /revisionId: input\.ids\.databaseCredentialVersionId/u,
-  );
-  assert.doesNotMatch(executor, /packscout-provider-credential:v2/u);
-  assert.match(
-    executor,
-    /revoke all on function[\s\S]+?from public,/u,
-  );
-  assert.match(executor, /error\.code === "42501"/u);
-  assert.match(executor, /await directoryHandle\.sync\(\)/u);
-  const backupCall = executor.indexOf("backupProofs = await backupExistingTargets");
-  const proofCall = executor.indexOf("assertVerifiedBackupProofs", backupCall);
-  const dropCall = executor.indexOf("await dropExactTargets(admin)", proofCall);
-  assert.ok(backupCall >= 0 && proofCall > backupCall && dropCall > proofCall);
+  assert.match(runtime, /\/opt\/homebrew\/opt\/postgresql@16\/bin\/initdb/u);
+  assert.match(runtime, /\/opt\/homebrew\/opt\/postgresql@16\/bin\/pg_ctl/u);
+  assert.match(runtime, /input: `\$\{clusterAdminPassword\}\\n`/u);
+  assert.match(runtime, /current_setting\('data_directory'\)/u);
+  assert.match(runtime, /pg_control_system\(\)/u);
+  assert.match(runtime, /app_connect_databases/u);
+  assert.match(runtime, /state === "nonempty"/u);
+  assert.match(executor, /grant select, insert, update on table/u);
+  assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
+  assert.match(executor, /deterministicProvisionUuid/u);
+  assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);
+  assert.doesNotMatch(executor, /on all tables|alter default privileges/iu);
+  assert.doesNotMatch(`${runtime}\n${executor}`, /drop database|drop role|rebuild|pg_dump/iu);
+  assert.doesNotMatch(`${runtime}\n${executor}`, /packscout_dev/u);
+  assert.doesNotMatch(`${runtime}\n${executor}`, /\/Users\/lains/u);
 });
 
-test("failures and forbidden argv never echo database or bootstrap secrets", () => {
-  const allSecrets = Object.values(secrets);
-  const serialized = JSON.stringify(
-    safeClutchpacksProvisionFailure(new Error(allSecrets.join("|"))),
-  );
-  for (const secret of allSecrets) assert.doesNotMatch(serialized, new RegExp(secret, "u"));
+test("package commands expose independent inspect, start, and stop without rebuild", () => {
+  const packageDocument = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../../package.json", import.meta.url)),
+    "utf8",
+  ));
+  for (const cluster of ["packscout-control", "packscout-clutchpacks"]) {
+    for (const action of ["inspect", "start", "stop"]) {
+      assert.equal(
+        typeof packageDocument.scripts[`db:${action}:${cluster}:local`],
+        "string",
+      );
+    }
+  }
+  assert.equal(packageDocument.scripts["db:rebuild:clutchpacks-review:local"], undefined);
+  assert.doesNotMatch(JSON.stringify(packageDocument.scripts), /PACKSCOUT_LOCAL_POSTGRES_ADMIN_URL/u);
+});
 
+test("failures and forbidden argv never echo cluster or admin secrets", () => {
+  const serialized = JSON.stringify(
+    safeClutchpacksProvisionFailure(new Error(Object.values(secrets).join("|"))),
+  );
+  for (const secret of Object.values(secrets)) {
+    assert.equal(serialized.includes(secret), false);
+  }
   const script = fileURLToPath(new URL(
     "./provision-clutchpacks-review-databases.mts",
     import.meta.url,
@@ -389,5 +454,5 @@ test("failures and forbidden argv never echo database or bootstrap secrets", () 
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /"code":"ARGUMENTS_FORBIDDEN"/u);
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(argvSecret, "u"));
+  assert.equal(`${result.stdout}${result.stderr}`.includes(argvSecret), false);
 });
