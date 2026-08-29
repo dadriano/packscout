@@ -108,7 +108,7 @@ The UI remains unchanged from the authoritative admin baseline.
   15 pull quarantines without any synthetic pack or raw actor identity.
 - [ ] Identical replay is idempotent and invalid record-local evidence is safely
   quarantined.
-- [ ] An uninstalled provider still fails before mutation with
+- [x] An uninstalled provider still fails before mutation with
   `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE`.
 - [ ] The authoritative admin route/UI parity guards and focused ClutchPacks
   source, repository, API, and browser tests pass.
@@ -120,3 +120,7 @@ The UI remains unchanged from the authoritative admin baseline.
 - ClutchPacks is a first-provider milestone inside the approved two-provider
   proof, not a new provider-specific branch in generic orchestration.
 - Courtyard and concurrency remain Task 021; Convex publication remains paused.
+- Verification so far: the pinned capture emits five byte-stable validated
+  pages with exact public-safe counts, the explicit capability gate passes, and
+  uninstalled adapters fail before provider-local mutation. Database commit,
+  admin-trigger, and browser evidence remain open.

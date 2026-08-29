@@ -159,14 +159,14 @@ database connection was used.
 
 ### Baseline parity
 
-- [ ] The authoritative route catalog and protected shell are present with no
+- [x] The authoritative route catalog and protected shell are present with no
   simplified-shell route or visual substitution.
 - [ ] Existing current-admin component and route behavior tests pass after their
   API implementations move to distributed repositories.
 - [ ] Login, invitations, password recovery, operators, users, allowlist,
   messages, providers, source configuration, workers, and data inspection retain
   their current success, loading, empty, forbidden, and failure behavior.
-- [ ] Active product-user, allowlist, saved-item, provider-catalog, global
+- [x] Active product-user, allowlist, saved-item, provider-catalog, global
   manifest, and Data Release V3 Convex contracts remain present and their
   focused tests continue to pass.
 - [ ] The preview is visually checked against port 5101 at desktop and narrow
@@ -190,7 +190,7 @@ database connection was used.
 
 - [ ] Run now from the authoritative Providers/Operations experience reaches
   the new provider-level command path.
-- [ ] An uninstalled provider fails before mutation with
+- [x] An uninstalled provider fails before mutation with
   `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` in an accessible error state.
 - [ ] ClutchPacks and Courtyard can be configured through the current admin
   workflow without per-data-type management controls.
@@ -207,3 +207,7 @@ database connection was used.
 - Any current admin workflow that cannot map cleanly to those boundaries must be
   recorded as a design blocker instead of being silently dropped or backed by a
   compatibility shim.
+- Verification so far: authoritative admin route/API guards pass 5/5; active
+  Convex surface guards pass 6/6; current admin Run-now admission and stable
+  fail-closed behavior pass focused tests. Distributed runtime ownership and
+  full framework verification remain open.
