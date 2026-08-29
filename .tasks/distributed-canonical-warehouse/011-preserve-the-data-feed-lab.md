@@ -1,92 +1,68 @@
-# Task: Preserve the Data Feed Lab
+# Task: Exclude the Obsolete Data Feed Lab
 
 **ID:** distributed-canonical-warehouse/011
 **Depends on:** distributed-canonical-warehouse/002, distributed-canonical-warehouse/003
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** small
-**Estimated effort:** 1–2 days for one builder, including safe proxy parity and failure-state verification
+**Estimated effort:** less than one day for route, bundle, and contract verification
 **Status:** done
 
 ## Start Here
 
-Record the current Data Feed Lab request bounds, safe response projection, credential source, and every existing failure classification before routing its provider selection through the new registry.
+Use the authoritative commit-`225f9a1` route catalog as the source of truth.
+Verify that `/data-api-tester` and its stale proxy API are absent from the
+ported admin instead of carrying them forward from the obsolete distributed
+shell.
 
 ## Objective
 
-Preserve the current read-only Data Feed Lab so authorized operators can inspect bounded upstream responses without creating new persistence or exposing provider credentials.
+Keep the new admin compatible with the current application by excluding the
+retired Data Feed Lab and its transient upstream-proxy contract.
 
 ## Context
 
-The Data Feed Lab is a transient diagnostic proxy at `/data-api-tester`. It is not a canonical importer, source adapter, mapper, raw archive, or provider runtime command. Its environment-backed server credential and fixed upstream destination remain outside browser control. The provider registry supplies safe filter identities, while upstream wire vocabulary may retain an external `platform` field only inside this diagnostic boundary.
+The original distributed task breakdown was created from an older admin shell
+that contained a Data Feed Lab. The current port-5101 `apps/admin` replaced that
+surface with Canonical, Published, and Compare inspection workflows. Preserving
+the Lab would add a route and credential-bearing transport that no longer exists
+in the authoritative application.
 
-No database table is added for the lab. Its requests and responses remain transient and bounded.
+This task is historical correction, not feature removal from the current app.
+Task 022 owns the current data-inspection routes and their distributed
+persistence mapping.
 
 ## Requirements
 
-### Safe request behavior
-
-- Require authenticated provider viewing permission, trusted Origin, and CSRF before sending a diagnostic request.
-- Accept `All providers` or one validated provider selection, a bounded record limit up to 5,000, and a bounded cursor up to 4,096 characters.
-- Resolve the environment-backed credential, destination, and provider-ID-to-external-filter mapping server-side; `All providers` omits the upstream filter, and the browser cannot supply a URL, host, authorization value, or database target.
-- Keep the request read-only, use a fixed destination policy, handle redirects manually, and enforce bounded timeout and response size.
-- Disable execution with explicit guidance when the required credential or safe configuration is absent.
-
-### Safe response behavior
-
-- Preserve All providers, single-provider, limit, cursor, all returned record kinds, record `data`, Raw JSON view, and staging of the returned cursor.
-- Return the exact bounded validated diagnostic records and raw JSON to the authorized Lab only; render raw content as inert text and never pass through an upstream error body, authorization header, or credential.
-- Preserve stable failures for invalid input, authentication rejection, redirect, timeout, oversized body, invalid JSON, invalid shape, and network failure.
-- Keep diagnostic requests and raw results transient; do not persist them in canonical, raw-page, run, cursor, quarantine, audit, alert, or log storage.
-- Use canonical provider terminology in PackScout UI and contracts while isolating external wire vocabulary inside the proxy boundary.
-
-### Accessible diagnostic states
-
-- Preserve loading, disabled, empty, success, validation, timeout, redirect, oversized, malformed, authentication, and network-failure states.
-- Keep provider, limit, and cursor inputs labelled and keyboard operable.
-- Announce execution and failure outcomes without relying on color.
-- Preserve entered safe values after a recoverable failure.
-- Move focus to actionable validation or service errors.
+- Do not add `/data-api-tester` to the authoritative route catalog, navigation,
+  application tree, or browser bundle.
+- Do not mount the stale Data Feed Lab API or add its environment credential,
+  cursor proxy, request builder, or provider-filter mapping.
+- Preserve `/data/canonical`, `/data/published`, and `/data/compare` exactly as
+  defined by the current admin baseline.
+- Keep source transport and provider imports server-owned through the explicit
+  provider integration boundary; the browser cannot select an upstream URL,
+  credential, filesystem capture, or database target.
+- Remove no active current-admin route, API, or test to satisfy this task.
 
 ## User-Facing Behavior
 
-Authorized operators keep the existing Data Feed Lab workflow: select All providers or one provider, set a bounded limit or cursor, send a read-only request, inspect record data or Raw JSON, and stage the next cursor. Missing credentials disable execution. Upstream failures remain concise and never reveal the upstream error body.
-
-## Interface Contract
-
-The browser supplies an optional validated provider ID, bounded limit, and bounded opaque cursor. The server resolves the fixed diagnostic destination, environment-backed credential, and external provider filter. The response contains sanitized transport status, bounded validated raw records, counts, and a bounded next cursor when present.
-
-The lab does not emit provider runs, page commits, canonical writes, promotion changes, central activity, or durable cursor changes.
+The ported admin shows the same Data navigation as the current application:
+Canonical, Published, and Compare. It does not reintroduce a Data Feed Lab from
+an obsolete branch.
 
 ## Acceptance Criteria
 
-### Diagnostic acceptance
-
-- [x] Current All providers, single-provider, limit, cursor, send, record data, Raw JSON, and stage-next-cursor behavior remains available.
-- [x] Missing credentials disable sending with explicit guidance and no upstream request.
-- [x] The browser cannot select a URL, database host, credential, or authorization header.
-- [x] Redirect, timeout, oversized, malformed, authentication, validation, and network failures return stable sanitized outcomes.
-- [x] Provider ID maps server-side to the external diagnostic filter, while All providers omits that filter under the same environment-backed credential.
-- [x] No new table, canonical write, run, quarantine, promotion change, or durable cursor is created.
-
-### Safety acceptance
-
-- [x] Provider ownership, permission, Origin, CSRF, destination, timeout, body, limit, and cursor bounds have direct tests.
-- [x] Credentials, authorization values, and upstream error bodies never appear; authorized bounded raw results appear only in the transient Lab response and never in logs, audits, alerts, or persistence.
-- [x] External `platform` vocabulary remains contained inside the diagnostic wire boundary.
-- [x] Loading, disabled, success, and every failure state remain keyboard accessible and announced.
-- [x] Data Feed Lab behavior remains independent of provider importer or mapper implementation.
-
-## Spec Compliance
-
-- Implementation authority: `tech-001-database-schema-contract.md`.
-- The Lab remains transient and adds no persistence table, canonical write, run, cursor, or quarantine record.
-- No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+- [x] Commit `225f9a1` contains no `/data-api-tester` route or navigation item.
+- [x] Task 022 explicitly excludes the stale Lab from the port.
+- [x] The new task breakdown directs data inspection to the current Canonical,
+  Published, and Compare contracts.
+- [ ] Final route and bundle verification confirms the obsolete Lab was not
+  reintroduced during integration.
 
 ## Completion Evidence
 
-- The current Lab page, request builder, record view, inert Raw JSON view, cursor staging, responsive styling, route, and navigation entry were ported without adding a database model.
-- The browser contract now sends only optional `providerId`, limit `1..5000`, and an opaque cursor of at most 4,096 characters. It cannot provide a URL, host, database selector, credential, or authorization header.
-- The server obtains organization-visible providers from the central registry, excludes archived providers, translates the selected provider to the upstream filter, and omits that external wire field for All providers. Unknown, archived, unmapped, and registry-unavailable providers fail before an upstream request.
-- The fixed HTTPS destination, environment credential, manual redirects, 15-second default timeout, 16 MiB response ceiling, requested record-count ceiling, and record/response validation are server-owned.
-- Tests cover authentication, permission, Origin, CSRF, request bounds, provider ownership, mapping, missing credential, redirect, upstream auth rejection, timeout, oversize, invalid JSON/shape/records, network failure, raw-response preservation, cursor staging, announcements, and focus movement.
-- The full admin suite passes 124 tests. Admin lint, typecheck, production build, framework checks, framework ratchet, and `git diff --check` pass.
+- The authoritative admin audit compared all current and distributed UI/API
+  routes and identified the Data Feed Lab as stale-branch-only behavior.
+- The current integration branch starts from commit `225f9a1`, so the Lab is
+  absent by default while all active data-inspection screens remain intact.
+
