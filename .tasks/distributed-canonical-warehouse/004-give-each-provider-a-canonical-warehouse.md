@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/005, distributed-canonical-warehouse/006
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including schema invariants, canonical write behavior, and representative data verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -69,22 +69,36 @@ Consumers address local entities only through a validated provider database cont
 
 ### Model acceptance
 
-- [ ] The provider schema represents category trees, multi-collectible packs, exact instances, provider accounts, multi-item pulls, and every approved market-event type.
-- [ ] Category cycles, cross-collectible instance references, empty completed pulls, and unresolved market-event subjects are rejected.
-- [ ] Exact decimals and unavailable states round-trip without floating-point loss or zero substitution.
-- [ ] Immutable pull and market history cannot be updated or deleted through ordinary canonical operations.
-- [ ] Exact instances, accounts, pulls, events, and protected attributes are absent from public projection fixtures.
+- [x] The provider schema represents category trees, multi-collectible packs, exact instances, provider accounts, multi-item pulls, and every approved market-event type.
+- [x] Category cycles, cross-collectible instance references, empty completed pulls, and unresolved market-event subjects are rejected.
+- [x] Exact decimals and unavailable states round-trip without floating-point loss or zero substitution.
+- [x] Immutable pull and market history cannot be updated or deleted through ordinary canonical operations.
+- [x] Exact instances, accounts, pulls, events, and protected attributes are absent from public projection fixtures.
 
 ### Change acceptance
 
-- [ ] A material mutable-entity update increments `row_version` and atomically appends one promotion change.
-- [ ] An unchanged replay creates neither a new entity version nor a promotion change.
-- [ ] Retirement preserves referenced history and emits a retire change for the next release.
-- [ ] A forced transaction failure leaves neither a partial canonical mutation nor an orphan promotion change.
-- [ ] The same provider schema and invariants pass against two separately provisioned provider databases.
+- [x] A material mutable-entity update increments `row_version` and atomically appends one promotion change.
+- [x] An unchanged replay creates neither a new entity version nor a promotion change.
+- [x] Retirement preserves referenced history and emits a retire change for the next release.
+- [x] A forced transaction failure leaves neither a partial canonical mutation nor an orphan promotion change.
+- [x] The same provider schema and invariants pass against two separately provisioned provider databases.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - The typed provider schema replaces the generic canonical graph and contains no compatibility fallback.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- Explicit typed contracts and repository methods cover every mutable provider
+  entity plus immutable pull/item and market-event facts; no generic entity or
+  relationship graph is used.
+- PostgreSQL deferred constraints reject category cycles, instance mismatches,
+  empty completed pulls, unresolved market subjects, orphan promotion changes,
+  history mutation, and canonical deletes.
+- The live two-provider integration test proves exact decimal round trips,
+  multi-collectible packs, multi-item pulls, material/no-op replay behavior,
+  retirement, digest conflicts, forced rollback, and independent ledgers.
+- Database lint and type checking pass with the provider APIs exported from the
+  server-only database package.
