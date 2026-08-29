@@ -66,6 +66,11 @@ browser-selected database connections.
   reads continue through the current server-owned Convex/directory HTTP boundary.
   The browser receives only the existing safe admin projections and never a
   directory token or Convex credential.
+- Preserve the active commit-`225f9a1` Convex/frontend contract, including
+  product users, beta allowlist entries, saved items, provider-catalog releases
+  and reconciliation, global catalog manifests, Data Release V3 tables, and
+  their existing admin HTTP endpoints. Older distributed publication tables
+  cannot replace this baseline.
 
 ## Requirements
 
@@ -126,6 +131,9 @@ browser-selected database connections.
 - Port current source adapter and supervisor behavior through explicit new
   central/provider repositories; provider-specific mapping remains outside
   generic orchestration code.
+- Port provider-release publication behind the active Convex manifest and V3
+  release contracts. Do not replace `convex/schema.ts` with the older
+  distributed schema or remove active frontend/admin directory tables.
 
 ## User-Facing Behavior
 
@@ -147,6 +155,9 @@ database connection was used.
 - [ ] Login, invitations, password recovery, operators, users, allowlist,
   messages, providers, source configuration, workers, and data inspection retain
   their current success, loading, empty, forbidden, and failure behavior.
+- [ ] Active product-user, allowlist, saved-item, provider-catalog, global
+  manifest, and Data Release V3 Convex contracts remain present and their
+  focused tests continue to pass.
 - [ ] The preview is visually checked against port 5101 at desktop and narrow
   widths before it is shown as the replacement admin.
 
