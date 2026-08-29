@@ -30,6 +30,13 @@ When they submit zero, 5,001, a fraction, or a non-number
 Then no source setting changes
 And the field says `Enter a whole number from 1 to 5,000.`
 
+## Retest after changing the request size
+
+Given a disabled source last passed its source test at 500 records per request
+When an administrator saves 1,000 records per request
+Then the earlier source test is no longer current
+And `Activate paused` remains unavailable until a source test succeeds at 1,000
+
 ## Enforce the pin
 
 Given a provider page request is pinned to 100 records

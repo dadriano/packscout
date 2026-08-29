@@ -459,6 +459,36 @@ test("source activation stays disabled after a newer pending or failed connectio
   }
 });
 
+test("a request-size edit keeps Activate paused disabled until the source test is current", async (context) => {
+  const staleCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    sources: catalog.sources.map((source) => ({
+      ...source,
+      state: "disabled",
+      recordsPerRequest: 2_000,
+      test: {
+        ...source.test,
+        state: "succeeded",
+        outcome: "success",
+        current: false,
+      },
+    })),
+  };
+  const renderer = await renderPage(
+    <ProviderSourceLedger
+      catalog={staleCatalog}
+      canManage
+      pendingKey={null}
+      onCreate={async () => true}
+      onCommand={() => undefined}
+      onInterval={async () => true}
+    />,
+  );
+  cleanupPage(context, renderer);
+
+  assert.equal(findButton(renderer, "Activate paused").disabled, true);
+});
+
 test("source testing is offered only for draft and disabled lifecycle states", async (context) => {
   for (const state of ["draft", "disabled", "paused", "active", "replaced"] as const) {
     const stateCatalog: ProviderSourceAdminCatalog = {

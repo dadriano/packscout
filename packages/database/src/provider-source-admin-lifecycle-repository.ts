@@ -361,7 +361,7 @@ export class ProviderSourceAdminLifecycleRepository
       });
       if (
         !locked ||
-        !["draft", "paused", "active"].includes(locked.state) ||
+        !["draft", "paused", "active", "disabled"].includes(locked.state) ||
         !schedule
       ) this.#fenced("Source request settings changed or are no longer configurable.");
       const previous =

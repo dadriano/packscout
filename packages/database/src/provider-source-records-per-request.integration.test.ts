@@ -8,6 +8,8 @@ import {
   createProviderSourceAcceptanceFixture,
 } from "./provider-source-acceptance-test-support.ts";
 import { PersistenceError } from "./persistence-error.ts";
+import { ProviderSourceAdminCatalogRepository } from
+  "./provider-source-admin-catalog-repository.ts";
 import { ProviderSourceAdminLifecycleRepository } from
   "./provider-source-admin-lifecycle-repository.ts";
 import { ProviderSourceImportRunRepository } from
@@ -188,6 +190,174 @@ test("records per request defaults to 500 and source tests pin each saved revisi
     );
   } finally {
     await Promise.all([fixture.close(), other.close()]);
+  }
+});
+
+test("source catalog selects the latest test for the current request-size pin", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "records-per-request-catalog-test",
+  );
+  try {
+    const source = await createAcceptanceProviderSource(fixture, sourceDefinition);
+    await activateConnection(fixture);
+    const admin = new ProviderSourceAdminLifecycleRepository(fixture.database);
+    const initial = await admin.loadSource({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+    });
+    assert.ok(initial);
+    const testAt500 = await admin.requestSourceTest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      sourceRevisionId: source.sourceRevisionId,
+      connectionProfileId: fixture.connectionProfileId,
+      connectionRevisionId: fixture.connectionRevisionId,
+      requestedByActorKey: "operator-admin",
+      requestedAt: ACCEPTANCE_CREATED_AT,
+    });
+    const at1000 = await admin.reviseRecordsPerRequest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      expectedScheduleRevisionId: initial.scheduleRevisionId,
+      recordsPerRequest: 1_000,
+      actorKey: "operator-admin",
+      effectiveAt: new Date(ACCEPTANCE_CREATED_AT.getTime() + 1_000),
+    });
+    const testAt1000 = await admin.requestSourceTest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      sourceRevisionId: source.sourceRevisionId,
+      connectionProfileId: fixture.connectionProfileId,
+      connectionRevisionId: fixture.connectionRevisionId,
+      requestedByActorKey: "operator-admin",
+      requestedAt: new Date(ACCEPTANCE_CREATED_AT.getTime() + 2_000),
+    });
+    await admin.reviseRecordsPerRequest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      expectedScheduleRevisionId: at1000.scheduleRevisionId,
+      recordsPerRequest: 500,
+      actorKey: "operator-admin",
+      effectiveAt: new Date(ACCEPTANCE_CREATED_AT.getTime() + 3_000),
+    });
+
+    const catalogSource = (await new ProviderSourceAdminCatalogRepository(
+      fixture.database,
+    ).listSources(fixture.organizationId))[0];
+    assert.ok(catalogSource);
+    assert.equal(catalogSource.recordsPerRequest, 500);
+    assert.equal(catalogSource.test.jobId, testAt500.jobId);
+    assert.equal(catalogSource.test.recordsPerRequest, 500);
+    assert.notEqual(catalogSource.test.jobId, testAt1000.jobId);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a disabled source can revise its request size before the next source test", async () => {
+  const fixture = await createProviderSourceAcceptanceFixture(
+    "records-per-request-disabled",
+  );
+  try {
+    const source = await createAcceptanceProviderSource(fixture, sourceDefinition);
+    await activateAcceptanceRuntime(
+      fixture.database,
+      fixture,
+      source,
+      ACCEPTANCE_CREATED_AT,
+    );
+    const admin = new ProviderSourceAdminLifecycleRepository(fixture.database);
+    const disabledAt = new Date(ACCEPTANCE_CREATED_AT.getTime() + 1_000);
+    await admin.disable({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      actorKey: "operator-admin",
+      disabledAt,
+    });
+
+    const before = await admin.loadSource({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+    });
+    assert.ok(before);
+    assert.equal(before.state, "disabled");
+    const instanceBefore = await fixture.database.provider_source_instances
+      .findUniqueOrThrow({
+        where: { id: source.sourceInstanceId },
+        select: { active_revision_id: true, disabled_at: true },
+      });
+
+    const revised = await admin.reviseRecordsPerRequest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      expectedScheduleRevisionId: before.scheduleRevisionId,
+      recordsPerRequest: 250,
+      actorKey: "operator-admin",
+      effectiveAt: new Date(disabledAt.getTime() + 1_000),
+    });
+
+    const [after, instanceAfter] = await Promise.all([
+      admin.loadSource({
+        organizationId: fixture.organizationId,
+        providerId: source.providerId,
+        sourceInstanceId: source.sourceInstanceId,
+      }),
+      fixture.database.provider_source_instances.findUniqueOrThrow({
+        where: { id: source.sourceInstanceId },
+        select: { active_revision_id: true, disabled_at: true },
+      }),
+    ]);
+    assert.ok(after);
+    assert.equal(after.state, before.state);
+    assert.equal(
+      instanceAfter.disabled_at?.toISOString(),
+      disabledAt.toISOString(),
+    );
+    assert.equal(
+      instanceAfter.disabled_at?.toISOString(),
+      instanceBefore.disabled_at?.toISOString(),
+    );
+    assert.equal(instanceAfter.active_revision_id, instanceBefore.active_revision_id);
+    assert.equal(after.sourceRevisionId, before.sourceRevisionId);
+    assert.equal(after.intervalSeconds, before.intervalSeconds);
+    assert.equal(after.cursorGeneration, before.cursorGeneration);
+    assert.equal(after.cursorFingerprint, before.cursorFingerprint);
+    assert.equal(after.scheduleRevisionId, revised.scheduleRevisionId);
+    assert.equal(after.recordsPerRequest, 250);
+    const catalogSource = (await new ProviderSourceAdminCatalogRepository(
+      fixture.database,
+    ).listSources(fixture.organizationId)).find((candidate) =>
+      candidate.sourceInstanceId === source.sourceInstanceId
+    );
+    assert.equal(catalogSource?.disabledAt?.toISOString(), disabledAt.toISOString());
+
+    const nextTest = await admin.requestSourceTest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      sourceRevisionId: source.sourceRevisionId,
+      connectionProfileId: fixture.connectionProfileId,
+      connectionRevisionId: fixture.connectionRevisionId,
+      requestedByActorKey: "operator-admin",
+      requestedAt: new Date(disabledAt.getTime() + 2_000),
+    });
+    const pinnedTest = await fixture.database.provider_source_test_jobs
+      .findUniqueOrThrow({ where: { id: nextTest.jobId } });
+    assert.equal(pinnedTest.records_per_request, 250);
+  } finally {
+    await fixture.close();
   }
 });
 
