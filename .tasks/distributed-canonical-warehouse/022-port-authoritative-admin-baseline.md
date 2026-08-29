@@ -47,6 +47,8 @@ browser-selected database connections.
 - Central worker presence and configuration because runners are centralized.
 - Email message intents, attempts, and link-token metadata used by the current
   Operators, Messages, invitation, and password-reset workflows.
+- Provider-independent activity events for global conditions such as no live
+  workers; provider-scoped observations continue to identify their provider.
 - Best-effort provider activity observations, durable health, alerts, and
   publication/manifest control-plane state.
 - Shared global category and collectible catalog.
@@ -83,6 +85,10 @@ browser-selected database connections.
   `/data/published`, and `/data/compare`.
 - Preserve current detail, create/edit, invitation, forgot-password, reset, and
   not-found routes declared by the authoritative `App.tsx` and route catalog.
+- Preserve the active behavior that retired historical provider-configuration
+  mutations return `410` and current configuration is managed through Sources.
+- Do not carry `/data-api-tester` forward: it belongs to the obsolete
+  distributed shell and is not an authoritative current-admin route.
 - Preserve current styling, responsive layout, theme, breadcrumbs, navigation,
   permissions, focus management, live regions, empty states, partial failures,
   and stable browser-safe errors.
@@ -93,7 +99,10 @@ browser-selected database connections.
 
 - Add clean central models and migrations for current admin support state that
   is not already represented, especially email intent/attempt/link records and
-  centralized worker presence/configuration.
+  centralized worker presence/configuration plus provider-independent global
+  activity.
+- Preserve operator invitation lifecycle with `pending`, `active`, `disabled`,
+  and `cancelled` states and the authoritative permission vocabulary.
 - Keep product-user and allowlist source-of-truth data outside Postgres as in the
   current admin; store only bounded PackScout audit and delivery state centrally.
 - Adapt operator invitation, account-created notice, password reset, Messages,
@@ -108,6 +117,8 @@ browser-selected database connections.
 - Adapt Operations, Runs, Background Work, Quarantine, Canonical, and Compare
   reads to require validated provider context and route directly to one provider
   database after central authorization.
+- Add the provider-local recomputation queue required by the existing Background
+  Work page; do not leave that route backed by the legacy database.
 - Preserve bounded cross-provider views by merging typed per-provider results;
   one unreachable provider remains one explicit unavailable result.
 - Adapt Source Configuration and Workers to the hybrid model: centralized
@@ -167,6 +178,8 @@ database connection was used.
   routing, and existing server-owned external service configuration.
 - [ ] Central supporting tables cover message/link and centralized worker state;
   provider runtime, runs, cursors, quarantine, and canonical data remain local.
+- [ ] Provider-independent activity and provider-local recomputation work support
+  the current Overview, Workers, Alerts, and Background Work states.
 - [ ] Operations, Runs, Background Work, Quarantine, Canonical, and Compare never
   scan databases to discover ownership and never expose a connection string.
 - [ ] One unreachable provider does not prevent healthy provider reads or
