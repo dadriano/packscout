@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including quarantine parity, bulk retry, retention evidence, and recovery failures
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

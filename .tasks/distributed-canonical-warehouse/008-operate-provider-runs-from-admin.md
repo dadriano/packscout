@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/009, distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including current route parity, direct provider control, partial failures, and accessibility
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -72,24 +72,32 @@ Every run list row and local soft reference carries `providerId` with `runId`. T
 
 ### Operations acceptance
 
-- [ ] `/operations`, `/runs`, `/runs/:id`, and provider Run now preserve current behavior under provider terminology.
-- [ ] One Run now request creates or reuses one provider-level run and exposes no per-data-kind controls.
-- [ ] Run detail shows mixed record counters, pages, safe cursors, immutable outcomes, and related quarantine links.
-- [ ] Cross-provider lists use deterministic merge ordering and resumable composite cursors while reporting per-provider unreachable outcomes.
-- [ ] Pause, resume, stop, and Run now enforce permission, Origin, CSRF, generation, idempotency, and confirmation rules.
-- [ ] Loading, empty, partial, unavailable, conflict, polling, and terminal states remain accessible.
+- [x] `/operations`, `/runs`, `/runs/:id`, and provider Run now preserve current behavior under provider terminology.
+- [x] One Run now request creates or reuses one provider-level run and exposes no per-data-kind controls.
+- [x] Run detail shows mixed record counters, pages, safe cursors, immutable outcomes, and related quarantine links.
+- [x] Cross-provider lists use deterministic merge ordering and resumable composite cursors while reporting per-provider unreachable outcomes.
+- [x] Pause, resume, stop, and Run now enforce permission, Origin, CSRF, generation, idempotency, and confirmation rules.
+- [x] Loading, empty, partial, unavailable, conflict, polling, and terminal states remain accessible.
 
 ### Isolation acceptance
 
-- [ ] One unreachable provider produces one bounded unavailable result while healthy provider rows and commands work.
-- [ ] Cross-organization and browser-selected database targets fail before a provider connection opens.
-- [ ] Pagination remains stable while other providers create or finish runs.
-- [ ] Every local run and quarantine link carries provider context, and a missing context never scans provider databases.
-- [ ] Raw cursors, credentials, connection details, database errors, and provider payloads never reach browser or audit output.
-- [ ] Current admin run and operations contract tests pass against at least two isolated provider databases.
+- [x] One unreachable provider produces one bounded unavailable result while healthy provider rows and commands work.
+- [x] Cross-organization and browser-selected database targets fail before a provider connection opens.
+- [x] Pagination remains stable while other providers create or finish runs.
+- [x] Every local run and quarantine link carries provider context, and a missing context never scans provider databases.
+- [x] Raw cursors, credentials, connection details, database errors, and provider payloads never reach browser or audit output.
+- [x] Current admin run and operations contract tests pass against at least two isolated provider databases.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Admin routes authorize centrally and route directly by validated `providerId`; no provider scan or offline command queue is added.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- Provider operations, run list/detail, Run now, and runtime-control contracts now use provider terminology and direct bounded provider-database routing with central ownership checks.
+- Signed compact composite cursors retain deterministic per-provider positions and frozen unavailable outcomes within the 8,192-byte payload limit at the 50-provider fan-out bound.
+- Provider-local command and run repositories preserve one queued/active mixed run, exact idempotency, generation/fence checks, and queued-run visibility across pause, stop, and active-run races.
+- Existing admin pages retain loading, empty, partial, unavailable, polling, terminal, keyboard, confirmation, and last-safe-result behavior without exposing raw cursors, credentials, connection details, errors, or provider payloads.
+- The task branch passed `npm run verify:framework`; after integration, all 15 Prisma schema tests, distributed package typechecks, 8 cursor/service regressions, and 3 provider-coordination regressions passed.
