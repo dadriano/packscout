@@ -311,7 +311,8 @@ fingerprint, predecessor, completeness, and non-positive-EV gates. It then
 publishes a signed, release-bound provider observation from the actual local
 source lifecycle and reads all 17 repacks plus bounded category, collectible,
 chase, dashboard, and search paths through trusted-clock public V3 reads.
-Provider health gates Top Opportunities only; it never erases catalog EV. A
+Provider health is informational and never erases catalog EV or gates Top
+Opportunities. Source-evidence age is represented by EV confidence. A
 failed post-activation proof rolls back to the guarded predecessor when one
 exists; genesis verification failures require explicit recovery and return a
 non-success status.

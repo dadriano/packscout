@@ -39,23 +39,23 @@ And PackScout does not turn missing evidence into a low-confidence estimate
 
 Coverage: Automated calculation regression and public-contract coverage is owned by tasks `001` and `002`.
 
-## Scenario: Provider health only controls opportunity eligibility
+## Scenario: Provider health is informational
 
 Given a known last-known estimate from a paused, unhealthy, stale, behind-head, or release-misaligned provider
 When a buyer opens the catalog
 Then the estimate remains visible in rows, details, ordinary sorting, median, and coverage
-And it is excluded from Top Opportunities with a provider-delay explanation
+And it remains eligible for Top Opportunities with provider delay disclosed separately
 
 Coverage: Automated provider-health, ranking, and frontend coverage is owned by tasks `004` and `005`.
 
-## Scenario: A healthy last-known estimate may rank
+## Scenario: Any calculable last-known estimate may rank
 
-Given a known last-known estimate and a fresh aligned at-head provider observation
+Given a known last-known estimate with any informational provider-health state
 When Top Opportunities is evaluated
 Then the pack may rank under the existing signed EV rules
 And its decayed confidence and last-observed time remain visible
 
-Coverage: Automated provider-health and ranking coverage is owned by tasks `003`, `004`, and `005`.
+Coverage: Automated confidence and ranking coverage is owned by tasks `003`, `004`, and `005`.
 
 ## Scenario: Confidence pagination remains stable
 

@@ -50,6 +50,6 @@ Run focused Convex/public-query tests, cursor adversarial tests, and typecheck b
 ## Spec Compliance
 
 - Related specs reviewed: none; this feature has no companion tech or UX specs.
-- Alignment: trusted public actions mint the response clock, confidence pagination binds its first-page clock in a signed opaque cursor, and provider health uses a distinct current server clock so opening a later page cannot extend provider eligibility. Search, details, aggregates, sold-out history, positive suppression, and the full retained 1,000-row compatibility bound are covered.
+- Alignment: trusted public actions mint the response clock, confidence pagination binds its first-page clock in a signed opaque cursor, and provider health uses a distinct current server clock so opening a later page cannot extend health freshness. Search, details, aggregates, sold-out history, positive suppression, and the full retained 1,000-row compatibility bound are covered.
 - Divergences: none.
 - Verification: full Convex suite passed 340/340, Convex typecheck passed, and the contract suite passed 317/317.

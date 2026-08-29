@@ -8,7 +8,7 @@ Open `last-known-ev-confidence/001`, encode the versioned public freshness polic
 
 ## Context
 
-PackScout's buyback-adjusted EV calculation currently treats evidence older than 60 minutes as unavailable. That creates an avoidable information cliff: the economics are still known, but the public catalog removes them instead of communicating that confidence has fallen. This feature keeps calculable EV visible as a last-known estimate, continuously decays its public confidence, and uses provider health only to decide whether a pack may enter Top Opportunities.
+PackScout's buyback-adjusted EV calculation currently treats evidence older than 60 minutes as unavailable. That creates an avoidable information cliff: the economics are still known, but the public catalog removes them instead of communicating that confidence has fallen. This feature keeps calculable EV visible as a last-known estimate, continuously decays its public confidence, and keeps provider health informational.
 
 The raw `packscout-buyback-adjusted-ev-confidence-v1` calculation record remains immutable and truthful. A separate versioned public freshness policy derives presentation state and confidence at one pinned evaluation time. Existing active Convex release data can adopt the policy without a provider reimport or a PostgreSQL/Neon migration.
 
@@ -45,16 +45,16 @@ The raw `packscout-buyback-adjusted-ev-confidence-v1` calculation record remains
 
 ### Provider health
 
-- Evidence freshness controls displayed confidence; provider health controls Top Opportunities eligibility.
-- A missing, stale, paused, unhealthy, behind-head, or release-misaligned provider observation excludes its packs from Top Opportunities only.
-- Last-known EV remains visible in catalog rows, details, ordinary EV sorting, and overview coverage when provider health excludes it from Top Opportunities.
+- Evidence freshness controls displayed confidence; provider health is informational only.
+- A missing, stale, paused, unhealthy, behind-head, or release-misaligned provider observation never hides a known estimate or excludes it from Top Opportunities.
+- Last-known EV remains visible in catalog rows, details, ordinary EV sorting, overview coverage, and Top Opportunities whenever its economics are otherwise rankable.
 - Health refreshes are independently observable, monotonic, idempotent, and bound to the exact active public release.
 
 ## User Promise
 
 - Buyers never see a previously calculable EV disappear solely because time passed.
 - Every aged estimate says `Last-known estimate`, shows when its source evidence was last observed, and carries a decaying confidence score.
-- Provider delay is disclosed separately as `Provider feed delayed; excluded from Top Opportunities.`
+- Provider delay is disclosed separately as `Provider feed delayed; displaying the latest available data.`
 - PackScout explains that unavailable means required supported inputs are missing; age alone does not make an estimate unavailable.
 
 ## Out of Scope
@@ -63,7 +63,6 @@ The raw `packscout-buyback-adjusted-ev-confidence-v1` calculation record remains
 - Reimporting ClutchPacks or migrating local PostgreSQL data to Neon.
 - Reinterpreting provider-reported EV as PackScout EV.
 - Changing the positive-EV suppression policy or sold-out ranking policy.
-- Ranking unhealthy provider data in Top Opportunities.
 
 ## Tasks
 

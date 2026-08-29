@@ -24,8 +24,8 @@ export type DataReleaseStatusPresentation = Readonly<{
 
 /**
  * Uses two timestamps minted by the same trusted backend response so browser
- * clock skew cannot move the next ranking-health refresh boundary. Aggregate
- * health may already be delayed while another provider is still eligible.
+ * clock skew cannot move the next provider-health status refresh boundary.
+ * Aggregate health may already be delayed while another provider remains fresh.
  */
 export function providerHealthRefreshDelayMilliseconds(
   status: DataReleaseStatusValue,

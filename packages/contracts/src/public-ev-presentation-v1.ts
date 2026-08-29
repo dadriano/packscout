@@ -662,7 +662,7 @@ export function safePresentPackScoutPublicEvV3(
     : { success: false, reason: "schema_invalid" };
 }
 
-export const PUBLIC_PROVIDER_RANKING_INELIGIBILITY_REASONS_V1 = Object.freeze([
+export const PUBLIC_PROVIDER_HEALTH_STATUS_REASONS_V1 = Object.freeze([
   "PROVIDER_HEALTH_UNAVAILABLE",
   "PROVIDER_OBSERVATION_STALE",
   "PROVIDER_PAUSED",
@@ -671,11 +671,11 @@ export const PUBLIC_PROVIDER_RANKING_INELIGIBILITY_REASONS_V1 = Object.freeze([
   "RELEASE_MISMATCH",
 ] as const);
 
-export const publicProviderRankingIneligibilityReasonV1Schema = z.enum(
-  PUBLIC_PROVIDER_RANKING_INELIGIBILITY_REASONS_V1,
+export const publicProviderHealthStatusReasonV1Schema = z.enum(
+  PUBLIC_PROVIDER_HEALTH_STATUS_REASONS_V1,
 );
 
-const delayedProviderRankingIneligibilityReasonV1Schema = z.enum([
+const delayedProviderHealthStatusReasonV1Schema = z.enum([
   "PROVIDER_OBSERVATION_STALE",
   "PROVIDER_PAUSED",
   "PROVIDER_UNHEALTHY",
@@ -683,37 +683,33 @@ const delayedProviderRankingIneligibilityReasonV1Schema = z.enum([
   "RELEASE_MISMATCH",
 ]);
 
-/** Sanitized provider health carried only by dynamic public views. */
+/** Sanitized, informational provider health carried by dynamic public views. */
 export const publicProviderHealthV1Schema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("healthy"),
       observedAt: packScoutBuybackEvTimestampV1Schema,
-      rankingEligible: z.literal(true),
-      rankingIneligibilityReason: z.null(),
+      statusReason: z.null(),
     })
     .strict(),
   z
     .object({
       state: z.literal("delayed"),
       observedAt: packScoutBuybackEvTimestampV1Schema,
-      rankingEligible: z.literal(false),
-      rankingIneligibilityReason:
-        delayedProviderRankingIneligibilityReasonV1Schema,
+      statusReason: delayedProviderHealthStatusReasonV1Schema,
     })
     .strict(),
   z
     .object({
       state: z.literal("unavailable"),
       observedAt: z.null(),
-      rankingEligible: z.literal(false),
-      rankingIneligibilityReason: z.literal("PROVIDER_HEALTH_UNAVAILABLE"),
+      statusReason: z.literal("PROVIDER_HEALTH_UNAVAILABLE"),
     })
     .strict(),
 ]);
 
-export type PublicProviderRankingIneligibilityReasonV1 = z.infer<
-  typeof publicProviderRankingIneligibilityReasonV1Schema
+export type PublicProviderHealthStatusReasonV1 = z.infer<
+  typeof publicProviderHealthStatusReasonV1Schema
 >;
 export type PublicProviderHealthV1 = z.infer<
   typeof publicProviderHealthV1Schema
@@ -745,9 +741,9 @@ function providerHealthSummaryNextEvaluationIsValidV1(summary: {
   readonly totalProviderCount: number;
   readonly delayedProviderCount: number;
 }): boolean {
-  const hasRankingEligibleProvider =
+  const hasFreshProvider =
     summary.delayedProviderCount < summary.totalProviderCount;
-  if ((summary.nextHealthEvaluationAt !== null) !== hasRankingEligibleProvider) {
+  if ((summary.nextHealthEvaluationAt !== null) !== hasFreshProvider) {
     return false;
   }
   return summary.nextHealthEvaluationAt === null ||

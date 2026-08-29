@@ -10,17 +10,16 @@ export type ProviderHealthPresentation = Readonly<{
     | "Provider feed healthy"
     | "Provider feed delayed"
     | "Provider feed unavailable";
-  rankingEligible: boolean;
-  rankingLabel: string;
+  statusCopy: string;
   observedAt: string | null;
   observedLabel: string | null;
   accessibleLabel: string;
 }>;
 
 /**
- * Formats the bounded public provider-health decision without exposing its
- * operational cause vocabulary. Health controls Top Opportunities only; it
- * never changes whether the already-calculated EV metrics are presentable.
+ * Formats informational provider health without exposing its operational
+ * cause vocabulary. Feed health never changes EV visibility or ranking;
+ * source-evidence age is represented separately by confidence.
  */
 export function presentProviderHealthV3(
   health: PublicProviderHealthV3,
@@ -31,11 +30,11 @@ export function presentProviderHealthV3(
       : health.state === "delayed"
         ? "Provider feed delayed"
         : "Provider feed unavailable";
-  const rankingLabel = health.rankingEligible
-    ? "Eligible for Top Opportunities."
+  const statusCopy = health.state === "healthy"
+    ? "Displaying the latest available provider data."
     : health.state === "unavailable"
-      ? "Provider feed unavailable; excluded from Top Opportunities."
-      : "Provider feed delayed; excluded from Top Opportunities.";
+      ? "Provider feed status is unavailable; displaying the latest available data."
+      : "Provider feed delayed; displaying the latest available data.";
   const observedLabel =
     health.observedAt === null
       ? null
@@ -44,11 +43,10 @@ export function presentProviderHealthV3(
   return Object.freeze({
     state: health.state,
     statusLabel,
-    rankingEligible: health.rankingEligible,
-    rankingLabel,
+    statusCopy,
     observedAt: health.observedAt,
     observedLabel,
-    accessibleLabel: [statusLabel + ".", rankingLabel, observedLabel]
+    accessibleLabel: [statusLabel + ".", statusCopy, observedLabel]
       .filter(Boolean)
       .join(" "),
   });

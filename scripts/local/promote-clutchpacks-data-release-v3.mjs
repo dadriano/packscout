@@ -879,16 +879,14 @@ function publicProviderHealthForObservation(observation, currentTimeMilliseconds
     return {
       state: "delayed",
       observedAt: observation.observedAt,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_UNHEALTHY",
+      statusReason: "PROVIDER_UNHEALTHY",
     };
   }
   if (observation.sourceLifecycle !== "active") {
     return {
       state: "delayed",
       observedAt: observation.observedAt,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_PAUSED",
+      statusReason: "PROVIDER_PAUSED",
     };
   }
   if (
@@ -898,8 +896,7 @@ function publicProviderHealthForObservation(observation, currentTimeMilliseconds
     return {
       state: "delayed",
       observedAt: observation.observedAt,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_UNHEALTHY",
+      statusReason: "PROVIDER_UNHEALTHY",
     };
   }
   if (
@@ -910,23 +907,20 @@ function publicProviderHealthForObservation(observation, currentTimeMilliseconds
     return {
       state: "delayed",
       observedAt: observation.observedAt,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_BEHIND",
+      statusReason: "PROVIDER_BEHIND",
     };
   }
   if (currentTimeMilliseconds >= freshThroughMilliseconds) {
     return {
       state: "delayed",
       observedAt: observation.observedAt,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+      statusReason: "PROVIDER_OBSERVATION_STALE",
     };
   }
   return {
     state: "healthy",
     observedAt: observation.observedAt,
-    rankingEligible: true,
-    rankingIneligibilityReason: null,
+    statusReason: null,
   };
 }
 
@@ -935,11 +929,11 @@ function providerHealthSummaryForObservation(observation, health) {
     state: health.state,
     observedAt: observation.observedAt,
     freshThrough: observation.freshThrough,
-    nextHealthEvaluationAt: health.rankingEligible
+    nextHealthEvaluationAt: health.state === "healthy"
       ? observation.freshThrough
       : null,
     totalProviderCount: 1,
-    delayedProviderCount: health.rankingEligible ? 0 : 1,
+    delayedProviderCount: health.state === "healthy" ? 0 : 1,
   };
 }
 
@@ -1329,19 +1323,9 @@ export async function assertClutchpacksPublicReadBack(
     right.presentation.metrics.evDollars.minorUnits -
       left.presentation.metrics.evDollars.minorUnits ||
     left.detail.publicRepackId.localeCompare(right.detail.publicRepackId));
-  const expectedOpportunityDetails = dashboardContext.providerHealth
-      .rankingEligible
-    ? opportunityCandidates.slice(0, 6).map(({ detail }) => detail)
-    : [];
-  const expectedOpportunityEligibility = {
-    rankingEligibleRepackCount: dashboardContext.providerHealth.rankingEligible
-      ? opportunityCandidates.length
-      : 0,
-    providerIneligibleRepackCount: dashboardContext.providerHealth
-        .rankingEligible
-      ? 0
-      : opportunityCandidates.length,
-  };
+  const expectedOpportunityDetails = opportunityCandidates
+    .slice(0, 6)
+    .map(({ detail }) => detail);
   if (
     !isDeepStrictEqual(
       shell.data.providerHealthSummary,
@@ -1354,10 +1338,6 @@ export async function assertClutchpacksPublicReadBack(
     !isDeepStrictEqual(
       dashboard.data.providerHealthSummary,
       dashboardContext.providerHealthSummary,
-    ) ||
-    !isDeepStrictEqual(
-      dashboard.data.opportunityEligibility,
-      expectedOpportunityEligibility,
     ) ||
     dashboard.data.opportunities.length !== expectedOpportunityDetails.length ||
     dashboard.data.details.length !== expectedOpportunityDetails.length ||

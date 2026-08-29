@@ -24,12 +24,12 @@ ClutchPacks is the bounded test provider. Its canonical import is complete and a
 - Deploy the versioned public policy and provider-health path to the isolated test deployment.
 - Reuse existing ClutchPacks canonical and release evidence; do not run a provider reimport.
 - Publish or refresh an authenticated provider observation reflecting the source's actual paused or healthy state.
-- Verify availability counts, confidence samples, sorting, Top Opportunities eligibility, and detail parity.
+- Verify availability counts, confidence samples, sorting, Top Opportunities ranking, and detail parity.
 - Preserve a tested rollback to the previously active public behavior or deployment.
 
 ## User-Facing Behavior
 
-The local frontend shows existing ClutchPacks economics as current or last-known, never age-expired unavailable. If the source remains paused, every known EV stays visible while Top Opportunities explains its exclusion.
+The local frontend shows existing ClutchPacks economics as current or last-known, never age-expired unavailable. If the source remains paused, every otherwise eligible known EV stays visible and rankable while the feed status remains informational.
 
 ## Interface Contract
 
@@ -39,7 +39,7 @@ Certification records the active release identity, public freshness-policy versi
 
 - [x] ClutchPacks known EV becomes visible from the existing canonical revisions in the newly assembled active release without provider reimport.
 - [x] Sample scores match the approved curve and one pinned server evaluation time.
-- [x] Provider health affects Top Opportunities only and matches the real source state.
+- [x] Provider health matches the real source state without affecting Top Opportunities.
 - [x] Catalog, overview, sort, inspector, glossary, and Learn flows pass browser verification with screenshots.
 - [x] Focused tests and `npm run verify:framework` pass before handoff.
 
@@ -52,10 +52,11 @@ Completed certification:
 - Release fingerprint: `e0941b016fca5e7fb5dbe57674c60e8e662e6a935900290b210d85c0db9a418e`.
 - Rollback predecessor: `dda5db8a-cbd4-86e9-8678-802977c4ce53`.
 - Reconciliation: 17 repacks, 10 categories, 6,442 collectibles, 8,130 chases, and 1 search shard; public read-back returned all 17 repacks and all detail/search probes passed.
-- EV presentation: 15 last-known estimates remain visible with confidence scores from 4,701 through 4,980; 2 estimates remain deterministically unavailable for non-age reasons; no positive EV is displayed.
-- Provider observation matches the actual paused source lifecycle, so all 15 known estimates are provider-ineligible for Top Opportunities while remaining visible in All Repacks; Top Opportunities correctly returns 0.
+- EV presentation follow-up: 15 last-known estimates remain visible with confidence scores from 3,838 through 3,841 at the read-back clock; 2 estimates remain deterministically unavailable for non-age reasons; no positive EV is displayed.
+- Provider observation matches the actual paused source lifecycle while 6 known estimates remain ranked in Top Opportunities. Their signed EV values range from -$0.64 through -$6.18.
+- Provider health is informational in the live contract: the retired opportunity-eligibility object is absent, and rows expose only state, observation time, and a bounded status reason.
 - Source: all 17 existing local canonical revisions were reused. No provider reimport, PostgreSQL mutation, or Neon migration was performed.
-- Verification: contracts 317 tests, services 1,146 tests, Convex 340 tests, frontend 458 tests, and promotion/preproduction 65 tests passed. The complete `npm run verify:framework` gate passed, including production builds.
+- Verification: contracts 317 tests, database 310 tests, services 1,145 unit tests plus the volume test, worker 163 tests, Convex 340 tests, frontend 538 tests, and tooling 399 tests plus 3 isolated admin-process tests passed. The complete `npm run verify:framework` gate passed, including production builds.
 - Browser: overview, catalog cards/table, confidence sort, inspector, keyboard dismissal, both themes, mobile/200%-equivalent reflow, glossary/Learn copy, and console-error checks passed. Screenshot proof is retained with the task artifacts.
 
 ## Spec Compliance

@@ -220,8 +220,7 @@ export function buildV3HealthyProviderHealth(): PublicRepackViewDetailV3["provid
   return {
     state: "healthy",
     observedAt: FIXTURE_CURRENT_EVALUATED_AT,
-    rankingEligible: true,
-    rankingIneligibilityReason: null,
+    statusReason: null,
   };
 }
 
@@ -229,8 +228,7 @@ export function buildV3DelayedProviderHealth(): PublicRepackViewDetailV3["provid
   return {
     state: "delayed",
     observedAt: FIXTURE_OBSERVED_AT,
-    rankingEligible: false,
-    rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+    statusReason: "PROVIDER_OBSERVATION_STALE",
   };
 }
 

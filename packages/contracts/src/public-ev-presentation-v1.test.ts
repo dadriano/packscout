@@ -372,13 +372,12 @@ test("invalid clocks and impossible presentation combinations fail closed", () =
   );
 });
 
-test("provider health admits only the approved state and eligibility pairs", () => {
+test("provider health admits only the approved informational state and reason pairs", () => {
   assert.equal(
     publicProviderHealthV1Schema.safeParse({
       state: "healthy",
       observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-      rankingEligible: true,
-      rankingIneligibilityReason: null,
+      statusReason: null,
     }).success,
     true,
   );
@@ -386,8 +385,7 @@ test("provider health admits only the approved state and eligibility pairs", () 
     publicProviderHealthV1Schema.safeParse({
       state: "delayed",
       observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+      statusReason: "PROVIDER_OBSERVATION_STALE",
     }).success,
     true,
   );
@@ -395,8 +393,7 @@ test("provider health admits only the approved state and eligibility pairs", () 
     publicProviderHealthV1Schema.safeParse({
       state: "unavailable",
       observedAt: null,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_HEALTH_UNAVAILABLE",
+      statusReason: "PROVIDER_HEALTH_UNAVAILABLE",
     }).success,
     true,
   );
@@ -405,20 +402,17 @@ test("provider health admits only the approved state and eligibility pairs", () 
     {
       state: "healthy",
       observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-      rankingEligible: false,
-      rankingIneligibilityReason: null,
+      statusReason: "PROVIDER_OBSERVATION_STALE",
     },
     {
       state: "delayed",
       observedAt: null,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_BEHIND",
+      statusReason: "PROVIDER_BEHIND",
     },
     {
       state: "unavailable",
       observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_HEALTH_UNAVAILABLE",
+      statusReason: "PROVIDER_HEALTH_UNAVAILABLE",
     },
   ];
   for (const value of invalid) {

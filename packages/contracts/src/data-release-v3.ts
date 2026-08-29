@@ -187,13 +187,6 @@ function validateSelectedRepackV3(
   }
 }
 
-export const publicDashboardOpportunityEligibilityV1Schema = z
-  .object({
-    rankingEligibleRepackCount: z.number().int().safe().min(0),
-    providerIneligibleRepackCount: z.number().int().safe().min(0),
-  })
-  .strict();
-
 export const publicShellStatusV3Schema = z
   .object({
     release: dataReleaseV3IdentitySchema,
@@ -269,8 +262,8 @@ function validateResponsePresentationClockV3(
 /**
  * The dashboard opportunity projection. Opportunities carry the byte-
  * equivalent PackScout projection of their details, admit only purchasable
- * repacks with a current or last-known estimate from a ranking-eligible
- * provider, and rank by signed EV dollars.
+ * repacks with a current or last-known estimate, regardless of informational
+ * provider-feed status, and rank by signed EV dollars.
  */
 export const publicDashboardBundleV3Schema = z
   .object({
@@ -278,7 +271,6 @@ export const publicDashboardBundleV3Schema = z
     ...publicEvPresentationResponseContextV1Schema.shape,
     ...publicProviderHealthResponseContextV1Schema.shape,
     providerHealthSummary: publicProviderHealthSummaryV1Schema,
-    opportunityEligibility: publicDashboardOpportunityEligibilityV1Schema,
     opportunities: z.array(publicRepackViewSummaryV3Schema).max(6),
     details: z.array(publicRepackViewDetailV3Schema).max(6),
     selectedRepack: publicRepackViewDetailV3Schema.nullable(),
@@ -300,8 +292,7 @@ export const publicDashboardBundleV3Schema = z
       if (
         !packAvailabilityIsPurchasableV3(repack.availability) ||
         (repack.packScoutEvPresentation.status !== "current" &&
-          repack.packScoutEvPresentation.status !== "last_known") ||
-        !repack.providerHealth.rankingEligible
+          repack.packScoutEvPresentation.status !== "last_known")
       ) {
         context.addIssue({
           code: "custom",
@@ -329,16 +320,6 @@ export const publicDashboardBundleV3Schema = z
         });
       }
     });
-    if (
-      bundle.opportunityEligibility.rankingEligibleRepackCount <
-      bundle.opportunities.length
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["opportunityEligibility", "rankingEligibleRepackCount"],
-        message: "data_release_v3.opportunity_eligibility_count_invalid",
-      });
-    }
     if ((bundle.opportunities.length === 0) !== (bundle.selectedRepack === null)) {
       context.addIssue({
         code: "custom",
@@ -491,9 +472,6 @@ export const desiredCollectibleRepackResultsV3Schema = z
 
 export type PublicDashboardBundleV3 = z.infer<
   typeof publicDashboardBundleV3Schema
->;
-export type PublicDashboardOpportunityEligibilityV1 = z.infer<
-  typeof publicDashboardOpportunityEligibilityV1Schema
 >;
 export type PublicShellStatusV3 = z.infer<typeof publicShellStatusV3Schema>;
 export type PublicRepackListPageV3 = z.infer<

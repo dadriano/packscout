@@ -431,8 +431,7 @@ export function buildHealthyPublicProviderHealthV1(): PublicProviderHealthV1 {
   return {
     state: "healthy",
     observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-    rankingEligible: true,
-    rankingIneligibilityReason: null,
+    statusReason: null,
   };
 }
 
@@ -487,10 +486,6 @@ export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
     confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
-    opportunityEligibility: {
-      rankingEligibleRepackCount: 2,
-      providerIneligibleRepackCount: 0,
-    },
     opportunities: [
       publicRepackViewSummaryV3FromDetail(secondary),
       publicRepackViewSummaryV3FromDetail(primary),

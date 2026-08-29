@@ -420,14 +420,14 @@ export function RepackInspector({
             showProvenance={false}
             showRepackPrice={false}
           />
-          {!providerHealth.rankingEligible ? (
+          {providerHealth.state !== "healthy" ? (
             <div
               aria-label={providerHealth.accessibleLabel}
               className={styles.providerHealth}
               data-state={providerHealth.state}
             >
               <strong>{providerHealth.statusLabel}</strong>
-              <span>{providerHealth.rankingLabel}</span>
+              <span>{providerHealth.statusCopy}</span>
               {providerHealth.observedAt && providerHealth.observedLabel ? (
                 <time dateTime={providerHealth.observedAt}>
                   {providerHealth.observedLabel}
