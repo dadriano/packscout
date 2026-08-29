@@ -30,6 +30,22 @@ being integrated.
 This task proves ingestion, not publication. No Convex release, manifest
 activation, frontend cutover, or two-provider concurrency claim is made here.
 
+## Source Evidence Constraint
+
+The supplied capture contains 15 pulls and none includes a pack external ID.
+Twelve include one shared series ID, but that series is also attached to 14
+captured pack candidates, so it cannot identify a pack without fabrication.
+The active DataForrest observation mapper correctly preserves these as
+card-only pulls; the new provider canonical schema currently requires every
+pull to reference one pack.
+
+Until that design mismatch is resolved, the ClutchPacks integration must
+quarantine all 15 pulls as record-local evidence while continuing to commit the
+independent catalog and market-event records. It must not create a synthetic
+pack or choose one of the 14 candidates. The committed-pull acceptance
+criterion below remains open pending an explicit schema or source-evidence
+decision.
+
 ## Requirements
 
 ### ClutchPacks source integration
@@ -100,4 +116,3 @@ The UI remains unchanged from the authoritative admin baseline.
 - ClutchPacks is a first-provider milestone inside the approved two-provider
   proof, not a new provider-specific branch in generic orchestration.
 - Courtyard and concurrency remain Task 021; Convex publication remains paused.
-
