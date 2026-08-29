@@ -1,7 +1,7 @@
 # Task: Prove Two Provider Imports in Parallel
 
 **ID:** distributed-canonical-warehouse/021
-**Depends on:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008
+**Depends on:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008, distributed-canonical-warehouse/022
 **Blocks:** none at the current checkpoint
 **Estimated scope:** large
 **Estimated effort:** 4–7 days for one builder, including source adaptation, local provisioning, admin triggering, parallel-run proof, and verification
@@ -15,7 +15,7 @@ counts for each provider before connecting either source to the worker.
 
 ## Objective
 
-Trigger one ClutchPacks run and one Courtyard run from the existing admin UI,
+Trigger one ClutchPacks run and one Courtyard run from the authoritative current admin UI,
 ingest both through the source-neutral mixed-page boundary into separate
 provider databases, and prove that the runs execute concurrently without
 sharing leases, cursors, failures, or transactions.
@@ -75,7 +75,7 @@ is a production live-source transport.
 
 ## User-Facing Behavior
 
-The admin lists ClutchPacks and Courtyard as separate providers. An operator can
+The ported current admin lists ClutchPacks and Courtyard as separate providers. An operator can
 select Run now on each, open each provider-qualified run detail, and watch mixed
 catalog, pull, and market-event counters progress independently. A provider with
 no installed integration receives a clear unavailable error and no empty run.
@@ -112,4 +112,3 @@ no installed integration receives a clear unavailable error and no empty run.
   Courtyard at the captured-feed proof boundary.
 - No production live-source, Convex activation, migration, backfill, or legacy
   compatibility behavior is implied.
-

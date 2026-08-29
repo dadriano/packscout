@@ -2,15 +2,20 @@
 
 ## Start Here
 
-Open task `distributed-canonical-warehouse/001` and produce the database ownership matrix, naming rules, and cross-database boundary contract. The first checkpoint is a clean non-production topology with one `packscout` database and two independently reachable provider databases.
+Open task `distributed-canonical-warehouse/022` and port the authoritative
+port-5101 `apps/admin` baseline to the new central/provider ownership model.
+Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 11/21 tasks complete
+**Progress:** 11/22 tasks complete
 
 ## Current Build Checkpoint
 
-Finish the work already in progress, make the admin runnable on only the new
-central/provider topology, and complete Task 021's parallel ClutchPacks and
-Courtyard captured-feed import proof. Run now must return
+Finish the work already in progress, then complete Task 022 by porting the
+authoritative `apps/admin` baseline at commit `225f9a1` to only the new
+central/provider topology. The simplified admin shell currently present on this
+branch is not parity evidence. After the full route shell and supporting admin
+workflows are preserved, complete Task 021's parallel ClutchPacks and Courtyard
+captured-feed import proof. Run now must return
 `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without mutation for an uninstalled
 integration. After both installed providers can be triggered and ingest into
 separate databases concurrently, pause to realign priorities before starting
@@ -29,7 +34,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 - A clean environment can provision `packscout` plus at least two isolated provider databases and verify each schema independently.
 - Two providers can run concurrently, and an unreachable or failed provider cannot block the other provider's run, admin view, or publication.
-- The current admin routes and fixed roles work against the new central and provider-local ownership model without per-data-type stream controls.
+- The authoritative current admin route catalog and fixed roles work against the new central and provider-local ownership model without per-data-type stream controls.
 - Convex serves only immutable provider releases selected by one manifest with an independently gated version and catalog version for each provider.
 - The documented ERDs match the implemented ownership boundaries, and the repository verification gate passes without a bypass.
 
@@ -61,7 +66,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 ### Compatibility and safety
 
-- The current admin route set, fixed `admin | data_operator` roles, session security, provider lifecycle, run inspection, quarantine recovery, alerts, and Data Feed Lab remain behaviorally compatible.
+- The current port-5101 admin route set, fixed `admin | data_operator` roles, session security, provider/source configuration, run inspection, worker fleet, quarantine recovery, alerts, user/allowlist/message workflows, and canonical/published/compare inspection remain behaviorally compatible.
 - Admin control validates organization ownership centrally, resolves credentials server-side, and then connects directly to the selected provider database. Unreachable providers return explicit isolated failures.
 - Current public repack and collectible DTOs, search behavior, cursor safety, unavailable-value semantics, and saved public IDs remain stable across release activation.
 - Provider-local and central activity propagation is best effort; alert acknowledgement and resolution remain durable in `packscout`.
@@ -126,13 +131,19 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 019 | Publish the system overview and ERDs | medium | 2–3 days | not started | 006, 015, 016, 018 |
 | 020 | Certify the distributed warehouse | large | 5–8 days | not started | 008, 009, 010, 011, 016, 017, 018, 019 |
 
+### Authoritative admin compatibility
+
+| ID | Task | Scope | Estimate | Status | Depends on |
+|---|---|---|---|---|---|
+| 022 | Port the authoritative admin baseline | large | 8–12 days | in progress | 002, 003, 005, 007, 009, 010 |
+
 ### Provider integration checkpoint
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 021 | Prove two provider imports in parallel | large | 4–7 days | not started | 007, 008 |
+| 021 | Prove two provider imports in parallel | large | 4–7 days | not started | 007, 008, 022 |
 
-Total estimated builder effort is 69–108 days, including focused verification in every task. The dependency critical path is approximately 42–64 builder days; independent tasks reduce elapsed time when built in parallel.
+Total estimated builder effort is 77–120 days, including focused verification in every task. The dependency critical path is approximately 50–76 builder days; independent tasks reduce elapsed time when built in parallel.
 
 ## Build Order
 
@@ -140,7 +151,8 @@ Total estimated builder effort is 69–108 days, including focused verification 
 2. Complete task 003, then build provider runtime task 005 and shared catalog task 006 in parallel.
 3. Complete the mixed provider run in task 007 while tasks 010–012 use their satisfied boundaries; follow with admin run and recovery tasks 008–009.
 4. Assemble and publish provider releases through tasks 013–014, then join them with catalog publication task 012 at the per-provider manifest gate in task 015.
-5. Complete frontend, reconciliation, security, and documentation tasks 016–019, then run certification task 020.
+5. Port the authoritative admin baseline in task 022, then prove ClutchPacks and Courtyard imports through that UI in task 021.
+6. Complete frontend, reconciliation, security, and documentation tasks 016–019, then run certification task 020.
 
 ## Parallel Groups
 
@@ -173,7 +185,11 @@ Total estimated builder effort is 69–108 days, including focused verification 
 | L | 015 complete | 016, 017, 018 |
 | M | 016 and 018 complete | 019 |
 | N | 008–019 complete | 020 |
+| O | 002, 003, 005, 007, 009, and 010 complete | 022 |
+| P | 007, 008, and 022 complete | 021 |
 
 ## Next Action
 
-Open `001-establish-distributed-database-ownership.md` and list the current database bootstrap, routing, migration, and readiness entry points before changing any implementation.
+Open `022-port-authoritative-admin-baseline.md` and inventory every route,
+runtime, repository, and supporting table in the commit-`225f9a1` admin before
+changing the current UI or wiring either provider integration.
