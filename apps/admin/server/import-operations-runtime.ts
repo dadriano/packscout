@@ -15,6 +15,7 @@ import {
   createProviderObservationMapperRegistryFromManifest,
   providerSourceQuarantineSummary,
   type ProviderActorKeyer,
+  type ProviderSourceImportRunSummary,
   type ProviderSourceIntegrationCapabilityRegistry,
   type ProviderSourceManualImportDelegate,
 } from "@packscout/services";
@@ -194,8 +195,17 @@ function toRunDetail(
   };
 }
 
+interface AdminManualImportRequestDelegate {
+  requestManual(input: Parameters<
+    ImportOperationsRouterDependencies["manualImports"]["request"]
+  >[0]): Promise<Readonly<{
+    run: ProviderSourceImportRunSummary;
+    coalesced: boolean;
+  }>>;
+}
+
 function manualImportRoutes(
-  imports: ProviderSourceManualImportDelegate,
+  imports: AdminManualImportRequestDelegate,
 ): ImportOperationsRouterDependencies["manualImports"] {
   return {
     async request(request) {

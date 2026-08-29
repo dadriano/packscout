@@ -3,8 +3,8 @@ import type {
   ProviderMixedPageRecordKind,
 } from "@packscout/database";
 
-export const CLUTCHPACKS_CAPTURE_ADAPTER_KEY =
-  "local-capture-clutchpacks-v1" as const;
+export { CLUTCHPACKS_CAPTURE_ADAPTER_KEY } from "@packscout/services";
+
 export const CLUTCHPACKS_CAPTURE_FILE_NAME = "clutchpacks.json" as const;
 export const CLUTCHPACKS_CAPTURE_SHA256 =
   "6f7f76a26e21233e62f07e56b58b45ab9b17ce083e1db915704c5237d1b76fba" as const;

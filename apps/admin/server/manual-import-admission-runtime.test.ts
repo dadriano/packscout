@@ -25,7 +25,9 @@ function central(): CentralQueryClient {
           active_config_version: {
             id: revisionId,
             version_number: 1n,
-            adapter_key: "clutchpacks-capture-v1",
+            adapter_key: "local-capture-clutchpacks-v1",
+            configuration: { captureDirectory: "clutchpacks" },
+            schedule_seconds: 300,
             expires_at: null,
           },
         };

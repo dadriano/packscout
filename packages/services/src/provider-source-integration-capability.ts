@@ -1,6 +1,9 @@
 const sourceIntegrationKeyPattern =
   /^[a-z0-9](?:[a-z0-9_-]{0,126}[a-z0-9])?$/;
 
+export const CLUTCHPACKS_CAPTURE_ADAPTER_KEY =
+  "local-capture-clutchpacks-v1" as const;
+
 export interface ProviderSourceIntegrationCapability {
   readonly adapterKey: string;
   readonly sourceNeutralPageExecution: true;
@@ -39,4 +42,13 @@ export class ProviderSourceIntegrationCapabilityRegistry {
   keys(): readonly string[] {
     return Object.freeze([...this.#adapterKeys].sort());
   }
+}
+
+/** The intentionally narrow first-provider capability set. */
+export function createClutchpacksSourceIntegrationCapabilities():
+ProviderSourceIntegrationCapabilityRegistry {
+  return new ProviderSourceIntegrationCapabilityRegistry([{
+    adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+    sourceNeutralPageExecution: true,
+  }]);
 }

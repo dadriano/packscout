@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ProviderSourceIntegrationCapabilityRegistry } from
+import {
+  CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+  ProviderSourceIntegrationCapabilityRegistry,
+} from
   "./provider-source-integration-capability.ts";
 import { ProviderSourceImportAdmissionService } from
   "./provider-source-import-admission.ts";
@@ -22,7 +25,7 @@ const request = {
   expectedSourceRevisionId: configVersionId,
 };
 
-function ready(adapterKey = "clutchpacks-capture-v1") {
+function ready(adapterKey = CLUTCHPACKS_CAPTURE_ADAPTER_KEY) {
   return {
     kind: "ready" as const,
     providerId,
@@ -30,6 +33,9 @@ function ready(adapterKey = "clutchpacks-capture-v1") {
     adapterKey,
     configVersionId,
     configVersionNumber: 1n,
+    configuration: { captureDirectory: "clutchpacks" },
+    configExpiresAt: null,
+    scheduleSeconds: 300,
   };
 }
 
@@ -59,14 +65,25 @@ function service(input: Readonly<{
       input.installed === false
         ? []
         : [{
-            adapterKey: "clutchpacks-capture-v1",
+            adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
             sourceNeutralPageExecution: true,
           }],
     ),
     delegate: {
       async requestManual(received) {
         input.delegateCalls.count += 1;
-        assert.deepEqual(received, request);
+        assert.deepEqual(received, {
+          ...request,
+          authority: {
+            providerKey: "clutchpacks",
+            adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+            configVersionId,
+            configVersionNumber: 1n,
+            configuration: { captureDirectory: "clutchpacks" },
+            configExpiresAt: null,
+            scheduleSeconds: 300,
+          },
+        });
         return {
           run: {
             id: runId,

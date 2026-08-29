@@ -25,6 +25,9 @@ export type CentralProviderImportAdmission =
       adapterKey: string;
       configVersionId: string;
       configVersionNumber: bigint;
+      configuration: Readonly<Record<string, unknown>>;
+      configExpiresAt: Date | null;
+      scheduleSeconds: number;
     }>;
 
 const providerRootSelection =
@@ -48,6 +51,8 @@ const importAdmissionSelection =
         id: true,
         version_number: true,
         adapter_key: true,
+        configuration: true,
+        schedule_seconds: true,
         expires_at: true,
       },
     },
@@ -137,6 +142,13 @@ export class CentralAdminProviderRepository {
         activeConfigVersionId: configuration.id,
       };
     }
+    if (
+      configuration.configuration === null
+      || typeof configuration.configuration !== "object"
+      || Array.isArray(configuration.configuration)
+    ) {
+      return { kind: "source_unavailable" };
+    }
     return {
       kind: "ready",
       providerId: row.id,
@@ -144,6 +156,9 @@ export class CentralAdminProviderRepository {
       adapterKey: configuration.adapter_key,
       configVersionId: configuration.id,
       configVersionNumber: configuration.version_number,
+      configuration: configuration.configuration as Readonly<Record<string, unknown>>,
+      configExpiresAt: configuration.expires_at,
+      scheduleSeconds: configuration.schedule_seconds,
     };
   }
 }

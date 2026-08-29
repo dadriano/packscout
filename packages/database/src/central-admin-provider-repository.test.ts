@@ -38,7 +38,9 @@ function admissionRow(input: Readonly<{
       : {
           id: activeConfigVersionId,
           version_number: 1n,
-          adapter_key: "clutchpacks-capture-v1",
+          adapter_key: "local-capture-clutchpacks-v1",
+          configuration: { captureDirectory: "clutchpacks" },
+          schedule_seconds: 300,
           expires_at: input.expiresAt ?? null,
         },
   };
@@ -108,9 +110,12 @@ test("central import admission binds organization, provider, active config, and 
     kind: "ready",
     providerId,
     providerKey: "clutchpacks",
-    adapterKey: "clutchpacks-capture-v1",
+    adapterKey: "local-capture-clutchpacks-v1",
     configVersionId,
     configVersionNumber: 1n,
+    configuration: { captureDirectory: "clutchpacks" },
+    configExpiresAt: null,
+    scheduleSeconds: 300,
   });
 
   row = admissionRow({ lifecycle: "disabled" });

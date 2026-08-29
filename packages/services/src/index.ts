@@ -98,6 +98,7 @@ export * from "./provider-catalog-release-public-projection.ts";
 export * from "./provider-catalog-release-artifacts.ts";
 export * from "./provider-catalog-release-assembler.ts";
 export * from "./provider-credential-cipher.ts";
+export * from "./provider-database-credential-resolver.ts";
 export * from "./provider-endpoint-policy.ts";
 export * from "./provider-import-page-planner.ts";
 export * from "./provider-import-health-service.ts";

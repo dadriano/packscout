@@ -40,6 +40,7 @@ export interface ProviderSourceImportRunRequestRepository {
 }
 
 export type ProviderSourceImportRequestErrorCode =
+  | "PROVIDER_DATABASE_UNREACHABLE"
   | "PROVIDER_NOT_FOUND"
   | "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE"
   | "SOURCE_NOT_IMPORTABLE"
@@ -51,7 +52,9 @@ export class ProviderSourceImportRequestError extends Error {
     readonly status: number,
   ) {
     super(
-      code === "PROVIDER_NOT_FOUND"
+      code === "PROVIDER_DATABASE_UNREACHABLE"
+        ? "The provider database is temporarily unreachable."
+      : code === "PROVIDER_NOT_FOUND"
         ? "Provider not found."
         : code === "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE"
           ? "No source integration is installed for this provider."

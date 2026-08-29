@@ -29,6 +29,9 @@ export interface ProviderSourceImportAdmissionRepository {
         adapterKey: string;
         configVersionId: string;
         configVersionNumber: bigint;
+        configuration: Readonly<Record<string, unknown>>;
+        configExpiresAt: Date | null;
+        scheduleSeconds: number;
       }>
   >;
 }
@@ -38,6 +41,15 @@ export interface ProviderSourceManualImportDelegate {
     actor: ProviderActor;
     providerId: string;
     expectedSourceRevisionId: string;
+    authority: Readonly<{
+      providerKey: string;
+      adapterKey: string;
+      configVersionId: string;
+      configVersionNumber: bigint;
+      configuration: Readonly<Record<string, unknown>>;
+      configExpiresAt: Date | null;
+      scheduleSeconds: number;
+    }>;
   }>): Promise<Readonly<{
     run: ProviderSourceImportRunSummary;
     coalesced: boolean;
@@ -89,6 +101,17 @@ export class ProviderSourceImportAdmissionService {
         503,
       );
     }
-    return this.dependencies.delegate.requestManual(input);
+    return this.dependencies.delegate.requestManual({
+      ...input,
+      authority: {
+        providerKey: admission.providerKey,
+        adapterKey: admission.adapterKey,
+        configVersionId: admission.configVersionId,
+        configVersionNumber: admission.configVersionNumber,
+        configuration: admission.configuration,
+        configExpiresAt: admission.configExpiresAt,
+        scheduleSeconds: admission.scheduleSeconds,
+      },
+    });
   }
 }
