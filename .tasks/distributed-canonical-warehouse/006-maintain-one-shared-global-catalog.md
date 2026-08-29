@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/012, distributed-canonical-warehouse/013, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including deterministic correlation, alias safety, and replay verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -69,22 +69,30 @@ Global catalog consumers receive versioned category, collectible, correlation, a
 
 ### Identity acceptance
 
-- [ ] An unmatched collectible receives the same provisional global ID across retries and processing order changes.
-- [ ] A deterministic unique match links automatically, while an ambiguous match creates a suggestion and leaves identities separate.
-- [ ] Cross-provider, stale-version, conflicting, and type-incompatible evidence fails without corrupting an active correlation.
-- [ ] A merge creates an immutable alias, rejects cycles, and preserves both old and surviving public-ID lookups.
-- [ ] Exact instances and provider-protected data never appear in central global identity records.
+- [x] An unmatched collectible receives the same provisional global ID across retries and processing order changes.
+- [x] A deterministic unique match links automatically, while an ambiguous match creates a suggestion and leaves identities separate.
+- [x] Cross-provider, stale-version, conflicting, and type-incompatible evidence fails without corrupting an active correlation.
+- [x] A merge creates an immutable alias, rejects cycles, and preserves both old and surviving public-ID lookups.
+- [x] Exact instances and provider-protected data never appear in central global identity records.
 
 ### Reconciliation acceptance
 
-- [ ] Provider commits succeed during central outage and correlate after recovery from the last confirmed sequence.
-- [ ] Correlation replay has exactly-once effect and never advances its checkpoint past a failed record.
-- [ ] Catalog changes and their promotion-change records commit atomically.
-- [ ] Correlation and catalog-publisher checkpoints advance independently, and retention protects work pending for both consumers.
-- [ ] Property tests cover provisional stability, deterministic linking, ambiguous non-linking, alias resolution, and cycle rejection.
+- [x] Provider commits succeed during central outage and correlate after recovery from the last confirmed sequence.
+- [x] Correlation replay has exactly-once effect and never advances its checkpoint past a failed record.
+- [x] Catalog changes and their promotion-change records commit atomically.
+- [x] Correlation and catalog-publisher checkpoints advance independently, and retention protects work pending for both consumers.
+- [x] Property tests cover provisional stability, deterministic linking, ambiguous non-linking, alias resolution, and cycle rejection.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Global identities, temporal correlations, commit-ordered ledgers, aliases, and provider invalidations follow the contracted tables and sequence rules.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- A frozen UUIDv5 namespace and golden fixture make provisional public IDs stable across retries, ordering, and UUID case normalization.
+- Central repositories implement global category trees, provisional and canonical collectibles, temporal category and collectible correlations, bounded suggestions, permanent acyclic aliases, catalog decision events, promotion changes, and affected-provider invalidations.
+- The source-neutral correlator uses an independent fenced checkpoint contract, reads a repeatable provider snapshot, advances only after durable central decisions, classifies superseded local versions, and leaves the provider ledger pending when central processing fails.
+- The migrated central PostgreSQL suite proves all five canonical fixtures, temporal replacement, changed-digest replay conflict evidence, provisional refresh, missing-provisional rejection, alias reconciliation, cycle rollback, ledger/invalidation consistency, concurrent exact category replay, and two-provider isolation.
+- Contracts tests pass 58/58; Prisma schema tests pass 12/12; Prisma validation/generation, contracts/database lint and type checking, dependency and Prisma-boundary checks, the framework ratchet, and `git diff --check` pass.
