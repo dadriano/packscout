@@ -12,6 +12,7 @@ import {
   createProviderDatabaseLifecycle,
   initializeProviderDatabaseIdentity,
   PrismaAdminProviderRuntimeRepository,
+  PrismaProviderActivityOutboxRepository,
   PrismaProviderCommandRepository,
   PrismaProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
@@ -289,6 +290,40 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
       && entry.reason_code === "NORMALIZED_CANDIDATE_INVALID"
       && entry.field_path === "packKey"
     ), true);
+    const outbox = new PrismaProviderActivityOutboxRepository(harness.client);
+    const pendingActivity = await outbox.readPendingBatch({
+      providerId: harness.providerId,
+      limit: 100,
+    });
+    assert.equal(pendingActivity.health.providerId, harness.providerId);
+    const quarantineActivity = pendingActivity.events.filter(
+      ({ eventType }) => eventType === "provider.quarantine.opened",
+    );
+    assert.equal(quarantineActivity.length, 15);
+    assert.equal(quarantineActivity.every((event) =>
+      event.localRunId === firstRunId
+      && event.localQuarantineId !== null
+    ), true);
+    const terminalActivity = pendingActivity.events.find((event) =>
+      event.eventType === "provider.run.terminal"
+      && event.localRunId === firstRunId
+    );
+    assert.ok(terminalActivity);
+    assert.equal(await outbox.markDeliveryFailed({
+      eventId: terminalActivity.id,
+      eventDigest: terminalActivity.eventDigest,
+      attemptedAt: new Date(),
+      failureCode: "CENTRAL_ACTIVITY_UNAVAILABLE",
+    }), "recorded");
+    assert.equal(await outbox.markDelivered({
+      eventId: terminalActivity.id,
+      eventDigest: terminalActivity.eventDigest,
+      deliveredAt: new Date(),
+    }), "delivered");
+    assert.deepEqual(await harness.client.provider_activity_outbox.findUniqueOrThrow({
+      where: { id: terminalActivity.id },
+      select: { delivery_state: true, delivery_attempt_count: true },
+    }), { delivery_state: "delivered", delivery_attempt_count: 2 });
     const firstSequence = (await harness.client.promotion_ledger.findUniqueOrThrow({
       where: { singleton_key: true },
       select: { last_sequence: true },

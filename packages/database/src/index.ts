@@ -24,6 +24,7 @@ export * from "./central-email-message-outbox-repository.ts";
 export * from "./central-worker-presence-repository.ts";
 export * from "./central-activity-repository.ts";
 export * from "./provider-activity-contract.ts";
+export * from "./provider-activity-outbox-repository.ts";
 export * from "./provider-observation-repository.ts";
 export * from "./central-alert-email-read-repository.ts";
 export * from "./central-machinery-alert-read-repository.ts";
