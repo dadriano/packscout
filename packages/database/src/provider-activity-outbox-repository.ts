@@ -201,7 +201,18 @@ export class PrismaProviderActivityOutboxRepository {
         last_failure_code: null,
       },
     });
-    return updated.count === 1 ? "delivered" : "not_found";
+    if (updated.count === 1) return "delivered";
+    const raced = await this.database.provider_activity_outbox.findUnique({
+      where: { id: input.eventId },
+      select: { event_digest: true, delivery_state: true },
+    });
+    if (!raced) return "not_found";
+    if (raced.event_digest !== input.eventDigest) {
+      throw new Error("Provider activity immutable identity conflict.");
+    }
+    return raced.delivery_state === "delivered"
+      ? "already_delivered"
+      : "not_found";
   }
 
   async markDeliveryFailed(input: {

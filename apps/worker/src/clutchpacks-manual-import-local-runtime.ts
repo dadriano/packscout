@@ -115,6 +115,8 @@ export interface ClutchpacksManualImportLocalDependencies {
     actorHmacKey: Uint8Array;
     workerId: string;
   }>): Pick<ClutchpacksManualImportExecutor, "executeNext">;
+  relayProviderActivity?(): Promise<void>;
+  observeRelayFailure?(failureCode: "CENTRAL_ACTIVITY_UNAVAILABLE"): void;
 }
 
 /**
@@ -147,6 +149,7 @@ export async function runClutchpacksManualImportOnce(input: Readonly<{
       "CLUTCHPACKS_IMPORT_DATABASE_UNAVAILABLE",
     );
   }
+  let result: ClutchpacksManualImportExecutionResult;
   try {
     try {
       await lifecycle.start();
@@ -161,8 +164,20 @@ export async function runClutchpacksManualImportOnce(input: Readonly<{
       actorHmacKey: configuration.actorHmacKey,
       workerId: configuration.workerId,
     });
-    return executor.executeNext(input.signal);
+    result = await executor.executeNext(input.signal);
   } finally {
     await lifecycle.close();
   }
+  if (input.dependencies.relayProviderActivity) {
+    try {
+      await input.dependencies.relayProviderActivity();
+    } catch {
+      try {
+        input.dependencies.observeRelayFailure?.("CENTRAL_ACTIVITY_UNAVAILABLE");
+      } catch {
+        // Best-effort observer failures never change committed provider work.
+      }
+    }
+  }
+  return result;
 }

@@ -139,3 +139,67 @@ test("local composition always closes the provider database", async () => {
   }), /fixture execution failed/u);
   assert.deepEqual(events, ["database_started", "database_closed"]);
 });
+
+test("committed ClutchPacks work relays only after the provider closes", async () => {
+  const events: string[] = [];
+  const result = await runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as ProviderPrismaClient,
+          start: () => Promise.resolve(),
+          async close() { events.push("database_closed"); },
+        };
+      },
+      createExecutor() {
+        return {
+          async executeNext() {
+            events.push("provider_committed");
+            return { kind: "idle" as const };
+          },
+        };
+      },
+      async relayProviderActivity() { events.push("activity_relayed"); },
+    },
+  });
+
+  assert.equal(result.kind, "idle");
+  assert.deepEqual(events, [
+    "provider_committed",
+    "database_closed",
+    "activity_relayed",
+  ]);
+});
+
+test("central relay failure cannot fail committed ClutchPacks work", async () => {
+  const failures: string[] = [];
+  const result = await runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as ProviderPrismaClient,
+          start: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      },
+      createExecutor() {
+        return { executeNext: () => Promise.resolve({ kind: "idle" as const }) };
+      },
+      relayProviderActivity: () => Promise.reject(
+        new Error("postgresql://observer:secret@central/packscout"),
+      ),
+      observeRelayFailure(failureCode) {
+        failures.push(failureCode);
+        throw new Error("observer logger unavailable");
+      },
+    },
+  });
+
+  assert.equal(result.kind, "idle");
+  assert.deepEqual(failures, ["CENTRAL_ACTIVITY_UNAVAILABLE"]);
+  assert.doesNotMatch(JSON.stringify(failures), /secret|postgresql:\/\//iu);
+});

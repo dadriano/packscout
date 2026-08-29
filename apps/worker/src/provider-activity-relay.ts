@@ -4,14 +4,20 @@ import {
   type BoundedProviderDatabaseGateway,
   type CentralPrismaClient,
   type ProviderActivityBatch,
+  type ProviderActivityRelayCursor,
   type ProviderActivityEvent,
   type ProviderActivityRelayTarget,
+  type ProviderActivityRelayTargetPage,
   type ProviderLocalHealthObservation,
 } from "@packscout/database";
 
 export interface ProviderActivityRelayDirectory {
-  listRelayTargets(limit: number): Promise<readonly ProviderActivityRelayTarget[]>;
-  observeHealth(input: {
+  listRelayTargets(input: {
+    readonly limit: number;
+    readonly after: ProviderActivityRelayCursor | null;
+    readonly providerId?: string;
+  }): Promise<ProviderActivityRelayTargetPage>;
+  observeReachableHealth(input: {
     readonly organizationId: string;
     readonly providerId: string;
     readonly health: ProviderLocalHealthObservation;
@@ -123,7 +129,7 @@ implements ProviderActivityLocalStore {
   async read(
     input: ProviderActivityRelayTarget & { readonly limit: number },
   ): ReturnType<ProviderActivityLocalStore["read"]> {
-    const result = await this.gateway.runWithProviderDatabase(
+    const result = await this.gateway.runWithAdminProviderDatabase(
       { organizationId: input.organizationId, providerId: input.providerId },
       (database) => new PrismaProviderActivityOutboxRepository(database)
         .readPendingBatch({ providerId: input.providerId, limit: input.limit }),
@@ -143,7 +149,7 @@ implements ProviderActivityLocalStore {
     event: ProviderActivityEvent,
     deliveredAt: Date,
   ): Promise<void> {
-    const result = await this.gateway.runWithProviderDatabase(
+    const result = await this.gateway.runWithAdminProviderDatabase(
       { organizationId: target.organizationId, providerId: target.providerId },
       (database) => new PrismaProviderActivityOutboxRepository(database)
         .markDelivered({
@@ -163,7 +169,7 @@ implements ProviderActivityLocalStore {
     attemptedAt: Date,
     failureCode: string,
   ): Promise<void> {
-    const result = await this.gateway.runWithProviderDatabase(
+    const result = await this.gateway.runWithAdminProviderDatabase(
       { organizationId: target.organizationId, providerId: target.providerId },
       (database) => new PrismaProviderActivityOutboxRepository(database)
         .markDeliveryFailed({
@@ -188,6 +194,7 @@ export class ProviderActivityRelayCoordinator {
   readonly #clock: () => Date;
   readonly #observability: ProviderActivityRelayObservability;
   readonly #backoff = new Map<string, BackoffState>();
+  #cursor: ProviderActivityRelayCursor | null = null;
   #activeCycle: Promise<ProviderActivityRelayCycleResult> | null = null;
 
   constructor(private readonly dependencies: Readonly<{
@@ -200,6 +207,7 @@ export class ProviderActivityRelayCoordinator {
     maximumBackoffMilliseconds?: number;
     clock?: () => Date;
     observability?: ProviderActivityRelayObservability;
+    providerId?: string;
   }>) {
     this.#batchSize = boundedInteger(dependencies.batchSize, 25, 1, 100);
     this.#maximumProviders = boundedInteger(
@@ -240,11 +248,15 @@ export class ProviderActivityRelayCoordinator {
   }
 
   private async executeCycle(): Promise<ProviderActivityRelayCycleResult> {
-    let targets: readonly ProviderActivityRelayTarget[];
+    let page: ProviderActivityRelayTargetPage;
     try {
-      targets = await this.dependencies.directory.listRelayTargets(
-        this.#maximumProviders,
-      );
+      page = await this.dependencies.directory.listRelayTargets({
+        limit: this.#maximumProviders,
+        after: this.#cursor,
+        ...(this.dependencies.providerId === undefined
+          ? {}
+          : { providerId: this.dependencies.providerId }),
+      });
     } catch {
       return {
         providers: 0,
@@ -255,6 +267,8 @@ export class ProviderActivityRelayCoordinator {
         backpressured: 0,
       };
     }
+    this.#cursor = page.nextCursor;
+    const targets = page.targets;
     const now = this.#clock().getTime();
     const ready: ProviderActivityRelayTarget[] = [];
     let backpressured = 0;
@@ -319,15 +333,7 @@ export class ProviderActivityRelayCoordinator {
       return { ...empty, unreachable: 1 };
     }
     try {
-      await this.dependencies.directory.recordDirectProbe({
-        organizationId: target.organizationId,
-        providerId: target.providerId,
-        state: "reachable",
-        failureCode: null,
-        retryHint: null,
-        observedAt: read.batch.health.observedAt,
-      });
-      await this.dependencies.directory.observeHealth({
+      await this.dependencies.directory.observeReachableHealth({
         organizationId: target.organizationId,
         providerId: target.providerId,
         health: read.batch.health,
@@ -405,6 +411,7 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
   maximumBackoffMilliseconds?: number;
   clock?: () => Date;
   observability?: ProviderActivityRelayObservability;
+  providerId?: string;
 }>): ProviderActivityRelayCoordinator {
   return new ProviderActivityRelayCoordinator({
     directory: new CentralProviderObservationRepository(input.central),
@@ -426,5 +433,6 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
     ...(input.observability === undefined
       ? {}
       : { observability: input.observability }),
+    ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
   });
 }

@@ -5,6 +5,7 @@ import {
   assertProviderActivityEvent,
   providerActivityEventDigest,
   type ProviderActivityEvent,
+  type ProviderLocalHealthObservation,
 } from "./provider-activity-contract.ts";
 import { CentralProviderObservationRepository } from
   "./provider-observation-repository.ts";
@@ -125,5 +126,103 @@ describe("provider activity relay contract", () => {
       }),
       /unsafe value/,
     );
+  });
+
+  test("reachable probe preserves local health and emits recovery only once", async () => {
+    const health: ProviderLocalHealthObservation = {
+      providerId: clutchpacksId,
+      observedState: "idle",
+      freshnessState: "fresh",
+      qualityState: "healthy",
+      consecutiveFailures: 0,
+      openQuarantineCount: 0,
+      lastAttemptedAt: null,
+      lastHeadReachedAt: null,
+      recoveredAt: null,
+      lastRunnerHeartbeatAt: null,
+      latestFailureCode: null,
+      recoveryHint: "No recovery action required.",
+      publicationLag: 0n,
+      observedAt: new Date("2026-08-29T12:00:00.000Z"),
+    };
+    const states = ["unreachable", "idle"];
+    const probeTimes = [
+      new Date("2026-08-29T12:01:00.000Z"),
+      new Date("2026-08-29T12:02:00.000Z"),
+    ];
+    const rawValues: unknown[][] = [];
+    let recoveryEvents = 0;
+    let queryIndex = 0;
+    const transaction = {
+      providers: { findFirst: () => Promise.resolve({ id: clutchpacksId }) },
+      $queryRaw() {
+        const clockQuery = queryIndex % 2 === 0;
+        queryIndex += 1;
+        return Promise.resolve(clockQuery
+          ? [{ probed_at: probeTimes.shift() }]
+          : [{
+              observed_state: states.shift(),
+              last_direct_probe_at: null,
+            }]);
+      },
+      $executeRaw(query: { values?: unknown[] }) {
+        rawValues.push(query.values ?? []);
+        return Promise.resolve(1);
+      },
+      provider_activity_events: {
+        create() {
+          recoveryEvents += 1;
+          return Promise.resolve({});
+        },
+      },
+    };
+    const central = {
+      $transaction<T>(operation: (client: typeof transaction) => Promise<T>) {
+        return operation(transaction);
+      },
+    } as unknown as CentralPrismaClient;
+    const repository = new CentralProviderObservationRepository(central);
+
+    await repository.observeReachableHealth({
+      organizationId,
+      providerId: clutchpacksId,
+      health,
+    });
+    await repository.observeReachableHealth({
+      organizationId,
+      providerId: clutchpacksId,
+      health: { ...health, observedAt: new Date("2026-08-29T12:02:00.000Z") },
+    });
+
+    assert.equal(recoveryEvents, 1);
+    assert.ok(rawValues.flat().includes("idle"));
+    assert.ok(rawValues.flat().includes("fresh"));
+    assert.ok(rawValues.flat().includes("healthy"));
+  });
+
+  test("relay target pages expose a stable cursor for the next bounded cycle", async () => {
+    const queries: unknown[] = [];
+    const repository = new CentralProviderObservationRepository({
+      providers: {
+        findMany(query: unknown) {
+          queries.push(query);
+          return Promise.resolve([{
+            organization_id: organizationId,
+            id: clutchpacksId,
+            provider_key: "clutchpacks",
+          }]);
+        },
+      },
+    } as unknown as CentralPrismaClient);
+
+    const page = await repository.listRelayTargets({ limit: 1, after: null });
+    assert.deepEqual(page.nextCursor, {
+      organizationId,
+      providerKey: "clutchpacks",
+      providerId: clutchpacksId,
+    });
+    await repository.listRelayTargets({ limit: 1, after: page.nextCursor });
+    assert.match(JSON.stringify(queries[1]), /"gt":"clutchpacks"/u);
+    assert.match(JSON.stringify(queries[1]), new RegExp(clutchpacksId, "u"));
   });
 });

@@ -27,6 +27,17 @@ export interface ProviderActivityRelayTarget {
   readonly providerKey: string;
 }
 
+export interface ProviderActivityRelayCursor {
+  readonly organizationId: string;
+  readonly providerKey: string;
+  readonly providerId: string;
+}
+
+export interface ProviderActivityRelayTargetPage {
+  readonly targets: readonly ProviderActivityRelayTarget[];
+  readonly nextCursor: ProviderActivityRelayCursor | null;
+}
+
 export interface ProviderActivityObservationReceipt {
   readonly state: "accepted" | "deduplicated";
   readonly eventId: string;
@@ -192,6 +203,62 @@ function eventMatches(
       JSON.stringify(event.evidence);
 }
 
+async function appendDirectProbeEvent(
+  transaction: CentralQueryClient,
+  input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    state: "reachable" | "unreachable";
+    failureCode: string | null;
+    observedAt: Date;
+  }>,
+): Promise<void> {
+  const id = randomUUID();
+  const eventWithoutDigest = {
+    id,
+    eventType: input.state === "unreachable"
+      ? "provider.database.unreachable"
+      : "provider.database.recovered",
+    severity: input.state === "unreachable" ? "critical" : "info",
+    dedupeKey: "database-reachability",
+    recoveryKey: "database-reachability",
+    localRunId: null,
+    localQuarantineId: null,
+    title: input.state === "unreachable"
+      ? "Provider database is unreachable"
+      : "Provider database recovered",
+    summary: input.state === "unreachable"
+      ? "A bounded direct probe could not reach the provider database."
+      : "A bounded direct probe reached the provider database again.",
+    evidence: (input.failureCode === null
+      ? { state: input.state }
+      : { state: input.state, failureCode: input.failureCode }) as
+        Readonly<Record<string, ProviderActivityEvidenceValue>>,
+    eventAt: input.observedAt,
+  } as const;
+  await transaction.provider_activity_events.create({
+    data: {
+      id,
+      organization_id: input.organizationId,
+      provider_id: input.providerId,
+      origin: "central",
+      event_digest: providerActivityEventDigest(eventWithoutDigest),
+      event_type: eventWithoutDigest.eventType,
+      severity: eventWithoutDigest.severity,
+      dedupe_key: eventWithoutDigest.dedupeKey,
+      recovery_key: eventWithoutDigest.recoveryKey,
+      local_run_id: null,
+      local_quarantine_id: null,
+      title: eventWithoutDigest.title,
+      summary: eventWithoutDigest.summary,
+      evidence: eventWithoutDigest.evidence,
+      event_at: input.observedAt,
+      received_at: input.observedAt,
+      created_at: input.observedAt,
+    },
+  });
+}
+
 /**
  * Central observer repository used by the best-effort provider activity relay.
  * It never selects a provider database; provider-local identity is copied as a
@@ -201,13 +268,43 @@ export class CentralProviderObservationRepository {
   constructor(private readonly central: CentralPrismaClient) {}
 
   async listRelayTargets(
-    limit: number,
-  ): Promise<readonly ProviderActivityRelayTarget[]> {
+    input: Readonly<{
+      limit: number;
+      after: ProviderActivityRelayCursor | null;
+      providerId?: string;
+    }>,
+  ): Promise<ProviderActivityRelayTargetPage> {
+    const { limit, after, providerId } = input;
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
       throw new RangeError("Provider relay target limit is invalid.");
     }
+    if (after !== null) {
+      requireUuid(after.organizationId, "Relay cursor organization ID");
+      requireUuid(after.providerId, "Relay cursor provider ID");
+      if (!/^[a-z0-9][a-z0-9._-]{0,127}$/u.test(after.providerKey)) {
+        throw new TypeError("Relay cursor provider key is invalid.");
+      }
+    }
+    if (providerId !== undefined) requireUuid(providerId, "Provider ID");
     const rows = await this.central.providers.findMany({
-      where: { lifecycle: { in: ["active", "disabled"] } },
+      where: {
+        lifecycle: { in: ["active", "disabled"] },
+        ...(providerId === undefined ? {} : { id: providerId }),
+        ...(after === null ? {} : {
+          OR: [
+            { organization_id: { gt: after.organizationId } },
+            {
+              organization_id: after.organizationId,
+              provider_key: { gt: after.providerKey },
+            },
+            {
+              organization_id: after.organizationId,
+              provider_key: after.providerKey,
+              id: { gt: after.providerId },
+            },
+          ],
+        }),
+      },
       orderBy: [
         { organization_id: "asc" },
         { provider_key: "asc" },
@@ -216,11 +313,124 @@ export class CentralProviderObservationRepository {
       take: limit,
       select: { organization_id: true, id: true, provider_key: true },
     });
-    return rows.map((row) => ({
+    const targets = rows.map((row) => ({
       organizationId: row.organization_id,
       providerId: row.id,
       providerKey: row.provider_key,
     }));
+    const last = targets.at(-1);
+    return {
+      targets,
+      nextCursor: rows.length < limit || last === undefined
+        ? null
+        : {
+            organizationId: last.organizationId,
+            providerKey: last.providerKey,
+            providerId: last.providerId,
+          },
+    };
+  }
+
+  async observeReachableHealth(input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    health: ProviderLocalHealthObservation;
+  }>): Promise<void> {
+    requireUuid(input.organizationId, "Organization ID");
+    requireUuid(input.providerId, "Provider ID");
+    const health = assertProviderHealthObservation(input.health);
+    await this.central.$transaction(async (transaction) => {
+      await assertProviderOwnership(
+        transaction,
+        input.organizationId,
+        input.providerId,
+      );
+      const [clock] = await transaction.$queryRaw<readonly {
+        probed_at: Date;
+      }[]>(CentralPrisma.sql`select clock_timestamp() as probed_at`);
+      if (!clock || !validInstant(clock.probed_at)) {
+        throw new Error("Central observation clock is unavailable.");
+      }
+      const [current] = await transaction.$queryRaw<readonly {
+        observed_state: string;
+        last_direct_probe_at: Date | null;
+      }[]>(CentralPrisma.sql`
+        select observed_state, last_direct_probe_at
+        from provider_health
+        where provider_id = ${input.providerId}::uuid
+        for update
+      `);
+      const directProbeIsNewer =
+        current?.last_direct_probe_at === null
+        || current?.last_direct_probe_at === undefined
+        || clock.probed_at > current.last_direct_probe_at;
+      if (!directProbeIsNewer) {
+        await observeHealth(transaction, {
+          ...input,
+          health,
+          lastActivityEventId: null,
+          lastActivityAt: null,
+        });
+        return;
+      }
+      if (current?.observed_state === "unreachable") {
+        await transaction.$executeRaw(CentralPrisma.sql`
+          update provider_health
+          set observed_state = ${health.observedState},
+              freshness_state = ${health.freshnessState},
+              quality_state = ${health.qualityState},
+              consecutive_failures = ${health.consecutiveFailures},
+              open_quarantine_count = ${health.openQuarantineCount},
+              last_attempted_at = ${health.lastAttemptedAt},
+              last_head_reached_at = ${health.lastHeadReachedAt},
+              recovered_at = ${health.recoveredAt},
+              last_runner_heartbeat_at = ${health.lastRunnerHeartbeatAt},
+              latest_failure_code = ${health.latestFailureCode},
+              recovery_hint = ${health.recoveryHint},
+              publication_lag = ${health.publicationLag},
+              last_direct_probe_at = ${clock.probed_at},
+              observed_at = greatest(
+                provider_health.observed_at,
+                ${health.observedAt},
+                ${clock.probed_at}
+              ),
+              row_version = row_version + 1,
+              updated_at = greatest(
+                clock_timestamp(),
+                updated_at + interval '1 microsecond'
+              )
+          where provider_id = ${input.providerId}::uuid
+        `);
+        await appendDirectProbeEvent(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          state: "reachable",
+          failureCode: null,
+          observedAt: clock.probed_at,
+        });
+        return;
+      }
+      await observeHealth(transaction, {
+        ...input,
+        health,
+        lastActivityEventId: null,
+        lastActivityAt: null,
+      });
+      await transaction.$executeRaw(CentralPrisma.sql`
+        update provider_health
+        set last_direct_probe_at = ${clock.probed_at},
+            row_version = row_version + 1,
+            updated_at = greatest(
+              clock_timestamp(),
+              updated_at + interval '1 microsecond'
+            )
+        where provider_id = ${input.providerId}::uuid
+          and (
+            last_direct_probe_at is null
+            or ${clock.probed_at} > last_direct_probe_at
+          )
+      `);
+    }, CENTRAL_TRANSACTION_OPTIONS);
   }
 
   async observeHealth(input: Readonly<{
@@ -395,52 +605,7 @@ export class CentralProviderObservationRepository {
       `);
       if (current?.observed_state === input.state) return;
 
-      const id = randomUUID();
-      const eventWithoutDigest = {
-        id,
-        eventType: input.state === "unreachable"
-          ? "provider.database.unreachable"
-          : "provider.database.recovered",
-        severity: input.state === "unreachable" ? "critical" : "info",
-        dedupeKey: "database-reachability",
-        recoveryKey: "database-reachability",
-        localRunId: null,
-        localQuarantineId: null,
-        title: input.state === "unreachable"
-          ? "Provider database is unreachable"
-          : "Provider database recovered",
-        summary: input.state === "unreachable"
-          ? "A bounded direct probe could not reach the provider database."
-          : "A bounded direct probe reached the provider database again.",
-        evidence: (input.failureCode === null
-          ? { state: input.state }
-          : {
-              state: input.state,
-              failureCode: input.failureCode,
-            }) as Readonly<Record<string, ProviderActivityEvidenceValue>>,
-        eventAt: input.observedAt,
-      } as const;
-      await transaction.provider_activity_events.create({
-        data: {
-          id,
-          organization_id: input.organizationId,
-          provider_id: input.providerId,
-          origin: "central",
-          event_digest: providerActivityEventDigest(eventWithoutDigest),
-          event_type: eventWithoutDigest.eventType,
-          severity: eventWithoutDigest.severity,
-          dedupe_key: eventWithoutDigest.dedupeKey,
-          recovery_key: eventWithoutDigest.recoveryKey,
-          local_run_id: null,
-          local_quarantine_id: null,
-          title: eventWithoutDigest.title,
-          summary: eventWithoutDigest.summary,
-          evidence: eventWithoutDigest.evidence,
-          event_at: input.observedAt,
-          received_at: input.observedAt,
-          created_at: input.observedAt,
-        },
-      });
+      await appendDirectProbeEvent(transaction, input);
     }, CENTRAL_TRANSACTION_OPTIONS);
   }
 
