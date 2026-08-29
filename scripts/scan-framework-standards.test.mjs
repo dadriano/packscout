@@ -131,6 +131,26 @@ test("a newly oversized module fails a zero-debt baseline", (t) => {
   assert.match(result.output, /SOLID boundaries require modules/);
 });
 
+test("generated Prisma clients are outside authored-module standards", (t) => {
+  const root = createFixture(t, 20);
+  const generatedDirectory = path.join(
+    root,
+    "packages",
+    "database",
+    "prisma",
+    "generated",
+    "central",
+  );
+  mkdirSync(generatedDirectory, { recursive: true });
+  writeFileSync(
+    path.join(generatedDirectory, "index.d.ts"),
+    `${"export type Generated = string;\n".repeat(3000)}`,
+  );
+
+  const baseline = writeBaseline(root);
+  assert.equal(baseline.findingCount, 0);
+});
+
 test("a new uncovered API route fails a zero-debt baseline", (t) => {
   const root = createFixture(t, 20);
   writeBaseline(root);

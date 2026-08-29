@@ -61,7 +61,10 @@ function surfaceForFile(relativePath) {
   );
   return surface ? surface.name : relativePath.split("/")[0];
 }
-const shouldIgnoreDirectory = createDirectorySkipPredicate(["_generated"]);
+const shouldIgnoreDirectory = createDirectorySkipPredicate([
+  "_generated",
+  "generated",
+]);
 const sourceExtensions = new Set([
   ".ts",
   ".tsx",
@@ -93,7 +96,7 @@ function walk(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
+    if (entry.isDirectory() && !shouldIgnoreDirectory(entryPath)) {
       files.push(...walk(entryPath));
     } else if (
       entry.isFile() &&
