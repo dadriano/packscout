@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/018
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including state recovery, lease fencing, command audit, and retention behavior
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

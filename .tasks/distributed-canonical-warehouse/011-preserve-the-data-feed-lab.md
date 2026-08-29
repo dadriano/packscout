@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** small
 **Estimated effort:** 1–2 days for one builder, including safe proxy parity and failure-state verification
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

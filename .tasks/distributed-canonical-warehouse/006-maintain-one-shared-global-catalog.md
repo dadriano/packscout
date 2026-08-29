@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/012, distributed-canonical-warehouse/013, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including deterministic correlation, alias safety, and replay verification
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

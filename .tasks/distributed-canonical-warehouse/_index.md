@@ -79,17 +79,17 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 001 | Establish distributed database ownership | large | 4–6 days | in progress | none |
-| 002 | Preserve organization and admin access | large | 3–5 days | not started | 001 |
-| 003 | Register and route providers safely | large | 4–6 days | not started | 001, 002 |
-| 004 | Give each provider a canonical warehouse | large | 4–6 days | not started | 001 |
-| 005 | Keep provider execution state local | large | 4–6 days | not started | 003, 004 |
+| 001 | Establish distributed database ownership | large | 4–6 days | done | none |
+| 002 | Preserve organization and admin access | large | 3–5 days | done | 001 |
+| 003 | Register and route providers safely | large | 4–6 days | done | 001, 002 |
+| 004 | Give each provider a canonical warehouse | large | 4–6 days | done | 001 |
+| 005 | Keep provider execution state local | large | 4–6 days | in progress | 003, 004 |
 
 ### Catalog and provider operations
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 006 | Maintain one shared global catalog | large | 4–6 days | not started | 002, 003, 004 |
+| 006 | Maintain one shared global catalog | large | 4–6 days | in progress | 002, 003, 004 |
 | 007 | Complete one mixed-response provider run | large | 4–6 days | not started | 005 |
 | 008 | Operate provider runs from admin | large | 3–5 days | not started | 002, 003, 005, 007 |
 | 009 | Diagnose and recover provider work | large | 3–5 days | not started | 005, 007, 008 |
@@ -99,7 +99,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 011 | Preserve the Data Feed Lab | small | 1–2 days | not started | 002, 003 |
+| 011 | Preserve the Data Feed Lab | small | 1–2 days | in progress | 002, 003 |
 | 012 | Publish shared catalog versions safely | large | 3–5 days | not started | 006 |
 | 013 | Assemble immutable provider releases | large | 5–7 days | not started | 006, 007, 012 |
 | 014 | Publish provider releases safely | large | 4–6 days | not started | 013 |
