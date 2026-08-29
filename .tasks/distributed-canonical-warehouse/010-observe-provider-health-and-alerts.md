@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including activity relay, grouped alert lifecycle, partial outages, and admin parity
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -71,24 +71,32 @@ An alert projection contains organization and provider IDs, state, type, severit
 
 ### Observation acceptance
 
-- [ ] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
-- [ ] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
-- [ ] One unreachable provider leaves healthy provider history and alert operations usable.
-- [ ] Provider-local detail remains authoritative and returns an explicit unavailable result when unreachable.
-- [ ] Metrics cover reachability, heartbeats, activity lag, quarantine, publication lag, and alert age.
+- [x] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
+- [x] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
+- [x] One unreachable provider leaves healthy provider history and alert operations usable.
+- [x] Provider-local detail remains authoritative and returns an explicit unavailable result when unreachable.
+- [x] Metrics cover reachability, heartbeats, activity lag, quarantine, publication lag, and alert age.
 
 ### Alert acceptance
 
-- [ ] Matching events group into one alert with accurate occurrence counts and bounded history.
-- [ ] Acknowledge, resolve, and reopen preserve actor, time, history, role, Origin, CSRF, and audit behavior.
-- [ ] Alert state remains exactly `active | acknowledged | resolved`, and matching evidence reopens a resolved alert to `active`.
-- [ ] Missing or unreachable run and quarantine soft references do not corrupt the central alert.
-- [ ] Alert list, detail, navigation, confirmation, partial, and failure states remain accessible.
-- [ ] Every run or quarantine drill-down carries provider context and never scans provider databases.
-- [ ] No protected provider, credential, cursor, payload, actor, or database-error data appears centrally or in the browser.
+- [x] Matching events group into one alert with accurate occurrence counts and bounded history.
+- [x] Acknowledge, resolve, and reopen preserve actor, time, history, role, Origin, CSRF, and audit behavior.
+- [x] Alert state remains exactly `active | acknowledged | resolved`, and matching evidence reopens a resolved alert to `active`.
+- [x] Missing or unreachable run and quarantine soft references do not corrupt the central alert.
+- [x] Alert list, detail, navigation, confirmation, partial, and failure states remain accessible.
+- [x] Every run or quarantine drill-down carries provider context and never scans provider databases.
+- [x] No protected provider, credential, cursor, payload, actor, or database-error data appears centrally or in the browser.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Provider activity is relayed from the local outbox as best-effort observation; central alerts remain durable but non-authoritative.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- Provider-local transactions append safe, bounded activity through an outbox that preserves normal capacity with a singleton overflow coalescer; central outages leave delivery pending and never roll back the authoritative provider commit.
+- The relay replays events idempotently with bounded per-provider backoff, while independent provider cycles remain isolated and a successful direct probe is recorded before the next health projection.
+- Central observation keeps monotonic reachability and explicitly stale or missing health, groups bounded occurrence history, and preserves the exact `active | acknowledged | resolved` lifecycle with audited reopen and recovery transitions.
+- Admin routes and screens keep provider-qualified run and quarantine references, direct authoritative detail, explicit unreachable states, fixed-role authorization, Origin and CSRF checks, safe evidence, accessible status text, and durable alert actions.
+- The task branch passed `npm run verify:framework`; after integration with immutable release assembly, Prisma validation/generation plus 15 schema, 4 lifecycle, and 1 setup tests passed, all workspace typechecks passed, 13 focused activity/health/alert tests passed, and the full admin suite passed 139 tests.
