@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/013
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including page atomicity, replay, fencing, and fixture-driven verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -69,22 +69,30 @@ A committed page result contains page ID, record counts by kind and disposition,
 
 ### Page acceptance
 
-- [ ] One fixture page commits catalog, pull, and market-event outcomes under one run, page, cursor, and worker fence.
-- [ ] Valid records, quarantines, page counters, cursor advancement, and promotion changes commit atomically.
-- [ ] A page-level failure leaves canonical data, counters, change rows, quarantine, and cursor unchanged.
-- [ ] An identical replay has exactly-once effect, and a changed replay digest fails as an immutable conflict.
-- [ ] Unknown fields, cross-provider data, invalid versions, oversized input, and stale fences fail safely.
+- [x] One fixture page commits catalog, pull, and market-event outcomes under one run, page, cursor, and worker fence.
+- [x] Valid records, quarantines, page counters, cursor advancement, and promotion changes commit atomically.
+- [x] A page-level failure leaves canonical data, counters, change rows, quarantine, and cursor unchanged.
+- [x] An identical replay has exactly-once effect, and a changed replay digest fails as an immutable conflict.
+- [x] Unknown fields, cross-provider data, invalid versions, oversized input, and stale fences fail safely.
 
 ### Independence acceptance
 
-- [ ] One provider has at most one queued or running run and one durable cursor.
-- [ ] A duplicate manual request returns the active run instead of creating a second run.
-- [ ] Incomplete recovery creates a new run and preserves the original outcome.
-- [ ] Two provider fixtures progress concurrently with no shared cursor, lease, failure state, or transaction.
-- [ ] No provider adapter, mapper, raw staging store, or provider-specific generic branch is introduced.
+- [x] One provider has at most one queued or running run and one durable cursor.
+- [x] A duplicate manual request returns the active run instead of creating a second run.
+- [x] Incomplete recovery creates a new run and preserves the original outcome.
+- [x] Two provider fixtures progress concurrently with no shared cursor, lease, failure state, or transaction.
+- [x] No provider adapter, mapper, raw staging store, or provider-specific generic branch is introduced.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Catalog, pull, and market-event records share one page transaction, run, lease, and cursor.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- The provider-neutral `packscout.provider-mixed-page.v1` contract strictly validates canonical plain JSON, provider/run/config/fence identity, cursors, continuation, digest, record order, byte/count/depth limits, and recursively rejects protected secret or raw-payload fields.
+- One serializable provider transaction commits ordered canonical writes, immutable facts, record-local savepoint quarantines, page/run counters, the provider cursor, activity evidence, and promotion changes. Transaction or infrastructure failures roll the entire page back.
+- The production worker exposes one injected source-neutral page seam and keeps an underlying timed-out page operation in the provider single-flight slot until it truly settles. No provider adapter, raw staging store, or provider-name branch was added.
+- Real migrated PostgreSQL tests prove invalid-middle-valid savepoint recovery, forced SQLSTATE `40001` whole-page rollback, exact replay, changed-digest and cross-run page-ID conflicts, stale fences, recovery from the last committed cursor, and independent commits in two provider databases.
+- Database mixed-page tests pass 12/12; worker execution tests pass 13/13; Prisma schema tests pass 15/15; database/worker lint and type checking, both Prisma validations, framework ratchet, and diff checks pass.
