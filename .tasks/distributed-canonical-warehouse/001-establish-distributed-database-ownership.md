@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/002, distributed-canonical-warehouse/003, distributed-canonical-warehouse/004
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including clean provisioning, isolation tests, and readiness verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -71,7 +71,7 @@ Central callers supply a validated provider ID to the provider locator. The loca
 
 - [x] A malformed, unknown, or cross-organization provider key cannot select a database target.
 - [x] Making one provider database unreachable leaves central readiness and another provider's readiness successful.
-- [ ] A provider-scoped credential cannot access another provider or the central database.
+- [x] A provider-scoped credential cannot access another provider or the central database.
 - [x] Diagnostics contain stable sanitized failures and never reveal connection strings or credentials.
 - [x] Clean bootstrap and repeated readiness verification pass in local and CI environments.
 
@@ -96,6 +96,7 @@ Central callers supply a validated provider ID to the provider locator. The loca
   version from the authenticated organization/provider registry row; caller
   input cannot select a host, database, provider key, or credential.
 
-## Remediation In Progress
+## Remediation Evidence
 
-- Integration audit found that the guarded topology test proves distinct roles and revoked cross-database access, but the canonical provisioning workflow does not yet require or automate those grants. Completion is reopened until the documented/reusable provisioning path enforces the same physical isolation.
+- The canonical provisioning workflow now requires unique least-privilege database owners, revoked `PUBLIC CONNECT`, no PackScout role membership or foreign grants, and no shared-role fallback. A read-only verifier checks exact database names and exhaustively proves every supplied role can reach only its own central or provider target without logging connection details.
+- The full repository gate passed, a disposable live PostgreSQL topology passed the verifier for central, alpha, and beta, and the integrated isolation/freshness suites passed 29 focused tests without touching the existing review databases.

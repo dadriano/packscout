@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/014
 **Estimated scope:** large
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -77,7 +77,7 @@ The assembler consumes provider-local typed rows and promotion state plus a comp
 
 ### Public-boundary acceptance
 
-- [ ] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
+- [x] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
 - [x] Exact instances, accounts, pulls, events, credentials, raw evidence, runtime, quarantine, and audit data are absent from every artifact.
 - [x] Counts, hashes, ordering, category paths, references, money pairs, and public bounds reconcile before lifecycle becomes complete.
 - [x] One provider assembly failure leaves another provider and the prior complete release unaffected.
@@ -97,6 +97,7 @@ The assembler consumes provider-local typed rows and promotion state plus a comp
 - Stored assembled/complete artifacts are rehashed and exact-compared before resume; failed, blocked, corrupt, stale, or cross-provider state fails closed without moving a checkpoint or changing a prior complete release.
 - The task branch passed `npm run verify:framework`; integrated contract/database/services/Convex typechecks and 10 focused pin, projection, exact-token-currency, determinism, equivalence, isolation, and safe-diagnostic tests passed.
 
-## Remediation In Progress
+## Remediation Evidence
 
-- Integration audit found that release assembly derives `staleAt` from twice the schedule instead of the authoritative configuration `stale_after_seconds`. Completion is reopened until the central pin carries that threshold and release fixtures prove frontend and admin freshness semantics agree.
+- The central release pin now requires the active configuration and its validated `stale_after_seconds`; release assembly derives `staleAt` from the last successful observation plus that exact threshold through the same inclusive freshness helper used by admin and observed health.
+- Fixtures prove schedule and stale threshold can differ, threshold changes alter deterministic content/equivalence hashes and release identity, and an old release cannot be reused under changed public freshness semantics. The remediation branch and integrated focused typechecks/tests passed.
