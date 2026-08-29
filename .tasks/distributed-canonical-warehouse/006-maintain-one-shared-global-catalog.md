@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/012, distributed-canonical-warehouse/013, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including deterministic correlation, alias safety, and replay verification
-**Status:** done
+**Status:** in progress
 
 ## Start Here
 
@@ -96,3 +96,9 @@ Global catalog consumers receive versioned category, collectible, correlation, a
 - The source-neutral correlator uses an independent fenced checkpoint contract, reads a repeatable provider snapshot, advances only after durable central decisions, classifies superseded local versions, and leaves the provider ledger pending when central processing fails.
 - The migrated central PostgreSQL suite proves all five canonical fixtures, temporal replacement, changed-digest replay conflict evidence, provisional refresh, missing-provisional rejection, alias reconciliation, cycle rollback, ledger/invalidation consistency, concurrent exact category replay, and two-provider isolation.
 - Contracts tests pass 58/58; Prisma schema tests pass 12/12; Prisma validation/generation, contracts/database lint and type checking, dependency and Prisma-boundary checks, the framework ratchet, and `git diff --check` pass.
+
+### Reopened audit findings
+
+- Production composition, a real provider-checkpoint adapter, and a central-plus-provider execution test are still required before asynchronous correlation can be considered reachable.
+- Ambiguous evidence after an existing deterministic correlation must preserve that correlation and record bounded suggestions instead of rejecting and stalling the checkpoint.
+- Provider retirement changes must close the active temporal correlation and emit the corresponding durable catalog decision/promotion before the provider checkpoint advances.
