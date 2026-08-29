@@ -131,7 +131,9 @@ export async function assertFixedPg16Binaries(): Promise<void> {
   });
   if (
     version.error || version.status !== 0 ||
-    !/^initdb \(PostgreSQL\) 16\.[0-9]+\s*$/u.test(version.stdout)
+    !/^initdb \(PostgreSQL\) 16\.[0-9]+(?: \(Homebrew\))?\s*$/u.test(
+      version.stdout,
+    )
   ) {
     refuse("POSTGRES_16_BINARY_UNAVAILABLE");
   }
