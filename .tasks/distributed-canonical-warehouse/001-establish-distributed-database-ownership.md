@@ -69,14 +69,33 @@ Central callers supply a validated provider ID to the provider locator. The loca
 
 ### Isolation acceptance
 
-- [ ] A malformed, unknown, or cross-organization provider key cannot select a database target.
-- [ ] Making one provider database unreachable leaves central readiness and another provider's readiness successful.
+- [x] A malformed, unknown, or cross-organization provider key cannot select a database target.
+- [x] Making one provider database unreachable leaves central readiness and another provider's readiness successful.
 - [ ] A provider-scoped credential cannot access another provider or the central database.
-- [ ] Diagnostics contain stable sanitized failures and never reveal connection strings or credentials.
-- [ ] Clean bootstrap and repeated readiness verification pass in local and CI environments.
+- [x] Diagnostics contain stable sanitized failures and never reveal connection strings or credentials.
+- [x] Clean bootstrap and repeated readiness verification pass in local and CI environments.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - The approved central-outage policy is used: an already-running process may use unexpired configuration and credentials already in memory, while a restarted process waits for central credential access.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- Central and provider Prisma schemas validate independently and the static
+  contract suite freezes their exact role inventories and soft-reference
+  boundaries.
+- Live PostgreSQL 16 migration/invariant tests pass for both roles, including
+  promotion coupling, immutable history, receipt gates, monotonic checkpoints,
+  and stale lease fences.
+- The guarded exact-topology test provisioned `packscout`, `packscout_alpha`,
+  and `packscout_beta`, verified role-scoped credentials and isolated readiness,
+  repeated migrations, and removed only its own targets.
+- Provider lookup derives the key, database name, topology, node, and credential
+  version from the authenticated organization/provider registry row; caller
+  input cannot select a host, database, provider key, or credential.
+
+## Remediation In Progress
+
+- Integration audit found that the guarded topology test proves distinct roles and revoked cross-database access, but the canonical provisioning workflow does not yet require or automate those grants. Completion is reopened until the documented/reusable provisioning path enforces the same physical isolation.

@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/014
 **Estimated scope:** large
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
-**Status:** done
+**Status:** in progress
 
 ## Start Here
 
@@ -77,7 +77,7 @@ The assembler consumes provider-local typed rows and promotion state plus a comp
 
 ### Public-boundary acceptance
 
-- [x] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
+- [ ] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
 - [x] Exact instances, accounts, pulls, events, credentials, raw evidence, runtime, quarantine, and audit data are absent from every artifact.
 - [x] Counts, hashes, ordering, category paths, references, money pairs, and public bounds reconcile before lifecycle becomes complete.
 - [x] One provider assembly failure leaves another provider and the prior complete release unaffected.
@@ -96,3 +96,7 @@ The assembler consumes provider-local typed rows and promotion state plus a comp
 - Public-equivalence fingerprints reuse a prior complete immutable release only when all published bytes and pinned public inputs match; the returned selected sequence remains distinct so later receipt-gated publication can advance the provider checkpoint safely.
 - Stored assembled/complete artifacts are rehashed and exact-compared before resume; failed, blocked, corrupt, stale, or cross-provider state fails closed without moving a checkpoint or changing a prior complete release.
 - The task branch passed `npm run verify:framework`; integrated contract/database/services/Convex typechecks and 10 focused pin, projection, exact-token-currency, determinism, equivalence, isolation, and safe-diagnostic tests passed.
+
+## Remediation In Progress
+
+- Integration audit found that release assembly derives `staleAt` from twice the schedule instead of the authoritative configuration `stale_after_seconds`. Completion is reopened until the central pin carries that threshold and release fixtures prove frontend and admin freshness semantics agree.
