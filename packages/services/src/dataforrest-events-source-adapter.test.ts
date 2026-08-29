@@ -184,6 +184,7 @@ async function connectionOperation(
 async function sourceOperation(
   testRuntime: TestRuntime,
   provider: LaunchProviderKey,
+  sourceBounds: ProviderSourceRequestBounds = bounds,
 ): Promise<SourceTestOperation> {
   const requestIdentity = nextRequestIdentity(`source-${provider}`);
   const pins: SourceTestRequestPins = {
@@ -216,7 +217,7 @@ async function sourceOperation(
     connectionConfiguration,
     sourceConfiguration: { platform: provider },
     requestLease,
-    bounds,
+    bounds: sourceBounds,
     correlation: {
       singletonFencingEpoch: commonPins.singletonFencingEpoch,
       connectionHealthGeneration: commonPins.connectionHealthGeneration,
@@ -580,6 +581,9 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
     "cursor",
   ]);
   assert.equal(requests[3]!.url.searchParams.get("cursor"), opaqueCursor);
+  assert.equal(requests[1]!.url.searchParams.get("limit"), "250");
+  assert.equal(requests[2]!.url.searchParams.get("limit"), "250");
+  assert.equal(requests[3]!.url.searchParams.get("limit"), "250");
   for (const { init } of requests) {
     assert.equal(init.method, "GET");
     assert.equal(init.redirect, "manual");
@@ -622,6 +626,110 @@ test("a legacy adapter instance refuses the current v3 interpretation pin", asyn
     assert.equal(interpreted.diagnostics[0]?.code, "adapter_pin_mismatch");
   }
   operation.requestLease.close();
+});
+
+test("source tests and page reads send the exact pinned request size", async () => {
+  const requests: URL[] = [];
+  const adapter = adapterWithClient(async (url) => {
+    requests.push(new URL(url));
+    return jsonResponse(dataforestEventsV1EvidenceFixture.courtyard.initial);
+  });
+  const testRuntime = runtime();
+
+  const connection = await connectionOperation(testRuntime);
+  await successfulCapture(adapter, connection);
+  connection.requestLease.close();
+
+  for (const pageLimit of [1, 500, 5_000]) {
+    const source = await sourceOperation(testRuntime, "courtyard", {
+      ...bounds,
+      pageLimit,
+    });
+    await successfulCapture(adapter, source);
+    source.requestLease.close();
+
+    const page = await pageOperation(testRuntime, "courtyard", null, {
+      ...bounds,
+      pageLimit,
+    });
+    await successfulCapture(adapter, page);
+    page.requestLease.close();
+  }
+
+  assert.equal(requests[0]!.searchParams.get("limit"), "250");
+  assert.deepEqual(
+    requests.slice(1).map((url) => url.searchParams.get("limit")),
+    ["1", "1", "500", "500", "5000", "5000"],
+  );
+});
+
+test("fewer and exact records are valid while a response over the pin is fatal", async () => {
+  const initial = dataforestEventsV1EvidenceFixture.courtyard.initial;
+  const responses = [
+    { ...initial, records: initial.records.slice(0, 1) },
+    { ...initial, records: initial.records.slice(0, 2) },
+    { ...initial, records: initial.records.slice(0, 3) },
+    { ...initial, records: initial.records.slice(0, 3) },
+  ];
+  const adapter = adapterWithClient(async () => jsonResponse(responses.shift()!));
+  const testRuntime = runtime();
+  const pinnedBounds = { ...bounds, pageLimit: 2 };
+
+  for (const expectedRecords of [1, 2]) {
+    const operation = await pageOperation(
+      testRuntime,
+      "courtyard",
+      null,
+      pinnedBounds,
+    );
+    const completed = await completedPage(adapter, operation);
+    assert.equal(completed.ok, true);
+    if (completed.ok) {
+      assert.equal(completed.measurements.recordCount, expectedRecords);
+    }
+    operation.requestLease.close();
+  }
+
+  const overPage = await pageOperation(
+    testRuntime,
+    "courtyard",
+    null,
+    pinnedBounds,
+  );
+  const overPageCapture = await successfulCapture(adapter, overPage);
+  const overPageResult = await interpretSourceAdapterPage(
+    adapter,
+    overPage,
+    overPageCapture,
+  );
+  assert.equal(overPageResult.ok, false);
+  if (!overPageResult.ok) {
+    assert.deepEqual(overPageResult.failure, {
+      disposition: "source_action_required",
+      code: "invalid_response",
+    });
+  }
+  overPage.requestLease.close();
+
+  const overSourceTest = await sourceOperation(
+    testRuntime,
+    "courtyard",
+    pinnedBounds,
+  );
+  const sourceCapture = await successfulCapture(adapter, overSourceTest);
+  const sourceResult = await interpretSourceAdapterSourceTest(
+    adapter,
+    overSourceTest,
+    sourceCapture,
+  );
+  assert.equal(sourceResult.ok, false);
+  if (!sourceResult.ok) {
+    assert.deepEqual(sourceResult.failure, {
+      disposition: "source_action_required",
+      code: "invalid_response",
+    });
+  }
+  overSourceTest.requestLease.close();
 });
 
 test("all four filters normalize initial, continuation, replay, empty, and poll-after pages independently", async () => {

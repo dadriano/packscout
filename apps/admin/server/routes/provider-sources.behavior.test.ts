@@ -124,6 +124,7 @@ function dependencies() {
     requestTest: sourceMethod("sourceTest"),
     activatePaused: sourceMethod("activateSource"),
     reviseInterval: sourceMethod("reviseInterval"),
+    reviseRecordsPerRequest: sourceMethod("reviseRecordsPerRequest"),
     pause: sourceMethod("pause"),
     resume: sourceMethod("resume"),
     disable: sourceMethod("disable"),
@@ -373,22 +374,31 @@ test("data operators can pause and resume but cannot revise source configuration
       });
       assert.equal(response.status, 200, action);
     }
-    const forbidden = await fetch(`${source}/interval`, {
-      method: "POST",
-      headers: headers("operator-session"),
-      body: JSON.stringify({
-        expectedSourceRevisionId: revisionId,
-        expectedScheduleRevisionId: revisionId,
-        intervalSeconds: 180,
-      }),
-    });
-    assert.equal(forbidden.status, 403);
+    for (const [action, setting] of [
+      ["interval", { intervalSeconds: 180 }],
+      ["records-per-request", { recordsPerRequest: 1_000 }],
+    ] as const) {
+      const forbidden = await fetch(`${source}/${action}`, {
+        method: "POST",
+        headers: headers("operator-session"),
+        body: JSON.stringify({
+          expectedSourceRevisionId: revisionId,
+          expectedScheduleRevisionId: revisionId,
+          ...setting,
+        }),
+      });
+      assert.equal(forbidden.status, 403, action);
+    }
     assert.deepEqual(
       fixture.calls.filter(({ name }) => ["pause", "resume"].includes(name))
         .map(({ name }) => name),
       ["pause", "resume"],
     );
     assert.equal(fixture.calls.some(({ name }) => name === "reviseInterval"), false);
+    assert.equal(
+      fixture.calls.some(({ name }) => name === "reviseRecordsPerRequest"),
+      false,
+    );
   } finally {
     await server.close();
   }
@@ -438,6 +448,11 @@ test("every action body is strictly validated at the HTTP boundary before a serv
       expectedScheduleRevisionId: revisionId,
       intervalSeconds: 60,
     }],
+    [`${source}/records-per-request`, {
+      expectedSourceRevisionId: revisionId,
+      expectedScheduleRevisionId: revisionId,
+      recordsPerRequest: 500,
+    }],
     [`${source}/pause`, { expectedSourceRevisionId: revisionId }],
     [`${source}/resume`, { expectedSourceRevisionId: revisionId }],
     [`${source}/disable`, { expectedSourceRevisionId: revisionId }],
@@ -467,6 +482,56 @@ test("every action body is strictly validated at the HTTP boundary before a serv
       }
     }
     assert.equal(fixture.failureAudits.length, 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("records-per-request rejects invalid values and delegates one valid admin revision", async () => {
+  const fixture = dependencies();
+  const server = await start(app(fixture.dependencies));
+  const path = `${server.url}/providers/${providerId}/sources/${sourceId}/records-per-request`;
+  const base = {
+    expectedSourceRevisionId: revisionId,
+    expectedScheduleRevisionId: revisionId,
+  };
+  try {
+    for (const recordsPerRequest of [
+      0,
+      1.5,
+      5_001,
+      "not-a-number",
+      "1000",
+      true,
+    ]) {
+      const before = fixture.calls.length;
+      const response = await fetch(path, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ ...base, recordsPerRequest }),
+      });
+      assert.equal(response.status, 422, String(recordsPerRequest));
+      assert.equal(fixture.calls.length, before, String(recordsPerRequest));
+      assert.equal(
+        (await response.json() as { code: string }).code,
+        "INVALID_SOURCE_CONFIGURATION",
+      );
+    }
+
+    const valid = await fetch(path, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ ...base, recordsPerRequest: 5_000 }),
+    });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(fixture.calls.at(-1), {
+      name: "reviseRecordsPerRequest",
+      context: {
+        organizationId,
+        actorKey: `actor:v1:${organizationId}:${admin.operatorId}`,
+      },
+      body: { ...base, recordsPerRequest: 5_000 },
+    });
   } finally {
     await server.close();
   }

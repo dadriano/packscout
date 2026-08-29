@@ -2,11 +2,15 @@ import { isDeepStrictEqual } from "node:util";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { parse as parsePath } from "node:path";
-import { providerSourceLaunchBounds } from "@packscout/contracts";
+import {
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
+} from "@packscout/contracts";
 import type { PackscoutPrismaClient, ProviderSourceSupervisorClaimedWork } from
   "@packscout/database";
 import {
   buildProviderSourceCapacityForecast,
+  providerSourceCapacityModelMatchesLaunchBounds,
   PROVIDER_SOURCE_CAPACITY_FORECAST_VERSION,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
@@ -66,8 +70,7 @@ export function parseProviderSourceCapacityArtifact(
   }
   if (
     forecast.version !== PROVIDER_SOURCE_CAPACITY_FORECAST_VERSION ||
-    forecastInput.pageRecordLimit !==
-      providerSourceLaunchBounds.pageTargetRecords ||
+    !providerSourceCapacityModelMatchesLaunchBounds(forecastInput) ||
     !isDeepStrictEqual(forecast, record.forecast)
   ) {
     throw new ProviderSourceCapacityAdmissionConfigurationError(
@@ -107,12 +110,17 @@ export function providerSourceMaximumPageCommitBytes(
   artifact: CapacityArtifact,
 ): number {
   const model = artifact.forecastInput;
+  const maximumPageRecords = Math.max(
+    model.pageRecordLimit,
+    model.incrementalRecordsPerPollAttempt,
+    providerSourceRecordsPerRequest.maximum,
+  );
   const perRecord = model.measuredStructuredPhysicalBytesPerRecord +
     model.measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord +
     model.measuredQuarantinePhysicalBytes;
   const protectedNativeEvidenceBytes = Math.max(
     providerSourceLaunchBounds.maximumResponseBytes,
-    model.pageRecordLimit * Math.max(
+    maximumPageRecords * Math.max(
       model.measuredAverageRawRecordBytes,
       model.measuredQuarantineEvidencePhysicalBytes,
     ),
@@ -122,7 +130,7 @@ export function providerSourceMaximumPageCommitBytes(
   // native evidence can coexist until retention, so reserve both independently.
   const total = providerSourceLaunchBounds.maximumResponseBytes +
     protectedNativeEvidenceBytes +
-    model.pageRecordLimit * perRecord +
+    maximumPageRecords * perRecord +
     model.measuredImportPagePhysicalBytes +
     model.measuredDiagnosticPhysicalBytesPerPage +
     model.measuredTerminalAttemptPhysicalBytes +

@@ -9,6 +9,7 @@ export const TASK010_SAFETY_VERSION =
 export const TASK010_LOCAL_ACKNOWLEDGEMENT =
   "I_UNDERSTAND_THIS_TARGET_IS_LOCAL_AND_EMPTY";
 export const TASK010_SOURCE_EXECUTION_SLOTS = "4";
+export const TASK010_BACKFILL_RECORDS_PER_REQUEST = 500;
 export const TASK010_BOOTSTRAP_ACTION = "provider_source.task010.bootstrap";
 export const TASK010_PAGE_RECORD_COUNT_SQL = `
   coalesce((record_counts_json->>'catalog')::bigint, 0) +
@@ -453,9 +454,9 @@ export function sanitizedTask010WorkerEnvironment(environment) {
   );
   // The sole production v1 admits the evidenced 8 MiB response boundary. The
   // dedicated Task 010 runner owns exactly four source lanes beneath one
-  // singleton supervisor. Each platform has its own two-permit request lane;
-  // this runner cannot inherit a different slot value from the private file or
-  // ambient process.
+  // singleton supervisor. Each platform has an independent one-request lane
+  // beneath the provider-configured maximum of two; this runner cannot inherit
+  // a different slot value from the private file or ambient process.
   sanitized.PACKSCOUT_SOURCE_EXECUTION_SLOTS =
     TASK010_SOURCE_EXECUTION_SLOTS;
   return Object.freeze(sanitized);
@@ -497,7 +498,8 @@ export function assertTask010BackfillTopologySnapshot(snapshot) {
       (source) =>
         !["paused", "active"].includes(source.state) ||
         source.activeRevisionId === null ||
-        source.connectionProfileMatches !== true,
+        source.connectionProfileMatches !== true ||
+        source.recordsPerRequest !== TASK010_BACKFILL_RECORDS_PER_REQUEST,
     )
   ) {
     throw new Task010SafetyError("BACKFILL_TOPOLOGY_NOT_READY");

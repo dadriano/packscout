@@ -37,6 +37,7 @@ export interface ProviderSourceOperationsRunRecord {
   readonly lastProgressAt: Date;
   readonly reachedHead: boolean;
   readonly failureCode: string | null;
+  readonly recordsPerRequest: number;
   readonly counters: ProviderSourceOperationsCountersRecord;
 }
 
@@ -127,7 +128,7 @@ type RunRow = Awaited<ReturnType<
 >>;
 
 function runRecord(row: NonNullable<RunRow>): ProviderSourceOperationsRunRecord {
-  if (row.source_instance_id === null) {
+  if (row.source_instance_id === null || row.records_per_request === null) {
     throw new TypeError("Source operation run is missing source ownership.");
   }
   return {
@@ -146,6 +147,7 @@ function runRecord(row: NonNullable<RunRow>): ProviderSourceOperationsRunRecord 
     ]),
     reachedHead: row.reached_provider_head,
     failureCode: row.failure_code,
+    recordsPerRequest: row.records_per_request,
     counters: counters(row.counters_json),
   };
 }

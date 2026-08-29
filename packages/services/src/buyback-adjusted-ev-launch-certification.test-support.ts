@@ -314,6 +314,7 @@ export async function seedBuybackEvCertificationCatalog(
         mapper_key: mapperKey,
         mapper_version: mapperVersion,
         identity_namespace_key: `dataforrest-${fixture.providerKey}-v1`,
+        records_per_request: 500,
         connection_profile_id: connection.profileId,
         connection_revision_id: connection.revisionId,
         cursor_codec_version: cursorCodecVersion,

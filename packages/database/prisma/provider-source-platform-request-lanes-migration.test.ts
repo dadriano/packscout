@@ -196,6 +196,7 @@ async function seedUpgradeFixture(
       requested_cursor: null,
       requested_cursor_fingerprint: null,
       requested_cursor_key: "initial",
+      records_per_request: 500,
       current_cursor: null,
       current_cursor_fingerprint: null,
       current_cursor_key: "initial",

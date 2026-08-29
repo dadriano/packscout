@@ -7,11 +7,14 @@ import { fileURLToPath } from "node:url";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
 } from "@packscout/contracts";
 import {
   ProviderSourceCapacityInputError,
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
+  providerSourceCapacityModelMatchesLaunchBounds,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
   type ProviderSourceCapacityPreflightDecision,
@@ -44,6 +47,10 @@ interface MemoryMeasurement {
 
 interface CapacityArtifact {
   readonly storageMeasurement: Readonly<{
+    environment: Readonly<{
+      postgresVersionMajor: number;
+      schemaMigration: string;
+    }>;
     sample: Readonly<{ inputRecords: number }>;
     allocationPageBytes: number;
     structuredPhysicalBytesPerRecord: number;
@@ -132,6 +139,10 @@ test("capacity artifact is derived from measured relations and exact retention v
     artifact.storageMeasurement.relations.some((measured) =>
       measured.relation === relation)));
   assert.equal(
+    artifact.storageMeasurement.environment.schemaMigration,
+    "20260827010000_provider_source_platform_request_lanes",
+  );
+  assert.equal(
     artifact.forecastInput.measuredStructuredPhysicalBytesPerRecord,
     artifact.storageMeasurement.structuredPhysicalBytesPerRecord,
   );
@@ -209,18 +220,29 @@ test("capacity artifact is derived from measured relations and exact retention v
     artifact.forecast,
   );
   assert.equal(
-    artifact.forecastInput.incrementalRecordsPerPollAttempt,
     artifact.forecastInput.pageRecordLimit,
+    providerSourceLaunchBounds.pageTargetRecords,
+  );
+  assert.equal(
+    artifact.forecastInput.incrementalRecordsPerPollAttempt,
+    providerSourceRecordsPerRequest.maximum,
+  );
+  assert.equal(
+    providerSourceCapacityModelMatchesLaunchBounds(artifact.forecastInput),
+    true,
   );
   assert.equal(artifact.forecast.initialPageCount, 29_054);
   assert.equal(artifact.forecast.thirtyDayPollAttempts, 172_800);
   assert.equal(artifact.forecast.firstWindowAttempts, 201_854);
   assert.equal(artifact.forecast.incrementalPollAttempts, 2_102_400);
-  assert.equal(artifact.forecast.incrementalRecordCount, 1_051_200_000);
-  assert.equal(artifact.forecast.sevenDayIncrementalRecordCount, 20_160_000);
+  assert.equal(artifact.forecast.incrementalRecordCount, 10_512_000_000);
+  assert.equal(
+    artifact.forecast.sevenDayIncrementalRecordCount,
+    201_600_000,
+  );
   assert.equal(
     artifact.forecast.thirtyDayIncrementalRecordCount,
-    86_400_000,
+    864_000_000,
   );
   assert.equal(
     artifact.forecast.projectedBytes.structuredAndCanonical,
@@ -228,6 +250,25 @@ test("capacity artifact is derived from measured relations and exact retention v
       artifact.forecast.incrementalRecordCount) *
       artifact.forecast.structuredBytesPerRecord,
   );
+});
+
+test("capacity launch binding rejects stale initial and ongoing record limits", async () => {
+  const { forecastInput } = await capacityArtifact();
+  for (const patch of [
+    { pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords - 1 },
+    {
+      incrementalRecordsPerPollAttempt:
+        providerSourceRecordsPerRequest.maximum - 1,
+    },
+  ]) {
+    assert.equal(
+      providerSourceCapacityModelMatchesLaunchBounds({
+        ...forecastInput,
+        ...patch,
+      }),
+      false,
+    );
+  }
 });
 
 test("fresh four-concurrent-page authentic 100-page import planning stays within measured memory limits", async () => {
@@ -249,13 +290,16 @@ test("fresh four-concurrent-page authentic 100-page import planning stays within
   assert.equal(memory.concurrentPages, 4);
   assert.equal(memory.pagesPerTrial % memory.concurrentPages, 0);
   assert.equal(memory.pageCount % memory.concurrentPages, 0);
-  assert.equal(memory.recordsPerPage, 500);
+  assert.equal(
+    memory.recordsPerPage,
+    providerSourceRecordsPerRequest.maximum,
+  );
   assert.equal(
     memory.responseBytesPerPage,
     dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes,
   );
-  assert.equal(memory.jsonNodesPerPage, 479_004);
-  assert.equal(memory.emptyObjectFactsPerRecord, 945);
+  assert.equal(memory.jsonNodesPerPage, 475_004);
+  assert.equal(memory.emptyObjectFactsPerRecord, 82);
   assert.equal(
     memory.totalRecordsProcessed,
     memory.pageCount * memory.recordsPerPage,

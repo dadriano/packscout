@@ -43,6 +43,16 @@ const targets = {
     testFile: /\.test\.(ts|tsx)$/,
     loader: true,
   },
+  database: {
+    cwd: "packages/database",
+    roots: ["src"],
+    testFile: /\.test\.ts$/,
+    loader: true,
+    isolatedFiles: [
+      "src/normalized-heat-relationship-v1.test.ts",
+      "src/provider-source-page-maximum.integration.test.ts",
+    ],
+  },
   // Self-tests for the repository's own tooling: the policy checkers, the test
   // runner, and the local developer scripts. This lane covers no product
   // behavior, so it is deliberately kept out of the product test path and run

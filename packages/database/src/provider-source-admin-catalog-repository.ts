@@ -227,7 +227,7 @@ export class ProviderSourceAdminCatalogRepository {
       orderBy: [{ created_at: "asc" }, { id: "asc" }],
     });
     return Promise.all(sources.map(async (source) => {
-      const [provider, revision, profile, schedule, cursor, job] =
+      const [provider, revision, profile, schedule, cursor, activeRun] =
         await Promise.all([
           this.database.provider_sources.findFirst({
             where: { id: source.provider_id, organization_id: organizationId },
@@ -253,13 +253,18 @@ export class ProviderSourceAdminCatalogRepository {
           this.database.provider_source_cursors.findFirst({
             where: { source_instance_id: source.id, organization_id: organizationId },
           }),
-          this.database.provider_source_test_jobs.findFirst({
-            where: { source_instance_id: source.id, organization_id: organizationId },
-            orderBy: [{ created_at: "desc" }, { id: "desc" }],
+          this.database.import_runs.findFirst({
+            where: {
+              source_instance_id: source.id,
+              organization_id: organizationId,
+              state: { in: ["queued", "running"] },
+            },
+            orderBy: [{ created_at: "asc" }, { id: "asc" }],
+            select: { records_per_request: true },
           }),
         ]);
       if (!provider || !revision || !schedule || !cursor) return null;
-      const [scheduleRevision, result, connectionRevision] = await Promise.all([
+      const [scheduleRevision, connectionRevision] = await Promise.all([
         this.database.provider_source_schedule_revisions.findFirst({
           where: {
             id: schedule.active_schedule_revision_id,
@@ -267,11 +272,6 @@ export class ProviderSourceAdminCatalogRepository {
             source_instance_id: source.id,
           },
         }),
-        job
-          ? this.database.provider_source_test_results.findUnique({
-              where: { job_id: job.id },
-            })
-          : null,
         profile?.active_revision_id
           ? this.database.source_connection_revisions.findFirst({
               where: {
@@ -284,6 +284,19 @@ export class ProviderSourceAdminCatalogRepository {
           : null,
       ]);
       if (!scheduleRevision) return null;
+      const job = await this.database.provider_source_test_jobs.findFirst({
+        where: {
+          source_instance_id: source.id,
+          organization_id: organizationId,
+          records_per_request: scheduleRevision.records_per_request,
+        },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+      });
+      const result = job
+        ? await this.database.provider_source_test_results.findUnique({
+            where: { job_id: job.id },
+          })
+        : null;
       return {
         providerId: source.provider_id,
         provider: provider.platform_key,
@@ -295,6 +308,7 @@ export class ProviderSourceAdminCatalogRepository {
         connectionRevisionId: profile?.active_revision_id ?? null,
         connectionHealthGeneration: connectionRevision?.health_generation ?? null,
         state: source.state,
+        disabledAt: source.disabled_at,
         pauseRequested: source.pause_requested_at !== null,
         normalizedContractVersion: revision.normalized_contract_version,
         mapperKey: revision.mapper_key,
@@ -302,6 +316,9 @@ export class ProviderSourceAdminCatalogRepository {
         identityNamespaceKey: revision.identity_namespace_key,
         recordIdScopes: strings(revision.record_id_scopes_json),
         intervalSeconds: scheduleRevision.interval_seconds,
+        recordsPerRequest: scheduleRevision.records_per_request,
+        activeRunRecordsPerRequest:
+          activeRun?.records_per_request ?? null,
         freshnessGraceSeconds: scheduleRevision.freshness_grace_seconds,
         scheduleRevisionId: scheduleRevision.id,
         cursorGeneration: cursor.cursor_generation,
@@ -311,6 +328,7 @@ export class ProviderSourceAdminCatalogRepository {
           connectionRevisionId: job?.connection_revision_id ?? null,
           expectedHealthGeneration: job?.expected_health_generation ?? null,
           resultingHealthGeneration: result?.resulting_health_generation ?? null,
+          recordsPerRequest: job?.records_per_request ?? null,
           state: job?.state ?? null,
           outcome: result?.outcome ?? null,
           safeCode: result?.safe_code ?? null,

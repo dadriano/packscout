@@ -15,6 +15,7 @@ import {
 import {
   commandProviderSource,
   reviseProviderSourceInterval,
+  reviseProviderSourceRecordsPerRequest,
 } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
 import { SourceDiagnosticFeed } from "../components/operations/SourceDiagnosticFeed";
@@ -24,6 +25,12 @@ import {
   sourceOperationalLabel,
   type SourceOperationCommand,
 } from "../components/operations/SourceOperationsViews";
+import {
+  RECORDS_PER_REQUEST_ERROR,
+  RECORDS_PER_REQUEST_HELP,
+  RECORDS_PER_REQUEST_SAVED,
+  parseRecordsPerRequest,
+} from "../components/source-configuration/records-per-request";
 import { dateTime, humanize, interval } from "../components/operations/OperationStatus";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
@@ -127,8 +134,23 @@ export function ProviderDetailPage() {
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [intervalDraft, setIntervalDraft] = useState("");
+  const [recordsPerRequestDraft, setRecordsPerRequestDraft] = useState("");
+  const [recordsPerRequestError, setRecordsPerRequestError] = useState<
+    string | null
+  >(null);
+  const [recordsPerRequestConflict, setRecordsPerRequestConflict] = useState(
+    false,
+  );
+  const [recordsPerRequestReloading, setRecordsPerRequestReloading] = useState(
+    false,
+  );
   const priorOperationalState = useRef<string | null>(null);
   const intervalOwner = useRef<string | null>(null);
+  const recordsPerRequestOwner = useRef<string | null>(null);
+  const recordsPerRequestOriginRevision = useRef<string | null>(null);
+  const recordsPerRequestDirty = useRef(false);
+  const recordsPerRequestReloadInFlight = useRef(false);
+  const detailRequestGeneration = useRef(0);
   const diagnosticGeneration = useRef(0);
   useDocumentTitle(detail?.source.displayName ?? "Provider Processor");
 
@@ -138,9 +160,12 @@ export function ProviderDetailPage() {
 
   useEffect(() => {
     let active = true;
+    const requestGeneration = ++detailRequestGeneration.current;
+    const isCurrentRequest = () => active &&
+      requestGeneration === detailRequestGeneration.current;
     void getProviderSourceOperationsDetail(providerId)
       .then((result) => {
-        if (!active) return;
+        if (!isCurrentRequest()) return;
         const nextState = sourceOperationalLabel(result.source);
         if (priorOperationalState.current && priorOperationalState.current !== nextState) {
           setAnnouncement(`${result.source.displayName} changed from ${priorOperationalState.current} to ${nextState}.`);
@@ -150,14 +175,45 @@ export function ProviderDetailPage() {
           intervalOwner.current = result.source.source.sourceInstanceId;
           setIntervalDraft(String(result.source.schedule?.intervalSeconds ?? ""));
         }
+        const refreshedSource = result.source.source;
+        const refreshedScheduleRevisionId = result.source.schedule
+          ?.scheduleRevisionId ?? null;
+        if (
+          refreshedSource &&
+          (
+            recordsPerRequestOwner.current !== refreshedSource.sourceInstanceId ||
+            (!recordsPerRequestDirty.current &&
+              recordsPerRequestOriginRevision.current !==
+                refreshedScheduleRevisionId)
+          )
+        ) {
+          recordsPerRequestOwner.current = refreshedSource.sourceInstanceId;
+          recordsPerRequestOriginRevision.current = refreshedScheduleRevisionId;
+          recordsPerRequestDirty.current = false;
+          setRecordsPerRequestDraft(String(refreshedSource.recordsPerRequest));
+          setRecordsPerRequestError(null);
+          if (recordsPerRequestReloadInFlight.current) {
+            recordsPerRequestReloadInFlight.current = false;
+            setRecordsPerRequestReloading(false);
+            setRecordsPerRequestConflict(false);
+            setActionFailure(null);
+            setAnnouncement("Current request size reloaded.");
+          }
+        }
         setDetail(result);
         setDetailFailure(null);
       })
       .catch((error: unknown) => {
-        if (active) setDetailFailure(readError(error, "detail"));
+        if (isCurrentRequest()) {
+          setDetailFailure(readError(error, "detail"));
+          if (recordsPerRequestReloadInFlight.current) {
+            recordsPerRequestReloadInFlight.current = false;
+            setRecordsPerRequestReloading(false);
+          }
+        }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (isCurrentRequest()) setLoading(false);
       });
     return () => { active = false; };
   }, [providerId, refreshIndex]);
@@ -337,6 +393,63 @@ export function ProviderDetailPage() {
     }
   }
 
+  async function reviseRecordsPerRequest(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const source = detail?.source.source;
+    const scheduleRevisionId = recordsPerRequestOriginRevision.current;
+    if (!source || !scheduleRevisionId) return;
+    const recordsPerRequest = parseRecordsPerRequest(recordsPerRequestDraft);
+    if (recordsPerRequest === null) {
+      setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
+      return;
+    }
+    setPendingKey(`${detail.source.providerId}:records-per-request`);
+    setActionFailure(null);
+    setRecordsPerRequestError(null);
+    setRecordsPerRequestConflict(false);
+    try {
+      const revised = await reviseProviderSourceRecordsPerRequest(
+        detail.source.providerId,
+        source.sourceInstanceId,
+        {
+          expectedSourceRevisionId: source.sourceRevisionId,
+          expectedScheduleRevisionId: scheduleRevisionId,
+          recordsPerRequest,
+        },
+      );
+      // A detail read begun before this acknowledgment cannot know about the
+      // new schedule revision. Invalidate it synchronously before React runs
+      // the refresh effect so it cannot restore the old value or origin.
+      detailRequestGeneration.current += 1;
+      recordsPerRequestOriginRevision.current = revised.scheduleRevisionId;
+      recordsPerRequestDirty.current = false;
+      setAnnouncement(RECORDS_PER_REQUEST_SAVED);
+      showToast(RECORDS_PER_REQUEST_SAVED, "success");
+      refresh();
+    } catch (error) {
+      setRecordsPerRequestConflict(
+        error instanceof AdminApiError &&
+          error.code !== undefined &&
+          ["SOURCE_CONFLICT", "SOURCE_REVISION_CONFLICT"].includes(error.code),
+      );
+      setActionFailure(mutationError(error));
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  function reloadRecordsPerRequest(): void {
+    recordsPerRequestDirty.current = false;
+    recordsPerRequestOriginRevision.current = null;
+    recordsPerRequestReloadInFlight.current = true;
+    setRecordsPerRequestError(null);
+    setRecordsPerRequestReloading(true);
+    setAnnouncement("Reloading the current request size.");
+    refresh();
+  }
+
   if (loading && !detail) {
     return <div className="ops-loading" aria-busy="true">Loading current provider-source evidence…</div>;
   }
@@ -399,7 +512,32 @@ export function ProviderDetailPage() {
         <span>{canConfigure ? "Administrator configuration enabled" : canOperate ? "Data operator · operation controls only" : "Read-only access"}</span>
       </section>
       {detailFailure ? <div className="ops-error" role="alert"><p>{detailFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={refresh}>Refresh current state</button></div> : null}
-      {actionFailure ? <div className="ops-error" role="alert"><p>{actionFailure}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>Dismiss</button></div> : null}
+      {actionFailure ? (
+        <div className="ops-error" role="alert">
+          <p>{actionFailure}</p>
+          {recordsPerRequestConflict ? (
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              disabled={recordsPerRequestReloading}
+              onClick={reloadRecordsPerRequest}
+            >
+              {recordsPerRequestReloading ? "Reloading…" : "Reload current value"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="admin-button admin-button-secondary"
+            disabled={recordsPerRequestReloading}
+            onClick={() => {
+              setActionFailure(null);
+              setRecordsPerRequestConflict(false);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       <ConnectionOperationsSummary
         connection={detail.connection}
@@ -416,14 +554,14 @@ export function ProviderDetailPage() {
         <aside className="source-operator-boundary">
           <strong>{canOperate ? "Operation access, not configuration access" : "Read-only provider evidence"}</strong>
           <p>{canOperate
-            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, activation, disable, and cursor controls remain administrator-only."
+            ? "You may run, pause, resume, and retry authorized quarantine records. Credential, binding, interval, request size, activation, disable, and cursor controls remain administrator-only."
             : "Your role can inspect current safe processor, run, page, and diagnostic evidence but cannot operate or configure this source."}</p>
         </aside>
       ) : (
         <section className="source-admin-inline" aria-labelledby="source-admin-inline-title">
           <div>
             <span className="admin-kicker">Selected provider only</span>
-            <h2 id="source-admin-inline-title">Test and timing</h2>
+            <h2 id="source-admin-inline-title">Test and request settings</h2>
             <p>These controls affect {source.displayName} only. Shared credential and destructive lifecycle controls remain in Source configuration.</p>
             {sourceActionRequired ? (
               <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
@@ -445,6 +583,60 @@ export function ProviderDetailPage() {
               </div>
               <button type="submit" className="admin-button admin-button-secondary" disabled={pendingKey !== null}>
                 {pendingKey?.endsWith(":interval") ? "Saving timing…" : "Save timing"}
+              </button>
+            </form>
+            <form onSubmit={(event) => { void reviseRecordsPerRequest(event); }}>
+              <div className="admin-field source-admin-inline__records-field">
+                <label htmlFor="provider-source-records-per-request">
+                  Maximum records per request
+                </label>
+                <input
+                  id="provider-source-records-per-request"
+                  type="number"
+                  min="1"
+                  max="5000"
+                  step="1"
+                  required
+                  disabled={pendingKey !== null || recordsPerRequestReloading}
+                  value={recordsPerRequestDraft}
+                  aria-describedby={recordsPerRequestError
+                    ? "provider-source-records-per-request-help provider-source-records-per-request-error"
+                    : "provider-source-records-per-request-help"}
+                  aria-invalid={recordsPerRequestError !== null}
+                  onInvalid={(event) => {
+                    event.preventDefault();
+                    setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
+                  }}
+                  onChange={(event) => {
+                    recordsPerRequestDirty.current = true;
+                    setRecordsPerRequestDraft(event.target.value);
+                    setRecordsPerRequestError(null);
+                  }}
+                />
+                <p
+                  className="source-config-field-help"
+                  id="provider-source-records-per-request-help"
+                >
+                  {RECORDS_PER_REQUEST_HELP}
+                </p>
+                {recordsPerRequestError ? (
+                  <p
+                    className="admin-form-error source-config-field-error"
+                    id="provider-source-records-per-request-error"
+                    role="alert"
+                  >
+                    {recordsPerRequestError}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="submit"
+                className="admin-button admin-button-secondary"
+                disabled={pendingKey !== null || recordsPerRequestReloading}
+              >
+                {pendingKey?.endsWith(":records-per-request")
+                  ? "Saving request size…"
+                  : "Save request size"}
               </button>
             </form>
           </div>

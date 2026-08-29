@@ -74,6 +74,23 @@
   grid-column: span 2;
 }
 
+.source-config-form__records {
+  grid-column: span 2;
+}
+
+.source-config-field-help {
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.source-config-field-error.admin-form-error {
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.55rem;
+  font-size: 0.82rem;
+}
+
 .source-config-form__evidence {
   align-self: center;
   margin: 0;
@@ -227,6 +244,7 @@
   }
 
   .source-config-form__wide,
+  .source-config-form__records,
   .source-config-ledger__facts,
   .source-config-ledger__badges {
     grid-column: 1;

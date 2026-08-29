@@ -6,10 +6,11 @@
 
 **Reviewer:** PackScout engineering (automated structural capture plus manual contract review)
 
-**Historical verdict:** PASS for tasks 002–009. The original Task 010 gate
-rejected this host using an 8,759,332,238,475-byte maximum-throughput stress
-ceiling. That ceiling is not an operational storage forecast. The later live
-local observation and free-space-floor policy are documented in
+**Verdict:** PASS for tasks 002–009; the real local backfill remains
+capacity-blocked. The current Task 010 gate models the largest configurable
+request pin on every ongoing poll and explicitly rejects this host. That
+maximum-throughput ceiling is not an operational storage forecast. The later
+live local observation and free-space-floor policy are documented in
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Safety boundary
@@ -39,8 +40,9 @@ relationships, replay identity, catalog revision, and reached-head shape.
 
 | Setting | Launch value | Evidence |
 | --- | ---: | --- |
-| Filtered page target | 500 records; 250 on bounded retry | On 2026-08-26, the sanitized initial-page probe completed all four 500-record requests through the transport and structural validator under the fixed bounds: Courtyard 826,631 bytes/631 ms, Collector Crypt 535,465/154 ms, Phygitals 3,257,296/550 ms, and ClutchPacks 662,527/164 ms. Phygitals exceeded 8 MiB at both 1,000 and 2,500, making 500 the largest safe shared initial target. Because historical continuation pages are denser, an oversized page retries the same opaque cursor at 250. |
-| Maximum response | 8,388,608 bytes | The original smaller bounds fit the first launch samples, but later live 250-record Phygitals pages crossed them. The triggering page replayed as HTTP 200 with the exact three-key wrapper, 250 records, and 4,730,013 bytes. The 2026-08-26 probe retained the 8 MiB cap and discarded oversized Phygitals bodies at 1,000 and 2,500 records. |
+| Filtered page baseline | 500 records | On 2026-08-26, the sanitized initial-page probe completed all four 500-record requests through the transport and structural validator under the fixed bounds: Courtyard 826,631 bytes/631 ms, Collector Crypt 535,465/154 ms, Phygitals 3,257,296/550 ms, and ClutchPacks 662,527/164 ms. Phygitals exceeded 8 MiB at both 1,000 and 2,500, making 500 the largest live-evidenced shared baseline. |
+| Source request pin | 1–5,000 records; new-source default 500 | The saved maximum is pinned into source tests and import runs. Queued and running work uses the same value on every retry; a save applies only to later work. A response may contain fewer records, but more than the request pin is fatal. |
+| Maximum response | 8,388,608 bytes | The original smaller bounds fit the first launch samples, but later live 250-record Phygitals pages crossed them. The triggering page replayed as HTTP 200 with the exact three-key wrapper, 250 records, and 4,730,013 bytes. The 2026-08-26 probe retained the 8 MiB cap and discarded oversized Phygitals bodies at 1,000 and 2,500 records. An oversized response fails the page without changing its durable request pin or checkpoint. |
 | Request timeout | 10,000 ms | Fourteen successful filtered requests ranged from 435 to 4,042 ms, averaging 1,728 ms. |
 | Platform request cap | 2 per platform | This is the authoritative DataForrest limit. The historical capture overlapped two different platform filters and proved filter/cursor isolation, but it did not establish an aggregate connection-profile cap. |
 | Generic execution slots | 4; guarded Task 010 slots: 4 | The Task 010 safety fixture pins four slots beneath one singleton supervisor. The runtime operates four independent platform lanes at one request each, beneath the provider maximum of two per platform. Each source page cursor remains sequential, so useful page-read concurrency is at most four, one per provider. Connection tests use a separate one-request lane. |
@@ -48,10 +50,11 @@ relationships, replay identity, catalog revision, and reached-head shape.
 | Raw page retention | 7 days | One authoritative protected copy only. |
 | Quarantine, diagnostics, terminal attempts | 30 days | Protected quarantine remains independently retryable; diagnostics and attempts are sanitized. |
 
-The provider supports a maximum requested limit of 5,000, but PackScout does
-not use that limit. The live launch target is 500 with a 250-record bounded
-retry because response bytes, rather than record count alone, bound memory and
-transport risk.
+The provider supports a maximum requested limit of 5,000. PackScout stores and
+pins a per-source maximum from 1 through 5,000, defaulting new sources to the
+500-record live baseline. The independent 8 MiB response ceiling still applies.
+Neither transport retries nor process recovery silently replace the durable
+record pin; an administrator may save a smaller value for the next run.
 
 ## Live request and cursor evidence
 
@@ -181,6 +184,7 @@ runtime compatibility path.
 | Missing or wrong bearer | Live/documented 401 | Connection-scoped action required; one blocking episode |
 | Unknown filter, malformed cursor, or cursor/filter mismatch | Live/documented 400 | Source/configuration action required; do not retry unchanged input |
 | Client timeout or network interruption | Client-bound behavior | Retryable with the same requested cursor |
+| Response exceeds 8 MiB or the request pin | Bounded transport/contract behavior | Fatal for that page; preserve the same cursor, request pin, and checkpoint |
 | Provider 500 | Provider documented | Retryable with the same requested cursor |
 | Provider 429 / rate headers | Unavailable; not naturally observed | Do not invent semantics; preserve safe status evidence and use conservative retry handling if observed |
 | HTTP redirect | Provider documents HTTP→HTTPS 301 | Runtime sends HTTPS only and rejects redirects/destination changes |
@@ -207,12 +211,12 @@ machine-readable artifact is
 [`provider-source-capacity-measurement-v1.json`](./provider-source-capacity-measurement-v1.json).
 
 No observed steady-state delivery rate was available for this evidence window.
-The historical stress ceiling therefore failed closed at the transport
-maximum: every one of the four sources returns a
-full 500-record page on every 60-second poll throughout the 365-day growth
-horizon. That budgets 1,051,200,000 incremental records permanently, plus
-20,160,000 incremental records in the rolling seven-day payload window and
-86,400,000 in the rolling 30-day quarantine window. This is a stress upper
+The capacity model therefore fails closed at the configurable transport
+maximum: every one of the four sources returns a full 5,000-record page on
+every 60-second poll throughout the 365-day growth horizon. That budgets
+10,512,000,000 incremental records permanently, plus 201,600,000 incremental
+records in the rolling seven-day payload window and 864,000,000 in the rolling
+30-day quarantine window. This is a stress upper
 bound, not a prediction of likely provider volume or current-backfill storage.
 The 2026-08-24 operational reassessment uses measured whole-database growth and
 an actual free-space floor instead.
@@ -228,26 +232,26 @@ twice. It projects:
 
 | Component | Projected bytes |
 | --- | ---: |
-| Structured and canonical data | 15,733,325,885,151 |
+| Structured and canonical data | 155,403,116,285,151 |
 | Conservative raw full history | 98,700,000,000 |
 | Seven-day steady-poll raw pages | 25,902,938,880 |
-| Seven-day normalized page payload | 150,749,167,442 |
+| Seven-day normalized page payload | 939,287,407,442 |
 | Permanent expired page lineage | 32,014,439,080 |
-| Quarantine lineage and evidence | 219,894,433,264 |
+| Quarantine lineage and evidence | 1,914,090,433,264 |
 | Page diagnostics | 413,598,846 |
 | Terminal request attempts | 826,995,838 |
 | Permanent compact attempt lineage | 13,824,610,644 |
-| **Total** | **16,275,652,069,145** |
+| **Total** | **158,428,176,709,145** |
 
 At a 60-second interval, four sources create 172,800 poll attempts in 30 days;
 including the 29,054 initial pages gives 201,854 first-window attempts. Leaving
 25% of the target volume free after the projected import requires
-**21,700,869,425,527 available bytes** before Task 010 may start. The 200 GB
+**211,237,568,945,527 available bytes** before Task 010 may start. The 200 GB
 provisional floor is therefore superseded by this measured requirement. The
 80%-used abort threshold remains independently enforced.
 
 The refreshed committed host measurement reported 994,662,584,320 bytes of capacity and
-only 148,425,744,384 available bytes. Admission was rejected for insufficient
+only 175,989,243,904 available bytes. Admission was rejected for insufficient
 free bytes, an already-exceeded 80% threshold, and a projected threshold
 breach. Task 010 must not start a real backfill on this host. This does not block
 contract, adapter, mapper, importer, scheduler, admin, or UI implementation.
@@ -257,14 +261,14 @@ reserved-key, depth, and transport rejection boundaries without retaining an
 additional decoded copy of the complete response. It rejects more than 64
 container levels, 480,000 JSON values, 5,000 array items, or 256 syntactic
 member occurrences in one object; duplicate names count toward the work bound
-and otherwise retain JSON last-write semantics. The committed 8 MiB V1
-measurement on 2026-08-27 processed all 50,000 records across 100 pages in
-four-page concurrent waves. Every page carried 479,004 JSON values, including
-945 high-overhead empty-object facts per record, to exercise the 500-record,
-maximum-byte, and near-maximum-node boundaries together. The five-trial
-measurement passed the four-page aggregate gates; the peak delta was
-131,088,384 bytes and retained growth was 37,920 bytes, beneath
-the 256 MiB peak-delta and 32 MiB retained-growth limits. The dedicated Task 010 runner now
+and otherwise retain JSON last-write semantics. The committed 8 MiB maximum-page
+measurement on 2026-08-28 processed all 500,000 records across 100 pages in
+four-page concurrent waves. Every page carried 475,004 JSON values, including
+82 high-overhead empty-object facts per record, to exercise the 5,000-record,
+maximum-byte, and near-maximum-node boundaries together. The fresh-process
+measurement passed the four-page aggregate gates: its 85,442,560-byte peak
+delta and zero retained growth stayed beneath the 256 MiB peak-delta and 32 MiB
+retained-growth limits. The dedicated Task 010 runner now
 pins four source execution slots beneath one singleton supervisor. Its four
 platform request-permit lanes are independently operated at one request, and connection
 tests use their own one-request lane. DataForrest's hard maximum remains two per
@@ -275,10 +279,10 @@ provider. The maximum-page memory measurement exercises four concurrent pages;
 it is not a live-provider throughput result. Live soak and reconciliation evidence
 remain pending.
 
-The 72-page storage fixture was refreshed on August 27 under the terminal
+The 72-page storage fixture was refreshed on August 28 under the terminal
 platform-request-lane migration. The page-target change does not alter the
 persisted row shape. The current 8 MiB, four-concurrent-page memory measurement
-carries its own August 27 timestamp and is the passing launch-gate result.
+carries its own August 28 timestamp and is the passing launch-gate result.
 
 Reproduction and drift checks are executable from the repository root:
 

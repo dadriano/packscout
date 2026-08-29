@@ -5,6 +5,7 @@ import type {
 } from "@packscout/contracts";
 import { Link } from "react-router-dom";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
+import { recordsPerRequestDisplay } from "../source-configuration/records-per-request";
 import { dateTime, humanize, interval } from "./OperationStatus";
 
 export type SourceOperationCommand = "run" | "pause" | "resume";
@@ -197,6 +198,15 @@ export function ProviderSourceOperationsLedger({
                 <div><dt>Lifecycle / phase</dt><dd>{source.source ? humanize(source.source.lifecycle) : "Not configured"} / {source.processor ? humanize(source.processor.phase) : "No worker state"}</dd></div>
                 <div><dt>Continuation / wait</dt><dd>{source.processor?.continuation ? humanize(source.processor.continuation.kind) : "Not established"} / {source.processor?.waitReason ? humanize(source.processor.waitReason) : "None"}</dd></div>
                 <div><dt>Schedule / next due</dt><dd>{source.schedule ? `${interval(source.schedule.intervalSeconds)} / ${dateTime(source.schedule.nextDueAt)}` : "Not scheduled"}</dd></div>
+                <div>
+                  <dt>Maximum records per request</dt>
+                  <dd>{source.source
+                    ? recordsPerRequestDisplay(
+                        source.source.recordsPerRequest,
+                        source.activeRun?.recordsPerRequest ?? null,
+                      )
+                    : "Not configured"}</dd>
+                </div>
                 <div><dt>Progress / head</dt><dd>{dateTime(source.freshness.lastProgressAt)} / {dateTime(source.freshness.lastHeadReachedAt)}</dd></div>
                 <div><dt>Pages / records</dt><dd>{source.progress.pages} / {source.progress.records.total} · {source.progress.total.label}</dd></div>
                 <div><dt>Streams</dt><dd>{source.progress.records.catalog} catalog · {source.progress.records.pulls} pulls · {source.progress.records.trades} trades</dd></div>

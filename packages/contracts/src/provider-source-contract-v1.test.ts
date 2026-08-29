@@ -15,6 +15,8 @@ import {
   providerSourceDiagnosticEventKindByCorrelationKind,
   providerSourceDiagnosticSeverities,
   providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
+  providerSourceRecordsPerRequestSchema,
   providerSourceRetention,
   providerSourceSingletonTiming,
   sourceLifecycleStates,
@@ -22,6 +24,7 @@ import {
   sourceAdapterSafeDiagnosticSchema,
   sourceAdapterManifestV1Schema,
   validateSourceIntervalSeconds,
+  validateProviderSourceRecordsPerRequest,
 } from "./provider-source-contract-v1.ts";
 import {
   dataforrestEventsV1SourceAdapterManifest,
@@ -30,7 +33,7 @@ import {
 test("launch source constants retain the evidence-backed operating envelope", () => {
   assert.deepEqual(providerSourceLaunchBounds, {
     pageTargetRecords: 500,
-    fallbackPageTargetRecords: 250,
+    recordsPerRequest: { minimum: 1, default: 500, maximum: 5_000 },
     maximumResponseBytes: 8_388_608,
     requestTimeoutMilliseconds: 10_000,
     requestConcurrencyPerLane: 1,
@@ -38,6 +41,11 @@ test("launch source constants retain the evidence-backed operating envelope", ()
     genericExecutionSlots: 4,
     sourceIntervalSeconds: { minimum: 60, default: 60, maximum: 86_400 },
     freshnessGraceSeconds: 900,
+  });
+  assert.deepEqual(providerSourceRecordsPerRequest, {
+    minimum: 1,
+    default: 500,
+    maximum: 5_000,
   });
   assert.deepEqual(providerSourceRetention, {
     protectedRawPageDays: 7,
@@ -74,6 +82,19 @@ test("launch source constants retain the evidence-backed operating envelope", ()
     "disabled",
     "replaced",
   ]);
+});
+
+test("records per request accepts only whole values from 1 through 5,000", () => {
+  for (const value of [1, 500, 5_000]) {
+    assert.equal(providerSourceRecordsPerRequestSchema.parse(value), value);
+    assert.equal(validateProviderSourceRecordsPerRequest(value), value);
+  }
+  for (const value of [0, 1.5, 5_001, "500", null]) {
+    assert.equal(
+      providerSourceRecordsPerRequestSchema.safeParse(value).success,
+      false,
+    );
+  }
 });
 
 test("continuation is a strict discriminated union with bounded integer delay", () => {
@@ -304,7 +325,7 @@ test("the adapter manifest is credential-free, strict, and uses the launch bound
   );
   assert.equal(parsedV1.sourceTypeKey, "dataforrest-events-v1");
   assert.deepEqual(parsedV1.requestBounds, {
-    pageLimit: 500,
+    pageLimit: 5_000,
     maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
   });

@@ -117,6 +117,8 @@ const catalog: ProviderSourceAdminCatalog = {
       "trade-v1",
     ],
     intervalSeconds: 60,
+    recordsPerRequest: 1_000,
+    activeRunRecordsPerRequest: 500,
     freshnessGraceSeconds: 900,
     scheduleRevisionId,
     cursor: {
@@ -203,6 +205,7 @@ test("configuration UI renders masked evidence and explicit cursor impact withou
   assert.match(text, /dataforrest-events-adapter-v1/);
   assert.match(text, /packscout\.provider-observation\.v1/);
   assert.match(text, /courtyard-provider-observation @ 1/);
+  assert.match(text, /Current run: 500\. Next run: 1,000\./);
   assert.match(text, new RegExp(fingerprint));
   assert.doesNotMatch(text, /adapter upgrade|replace existing source/iu);
   assert.equal(renderer.container.querySelector("#source-replacement"), null);
@@ -227,6 +230,7 @@ test("data operators receive dense read-only evidence without configuration cont
 
   assert.match(pageText(renderer), /Read-only source evidence/);
   assert.match(pageText(renderer), /Shared DataForrest/);
+  assert.match(pageText(renderer), /Current run: 500\. Next run: 1,000\./);
   assert.equal(renderer.container.querySelector('input[type="password"]'), null);
   assert.equal([...renderer.container.querySelectorAll("button")]
     .some((button) => button.textContent?.trim() === "Revoke"), false);
@@ -321,6 +325,10 @@ test("source creation submits the immutable mapper descriptor supplied by the se
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   assert.match(pageText(renderer), /server-approved-mapper @ 7/u);
+  assert.match(
+    pageText(renderer),
+    /Smaller values use less memory\. Larger values can finish backfills faster\. The source may return fewer\./u,
+  );
   const form = findButton(renderer, "Save inactive source").closest("form");
   assert.ok(form);
   await act(async () => {
@@ -338,7 +346,85 @@ test("source creation submits the immutable mapper descriptor supplied by the se
     mapperKey: "server-approved-mapper",
     mapperVersion: "7",
     intervalSeconds: 60,
+    recordsPerRequest: 500,
   });
+});
+
+test("source creation rejects an invalid request size with associated exact copy", async (context) => {
+  let submitted: unknown;
+  const renderer = await renderPage(
+    <ProviderSourceLedger
+      catalog={catalog}
+      canManage
+      pendingKey={null}
+      onCreate={async (request) => {
+        submitted = request;
+        return true;
+      }}
+      onCommand={() => undefined}
+      onInterval={async () => true}
+    />,
+  );
+  cleanupPage(context, renderer);
+
+  await act(async () => {
+    changeControl(renderer, "source-provider", providerId);
+    changeControl(renderer, "source-profile", profileId);
+    changeControl(renderer, "source-records-per-request", "0");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  const form = findButton(renderer, "Save inactive source").closest("form");
+  assert.ok(form);
+  await act(async () => {
+    form.dispatchEvent(new renderer.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+
+  assert.equal(submitted, undefined);
+  assert.match(pageText(renderer), /Enter a whole number from 1 to 5,000\./u);
+  const input = renderer.container.querySelector<HTMLInputElement>(
+    "#source-records-per-request",
+  );
+  assert.equal(input?.getAttribute("aria-invalid"), "true");
+  assert.match(input?.getAttribute("aria-describedby") ?? "", /source-records-per-request-error/u);
+});
+
+test("successful source creation announces the approved next-run copy", async (context) => {
+  let submitted: unknown;
+  stubFetch(context, ({ input, init }) => {
+    const path = String(input);
+    if (path.endsWith("/provider-sources/sources") && init?.method === "POST") {
+      submitted = JSON.parse(String(init.body));
+      return jsonResponse({
+        sourceInstanceId: sourceId,
+        sourceRevisionId,
+        audit: { outcome: "success" },
+      }, 201);
+    }
+    return jsonResponse({ catalog });
+  });
+  const renderer = await renderPage(page(session(true)));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  await act(async () => {
+    changeControl(renderer, "source-provider", providerId);
+    changeControl(renderer, "source-profile", profileId);
+    const form = findButton(renderer, "Save inactive source").closest("form");
+    assert.ok(form);
+    form.dispatchEvent(new renderer.dom.window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  await settlePage();
+
+  assert.equal((submitted as { recordsPerRequest?: number }).recordsPerRequest, 500);
+  assert.match(pageText(renderer), /Saved\. Applies to the next import run\./u);
 });
 
 test("source activation stays disabled after a newer pending or failed connection test", async (context) => {
@@ -371,6 +457,36 @@ test("source activation stays disabled after a newer pending or failed connectio
     cleanupPage(context, renderer);
     assert.equal(findButton(renderer, "Activate paused").disabled, true);
   }
+});
+
+test("a request-size edit keeps Activate paused disabled until the source test is current", async (context) => {
+  const staleCatalog: ProviderSourceAdminCatalog = {
+    ...catalog,
+    sources: catalog.sources.map((source) => ({
+      ...source,
+      state: "disabled",
+      recordsPerRequest: 2_000,
+      test: {
+        ...source.test,
+        state: "succeeded",
+        outcome: "success",
+        current: false,
+      },
+    })),
+  };
+  const renderer = await renderPage(
+    <ProviderSourceLedger
+      catalog={staleCatalog}
+      canManage
+      pendingKey={null}
+      onCreate={async () => true}
+      onCommand={() => undefined}
+      onInterval={async () => true}
+    />,
+  );
+  cleanupPage(context, renderer);
+
+  assert.equal(findButton(renderer, "Activate paused").disabled, true);
 });
 
 test("source testing is offered only for draft and disabled lifecycle states", async (context) => {

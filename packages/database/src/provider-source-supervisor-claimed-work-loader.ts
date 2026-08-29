@@ -1,4 +1,7 @@
-import { launchProviderKeySchema } from "@packscout/contracts";
+import {
+  launchProviderKeySchema,
+  providerSourceRecordsPerRequestSchema,
+} from "@packscout/contracts";
 import { type PackscoutTransactionClient } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import { type ProviderSourceSupervisorQueueCandidate } from
@@ -168,7 +171,15 @@ export async function loadClaimedProviderSourceSupervisorWork(
   const providerId = sourceJob?.provider_id ?? run?.provider_id;
   const sourceInstanceId = sourceJob?.source_instance_id ?? run?.source_instance_id;
   const sourceRevisionId = sourceJob?.source_revision_id ?? run?.source_revision_id;
-  if (!providerId || !sourceInstanceId || !sourceRevisionId) {
+  const recordsPerRequest = providerSourceRecordsPerRequestSchema.safeParse(
+    sourceJob?.records_per_request ?? run?.records_per_request,
+  );
+  if (
+    !providerId ||
+    !sourceInstanceId ||
+    !sourceRevisionId ||
+    !recordsPerRequest.success
+  ) {
     throw new PersistenceError("SOURCE_FENCED", "Source work pins are incomplete.");
   }
   const [provider, source, sourceRevision, schedule, runtime, openEpisode] =
@@ -231,6 +242,7 @@ export async function loadClaimedProviderSourceSupervisorWork(
     provider: providerKey.data,
     sourceInstanceId,
     sourceRevisionId,
+    recordsPerRequest: recordsPerRequest.data,
     normalizedContractVersion: sourceRevision.normalized_contract_version,
     mapperKey: sourceRevision.mapper_key,
     mapperVersion: sourceRevision.mapper_version,

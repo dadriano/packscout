@@ -2327,10 +2327,20 @@ test("representative mixed commit measures normalized, canonical, evidence, oper
         },
       );
       // Random UUID text inside JSONB can change pglz compression by a few
-      // bytes while representing the same schema/content volume.
+      // bytes while representing the same schema/content volume. PostgreSQL
+      // transaction IDs are stored as text on public change causes; their
+      // tuple width grows by one 8-byte alignment step when the database XID
+      // reaches eight digits, so fresh CI and long-lived local databases can
+      // legitimately differ by 8 bytes per row.
+      const logicalByteDrift = Math.abs(
+        measured.logicalRowBytes - expected.logicalRowBytes,
+      );
+      const transactionIdAlignmentDrift = expected.rows * 8;
       assert.ok(
-        Math.abs(measured.logicalRowBytes - expected.logicalRowBytes) <= 128,
-        `${expected.relation} logical bytes drifted outside the UUID bound`,
+        logicalByteDrift <= 128 ||
+          (expected.relation === "public_change_causes" &&
+            Math.abs(logicalByteDrift - transactionIdAlignmentDrift) <= 128),
+        `${expected.relation} logical bytes drifted outside the environment bound`,
       );
     }
     assert.ok(

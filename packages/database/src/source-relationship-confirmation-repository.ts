@@ -37,6 +37,7 @@ export interface SourceRelationshipDeclarationIdentity {
   readonly targetExternalId: string;
   readonly createdPublicChangeSequence: bigint;
   readonly resolvedPublicChangeSequence: bigint | null;
+  readonly resolvedAt: Date | null;
   readonly insertedInCurrentWrite: boolean;
 }
 
@@ -471,23 +472,33 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
     };
   });
 
+  // A confirmation cannot predate every physical relationship it references.
+  // Sets whose relationships were all inserted by this write are necessarily
+  // new, so only possible replays need the cross-semantic confirmation lookup.
+  const possibleReplays = prepared.filter(({ set }) =>
+    set.declarations.some(({ insertedInCurrentWrite }) =>
+      !insertedInCurrentWrite
+    )
+  );
   const requestedRelationshipIds = [
-    ...new Set(prepared.flatMap(({ set }) =>
+    ...new Set(possibleReplays.flatMap(({ set }) =>
       set.declarations.map(({ canonicalRelationshipId }) =>
         canonicalRelationshipId
       )
     )),
   ];
-  const previouslyConfirmedRows = await transaction.$queryRaw<Array<{
-    canonicalRelationshipId: string;
-  }>>(Prisma.sql`
-    select distinct canonical_relationship_id as "canonicalRelationshipId"
-    from public.source_relationship_confirmations
-    where organization_id = ${uuid(input.organizationId)}
-      and canonical_relationship_id in (
-        ${Prisma.join(requestedRelationshipIds.map(uuid))}
-      )
-  `);
+  const previouslyConfirmedRows = requestedRelationshipIds.length === 0
+    ? []
+    : await transaction.$queryRaw<Array<{
+        canonicalRelationshipId: string;
+      }>>(Prisma.sql`
+        select distinct canonical_relationship_id as "canonicalRelationshipId"
+        from public.source_relationship_confirmations
+        where organization_id = ${uuid(input.organizationId)}
+          and canonical_relationship_id in (
+            ${Prisma.join(requestedRelationshipIds.map(uuid))}
+          )
+      `);
   const previouslyConfirmedIds = new Set(
     previouslyConfirmedRows.map(({ canonicalRelationshipId }) =>
       canonicalRelationshipId
@@ -497,7 +508,7 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
   const existingRows = await loadConfirmationRows(transaction, {
     organizationId: input.organizationId,
     sourceRevisionId,
-    semanticObservationIds: prepared.map(
+    semanticObservationIds: possibleReplays.map(
       ({ set }) => set.semanticObservationId,
     ),
   });
@@ -616,7 +627,7 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
       ${confirmation.publicChangeSequence}, ${confirmation.confirmationMode},
       ${input.confirmedAt}, ${input.confirmedAt}
     )`);
-    await transaction.$executeRaw(Prisma.sql`
+    const insertedHeaderCount = await transaction.$executeRaw(Prisma.sql`
       insert into public.source_relationship_confirmation_sets (
         id, organization_id, provider_id, source_instance_id,
         source_revision_id, source_record_id, semantic_observation_id,
@@ -627,6 +638,11 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
         confirmation_mode, confirmed_at, created_at
       ) values ${Prisma.join(headerRows)}
     `);
+    if (insertedHeaderCount !== newSets.length) {
+      throw new Error(
+        "Source relationship confirmation headers are incomplete.",
+      );
+    }
 
     const itemRows = newSets.flatMap((confirmation) =>
       confirmation.set.declarations.map((declaration) => Prisma.sql`(
@@ -645,7 +661,7 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
         ${input.confirmedAt}
       )`)
     );
-    await transaction.$executeRaw(Prisma.sql`
+    const insertedItemCount = await transaction.$executeRaw(Prisma.sql`
       insert into public.source_relationship_confirmations (
         confirmation_set_id, organization_id, canonical_relationship_id,
         source_entity_id, relationship_kind, target_platform_key,
@@ -654,15 +670,56 @@ export async function persistSourceRelationshipConfirmationSetsForCanonicalWrite
         heat_effective_public_change_sequence, created_at
       ) values ${Prisma.join(itemRows)}
     `);
+    if (insertedItemCount !== itemRows.length) {
+      throw new Error(
+        "Source relationship confirmation items are incomplete.",
+      );
+    }
   }
 
-  const confirmedRows = await loadConfirmationRows(transaction, {
-    organizationId: input.organizationId,
-    sourceRevisionId,
-    semanticObservationIds: prepared.map(
-      ({ set }) => set.semanticObservationId,
-    ),
-  });
+  const newlyInsertedRows: ExistingConfirmationRow[] = newSets.flatMap(
+    (confirmation) => confirmation.set.declarations.map((declaration) => ({
+      confirmationSetId: confirmation.id,
+      sourceRevisionId: confirmation.set.sourceRevisionId,
+      semanticObservationId: confirmation.set.semanticObservationId,
+      sourceEntityId: confirmation.set.sourceEntityId,
+      sourceCanonicalRevisionId:
+        confirmation.set.sourceCanonicalRevisionId,
+      sourceCanonicalContentHash:
+        confirmation.set.sourceCanonicalContentHash,
+      declarationHash: confirmation.declarationHash,
+      relationshipCount: confirmation.declarations.length,
+      confirmationPublicChangeSequence: confirmation.publicChangeSequence,
+      itemConfirmationPublicChangeSequence:
+        confirmation.publicChangeSequence,
+      heatEffectivePublicChangeSequence:
+        declaration.resolvedPublicChangeSequence === null
+          ? null
+          : declaration.resolvedPublicChangeSequence
+              > confirmation.publicChangeSequence
+            ? declaration.resolvedPublicChangeSequence
+            : confirmation.publicChangeSequence,
+      confirmedAt: input.confirmedAt,
+      canonicalRelationshipId: declaration.canonicalRelationshipId,
+      relationshipKind: declaration.relationshipKind,
+      targetPlatformKey: declaration.targetPlatformKey,
+      targetRecordKind: declaration.targetRecordKind,
+      targetExternalId: declaration.targetExternalId,
+      resolvedPublicChangeSequence:
+        declaration.resolvedPublicChangeSequence,
+      resolvedAt: declaration.resolvedAt,
+    })),
+  );
+  const confirmedRows = [...existingRows, ...newlyInsertedRows].sort(
+    (left, right) =>
+      left.semanticObservationId < right.semanticObservationId
+        ? -1
+        : left.semanticObservationId > right.semanticObservationId
+          ? 1
+          : left.relationshipKind < right.relationshipKind
+            ? -1
+            : left.relationshipKind > right.relationshipKind ? 1 : 0,
+  );
   if (
     confirmedRows.length
       !== prepared.reduce((count, { declarations }) =>

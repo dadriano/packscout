@@ -290,7 +290,8 @@ function requireRequestBoundsWithinLaunchEnvelope(
   requestBounds: ProviderSourceRequestBounds,
 ): void {
   if (
-    requestBounds.pageLimit > providerSourceLaunchBounds.pageTargetRecords
+    requestBounds.pageLimit >
+      providerSourceLaunchBounds.recordsPerRequest.maximum
     || requestBounds.maximumResponseBytes >
       providerSourceLaunchBounds.maximumResponseBytes
     || requestBounds.timeoutMilliseconds >

@@ -14,6 +14,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   TASK010_PROVIDER_IDENTITIES,
+  TASK010_BACKFILL_RECORDS_PER_REQUEST,
   TASK010_REQUIRED_MIGRATION,
   TASK010_SAFETY_VERSION,
   TASK010_SOURCE_EXECUTION_SLOTS,
@@ -362,6 +363,7 @@ test("backfill topology requires four exact active roots and fully pinned source
       state: "paused",
       activeRevisionId: "revision",
       connectionProfileMatches: true,
+      recordsPerRequest: TASK010_BACKFILL_RECORDS_PER_REQUEST,
     })),
   };
   assert.doesNotThrow(() => assertTask010BackfillTopologySnapshot(ready));
@@ -384,6 +386,12 @@ test("backfill topology requires four exact active roots and fully pinned source
       ...ready,
       sources: ready.sources.map((source, index) =>
         index === 0 ? { ...source, activeRevisionId: null } : source,
+      ),
+    },
+    {
+      ...ready,
+      sources: ready.sources.map((source, index) =>
+        index === 0 ? { ...source, recordsPerRequest: 5_000 } : source,
       ),
     },
   ]) {

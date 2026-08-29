@@ -100,6 +100,7 @@ function repository(
         connectionRevisionId,
         connectionHealthGeneration: 0n,
         state: "paused",
+        disabledAt: null,
         pauseRequested: false,
         normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
         mapperKey: "courtyard-provider-observation",
@@ -112,6 +113,8 @@ function repository(
           "trade-v1",
         ],
         intervalSeconds: 60,
+        recordsPerRequest: 1_000,
+        activeRunRecordsPerRequest: 500,
         freshnessGraceSeconds: 900,
         scheduleRevisionId,
         cursorGeneration: 1n,
@@ -121,6 +124,7 @@ function repository(
           connectionRevisionId,
           expectedHealthGeneration: 0n,
           resultingHealthGeneration: null,
+          recordsPerRequest: 1_000,
           state: "queued",
           outcome: null,
           safeCode: null,
@@ -197,10 +201,13 @@ test("catalog advertises the current adapter tuple while retaining masked connec
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   assert.equal(catalog.sources[0]?.test.state, "pending");
+  assert.equal(catalog.sources[0]?.test.current, true);
   assert.equal(
     catalog.sources[0]?.sourceAdapterVersion,
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
+  assert.equal(catalog.sources[0]?.recordsPerRequest, 1_000);
+  assert.equal(catalog.sources[0]?.activeRunRecordsPerRequest, 500);
   assert.equal(catalog.sources[0]?.cursor.resumeLabel, "Feed start");
   assert.equal(JSON.stringify(catalog).includes("must-never-leave"), false);
   assert.equal(JSON.stringify(catalog).includes("/v1/events"), false);
@@ -358,6 +365,123 @@ test("catalog marks a successful source test stale after the exact connection he
   });
   assert.equal(catalog.sources[0]?.test.state, "succeeded");
   assert.equal(catalog.sources[0]?.test.current, false);
+});
+
+test("catalog marks a successful source test stale after records per request changes", async () => {
+  const records = repository();
+  const staleRepository: ProviderSourceAdminCatalogRepository = {
+    ...records.value,
+    async listSources(scope) {
+      return (await records.value.listSources(scope)).map((source) => ({
+        ...source,
+        test: {
+          ...source.test,
+          recordsPerRequest: 500,
+          state: "succeeded" as const,
+          outcome: "success",
+          expectedHealthGeneration: 0n,
+          resultingHealthGeneration: 0n,
+          testedAt: now,
+        },
+      }));
+    },
+  };
+  const service = new ProviderSourceAdminCatalogService({
+    ...sourceRegistries(),
+    repository: staleRepository,
+    availableSourceTypes: [{
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      label: "DataForrest events",
+    }],
+    connectionConfigurations: {
+      async resolveSourceConnectionConfiguration(input) {
+        return {
+          ...input,
+          configuration: {
+            endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+            bearerToken: "secret",
+          },
+        };
+      },
+    },
+  });
+
+  const catalog = await service.getCatalog({
+    organizationId,
+    actorKey: "actor:v1:safe",
+  });
+  assert.equal(catalog.sources[0]?.recordsPerRequest, 1_000);
+  assert.equal(catalog.sources[0]?.test.state, "succeeded");
+  assert.equal(catalog.sources[0]?.test.current, false);
+});
+
+test("catalog requires a source test requested after the source was disabled", async () => {
+  const records = repository();
+  const disabledAt = new Date(now.getTime() + 1_000);
+  const disabledRepository: ProviderSourceAdminCatalogRepository = {
+    ...records.value,
+    async listSources(scope) {
+      return (await records.value.listSources(scope)).map((source) => ({
+        ...source,
+        state: "disabled" as const,
+        disabledAt,
+        test: {
+          ...source.test,
+          state: "succeeded" as const,
+          outcome: "success",
+          expectedHealthGeneration: 0n,
+          resultingHealthGeneration: 0n,
+          testedAt: now,
+        },
+      }));
+    },
+  };
+  const service = new ProviderSourceAdminCatalogService({
+    ...sourceRegistries(),
+    repository: disabledRepository,
+    availableSourceTypes: [{
+      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+      label: "DataForrest events",
+    }],
+    connectionConfigurations: {
+      async resolveSourceConnectionConfiguration(input) {
+        return {
+          ...input,
+          configuration: {
+            endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+            bearerToken: "secret",
+          },
+        };
+      },
+    },
+  });
+
+  const staleCatalog = await service.getCatalog({
+    organizationId,
+    actorKey: "actor:v1:safe",
+  });
+  assert.equal(staleCatalog.sources[0]?.test.current, false);
+
+  disabledRepository.listSources = async (scope) =>
+    (await records.value.listSources(scope)).map((source) => ({
+      ...source,
+      state: "disabled" as const,
+      disabledAt,
+      test: {
+        ...source.test,
+        requestedAt: disabledAt,
+        testedAt: disabledAt,
+        state: "succeeded" as const,
+        outcome: "success",
+        expectedHealthGeneration: 0n,
+        resultingHealthGeneration: 0n,
+      },
+    }));
+  const freshCatalog = await service.getCatalog({
+    organizationId,
+    actorKey: "actor:v1:safe",
+  });
+  assert.equal(freshCatalog.sources[0]?.test.current, true);
 });
 
 test("catalog omits providers and sources without an authoritative compatible mapper descriptor", async () => {

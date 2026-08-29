@@ -1,8 +1,8 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-26
+**Evidence date:** 2026-08-28
 
-**DataForrest Events V1 transport gate:** PASS WITH 500-RECORD TARGET, 250-RECORD RETRY FALLBACK
+**DataForrest Events V1 transport gate:** PASS WITH A 500-RECORD LIVE BASELINE, CONFIGURABLE 1–5,000 PIN, AND 8 MIB CAP
 
 **DataForrest V1 record gate:** PASS — current catalog, pull, and trade envelopes
 
@@ -33,11 +33,16 @@ live four-lane soak is pending; this is not live throughput or memory proof.
 A bounded live probe on 2026-08-26 established a 500-record initial page target:
 all four platforms completed under the unchanged 8 MiB and 10-second guards.
 Phygitals exceeded 8 MiB at both 1,000 and 2,500 records, so 500 is the largest
-shared initial value. Dense continuation pages retain the 8 MiB hard cap and
-retry the same opaque cursor at 250 records rather than stranding the source. The historical
-8,759,332,238,475-byte Task 010 result is a maximum-throughput stress ceiling,
-not the operational local estimate. Current local operation uses measured
-whole-database growth plus an explicit free-space floor; see
+shared baseline. Each source pins a maximum from 1 through 5,000, defaulting to
+500 for new sources. Queued and running work keeps that exact pin across every
+retry; the runtime never silently downshifts it. A response above 8 MiB or above
+the pinned record count fails that page without advancing its checkpoint. The
+current Task 010 capacity result reserves a full 5,000-record page for every
+ongoing poll as a maximum-throughput stress ceiling, not an operational local
+estimate. The regenerated model projects 158,428,176,709,145 bytes and requires
+211,237,568,945,527 available bytes with headroom; the measured host had only
+175,989,243,904 bytes available, so admission remains rejected. Current local
+operation uses measured whole-database growth plus an explicit free-space floor; see
 [`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Current launch boundary
@@ -57,12 +62,12 @@ upgrade, or source replacement is registered.
 
 | Current launch evidence | Current state | Verdict |
 | --- | --- | --- |
-| Live request, wrapper, cursor isolation, and 500-record page target | Reviewed authenticated capture plus the sanitized 2026-08-26 all-platform page-limit probe | PASS |
+| Live request, wrapper, cursor isolation, 500-record baseline, and configurable 1–5,000 durable request pin | Reviewed authenticated capture, sanitized 2026-08-26 all-platform page-limit probe, and pinned-bound tests | PASS |
 | Catalog, partial pull, and trade normalization under the exact V1 tuple | Contract and mapper tests | PASS |
 | Sole adapter/observation/mapper runtime registration | Production registries and Task 010 fail-closed topology gate | PASS |
 | Four Task 010 source lanes, singleton ownership, one operating request per platform, and provider maximum of two | Safety tooling fixture plus database-backed in-process supervisor integration; live four-lane soak pending | PARTIAL |
 | Historical database-pin handling | Guarded full local reset and reimport; no in-place upgrade path | REQUIRED |
-| 8 MiB maximum-page bounded-memory proof | Committed 100-page measurement and three independent fresh-process runs passed the 256 MiB peak-delta and 32 MiB retained-growth four-page aggregate gates | PASS |
+| Four concurrent 8 MiB / 5,000-record maximum-page bounded-memory proof | Committed authentic 100-page measurement passed the 256 MiB peak-delta and 32 MiB retained-growth aggregate gates | PASS |
 | Full-history provider-head reconciliation | Requires the controlled local backfill | PENDING |
 
 Everything below under the aggregate V1 fixture scorecard is retained as

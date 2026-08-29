@@ -3,6 +3,7 @@ import {
   launchProviderKeySchema,
   normalizedContinuationSchema,
   providerSourceDiagnosticSeveritySchema,
+  providerSourceRecordsPerRequestSchema,
 } from "./provider-source-contract-v1.ts";
 import {
   productionProviderSourceTypeKeySchema,
@@ -116,6 +117,7 @@ const runSummarySchema = z.object({
   lastProgressAt: timestampSchema,
   reachedHead: z.boolean(),
   failureCode: safeCodeSchema.nullable(),
+  recordsPerRequest: providerSourceRecordsPerRequestSchema,
 }).strict();
 
 const countSummarySchema = z.object({
@@ -149,6 +151,7 @@ export const providerSourceOperationsSourceSchema = z.object({
     recordIdScopes: z.array(registrationKeySchema).min(1).max(32),
     lifecycle: z.enum(["draft", "paused", "active", "disabled", "replaced"]),
     pauseRequested: z.boolean(),
+    recordsPerRequest: providerSourceRecordsPerRequestSchema,
     configuration: z.object({
       validated: z.literal(true),
       fields: z.array(z.object({
