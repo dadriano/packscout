@@ -7,6 +7,17 @@
 **Estimated effort:** 4–6 days for one builder, including authenticated operations, idempotent receipts, and lost-response recovery
 **Status:** in progress
 
+## Current Porting Constraint
+
+The original implementation branch targets an older Convex schema. The
+authoritative commit-`225f9a1` application already owns product-user,
+allowlist, saved-item, provider-catalog, global-manifest, and Data Release V3
+contracts that must remain intact. Task 014 therefore stays in progress until
+its reusable provider-local publication repository/coordinator is ported behind
+those active contracts and Convex finalization enforces the complete active
+release invariant set. The older `convex/schema.ts` is not integration-ready and
+must not replace the authoritative schema.
+
 ## Start Here
 
 Write the operation transcript for starting, batching, finalizing, and reconciling one provider release, including a duplicate request and a lost final response with the exact receipt expected afterward.
