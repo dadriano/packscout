@@ -563,7 +563,7 @@ export class ProviderSourceOperationsService {
         organizationId,
       }),
     ]);
-    if (catalog.providers.length !== 4) {
+    if (catalog.providers.length < 1 || catalog.providers.length > 50) {
       throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
     }
     const sources = catalog.providers.map(({ id }) => selectedSource(catalog, id));

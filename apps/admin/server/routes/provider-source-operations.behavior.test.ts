@@ -232,6 +232,23 @@ test("authenticated source operation reads remain tenant scoped and strict", asy
   });
 });
 
+test("source operations route preserves the bounded one-provider checkpoint DTO", async () => {
+  const fixture = harness({
+    async overview() {
+      return { ...overview, sources: [overview.sources[3]!] };
+    },
+  });
+  await withServer(fixture.dependencies, async (origin) => {
+    const response = await fetch(`${origin}/api/provider-source-operations`, {
+      headers: fixture.cookie("operator-session"),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as ProviderSourceOperationsOverview;
+    assert.equal(body.sources.length, 1);
+    assert.equal(body.sources[0]?.provider, "clutchpacks");
+  });
+});
+
 test("diagnostic cursors are opaque and bound to tenant, provider, and filters", async () => {
   const fixture = harness();
   await withServer(fixture.dependencies, async (origin) => {

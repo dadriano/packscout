@@ -1,6 +1,8 @@
 import path from "node:path";
 import { runWithPostgresAdvisoryOperationGuard } from "@packscout/database";
 import express from "express";
+import { createAdminProviderRuntimeFactory } from
+  "./admin-provider-runtime-factory.ts";
 import { createAdminRuntime } from "./runtime.ts";
 import { readRequiredSecret } from "./runtime-config.ts";
 import { createVercelAdminApp } from "./vercel/app.ts";
@@ -9,7 +11,10 @@ import { createRetryingSingleFlight } from "./vercel/runtime-loader.ts";
 
 const adminRoot = resolveVercelAdminRoot(import.meta.url);
 const getRuntime = createRetryingSingleFlight(() =>
-  createAdminRuntime({ trustedProxyHops: 1 }),
+  createAdminRuntime({
+    trustedProxyHops: 1,
+    providerRuntimeFactory: createAdminProviderRuntimeFactory,
+  }),
 );
 
 function report(event: string): void {
@@ -25,8 +30,8 @@ const vercelAdmin = createVercelAdminApp({
         const result = await runWithPostgresAdvisoryOperationGuard(
           {
             unpooledConnectionString: readRequiredSecret(
-              process.env.PACKSCOUT_DATABASE_LOCK_URL,
-              "PACKSCOUT_DATABASE_LOCK_URL",
+              process.env.PACKSCOUT_CONTROL_DATABASE_LOCK_URL,
+              "PACKSCOUT_CONTROL_DATABASE_LOCK_URL",
             ),
             lockName: "packscout:admin:machinery-alert-cycle:v1",
           },

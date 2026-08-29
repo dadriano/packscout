@@ -8,6 +8,8 @@ import {
   startMachineryAlertLoop,
   type MachineryAlertLoop,
 } from "./machinery-alert-runtime.ts";
+import { createAdminProviderRuntimeFactory } from
+  "./admin-provider-runtime-factory.ts";
 import { createAdminRuntime, type AdminRuntime } from "./runtime.ts";
 import {
   adminDevelopmentServerNetwork,
@@ -57,7 +59,10 @@ let machineryAlerts: MachineryAlertLoop | undefined;
 let shutdownPromise: Promise<void> | undefined;
 
 try {
-  runtime = await createAdminRuntime({ port });
+  runtime = await createAdminRuntime({
+    port,
+    providerRuntimeFactory: createAdminProviderRuntimeFactory,
+  });
   const { app, configuration } = runtime;
 
   if (configuration.development) {

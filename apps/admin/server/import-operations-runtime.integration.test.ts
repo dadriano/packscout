@@ -397,7 +397,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
   }
 });
 
-test("admin entrypoint fails closed without provider routing and never uses the legacy database", async () => {
+test("admin entrypoint uses concrete provider routing and never falls back to the legacy database", async () => {
   let child: ChildProcess | undefined;
   try {
     const controlDatabaseUrl =
@@ -447,7 +447,8 @@ test("admin entrypoint fails closed without provider routing and never uses the 
     });
     assert.notEqual(exit.code, 0);
     assert.equal(exit.signal, null);
-    assert.match(output, /provider runtime composition is required/i);
+    assert.match(output, /central database is unavailable/i);
+    assert.doesNotMatch(output, /provider runtime composition is required/i);
     assert.doesNotMatch(output, /control-secret|legacy-secret|packscout_dev/);
     child = undefined;
   } finally {
