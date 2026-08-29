@@ -575,3 +575,23 @@ test("clean baselines pin schema identities without hard-coding a provider", () 
     "provider migration must not hard-code a provider database/key",
   );
 });
+
+test("central baseline pins exactly-once and bounded global-correlation evidence", () => {
+  const migration = baselineMigration("central");
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX "catalog_decision_events_correlation_request_unique"/u,
+  );
+  for (const actorType of [
+    "provider_correlation_request",
+    "provider_correlation_conflict",
+    "provider_category_correlation_request",
+    "provider_category_correlation_conflict",
+  ]) {
+    assert.match(migration, new RegExp(`'${actorType}'`, "u"));
+  }
+  assert.match(migration, /catalog_decision_events_bounded_evidence_check/u);
+  assert.match(migration, /octet_length\("after_state"::text\) <= 4096/u);
+  assert.match(migration, /correlation_suggestions_bounded_rationale_check/u);
+  assert.match(migration, /'raw', 'payload', 'credential', 'databaseUrl', 'externalIdentifier'/u);
+});

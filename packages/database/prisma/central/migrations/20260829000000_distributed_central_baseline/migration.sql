@@ -943,6 +943,15 @@ CREATE UNIQUE INDEX "correlation_suggestions_pending_candidate_rule_unique"
   ON "correlation_suggestions"("provider_id", "local_collectible_id", "candidate_collectible_id", "rule_version")
   WHERE "review_state" = 'pending';
 
+CREATE UNIQUE INDEX "catalog_decision_events_correlation_request_unique"
+  ON "catalog_decision_events"("actor_type", "actor_id")
+  WHERE "actor_type" IN (
+    'provider_correlation_request',
+    'provider_correlation_conflict',
+    'provider_category_correlation_request',
+    'provider_category_correlation_conflict'
+  );
+
 CREATE UNIQUE INDEX "provider_release_invalidations_catalog_cause_unique"
   ON "provider_release_invalidations"("provider_id", "catalog_change_sequence")
   WHERE "catalog_change_sequence" IS NOT NULL;
@@ -1249,6 +1258,13 @@ ALTER TABLE "correlation_suggestions"
   ADD CONSTRAINT "correlation_suggestions_confidence_check" CHECK ("confidence" BETWEEN 0 AND 1),
   ADD CONSTRAINT "correlation_suggestions_distinct_candidate_check" CHECK (
     "candidate_collectible_id" <> "provisional_collectible_id"
+  ),
+  ADD CONSTRAINT "correlation_suggestions_bounded_rationale_check" CHECK (
+    jsonb_typeof("rationale") = 'object'
+    AND octet_length("rationale"::text) <= 4096
+    AND NOT ("rationale" ?| ARRAY[
+      'raw', 'payload', 'credential', 'databaseUrl', 'externalIdentifier'
+    ])
   );
 
 ALTER TABLE "catalog_ledger"
@@ -1270,6 +1286,14 @@ ALTER TABLE "catalog_decision_events"
   ADD CONSTRAINT "catalog_decision_events_state_shape_check" CHECK (
     ("before_state" IS NULL OR jsonb_typeof("before_state") = 'object')
     AND ("after_state" IS NULL OR jsonb_typeof("after_state") = 'object')
+  ),
+  ADD CONSTRAINT "catalog_decision_events_bounded_evidence_check" CHECK (
+    length("event_type") <= 80
+    AND length("actor_type") <= 80
+    AND length("actor_id") <= 180
+    AND length("reason") <= 160
+    AND ("before_state" IS NULL OR octet_length("before_state"::text) <= 4096)
+    AND ("after_state" IS NULL OR octet_length("after_state"::text) <= 4096)
   );
 
 ALTER TABLE "catalog_promotion_changes"

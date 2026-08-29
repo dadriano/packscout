@@ -30,6 +30,7 @@ export * from "./repack-heat.ts";
 export * from "./repack-heat-publication.ts";
 export * from "./repack-heat-publication-receipts.ts";
 export * from "./provider.ts";
+export * from "./public-identities.ts";
 export * from "./quarantine.ts";
 export * from "./operations.ts";
 export * from "./worker-fleet.ts";
