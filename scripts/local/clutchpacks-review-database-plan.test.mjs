@@ -399,6 +399,7 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   );
   assert.match(runtime, /\/opt\/homebrew\/opt\/postgresql@16\/bin\/initdb/u);
   assert.match(runtime, /\/opt\/homebrew\/opt\/postgresql@16\/bin\/pg_ctl/u);
+  assert.match(runtime, /--pwfile=\/dev\/fd\/0/u);
   assert.match(runtime, /input: `\$\{clusterAdminPassword\}\\n`/u);
   assert.match(runtime, /current_setting\('data_directory'\)/u);
   assert.match(runtime, /pg_control_system\(\)/u);

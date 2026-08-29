@@ -286,7 +286,7 @@ export async function initializeFixedCluster(
       "-D",
       cluster.dataDirectory,
       `--username=${cluster.clusterAdminRoleName}`,
-      "--pwfile=-",
+      "--pwfile=/dev/fd/0",
       "--auth-local=scram-sha-256",
       "--auth-host=scram-sha-256",
       "--encoding=UTF8",
