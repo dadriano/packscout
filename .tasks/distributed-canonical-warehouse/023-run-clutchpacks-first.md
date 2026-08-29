@@ -11,8 +11,10 @@
 
 Write the expected ClutchPacks capture counts and representative pack,
 collectible, pull, and sale relationships before enabling its source capability.
-Use `/Users/lains/Documents/packscout-data/clutchpacks.json` as untrusted,
-read-only local evidence; never persist or log the raw payload.
+Use the server-owned
+`$PACKSCOUT_PROVIDER_CAPTURE_ROOT/clutchpacks.json` capture as untrusted,
+read-only local evidence; never persist or log the raw payload or a
+workstation-specific path.
 
 ## Objective
 
