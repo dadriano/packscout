@@ -890,14 +890,12 @@ function publicHealth(observation, currentTime) {
     ? {
         state: "healthy",
         observedAt: observation.observedAt,
-        rankingEligible: true,
-        rankingIneligibilityReason: null,
+        statusReason: null,
       }
     : {
         state: "delayed",
         observedAt: observation.observedAt,
-        rankingEligible: false,
-        rankingIneligibilityReason: reason,
+        statusReason: reason,
       };
 }
 
@@ -918,11 +916,11 @@ function publicReadBack(
     state: health.state,
     observedAt: observation.observedAt,
     freshThrough: observation.freshThrough,
-    nextHealthEvaluationAt: health.rankingEligible
+    nextHealthEvaluationAt: health.state === "healthy"
       ? observation.freshThrough
       : null,
     totalProviderCount: 1,
-    delayedProviderCount: health.rankingEligible ? 0 : 1,
+    delayedProviderCount: health.state === "healthy" ? 0 : 1,
   });
   const plannedDetails = planRecords(candidate, "repacks").slice(0, count);
   const plannedById = new Map(
@@ -960,9 +958,9 @@ function publicReadBack(
     detailAt(entry, dashboardTime)).filter(({ data }) =>
     data.availability === "available" &&
     ["current", "last_known"].includes(data.packScoutEvPresentation.status));
-  const dashboardDetails = dashboardHealth.rankingEligible
-    ? opportunityCandidates.slice(0, 6).map(({ data }) => structuredClone(data))
-    : [];
+  const dashboardDetails = opportunityCandidates
+    .slice(0, 6)
+    .map(({ data }) => structuredClone(data));
   const dashboardRows = dashboardDetails.map(summaryFromDetail);
   const probes = clutchpacksCollectibleReadbackProbes(governedScope);
   const collectibleReads = probes.direct.map((item, index) => {
@@ -1053,14 +1051,6 @@ function publicReadBack(
         confidenceEvaluatedAt: new Date(dashboardTime).toISOString(),
         providerHealthEvaluatedAt: new Date(dashboardTime).toISOString(),
         providerHealthSummary: healthSummary(dashboardHealth),
-        opportunityEligibility: {
-          rankingEligibleRepackCount: dashboardHealth.rankingEligible
-            ? opportunityCandidates.length
-            : 0,
-          providerIneligibleRepackCount: dashboardHealth.rankingEligible
-            ? 0
-            : opportunityCandidates.length,
-        },
         opportunities: dashboardRows,
         details: dashboardDetails,
         selectedRepack: dashboardDetails[0] ?? null,
@@ -1722,7 +1712,7 @@ test("public readback verifies each server-minted response clock independently",
     readBack.dashboard.data.providerHealthSummary.nextHealthEvaluationAt,
     null,
   );
-  assert.equal(readBack.dashboard.data.opportunities.length, 0);
+  assert.equal(readBack.dashboard.data.opportunities.length, 6);
   await assert.doesNotReject(() => assertClutchpacksPublicReadBack(
     readBack,
     candidate,
@@ -1755,7 +1745,7 @@ test("public readback rejects a response clock that does not govern its presenta
   );
 });
 
-test("public readback rejects a health clock that does not govern provider eligibility", async () => {
+test("public readback rejects a health clock that does not govern provider status", async () => {
   const candidate = plan();
   const providerObservation = observationRequest(
     candidate,
@@ -1865,7 +1855,7 @@ test("known EV remains last-known after its legacy deadline", async () => {
   ));
 });
 
-test("healthy source health admits known EV to Top Opportunities", async () => {
+test("provider health does not gate known EV from Top Opportunities", async () => {
   const candidate = plan();
   const facts = providerObservationFacts({ sourceLifecycle: "active" });
   const providerObservation = observationRequest(
@@ -1875,10 +1865,6 @@ test("healthy source health admits known EV to Top Opportunities", async () => {
   );
   const readBack = publicReadBack(candidate, 17, scope(), {
     providerObservation,
-  });
-  assert.deepEqual(readBack.dashboard.data.opportunityEligibility, {
-    rankingEligibleRepackCount: 17,
-    providerIneligibleRepackCount: 0,
   });
   assert.equal(readBack.dashboard.data.opportunities.length, 6);
   await assert.doesNotReject(() => assertClutchpacksPublicReadBack(
@@ -2296,8 +2282,7 @@ test("activation requires the already-staged fingerprint and expected active poi
     publicHealth: {
       state: "delayed",
       observedAt: new Date(DEFAULT_CURRENT_TIME).toISOString(),
-      rankingEligible: false,
-      rankingIneligibilityReason: "PROVIDER_PAUSED",
+      statusReason: "PROVIDER_PAUSED",
     },
     result: "provider_observation_created",
   });
@@ -2573,7 +2558,7 @@ test("public readback byte-matches every stored list summary and detail field", 
         .scoreBasisPoints -= 1;
     },
     (readBack) => {
-      readBack.details[0].data.providerHealth.rankingIneligibilityReason =
+      readBack.details[0].data.providerHealth.statusReason =
         "PROVIDER_UNHEALTHY";
     },
     (readBack) => {

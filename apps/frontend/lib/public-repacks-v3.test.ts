@@ -53,10 +53,6 @@ function dashboardPayload() {
       providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthSummary: buildV3ProviderHealthSummary(),
       opportunities: [summaryOf(detail)],
-      opportunityEligibility: {
-        rankingEligibleRepackCount: 1,
-        providerIneligibleRepackCount: 0,
-      },
       details: [detail],
       selectedRepack: detail,
       kpis: {
@@ -174,10 +170,7 @@ test("parses provider health on shell, dashboard, and list responses", () => {
   assert.equal(parsedDashboard.ok, true);
   if (!parsedDashboard.ok) return;
   assert.equal(parsedDashboard.data.providerHealthSummary.state, "delayed");
-  assert.equal(
-    parsedDashboard.data.opportunityEligibility.rankingEligibleRepackCount,
-    1,
-  );
+  assert.equal(parsedDashboard.data.opportunities.length, 1);
 
   const list = listPayload();
   list.data.providerHealthSummary = providerHealthSummary;

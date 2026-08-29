@@ -29,7 +29,7 @@ The V1 confidence policy combines calculation-time evidence limitations with a h
 
 ## User-Facing Behavior
 
-No screen changes in this task. Its contract guarantees that later surfaces receive one state, score, evaluation timestamp, source timestamp, limitations list, and ranking-eligibility explanation.
+No screen changes in this task. Its contract guarantees that later surfaces receive one state, score, evaluation timestamp, source timestamp, limitations list, and informational provider-health explanation.
 
 ## Interface Contract
 

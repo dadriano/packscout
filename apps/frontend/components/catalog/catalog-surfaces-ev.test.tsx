@@ -36,7 +36,6 @@ function withProviders(element: ReactElement): ReactElement {
 
 function renderOpportunityTable(
   detail: ReturnType<typeof buildV3ViewDetail> | null = buildV3ViewDetail(),
-  providerIneligibleRepackCount = 0,
 ): string {
   return renderStatic(
     <OpportunityTable
@@ -44,10 +43,6 @@ function renderOpportunityTable(
       opportunities={
         detail === null ? [] : [publicRepackViewSummaryV3FromDetail(detail)]
       }
-      opportunityEligibility={{
-        rankingEligibleRepackCount: detail === null ? 0 : 1,
-        providerIneligibleRepackCount,
-      }}
       repacksHref="/packs"
       selectedPublicRepackId={detail?.publicRepackId ?? null}
     />,
@@ -202,7 +197,7 @@ test("last-known EV stays visible and sortable after the former 60-minute bounda
   assert.ok(renderInspector(detail).includes("$85.00"));
 });
 
-test("provider delay is separate from last-known EV and excludes ranking only", () => {
+test("provider delay is informational and last-known EV remains rankable", () => {
   const detail = buildV3ViewDetail({
     packScoutEvPresentation: buildV3LastKnownPresentation(),
     providerHealth: buildV3DelayedProviderHealth(),
@@ -214,20 +209,17 @@ test("provider delay is separate from last-known EV and excludes ranking only", 
   ]) {
     assert.ok(
       markup.includes(
-        "Provider feed delayed; excluded from Top Opportunities.",
+        "Provider feed delayed; displaying the latest available data.",
       ),
     );
     assert.ok(markup.includes("Last-known estimate"));
     assert.ok(markup.includes("-$15.00"));
   }
 
-  const opportunities = renderOpportunityTable(null, 1);
-  assert.ok(
-    opportunities.includes(
-      "Provider feed delayed; excluded from Top Opportunities.",
-    ),
-  );
-  assert.ok(opportunities.includes("Last-known EV remains available in All Repacks"));
+  const opportunities = renderOpportunityTable(detail);
+  assert.ok(opportunities.includes("Last-known estimate"));
+  assert.ok(opportunities.includes("-$15.00"));
+  assert.equal(opportunities.includes("excluded from Top Opportunities"), false);
 });
 
 test("tables expose sortable headers with aria-sort and glossary help", () => {

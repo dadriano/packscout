@@ -925,7 +925,6 @@ export const getPublicShellStatusV3AtTime = internalQuery({
       active.vendors,
       args.currentTime,
     );
-    if (health === null) return publicReadError("RELEASE_UNAVAILABLE");
     const shell = publicShellStatusV3Schema.safeParse({
       release: active.identity,
       ...dataReleaseV3PresentationContext(args.currentTime),
@@ -965,7 +964,6 @@ export const getDashboardBundleV3AtTime = internalQuery({
       active.vendors,
       currentTime,
     );
-    if (health === null) return publicReadError("RELEASE_UNAVAILABLE");
     const presentedSearch = await presentSearchRows(
       ctx,
       active,
@@ -983,25 +981,15 @@ export const getDashboardBundleV3AtTime = internalQuery({
     const matchingRows = allRows.filter((row) =>
       rowMatchesFilters(row, request.filters),
     );
-    // Provider freshness gates only actionable ranking. Catalog rows, EV
-    // presentations, KPIs, medians, and summaries remain visible and continue
-    // to use the pinned evaluation clock.
+    // Rank every purchasable repack with a calculable estimate. Provider-feed
+    // status is informational; source-evidence age is already represented by
+    // the server-derived confidence score and last-known presentation state.
     const opportunityCandidates = matchingRows.filter(
       (row) =>
         packIsPurchasable(row.availability) &&
         row.packScoutEvDollarsMinor !== null,
     );
-    const rankingEligibleRows = opportunityCandidates.filter(
-      (row) =>
-        (health.byPublicVendorId.get(row.publicVendorId) ??
-          missingDataReleaseV3ProviderHealth()).rankingEligible,
-    );
-    const opportunityRows = [...rankingEligibleRows]
-      .filter(
-        (row) =>
-          packIsPurchasable(row.availability) &&
-          row.packScoutEvDollarsMinor !== null,
-      )
+    const opportunityRows = [...opportunityCandidates]
       .sort((left, right) =>
         compareRows(left, right, {
           search: "",
@@ -1030,11 +1018,6 @@ export const getDashboardBundleV3AtTime = internalQuery({
       ...dataReleaseV3PresentationContext(currentTime),
       ...dataReleaseV3ProviderHealthContext(currentTime),
       providerHealthSummary: health.summary,
-      opportunityEligibility: {
-        rankingEligibleRepackCount: rankingEligibleRows.length,
-        providerIneligibleRepackCount:
-          opportunityCandidates.length - rankingEligibleRows.length,
-      },
       opportunities: details.map(publicRepackViewSummaryV3FromDetail),
       details,
       selectedRepack,
@@ -1104,7 +1087,6 @@ export const listPublicRepacksV3AtTime = internalQuery({
       active.vendors,
       currentTime,
     );
-    if (health === null) return publicReadError("RELEASE_UNAVAILABLE");
     const presentedSearch = await presentSearchRows(
       ctx,
       active,
@@ -1279,7 +1261,6 @@ export const getPublicRepackV3AtTime = internalQuery({
       active.vendors,
       args.currentTime,
     );
-    if (health === null) return publicReadError("RELEASE_UNAVAILABLE");
     const views = await hydrateRepackViews(
       ctx,
       active,
@@ -1396,7 +1377,6 @@ export const findRepacksByDesiredCollectibleV3AtTime = internalQuery({
       active.vendors,
       currentTime,
     );
-    if (health === null) return publicReadError("RELEASE_UNAVAILABLE");
     const presentedSearch = await presentSearchRows(
       ctx,
       active,

@@ -415,10 +415,6 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
       delayedProviderCount: 0,
       nextHealthEvaluationAt: "2026-08-20T20:00:00.000Z",
     },
-    opportunityEligibility: {
-      rankingEligibleRepackCount: 1,
-      providerIneligibleRepackCount: 0,
-    },
     opportunities: [publicRepackViewSummaryV3FromDetail(lastKnown)],
     details: [lastKnown],
     selectedRepack: lastKnown,
@@ -444,18 +440,6 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
     false,
     "response and live presentation clocks cannot diverge",
   );
-  assert.equal(
-    publicDashboardBundleV3Schema.safeParse({
-      ...oneLastKnownOpportunity,
-      opportunityEligibility: {
-        rankingEligibleRepackCount: 0,
-        providerIneligibleRepackCount: 0,
-      },
-    }).success,
-    false,
-    "eligibility counts cannot under-report emitted opportunities",
-  );
-
   const tamperedPresentation = structuredClone(lastKnown);
   if (tamperedPresentation.packScoutEvPresentation.status === "unavailable") {
     throw new Error("unexpected unavailable fixture");
@@ -474,8 +458,7 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
       providerHealth: {
         state: "delayed",
         observedAt: DATA_RELEASE_V3_OBSERVED_AT,
-        rankingEligible: false,
-        rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+        statusReason: "PROVIDER_OBSERVATION_STALE",
       },
     },
   );
@@ -486,8 +469,8 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
       details: [delayed],
       selectedRepack: delayed,
     }).success,
-    false,
-    "provider-ineligible estimates remain visible but cannot rank",
+    true,
+    "provider delay remains informational and does not block ranking",
   );
   assert.equal(
     publicDashboardBundleV3Schema.safeParse({
@@ -500,16 +483,12 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
         delayedProviderCount: 1,
         nextHealthEvaluationAt: null,
       },
-      opportunityEligibility: {
-        rankingEligibleRepackCount: 0,
-        providerIneligibleRepackCount: 1,
-      },
       opportunities: [],
       details: [],
       selectedRepack: null,
     }).success,
     true,
-    "an empty opportunity list can explain provider ineligibility",
+    "an ordinary no-match opportunity list remains valid during provider delay",
   );
 
   const list = buildPublicRepackListPageV3();

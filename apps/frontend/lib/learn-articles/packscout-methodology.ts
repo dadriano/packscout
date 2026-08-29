@@ -182,7 +182,7 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "When a previously calculable estimate has not received newer source evidence for more than 60 minutes, PackScout keeps the economics visible as a Last-known estimate and lowers its confidence over time. Provider feed health is tracked separately and determines whether that estimate can appear in Top Opportunities.",
+          text: "When a previously calculable estimate has not received newer source evidence for more than 60 minutes, PackScout keeps the economics visible as a Last-known estimate and lowers its confidence over time. Provider feed health is informational and does not hide the estimate or exclude it from ranking.",
         },
       ],
     },

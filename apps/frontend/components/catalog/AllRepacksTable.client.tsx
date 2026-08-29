@@ -176,9 +176,9 @@ function RepackRow({
             {estimate.freshness.dataAsOfLabel}
           </time>
         ) : null}
-        {!providerHealth.rankingEligible ? (
+        {providerHealth.state !== "healthy" ? (
           <span className={styles.providerWarning}>
-            {providerHealth.rankingLabel}
+            {providerHealth.statusCopy}
           </span>
         ) : null}
       </td>

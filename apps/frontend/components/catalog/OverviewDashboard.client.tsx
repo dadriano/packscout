@@ -75,7 +75,6 @@ export function OverviewDashboard({
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
-          opportunityEligibility={bundle.opportunityEligibility}
           repacksHref={repacksHref}
           selectedPublicRepackId={selectedId}
         />

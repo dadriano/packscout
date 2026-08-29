@@ -22,12 +22,11 @@ import {
 } from "./productionDataReleaseErrors";
 
 /**
- * Independently refreshed provider-health authorization for data_release_v3.
+ * Independently refreshed, informational provider health for data_release_v3.
  *
  * Catalog releases remain immutable. One observation is stored per active
- * release and public vendor, and a later release is therefore ineligible until
- * it receives its own aligned observation. The write primitive is internal on
- * purpose: only an authenticated publication boundary may invoke it.
+ * release and public vendor. The write primitive is internal on purpose: only
+ * an authenticated publication boundary may invoke it.
  */
 
 const MAX_OBSERVATION_CLOCK_SKEW_MILLISECONDS = 5 * 60_000;
@@ -95,7 +94,7 @@ type ProviderObservationInput = Readonly<{
   releaseAlignment: "aligned" | "behind";
 }>;
 
-export type DataReleaseV3ProviderRankingIneligibilityReason =
+export type DataReleaseV3ProviderHealthStatusReason =
   | "PROVIDER_HEALTH_UNAVAILABLE"
   | "PROVIDER_OBSERVATION_STALE"
   | "PROVIDER_PAUSED"
@@ -106,10 +105,7 @@ export type DataReleaseV3ProviderRankingIneligibilityReason =
 export type DataReleaseV3PublicProviderHealth = Readonly<{
   state: "healthy" | "delayed" | "unavailable";
   observedAt: string | null;
-  rankingEligible: boolean;
-  rankingIneligibilityReason:
-    | DataReleaseV3ProviderRankingIneligibilityReason
-    | null;
+  statusReason: DataReleaseV3ProviderHealthStatusReason | null;
 }>;
 
 export type DataReleaseV3ProviderHealthSummary = Readonly<{
@@ -368,7 +364,7 @@ export const refresh = internalMutation({
 });
 
 function unavailableHealth(
-  reason: DataReleaseV3ProviderRankingIneligibilityReason,
+  reason: DataReleaseV3ProviderHealthStatusReason,
   observedAt: string | null = null,
 ): DataReleaseV3PublicProviderHealth {
   return {
@@ -376,13 +372,34 @@ function unavailableHealth(
       ? "unavailable"
       : "delayed",
     observedAt: reason === "PROVIDER_HEALTH_UNAVAILABLE" ? null : observedAt,
-    rankingEligible: false,
-    rankingIneligibilityReason: reason,
+    statusReason: reason,
   };
 }
 
 export function missingDataReleaseV3ProviderHealth(): DataReleaseV3PublicProviderHealth {
   return unavailableHealth("PROVIDER_HEALTH_UNAVAILABLE");
+}
+
+function unavailableProviderHealthSnapshot(
+  publicVendorIds: readonly string[],
+): DataReleaseV3ProviderHealthSnapshot {
+  const uniquePublicVendorIds = [...new Set(publicVendorIds)];
+  return {
+    byPublicVendorId: new Map(
+      uniquePublicVendorIds.map((publicVendorId) => [
+        publicVendorId,
+        missingDataReleaseV3ProviderHealth(),
+      ]),
+    ),
+    summary: {
+      state: "unavailable",
+      observedAt: null,
+      freshThrough: null,
+      nextHealthEvaluationAt: null,
+      totalProviderCount: uniquePublicVendorIds.length,
+      delayedProviderCount: uniquePublicVendorIds.length,
+    },
+  };
 }
 
 function presentObservation(
@@ -434,8 +451,7 @@ function presentObservation(
   return {
     state: "healthy",
     observedAt: observation.observedAt,
-    rankingEligible: true,
-    rankingIneligibilityReason: null,
+    statusReason: null,
   };
 }
 
@@ -447,11 +463,14 @@ export async function loadDataReleaseV3ProviderHealthSnapshot(
     vendorKey: string;
   }>[],
   evaluationTime: number,
-): Promise<DataReleaseV3ProviderHealthSnapshot | null> {
+): Promise<DataReleaseV3ProviderHealthSnapshot> {
+  const publicVendorIds = vendors.map(({ publicVendorId }) => publicVendorId);
   const uniqueVendors = new Map<string, string>();
   for (const vendor of vendors) {
     const previousKey = uniqueVendors.get(vendor.publicVendorId);
-    if (previousKey !== undefined && previousKey !== vendor.vendorKey) return null;
+    if (previousKey !== undefined && previousKey !== vendor.vendorKey) {
+      return unavailableProviderHealthSnapshot(publicVendorIds);
+    }
     uniqueVendors.set(vendor.publicVendorId, vendor.vendorKey);
   }
   const observations = await ctx.db
@@ -460,14 +479,16 @@ export async function loadDataReleaseV3ProviderHealthSnapshot(
       index.eq("releaseId", release._id),
     )
     .take(uniqueVendors.size + 1);
-  if (observations.length > uniqueVendors.size) return null;
+  if (observations.length > uniqueVendors.size) {
+    return unavailableProviderHealthSnapshot(publicVendorIds);
+  }
   const byVendor = new Map<string, Doc<"dataReleaseV3ProviderObservations">>();
   for (const observation of observations) {
     if (
       !uniqueVendors.has(observation.publicVendorId) ||
       byVendor.has(observation.publicVendorId)
     ) {
-      return null;
+      return unavailableProviderHealthSnapshot(publicVendorIds);
     }
     byVendor.set(observation.publicVendorId, observation);
   }
@@ -498,12 +519,12 @@ export async function loadDataReleaseV3ProviderHealthSnapshot(
   const nextHealthEvaluationTimes = observations.flatMap((observation) => {
     const health = byPublicVendorId.get(observation.publicVendorId);
     const freshThrough = timestampMilliseconds(observation.freshThrough);
-    return health?.rankingEligible === true && freshThrough !== null
+    return health?.state === "healthy" && freshThrough !== null
       ? [freshThrough]
       : [];
   });
   const delayedProviderCount = healthValues.filter(
-    ({ rankingEligible }) => !rankingEligible,
+    ({ state }) => state !== "healthy",
   ).length;
   const unavailableProvider = healthValues.some(
     ({ state }) => state === "unavailable",

@@ -94,7 +94,7 @@ function RepackCard({
         <MetricValue compact metric={buyback} showReason={false} />
       </div>
 
-      {estimate.status === "last_known" || !providerHealth.rankingEligible ? (
+      {estimate.status === "last_known" || providerHealth.state !== "healthy" ? (
         <div
           className={styles.evidence}
           data-health={providerHealth.state}
@@ -112,8 +112,8 @@ function RepackCard({
               ) : null}
             </>
           ) : null}
-          {!providerHealth.rankingEligible ? (
-            <span>{providerHealth.rankingLabel}</span>
+          {providerHealth.state !== "healthy" ? (
+            <span>{providerHealth.statusCopy}</span>
           ) : null}
         </div>
       ) : null}

@@ -257,8 +257,7 @@ test("every approved public state appears and passes the production contracts", 
         providerHealth: {
           state: "healthy",
           observedAt: result.readAt,
-          rankingEligible: true,
-          rankingIneligibilityReason: null,
+          statusReason: null,
         },
       });
       assert.ok(view.success);

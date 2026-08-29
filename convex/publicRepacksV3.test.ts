@@ -608,7 +608,7 @@ describe("data_release_v3 public reads", () => {
     });
   });
 
-  test("provider health fails Top Opportunities closed without hiding EV", async () => {
+  test("provider health remains informational without hiding or excluding EV", async () => {
     const scenarios = [
       {
         name: "missing",
@@ -750,20 +750,12 @@ describe("data_release_v3 public reads", () => {
       const dashboardData = dashboard.data as {
         opportunities: unknown[];
         providerHealthSummary: { state: string };
-        opportunityEligibility: {
-          rankingEligibleRepackCount: number;
-          providerIneligibleRepackCount: number;
-        };
         kpis: { medianPackScoutEvPercent: { status: string } };
       };
-      expect(dashboardData.opportunities, scenario.name).toEqual([]);
+      expect(dashboardData.opportunities, scenario.name).toHaveLength(2);
       expect(dashboardData.providerHealthSummary.state, scenario.name).toBe(
         scenario.summaryState,
       );
-      expect(dashboardData.opportunityEligibility, scenario.name).toEqual({
-        rankingEligibleRepackCount: 0,
-        providerIneligibleRepackCount: 2,
-      });
       expect(
         dashboardData.kpis.medianPackScoutEvPercent.status,
         scenario.name,
@@ -778,16 +770,16 @@ describe("data_release_v3 public reads", () => {
           details: {
             publicRepackId: string;
             providerHealth: {
-              rankingEligible: boolean;
-              rankingIneligibilityReason: string | null;
+              state: string;
+              statusReason: string | null;
             };
             packScoutEvPresentation: { status: string; metrics: unknown };
           }[];
         }
       ).details.find(({ publicRepackId }) => publicRepackId === V3_REPACK_ID_A)!;
       expect(detail.providerHealth, scenario.name).toMatchObject({
-        rankingEligible: false,
-        rankingIneligibilityReason: scenario.reason,
+        state: scenario.summaryState,
+        statusReason: scenario.reason,
       });
       expect(detail.packScoutEvPresentation.status, scenario.name).toBe(
         "current",
@@ -796,7 +788,7 @@ describe("data_release_v3 public reads", () => {
     }
   });
 
-  test("a delayed provider still exposes the next eligible provider-health deadline", async () => {
+  test("provider health deadlines refresh without gating opportunity ranking", async () => {
     const t = convexTest(schema, modules);
     const secondVendorId = "00000000-0000-5000-8000-000000000009";
     await publishFixture(t, [
@@ -845,7 +837,10 @@ describe("data_release_v3 public reads", () => {
         freshThrough: new Date(NOW - 1).toISOString(),
         nextHealthEvaluationAt,
       },
-      opportunities: [{ publicRepackId: V3_REPACK_ID_B }],
+      opportunities: [
+        { publicRepackId: V3_REPACK_ID_A },
+        { publicRepackId: V3_REPACK_ID_B },
+      ],
     });
 
     const atBoundary = (await t.query(
@@ -858,7 +853,10 @@ describe("data_release_v3 public reads", () => {
         state: "delayed",
         nextHealthEvaluationAt: null,
       },
-      opportunities: [],
+      opportunities: [
+        { publicRepackId: V3_REPACK_ID_A },
+        { publicRepackId: V3_REPACK_ID_B },
+      ],
     });
   });
 
@@ -1140,7 +1138,7 @@ describe("data_release_v3 public reads", () => {
         state: string;
         nextHealthEvaluationAt: string | null;
       };
-      details: { providerHealth: { rankingEligible: boolean } }[];
+      details: { providerHealth: { state: string } }[];
     };
     expect(secondPage.rows.length).toBe(2);
     expect(secondPage.hasPrevious).toBe(true);
@@ -1157,7 +1155,7 @@ describe("data_release_v3 public reads", () => {
     });
     expect(
       secondPage.details.every(
-        ({ providerHealth }) => !providerHealth.rankingEligible,
+        ({ providerHealth }) => providerHealth.state === "delayed",
       ),
     ).toBe(true);
     const firstIds = new Set(
