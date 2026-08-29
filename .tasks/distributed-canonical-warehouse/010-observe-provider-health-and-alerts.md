@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including activity relay, grouped alert lifecycle, partial outages, and admin parity
-**Status:** done
+**Status:** in progress
 
 ## Start Here
 
@@ -71,9 +71,9 @@ An alert projection contains organization and provider IDs, state, type, severit
 
 ### Observation acceptance
 
-- [x] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
-- [x] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
-- [x] One unreachable provider leaves healthy provider history and alert operations usable.
+- [ ] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
+- [ ] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
+- [ ] One unreachable provider leaves healthy provider history and alert operations usable.
 - [x] Provider-local detail remains authoritative and returns an explicit unavailable result when unreachable.
 - [x] Metrics cover reachability, heartbeats, activity lag, quarantine, publication lag, and alert age.
 
@@ -94,6 +94,13 @@ An alert projection contains organization and provider IDs, state, type, severit
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
 
 ## Completion Evidence
+
+- Integration review on 2026-08-29 reopened this task: the relay had no runtime
+  call site, equal-timestamp probe/health writes could leave health unknown,
+  disabled targets could be misreported as unreachable, the fixed first target
+  page could starve later providers, and concurrent delivery acknowledgement
+  could produce a false failure. These gaps must be fixed and reverified before
+  the prior completion evidence is accepted again.
 
 - Provider-local transactions append safe, bounded activity through an outbox that preserves normal capacity with a singleton overflow coalescer; central outages leave delivery pending and never roll back the authoritative provider commit.
 - The relay replays events idempotently with bounded per-provider backoff, while independent provider cycles remain isolated and a successful direct probe is recorded before the next health projection.
