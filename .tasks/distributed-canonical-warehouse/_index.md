@@ -4,18 +4,18 @@
 
 Open task `distributed-canonical-warehouse/001` and produce the database ownership matrix, naming rules, and cross-database boundary contract. The first checkpoint is a clean non-production topology with one `packscout` database and two independently reachable provider databases.
 
-**Progress:** 10/20 tasks complete
+**Progress:** 10/21 tasks complete
 
 ## Current Build Checkpoint
 
-Stop after the admin and production worker fail closed when no provider
-integration is installed. Run now must return
-`PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without creating a command or run, and
-scheduled execution must not acquire a lease or mutate provider data. Unfinished
-Task 009 and Tasks 014–020 remain deferred until a real provider
-fetcher/parser/mapper is available; already completed schema and release-assembly
-foundations remain in place, but no Convex publication or frontend gate work
-proceeds at this checkpoint.
+Finish the work already in progress, make the admin runnable on only the new
+central/provider topology, and complete Task 021's parallel ClutchPacks and
+Courtyard captured-feed import proof. Run now must return
+`PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without mutation for an uninstalled
+integration. After both installed providers can be triggered and ingest into
+separate databases concurrently, pause to realign priorities before starting
+Tasks 015–020. No Convex manifest activation or frontend gate work proceeds at
+this checkpoint.
 
 ## Context
 
@@ -103,7 +103,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 006 | Maintain one shared global catalog | large | 4–6 days | done | 002, 003, 004 |
 | 007 | Complete one mixed-response provider run | large | 4–6 days | in progress | 005 |
 | 008 | Operate provider runs from admin | large | 3–5 days | in progress | 002, 003, 005, 007 |
-| 009 | Diagnose and recover provider work | large | 3–5 days | blocked | 005, 007, 008 |
+| 009 | Diagnose and recover provider work | large | 3–5 days | in progress | 005, 007, 008 |
 | 010 | Observe provider health and alerts | large | 3–5 days | done | 002, 003, 005, 007 |
 
 ### Diagnostics and publication
@@ -113,7 +113,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 011 | Preserve the Data Feed Lab | small | 1–2 days | done | 002, 003 |
 | 012 | Publish shared catalog versions safely | large | 3–5 days | done | 006 |
 | 013 | Assemble immutable provider releases | large | 5–7 days | done | 006, 007, 012 |
-| 014 | Publish provider releases safely | large | 4–6 days | blocked | 013 |
+| 014 | Publish provider releases safely | large | 4–6 days | in progress | 013 |
 | 015 | Advance provider manifest gates independently | large | 4–6 days | not started | 012, 014 |
 
 ### Delivery and proof
@@ -125,6 +125,12 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 018 | Prove distributed security and failure isolation | large | 3–5 days | not started | 005, 006, 012, 014, 015 |
 | 019 | Publish the system overview and ERDs | medium | 2–3 days | not started | 006, 015, 016, 018 |
 | 020 | Certify the distributed warehouse | large | 5–8 days | not started | 008, 009, 010, 011, 016, 017, 018, 019 |
+
+### Provider integration checkpoint
+
+| ID | Task | Scope | Estimate | Status | Depends on |
+|---|---|---|---|---|---|
+| 021 | Prove two provider imports in parallel | large | 4–7 days | not started | 007, 008 |
 
 Total estimated builder effort is 69–108 days, including focused verification in every task. The dependency critical path is approximately 42–64 builder days; independent tasks reduce elapsed time when built in parallel.
 
