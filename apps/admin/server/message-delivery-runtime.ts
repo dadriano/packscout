@@ -1,4 +1,4 @@
-import { PrismaEmailMessageOutboxRepository } from "@packscout/database";
+import { CentralEmailMessageOutboxRepository } from "@packscout/database";
 import { createMessageDeliveryAuditSink } from "./message-delivery-audit.ts";
 import type { MessagesRouterDependencies } from "./routes/messages.ts";
 
@@ -11,7 +11,7 @@ import type { MessagesRouterDependencies } from "./routes/messages.ts";
  */
 
 type MessageDeliveryDatabase = ConstructorParameters<
-  typeof PrismaEmailMessageOutboxRepository
+  typeof CentralEmailMessageOutboxRepository
 >[0];
 
 export interface AdminMessageDeliveryRuntimeInput {
@@ -23,7 +23,7 @@ export function createAdminMessageDeliveryRuntime(
   input: AdminMessageDeliveryRuntimeInput,
 ): Omit<MessagesRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
   return {
-    queue: new PrismaEmailMessageOutboxRepository(input.database),
+    queue: new CentralEmailMessageOutboxRepository(input.database),
     audit: createMessageDeliveryAuditSink({
       database: input.database,
       actorPseudonymKey: input.actorPseudonymKey,

@@ -1,39 +1,36 @@
 import { RECOMPUTATION_BACKLOG_DEPTH_DEFAULT } from "@packscout/contracts";
 import {
-  createPrismaClientLifecycle,
-  DatabaseLoginAttemptLimiter,
-  PrismaAuthAuditSink,
-  PrismaAuthRepository,
-  PrismaCanonicalInspectionRepository,
-  PrismaProviderPromotionFactsRepository,
-  ProviderSourceAdminCatalogRepository,
+  CentralAuthAuditSink,
+  CentralAuthRepository,
+  CentralLoginAttemptLimiter,
+  CentralWorkerPresenceRepository,
+  createCentralDatabaseLifecycle,
+  type CentralPrismaClient,
+  type PrismaWorkerFleetReadRepository,
 } from "@packscout/database";
 import {
-  CanonicalInspectionService,
   MachineryAlertService,
   resolveEmailLinkTokenSecret,
+  type MachineryAlertFactsSource,
+  type OperationalHealthRepository,
 } from "@packscout/services";
 import { createAdminAccessDecisionNoticeRuntime } from "./access-decision-notice-runtime.ts";
-import { createAdminApp } from "./app.ts";
+import {
+  createAdminApp,
+  type AdminAppDependencies,
+} from "./app.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
-import { createAdminBackgroundWorkRuntime } from "./background-work-runtime.ts";
 import { createBetaAllowlistAuditSink } from "./beta-allowlist-audit.ts";
 import { createBetaAllowlistDirectoryClient } from "./beta-allowlist-directory.ts";
-import { createAdminImportOperationsRuntime } from "./import-operations-runtime.ts";
-import {
-  createAdminMachineryAlertFactsSource,
-  createAdminMachineryAlertObserver,
-} from "./machinery-alert-runtime.ts";
+import { createAdminCentralOperationalRuntime } from "./central-operational-runtime.ts";
+import { createAdminMachineryAlertObserver } from "./machinery-alert-runtime.ts";
 import { createAdminMessageDeliveryRuntime } from "./message-delivery-runtime.ts";
-import { createAdminOperationalRuntime } from "./operational-runtime.ts";
 import { createAdminOperatorAccountCreatedNoticeRuntime } from "./operator-account-created-notice-runtime.ts";
 import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runtime.ts";
-import { createParityRuntime } from "./parity-runtime.ts";
 import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
 import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
-import { createProviderAdminRuntime } from "./provider-runtime.ts";
-import { createAdminProviderSourceRuntime } from "./provider-source-runtime.ts";
+import { createCentralProviderAdminRuntime } from "./provider-runtime.ts";
 import { createPublishedCatalogReader } from "./published-catalog-reader.ts";
 import {
   adminDevelopmentAllowedOrigins,
@@ -48,8 +45,9 @@ import {
   readServiceHost,
   readSourceAdministrationSettings,
   readTrustedProxies,
+  type SourceAdministrationSettings,
 } from "./runtime-config.ts";
-import { createAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
+import { createDistributedAdminWorkerFleetRuntime } from "./worker-fleet-runtime.ts";
 
 export interface AdminRuntimeConfiguration {
   readonly development: boolean;
@@ -68,10 +66,54 @@ export interface AdminRuntime {
   close(): Promise<void>;
 }
 
+type ProviderAppDependencies = Pick<
+  AdminAppDependencies,
+  | "importOperations"
+  | "backgroundWork"
+  | "canonical"
+  | "parity"
+  | "providerSources"
+  | "providerSourceOperations"
+>;
+
+/**
+ * Provider-owned dependencies required before the distributed admin can boot.
+ * The factory may route across providers, but it never hands a database client
+ * or connection string to a browser-selected request.
+ */
+export interface AdminProviderRuntimeSlice {
+  readonly app: ProviderAppDependencies;
+  readonly workerFleetEvidence: Pick<
+    PrismaWorkerFleetReadRepository,
+    "listRunningRuns" | "listSchedules"
+  >;
+  readonly operationalHealthRepository: OperationalHealthRepository;
+  readonly machineryAlertFacts: MachineryAlertFactsSource;
+  close(): Promise<void>;
+}
+
+export interface AdminProviderRuntimeFactoryContext {
+  readonly central: CentralPrismaClient;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly actorPseudonymKey: Uint8Array;
+  readonly sourceAdministration: SourceAdministrationSettings | null;
+  readonly recomputationBacklogLimit: number;
+  readonly catalogDeploymentKey: string | null;
+}
+
+export type AdminProviderRuntimeFactory = (
+  context: AdminProviderRuntimeFactoryContext,
+) => Promise<AdminProviderRuntimeSlice> | AdminProviderRuntimeSlice;
+
 export interface CreateAdminRuntimeInput {
   readonly environment?: NodeJS.ProcessEnv;
   /** Adapter-validated listening port for self-hosted process models. */
   readonly port?: number;
+  /**
+   * Provider-local admin behavior is supplied by the distributed routing
+   * composition. Keeping it explicit prevents a legacy database fallback.
+   */
+  readonly providerRuntimeFactory?: AdminProviderRuntimeFactory;
   /**
    * Vercel terminates the public connection one trusted hop before Express and
    * overwrites the forwarded-for header. The deployment adapter opts into that
@@ -82,8 +124,8 @@ export interface CreateAdminRuntimeInput {
 
 /**
  * Composes the admin's database-backed behavior without choosing a process
- * model. The self-host adapter owns listeners and timers; the Vercel adapter
- * owns request dispatch and its scheduler endpoint.
+ * model. Central dependencies are authoritative in `packscout`; provider-local
+ * dependencies must arrive through the validated provider routing factory.
  */
 export async function createAdminRuntime(
   input: CreateAdminRuntimeInput = {},
@@ -118,10 +160,15 @@ export async function createAdminRuntime(
       "PACKSCOUT_SESSION_ABSOLUTE_MS must be greater than or equal to PACKSCOUT_SESSION_IDLE_MS.",
     );
   }
+  if (input.providerRuntimeFactory === undefined) {
+    throw new Error(
+      "PackScout provider runtime composition is required; legacy database fallback is disabled.",
+    );
+  }
 
-  const databaseUrl = readRequiredSecret(
-    environment.PACKSCOUT_DATABASE_URL,
-    "PACKSCOUT_DATABASE_URL",
+  const centralDatabaseUrl = readRequiredSecret(
+    environment.PACKSCOUT_CONTROL_DATABASE_URL,
+    "PACKSCOUT_CONTROL_DATABASE_URL",
   );
   const sessionSecret = readRequiredSecret(
     environment.PACKSCOUT_SESSION_HASHING_SECRET,
@@ -176,44 +223,45 @@ export async function createAdminRuntime(
     token: environment.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
   });
   const emailLinkTokenSecret = resolveEmailLinkTokenSecret(environment);
-  const databaseLifecycle = createPrismaClientLifecycle({ databaseUrl });
+  const centralLifecycle = createCentralDatabaseLifecycle({
+    databaseUrl: centralDatabaseUrl,
+  });
+  let providerRuntime: AdminProviderRuntimeSlice | undefined;
 
   try {
-    await databaseLifecycle.start();
-    const database = databaseLifecycle.client;
-    const canonicalInspection = new CanonicalInspectionService(
-      new PrismaCanonicalInspectionRepository(database),
-    );
-    const operational = createAdminOperationalRuntime({
-      database,
+    await centralLifecycle.start();
+    const central = centralLifecycle.client;
+    providerRuntime = await input.providerRuntimeFactory({
+      central,
+      environment,
       actorPseudonymKey: providerActorKey,
+      sourceAdministration,
+      recomputationBacklogLimit,
+      catalogDeploymentKey,
+    });
+    const operational = createAdminCentralOperationalRuntime({
+      database: central,
+      actorPseudonymKey: providerActorKey,
+      healthRepository: providerRuntime.operationalHealthRepository,
       alertEmail: { env: environment },
     });
+    if (operational.health === undefined) {
+      throw new Error("PackScout provider health composition is required.");
+    }
     const auth = await createAdminAuthRuntime({
-      repository: new PrismaAuthRepository(database),
-      loginLimiter: new DatabaseLoginAttemptLimiter(database, {
+      repository: new CentralAuthRepository(central),
+      loginLimiter: new CentralLoginAttemptLimiter(central, {
         windowMs: 15 * 60 * 1_000,
         blockMs: 15 * 60 * 1_000,
         maximumFailures: 8,
       }),
-      audit: new PrismaAuthAuditSink(database),
+      audit: new CentralAuthAuditSink(central),
       sessionSecret,
       sessionIdleMs,
       sessionAbsoluteMs,
       production: !development,
       allowedOrigins,
     });
-    const providerSourceRuntime = sourceAdministration
-      ? createAdminProviderSourceRuntime({
-          database,
-          connectionConfigurationKey:
-            sourceAdministration.connectionConfigurationKey,
-          connectionConfigurationKeyVersion:
-            sourceAdministration.connectionConfigurationKeyVersion,
-          actorPseudonymKey: providerActorKey,
-          environment: development ? "local" : "production",
-        })
-      : undefined;
     const directory = createProductUserDirectoryReader({
       config: productUserDirectoryConfig,
     });
@@ -224,38 +272,21 @@ export async function createAdminRuntime(
       trustedProxies: configuredTrustedProxies,
       trustedProxyHops: input.trustedProxyHops,
       auth,
-      providers: createProviderAdminRuntime({
-        repository: new ProviderSourceAdminCatalogRepository(database),
+      providers: createCentralProviderAdminRuntime(central),
+      ...providerRuntime.app,
+      workerFleet: createDistributedAdminWorkerFleetRuntime({
+        presence: new CentralWorkerPresenceRepository(central),
+        evidence: providerRuntime.workerFleetEvidence,
       }),
-      importOperations: createAdminImportOperationsRuntime({
-        database,
-        actorPseudonymKey: providerActorKey,
-      }),
-      backgroundWork: createAdminBackgroundWorkRuntime({
-        database,
-        actorPseudonymKey: providerActorKey,
-        backlogDepthLimit: recomputationBacklogLimit,
-      }),
-      workerFleet: createAdminWorkerFleetRuntime({ database }),
-      canonical: canonicalInspection,
       published: publishedCatalog,
-      parity:
-        catalogDeploymentKey === null
-          ? undefined
-          : createParityRuntime({
-            canonical: canonicalInspection,
-            promotion: new PrismaProviderPromotionFactsRepository(database),
-            published: publishedCatalog,
-            deploymentKey: catalogDeploymentKey,
-            }),
       productUsers: {
         directory,
         audit: createProductUserAuditSink({
-          database,
+          database: central,
           actorPseudonymKey: providerActorKey,
         }),
         decisionNotice: createAdminAccessDecisionNoticeRuntime({
-          database,
+          database: central,
           directory,
         }),
       },
@@ -264,24 +295,22 @@ export async function createAdminRuntime(
           config: productUserDirectoryConfig,
         }),
         audit: createBetaAllowlistAuditSink({
-          database,
+          database: central,
           actorPseudonymKey: providerActorKey,
         }),
       },
       operationalAlerts: { alerts: operational.alerts },
       operationalHealth: { health: operational.health },
-      providerSources: providerSourceRuntime,
-      providerSourceOperations: providerSourceRuntime,
-      sourceAdministrationUnconfigured: providerSourceRuntime === undefined,
+      sourceAdministrationUnconfigured: sourceAdministration === null,
       messages: createAdminMessageDeliveryRuntime({
-        database,
+        database: central,
         actorPseudonymKey: providerActorKey,
       }),
       passwordReset:
         emailLinkTokenSecret === null
           ? undefined
           : createAdminPasswordResetRuntime({
-              database,
+              database: central,
               authService: auth.service,
               secret: emailLinkTokenSecret,
             }),
@@ -289,18 +318,15 @@ export async function createAdminRuntime(
         emailLinkTokenSecret === null
           ? undefined
           : createAdminOperatorInvitationRuntime({
-              database,
+              database: central,
               authService: auth.service,
               secret: emailLinkTokenSecret,
             }),
       operatorAccountCreatedNotifier:
-        createAdminOperatorAccountCreatedNoticeRuntime({ database }),
+        createAdminOperatorAccountCreatedNoticeRuntime({ database: central }),
     });
     const machineryAlerts = new MachineryAlertService(
-      createAdminMachineryAlertFactsSource({
-        database,
-        backlogDepthLimit: recomputationBacklogLimit,
-      }),
+      providerRuntime.machineryAlertFacts,
       operational.events,
       createAdminMachineryAlertObserver(),
     );
@@ -319,12 +345,26 @@ export async function createAdminRuntime(
       },
       runMachineryAlertCycle: () => machineryAlerts.runCycle(),
       close() {
-        closePromise ??= databaseLifecycle.close();
+        closePromise ??= (async () => {
+          let firstError: unknown;
+          try {
+            await providerRuntime?.close();
+          } catch (error) {
+            firstError = error;
+          }
+          try {
+            await centralLifecycle.close();
+          } catch (error) {
+            firstError ??= error;
+          }
+          if (firstError !== undefined) throw firstError;
+        })();
         return closePromise;
       },
     };
   } catch (error) {
-    await databaseLifecycle.close().catch(() => undefined);
+    await providerRuntime?.close().catch(() => undefined);
+    await centralLifecycle.close().catch(() => undefined);
     throw error;
   }
 }

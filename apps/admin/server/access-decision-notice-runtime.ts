@@ -1,4 +1,4 @@
-import { PrismaEmailMessageOutboxRepository } from "@packscout/database";
+import { CentralEmailMessageOutboxRepository } from "@packscout/database";
 import { EmailMessageOutboxService } from "@packscout/services";
 import {
   createAccessDecisionNotifier,
@@ -15,7 +15,7 @@ import {
  */
 
 type AccessDecisionNoticeDatabase = ConstructorParameters<
-  typeof PrismaEmailMessageOutboxRepository
+  typeof CentralEmailMessageOutboxRepository
 >[0];
 
 export interface AdminAccessDecisionNoticeRuntimeInput {
@@ -30,7 +30,7 @@ export function createAdminAccessDecisionNoticeRuntime(
   return createAccessDecisionNotifier({
     directory: input.directory,
     outbox: new EmailMessageOutboxService({
-      queue: new PrismaEmailMessageOutboxRepository(input.database),
+      queue: new CentralEmailMessageOutboxRepository(input.database),
     }),
   });
 }

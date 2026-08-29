@@ -605,6 +605,8 @@ model provider_activity_events {
   alerts       admin_alerts[]    @relation("AlertLatestActivity")
 
   @@unique([provider_id, id], map: "provider_activity_events_provider_id_unique")
+  @@index([organization_id, local_run_id], map: "provider_activity_events_org_local_run_idx")
+  @@index([organization_id, local_quarantine_id], map: "provider_activity_events_org_local_quarantine_idx")
 }
 
 model provider_health {

@@ -960,6 +960,11 @@ CREATE INDEX "provider_connection_tests_provider_kind_tested_idx" ON "provider_c
 -- CreateIndex
 CREATE UNIQUE INDEX "provider_activity_events_provider_id_unique" ON "provider_activity_events"("provider_id", "id");
 
+-- Provider-qualified soft-reference routing for current-admin run and quarantine details.
+CREATE INDEX "provider_activity_events_org_local_run_idx" ON "provider_activity_events"("organization_id", "local_run_id");
+
+CREATE INDEX "provider_activity_events_org_local_quarantine_idx" ON "provider_activity_events"("organization_id", "local_quarantine_id");
+
 -- CreateIndex
 CREATE INDEX "admin_alerts_organization_state_seen_idx" ON "admin_alerts"("organization_id", "state", "last_seen_at" DESC);
 

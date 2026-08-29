@@ -12,6 +12,11 @@ export type { CentralPrismaClient };
 export type CentralTransactionClient = CentralPrisma.TransactionClient;
 export type CentralQueryClient = CentralPrismaClient | CentralTransactionClient;
 
+export const CENTRAL_TRANSACTION_OPTIONS = Object.freeze({
+  maxWait: 5_000,
+  timeout: 30_000,
+});
+
 export interface CentralDatabaseLifecycleOptions {
   readonly databaseUrl: string;
   readonly connectionLimit?: number;

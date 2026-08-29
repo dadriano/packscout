@@ -1,4 +1,4 @@
-import { PrismaAuthAuditSink } from "@packscout/database";
+import { CentralAuthAuditSink } from "@packscout/database";
 import type {
   ProductUserAccessAction,
   ProductUserAccessDecider,
@@ -27,7 +27,7 @@ import { createRecordReferencer } from "./auth/actor-key.ts";
 
 /** The Prisma client shape this sink needs, taken from the existing sink. */
 type ProductUserAuditDatabase = ConstructorParameters<
-  typeof PrismaAuthAuditSink
+  typeof CentralAuthAuditSink
 >[0];
 
 export type ProductUserAuditAction =
