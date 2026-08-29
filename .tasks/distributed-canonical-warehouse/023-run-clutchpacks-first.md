@@ -5,14 +5,14 @@
 **Blocks:** distributed-canonical-warehouse/021
 **Estimated scope:** large
 **Estimated effort:** 2–4 days for one builder, including source translation, provisioning, admin triggering, database verification, and preview proof
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
 Keep the verified ClutchPacks capture as deterministic mapping and replay
-evidence, then prove the same provider through the authenticated DataForrest
-API. Never persist or log a raw payload, bearer credential, or
-workstation-specific path.
+evidence alongside the completed authenticated DataForrest source-head proof.
+Never persist or log a raw payload, bearer credential, or workstation-specific
+path.
 
 ## Objective
 
@@ -35,16 +35,19 @@ activation, frontend cutover, or two-provider concurrency claim is made here.
 The supplied capture contains 15 pulls and none includes a pack external ID.
 Twelve include one shared series ID, but that series is also attached to 14
 captured pack candidates, so it cannot identify a pack without fabrication.
-The active DataForrest observation mapper correctly preserves these as
-card-only pulls; the new provider canonical schema currently requires every
-pull to reference one pack.
+The live DataForrest stream can also deliver valid pull and market facts before
+their catalog rows, and it explicitly permits one side of a pull relationship
+to be unreported.
 
-The approved first-provider behavior is to quarantine all 15 pulls as
-record-local evidence while continuing to commit the independent catalog and
-market-event records. It must not create a synthetic pack, choose one of the 14
-candidates, or weaken the canonical `pulls.pack_id` relationship. A later
-source-evidence decision may retry those quarantines through the normal
-recovery path.
+The approved first-provider behavior is to store these facts immediately.
+Immutable source keys distinguish `unreported` (source key is null) from
+`unresolved` (source key is present while the local UUID is null). Later catalog
+arrival may only resolve a null local UUID to the row matching that immutable
+source key; it may never clear, relink, or rewrite the source fact. Every pull
+retains at least one ordered item, including one null-key item when ClutchPacks
+reports the pack but not the card. Only malformed source records are
+quarantined. The importer must not create a synthetic catalog entity or choose
+an unsupported relationship.
 
 ## Requirements
 
@@ -65,6 +68,11 @@ recovery path.
 - HMAC-pseudonymize actors before creating provider-account identities.
 - Emit only relationships supported by source evidence. Do not invent pack
   contents or economics fields when the authoritative mapper cannot prove them.
+- Preserve provider pack/card keys on facts independently of nullable resolved
+  UUIDs. Store valid unreported and keyed-unresolved pull/event relationships,
+  and reconcile keyed relationships in bounded batches when catalog rows arrive.
+- Convert a record-local adapter or mapper rejection into one safe quarantine
+  record so the rest of the authenticated source page can commit and advance.
 
 ### Database and admin path
 
@@ -85,9 +93,9 @@ recovery path.
   rate without retaining provider-native response bodies.
 - Verify terminal run/page/cursor evidence and committed canonical counts
   directly in `packscout_clutchpacks`.
-- Verify representative pack, collectible, and sale-event relationships using
-  public-safe identifiers, plus the 15 quarantined pull records and their valid
-  collectible-item evidence without asserting a pack relationship.
+- Verify representative pack, collectible, pull, and sale-event relationships
+  using public-safe identifiers, including the 15 card-only capture pulls with
+  unreported pack relationships.
 - Replay the same capture deterministically without duplicating immutable facts
   or advancing a false cursor/checkpoint.
 - Prove raw payloads, source credentials, database URLs, and unpseudonymized
@@ -107,23 +115,38 @@ The UI remains unchanged from the authoritative admin baseline.
 - [x] Admin Run now creates or reuses one ClutchPacks run only after its source
   capability is installed.
 - [x] The validated capture commits deterministic categories, packs,
-  collectibles, accounts, market events, promotion changes, run pages, and
-  cursor evidence while quarantining all 15 unresolved pulls with their valid
-  collectible-item evidence.
+  collectibles, accounts, 15 pulls with 15 items, market events, promotion
+  changes, run pages, and cursor evidence with zero relationship quarantines.
 - [x] The provider database verifies one deterministic page, 8 categories,
-  14 packs, 907 collectibles, 17 pseudonymized accounts, 15 market events, and
-  15 pull quarantines without any synthetic pack or raw actor identity.
-- [x] Identical capture replay is idempotent and its invalid record-local
-  evidence is safely quarantined.
+  14 packs, 907 collectibles, 17 pseudonymized accounts, 15 pulls/items, 15
+  market events, and no synthetic pack or raw actor identity.
+- [x] Identical capture replay is idempotent without duplicating facts,
+  relationship resolutions, or promotion changes.
 - [x] An uninstalled provider still fails before mutation with
   `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE`.
 - [x] The authoritative admin route/UI parity guards and focused ClutchPacks
   source, repository, API, and browser tests pass.
 - [x] The active ClutchPacks configuration references an encrypted central
   source credential and the live DataForrest capability.
-- [ ] An authenticated admin-triggered DataForrest run reaches source head in
-  `packscout_clutchpacks`, with request/page/rate evidence and no raw payload or
-  credential leakage.
+- [x] Authenticated admin-triggered run
+  `da9c58ff-2046-479c-84f4-0ff5f1f36695` used pinned configuration v4 and
+  succeeded at source head in `packscout_clutchpacks`: 25 pages and 25
+  successful API requests with zero failures processed 49,602 source records
+  in 334.4 seconds (148.3 source records/second), without retaining raw payloads
+  or exposing credentials.
+- [x] The completed live run reported 6,730 catalog records, 22,362 pulls,
+  20,510 events, 31,518 accepted records, 18,059 duplicates, 25 quarantines,
+  and 31,518 material changes.
+- [x] Final canonical verification reports 10 categories, 17 packs, 6,655
+  collectibles, 17 pseudonymized accounts, 22,362 pulls with 22,362 ordered
+  items, 20,525 market events, and 78,502 promotion changes, with every keyed
+  unresolved relationship reconciled to zero.
+- [x] Bounded historical reconciliation resolved 29,739 missing-reference
+  quarantines. The 51 remaining historical pull records are explained and
+  bounded: 30 are absent from both the current source and canonical data, and
+  21 have immutable timestamp/digest mismatches. The live run's 25 new
+  quarantines are immutable pull timestamp conflicts rather than missing
+  catalog relationships.
 
 ## Spec Compliance
 
@@ -132,41 +155,32 @@ The UI remains unchanged from the authoritative admin baseline.
 - ClutchPacks is a first-provider milestone inside the approved two-provider
   proof, not a new provider-specific branch in generic orchestration.
 - Courtyard and concurrency remain Task 021; Convex publication remains paused.
-- Capture checkpoint completed on 2026-08-29: the authoritative admin queued the
-  initial run and an identical replay through the provider-routed command path.
-  The approved 2,000-record page limit and 4,000-record / 8 MiB normalized
-  envelope emitted all 976 captured records as one 960,893-byte head page. The
-  replay finished in 1,610 ms at 606.21 records/second with 961 duplicates, 15
-  quarantines, and zero material changes; canonical and promotion counts did
-  not grow. The focused mixed-page, worker, disposable PostgreSQL, admin API/UI,
-  typecheck, and lint checks pass.
-  The replay rate is not compared directly with the initial write rate because
-  duplicate validation performs less database work than first-time ingestion.
-  The repository-wide verifier remains blocked by pre-existing EV-cutover
-  inventory drift in generated Prisma output and the central worker presence
-  repository; none of the reported files are changed by this task.
-- Live API amendment: the user clarified that the first-provider checkpoint is
-  incomplete until it fetches DataForrest directly. The supplied API contract
-  describes one cursor-driven mixed endpoint, at-least-once delivery, an opaque
-  cursor bound to the platform filter, a 5,000-record API maximum, and an
-  estimated 39,746 ClutchPacks records / 54 MB. The credential from that
-  contract was used ephemerally on 2026-08-29, passed a bounded one-record live
-  check, and was encrypted as central source credential v1. The initial generic
-  active config v2 was then non-destructively upgraded to the dedicated
-  ClutchPacks adapter in active config v3 while reusing that encrypted
-  credential. The plaintext credential is not stored in `.env`, task artifacts,
-  logs, or provider-local rows.
-- The direct distributed bridge, sanitized request/page metrics, and distinct
-  2,000-source-record ClutchPacks request profile are implemented without
-  changing the shared 500-record adapter used by other providers. A full source
-  page can yield at most 4,000 normalized records because each source record may
-  also derive one category; the 8 MiB internal cap remains fail-closed, and one
-  full 2,000-record page may quarantine record-locally. Before the authenticated
-  run can be called complete, record-local adapter/mapper defects must quarantine
-  without aborting their whole source page, cross-page relationship quarantines
-  need a bounded retry/reconciliation path, at-least-once source identity must
-  prevent older catalog redelivery from regressing newer state, and a running
-  immutable config pin must not depend on remaining the central active pointer.
-  The live-only worker path must also stop requiring the unused capture-root and
-  actor-HMAC settings. These are explicit Task 023 blockers; no source-head,
-  rate, or full-import completion claim is made in this PR.
+- Configuration v4 is the exact immutable authority pinned to the completed
+  run. It retains the approved adapter, source endpoint/settings, schedule,
+  encrypted source-credential reference, and no-expiration policy independent
+  of any later central active-pointer change.
+- The provider schema change is additive. Pulls, pull items, and market events
+  retain immutable provider source keys while their local catalog UUIDs may be
+  deferred; later catalog arrival resolves only the matching null UUID and
+  cannot rewrite, clear, or relink the source fact.
+- Record-local defects quarantine independently, while keyed-unresolved facts
+  remain canonical and are reconciled in bounded batches. The completed live
+  run ended with zero keyed-unresolved relationships.
+- Historical cleanup was bounded and evidence-driven: 29,739 legacy
+  missing-reference quarantines were resolved without rewriting immutable
+  source facts. The remaining 51 historical pulls and 25 new timestamp-conflict
+  quarantines are explicitly classified above rather than treated as an open
+  ingestion blocker.
+- Completion evidence: admin-triggered run
+  `da9c58ff-2046-479c-84f4-0ff5f1f36695`, configuration v4, terminal state
+  `succeeded`, source head reached, 25 successful requests and zero failures,
+  49,602 source records across 25 pages, and the final canonical totals recorded
+  in the acceptance criteria.
+- Related specs reviewed: `tech-001-database-schema-contract.md` and the Task
+  022 current-admin ownership amendment.
+- Alignment: implemented as specified, including exact run configuration
+  authority, deferred source-key relationships, additive migration, bounded
+  reconciliation, and admin-triggered provider-local execution.
+- Divergences: none.
+- Verification: authenticated admin-triggered source-head replay plus direct
+  provider-database reconciliation and canonical-count verification.

@@ -479,9 +479,17 @@ function migrationFiles(directory: string): string[] {
 }
 
 function baselineMigration(role: "central" | "provider"): string {
-  const files = migrationFiles(join(prismaDirectory, role, "migrations"));
+  const files = migrationFiles(join(prismaDirectory, role, "migrations"))
+    .filter((path) => path.includes("_baseline/"));
   assert.equal(files.length, 1, `${role} must have exactly one clean baseline migration`);
   return readFileSync(files[0]!, "utf8");
+}
+
+function migrationContents(role: "central" | "provider", name: string): string {
+  return readFileSync(
+    join(prismaDirectory, role, "migrations", name, "migration.sql"),
+    "utf8",
+  );
 }
 
 test("distributed Prisma schemas freeze exact role inventories and enum vocabularies", () => {
@@ -537,6 +545,161 @@ test("cross-authority identifiers stay soft while every local UUID reference is 
     unboundUuidIdentifiers(providerSource),
     [...PROVIDER_ALLOWED_UNBOUND_UUIDS].sort(),
     "provider UUID identifiers without local Prisma relations drifted",
+  );
+});
+
+test("provider facts preserve source identities while local relationships resolve monotonically", () => {
+  const providerSource = readFileSync(providerSchemaPath, "utf8");
+  const providerModels = modelMap(providerSource);
+  const pulls = providerModels.get("pulls");
+  const pullItems = providerModels.get("pull_items");
+  const marketEvents = providerModels.get("market_events");
+  const packs = providerModels.get("packs");
+  const collectibles = providerModels.get("collectibles");
+  assert.ok(pulls);
+  assert.ok(pullItems);
+  assert.ok(marketEvents);
+  assert.ok(packs);
+  assert.ok(collectibles);
+
+  const pullFields = fieldsIn(pulls);
+  assert.match(pullFields.get("pack_key") ?? "", /^pack_key\s+String\?/u);
+  assert.match(pullFields.get("pack_id") ?? "", /^pack_id\s+String\?\s+@db\.Uuid/u);
+  assert.match(pullFields.get("item_count") ?? "", /^item_count\s+Int$/u);
+  assert.match(pullFields.get("row_version") ?? "", /BigInt\s+@default\(1\)/u);
+  assert.ok(pullFields.has("updated_at"));
+  assert.match(
+    pulls.body,
+    /pack\s+packs\?\s+@relation\(fields:\s*\[pack_id, pack_key\],\s*references:\s*\[id, pack_key\]/u,
+  );
+  assert.doesNotMatch(pulls.body, /@@index\(\[pack_key\]/u);
+
+  const pullItemFields = fieldsIn(pullItems);
+  assert.match(
+    pullItemFields.get("collectible_key") ?? "",
+    /^collectible_key\s+String\?/u,
+  );
+  assert.match(
+    pullItemFields.get("collectible_id") ?? "",
+    /^collectible_id\s+String\?\s+@db\.Uuid/u,
+  );
+  assert.match(pullItemFields.get("row_version") ?? "", /BigInt\s+@default\(1\)/u);
+  assert.ok(pullItemFields.has("updated_at"));
+  assert.match(
+    pullItems.body,
+    /collectible\s+collectibles\?\s+@relation\(fields:\s*\[collectible_id, collectible_key\],\s*references:\s*\[id, collectible_key\]/u,
+  );
+  assert.doesNotMatch(pullItems.body, /@@index\(\[collectible_key\]/u);
+
+  const marketEventFields = fieldsIn(marketEvents);
+  for (const fieldName of ["pack_key", "collectible_key"]) {
+    assert.match(marketEventFields.get(fieldName) ?? "", /String\?/u);
+  }
+  for (const fieldName of ["pack_id", "collectible_id"]) {
+    assert.match(marketEventFields.get(fieldName) ?? "", /String\?\s+@db\.Uuid/u);
+  }
+  assert.match(marketEventFields.get("row_version") ?? "", /BigInt\s+@default\(1\)/u);
+  assert.ok(marketEventFields.has("updated_at"));
+  assert.match(
+    marketEvents.body,
+    /pack\s+packs\?\s+@relation\(fields:\s*\[pack_id, pack_key\],\s*references:\s*\[id, pack_key\]/u,
+  );
+  assert.match(
+    marketEvents.body,
+    /collectible\s+collectibles\?\s+@relation\(fields:\s*\[collectible_id, collectible_key\],\s*references:\s*\[id, collectible_key\]/u,
+  );
+  assert.doesNotMatch(marketEvents.body, /@@index\(\[(?:pack|collectible)_key\]/u);
+  assert.match(packs.body, /@@unique\(\[id, pack_key\],\s*map:\s*"packs_id_pack_key_key"\)/u);
+  assert.match(
+    collectibles.body,
+    /@@unique\(\[id, collectible_key\],\s*map:\s*"collectibles_id_collectible_key_key"\)/u,
+  );
+
+  const migration = migrationContents(
+    "provider",
+    "20260829120000_provider_fact_deferred_relationships",
+  );
+  for (const expectedIndex of [
+    /CREATE INDEX "pulls_unresolved_pack_key_idx"\s+ON "pulls"\("pack_key", "id"\)\s+WHERE "pack_key" IS NOT NULL AND "pack_id" IS NULL/u,
+    /CREATE INDEX "pull_items_unresolved_collectible_key_idx"\s+ON "pull_items"\("collectible_key", "id"\)\s+WHERE "collectible_key" IS NOT NULL AND "collectible_id" IS NULL/u,
+    /CREATE INDEX "market_events_unresolved_pack_key_idx"\s+ON "market_events"\("pack_key", "id"\)\s+WHERE "pack_key" IS NOT NULL AND "pack_id" IS NULL/u,
+    /CREATE INDEX "market_events_unresolved_collectible_key_idx"\s+ON "market_events"\("collectible_key", "id"\)\s+WHERE "collectible_key" IS NOT NULL AND "collectible_id" IS NULL/u,
+  ]) {
+    assert.match(migration, expectedIndex);
+  }
+  for (const expectedConstraint of [
+    /FOREIGN KEY \("pack_id", "pack_key"\)\s+REFERENCES "packs"\("id", "pack_key"\) MATCH SIMPLE/u,
+    /FOREIGN KEY \("collectible_id", "collectible_key"\)\s+REFERENCES "collectibles"\("id", "collectible_key"\) MATCH SIMPLE/u,
+    /"pulls_pack_resolution_check"\s+CHECK \("pack_id" IS NULL OR "pack_key" IS NOT NULL\)/u,
+    /"pulls_item_count_check"\s+CHECK \("item_count" > 0\)/u,
+    /"pull_items_collectible_resolution_check"\s+CHECK \("collectible_id" IS NULL OR "collectible_key" IS NOT NULL\)/u,
+    /"market_events_subject_check"\s+CHECK \("pack_key" IS NOT NULL OR "collectible_key" IS NOT NULL\)/u,
+  ]) {
+    assert.match(migration, expectedConstraint);
+  }
+  for (const factTable of ["pulls", "pull_items", "market_events"]) {
+    assert.match(
+      migration,
+      new RegExp(`CREATE TRIGGER "${factTable}_row_version_trigger" BEFORE UPDATE ON "${factTable}"`, "u"),
+    );
+    assert.match(
+      migration,
+      new RegExp(`CREATE TRIGGER "${factTable}_resolvable_fact_guard_trigger" BEFORE UPDATE OR DELETE ON "${factTable}"`, "u"),
+    );
+    assert.match(
+      migration,
+      new RegExp(`CREATE CONSTRAINT TRIGGER "${factTable}_promotion_change_trigger" AFTER INSERT OR UPDATE ON "${factTable}"`, "u"),
+    );
+    assert.doesNotMatch(
+      migration,
+      new RegExp(`CREATE TRIGGER "${factTable}_append_only_trigger"`, "u"),
+    );
+  }
+  assert.match(
+    migration,
+    /TG_OP = 'INSERT' AND NEW\."row_version" <> 1[\s\S]{0,160}MESSAGE = 'promotion_fact_initial_version_invalid'/u,
+  );
+  assert.match(migration, /change\."entity_version" = NEW\."row_version"/u);
+  assert.match(
+    migration,
+    /SELECT true, "row_version" INTO entity_found, current_version FROM "pulls"/u,
+  );
+  assert.match(migration, /NEW\."entity_version" > 1 AND NOT EXISTS/u);
+  assert.match(migration, /MESSAGE = 'pull_requires_item'/u);
+  assert.match(migration, /MESSAGE = 'pull_requires_source_relationship'/u);
+  assert.match(migration, /MESSAGE = 'pull_item_count_mismatch'/u);
+  assert.match(
+    migration,
+    /CREATE CONSTRAINT TRIGGER "pull_items_exact_count_trigger"\s+AFTER INSERT ON "pull_items"/u,
+  );
+  for (const stableKey of [
+    "category_key",
+    "pack_key",
+    "collectible_key",
+    "instance_key",
+    "account_key",
+  ]) {
+    assert.match(migration, new RegExp(`THEN '${stableKey}'`, "u"));
+  }
+  assert.match(migration, /MESSAGE = TG_TABLE_NAME \|\| '_stable_key_immutable'/u);
+});
+
+test("provider quarantine source keys are nullable durable idempotency keys", () => {
+  const providerModels = modelMap(readFileSync(providerSchemaPath, "utf8"));
+  const quarantineRecords = providerModels.get("quarantine_records");
+  assert.ok(quarantineRecords);
+  assert.match(
+    fieldsIn(quarantineRecords).get("source_record_key") ?? "",
+    /String\?\s+@unique\(map:\s*"quarantine_records_source_record_key_key"\)/u,
+  );
+
+  const providerMigration = migrationContents(
+    "provider",
+    "20260829120000_provider_fact_deferred_relationships",
+  );
+  assert.match(
+    providerMigration,
+    /CREATE UNIQUE INDEX "quarantine_records_source_record_key_key"\s+ON "quarantine_records"\("source_record_key"\)/u,
   );
 });
 

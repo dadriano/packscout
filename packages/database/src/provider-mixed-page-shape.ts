@@ -101,6 +101,22 @@ function requireEntityType(value: unknown): ProviderMixedCatalogEntityType {
 export function assertRecordShape(value: CanonicalJsonObject, index: number): void {
   const path = `records[${index}]`;
   const kind = value.kind;
+  if (value.disposition === "quarantine") {
+    if (kind !== "catalog" && kind !== "pull" && kind !== "market_event") {
+      throw new TypeError(`${path}.kind is unsupported.`);
+    }
+    rejectUnknownFields(
+      value,
+      [
+        "position", "providerId", "kind", "disposition", "candidate",
+        "sourceRecordKey", "reasonCode", "fieldPath", "sanitizedSummary",
+      ],
+      path,
+    );
+    const candidate = requirePlainObject(value.candidate, `${path}.candidate`);
+    rejectUnknownFields(candidate, [], `${path}.candidate`);
+    return;
+  }
   if (kind === "catalog") {
     rejectUnknownFields(
       value,

@@ -9,10 +9,15 @@ import { Pool } from "pg";
 import { PrismaClient as ProviderPrismaClient } from "../prisma/generated/provider/index.js";
 import {
   ProviderCanonicalImmutableFactConflictError,
+  ProviderCanonicalInputError,
+  ProviderCanonicalWriteConflictError,
+  type CollectibleWriteInput,
   type PackWriteInput,
 } from "./provider-canonical-contract.ts";
 import { ProviderCanonicalRepository } from "./provider-canonical-repository.ts";
 import { initializeProviderDatabaseIdentity } from "./provider-database.ts";
+import { PrismaProviderWorkerLeaseRepository } from
+  "./provider-worker-lease-repository.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -156,12 +161,62 @@ function packInput(categoryId: string): PackWriteInput {
   };
 }
 
+function collectibleInput(
+  categoryId: string,
+  collectibleKey: string,
+  displayName: string,
+  cardNumber: string,
+): CollectibleWriteInput {
+  return {
+    collectibleKey,
+    categoryId,
+    collectibleType: "card",
+    displayName,
+    normalizedName: displayName.toLowerCase(),
+    year: 2026,
+    brand: "PackScout",
+    setOrSeries: "Deferred Relationship Test",
+    cardNumber,
+    referenceNumber: null,
+    subject: displayName,
+    grade: null,
+    grader: null,
+    primaryImageUrl: null,
+    primaryImageAlt: null,
+    valuationAmount: null,
+    valuationCurrency: null,
+    valuationUsdAmount: null,
+    valuationUnavailableReason: "unavailable",
+    valuationType: null,
+    valuationObservedAt: null,
+    dataAsOf: fixedInstant,
+    attributes: { source: "deferred-relationship-test" },
+  };
+}
+
 async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
   readonly categoryId: string;
   readonly packId: string;
   readonly finalSequence: bigint;
 }> {
   const repository = new ProviderCanonicalRepository(harness.client);
+  const leases = new PrismaProviderWorkerLeaseRepository(harness.client);
+  const leaseOwner = `canonical-integration-${process.pid}`;
+  const acquired = await leases.acquire({
+    role: "import",
+    owner: leaseOwner,
+    leaseMilliseconds: 60_000,
+  });
+  if (acquired.kind === "held") {
+    throw new Error("The isolated provider test import lease is unexpectedly held.");
+  }
+  let reconciliationAuthority = {
+    workerId: leaseOwner,
+    workerFence: acquired.lease.fence,
+  };
+  await repository.transaction(async (canonical) => {
+    assert.equal("reconcileFactReferences" in canonical, false);
+  });
   const category = await repository.upsertCategory({
     categoryKey: "cards",
     parentCategoryId: null,
@@ -310,18 +365,21 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
   const pull = await repository.insertPull({
     pullKey: "pull-stable-key",
     factDigest: "a".repeat(64),
+    packKey: "pack-stable-key",
     packId: pack.id,
     providerAccountId: account.id,
     occurredAt: fixedInstant,
     paidAmount: "12345678901234567890.123456789012345678",
     paidCurrency: "USD",
     items: [{
+      collectibleKey: "collectible-stable-key",
       collectibleId: collectible.id,
       collectibleInstanceId: instance.id,
       quantity: 1n,
       statedValueAmount: "99999999999999999999.999999999999999999",
       statedValueCurrency: "USD",
     }, {
+      collectibleKey: "collectible-secondary-key",
       collectibleId: secondaryCollectible.id,
       collectibleInstanceId: null,
       quantity: 2n,
@@ -335,18 +393,21 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
   const pullReplay = await repository.insertPull({
     pullKey: "pull-stable-key",
     factDigest: "a".repeat(64),
+    packKey: "pack-stable-key",
     packId: pack.id,
     providerAccountId: account.id,
     occurredAt: fixedInstant,
     paidAmount: "12345678901234567890.123456789012345678",
     paidCurrency: "USD",
     items: [{
+      collectibleKey: "collectible-stable-key",
       collectibleId: collectible.id,
       collectibleInstanceId: instance.id,
       quantity: 1n,
       statedValueAmount: "99999999999999999999.999999999999999999",
       statedValueCurrency: "USD",
     }, {
+      collectibleKey: "collectible-secondary-key",
       collectibleId: secondaryCollectible.id,
       collectibleInstanceId: null,
       quantity: 2n,
@@ -360,12 +421,14 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
     repository.insertPull({
       pullKey: "pull-stable-key",
       factDigest: "d".repeat(64),
+      packKey: "pack-stable-key",
       packId: pack.id,
       providerAccountId: account.id,
       occurredAt: fixedInstant,
       paidAmount: "1",
       paidCurrency: "USD",
       items: [{
+        collectibleKey: "collectible-stable-key",
         collectibleId: collectible.id,
         collectibleInstanceId: instance.id,
         quantity: 1n,
@@ -381,7 +444,9 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
     factDigest: "b".repeat(64),
     eventGroupId: randomUUID(),
     eventType: "sale",
+    packKey: null,
     packId: null,
+    collectibleKey: "collectible-stable-key",
     collectibleId: collectible.id,
     collectibleInstanceId: instance.id,
     fromProviderAccountId: account.id,
@@ -398,7 +463,9 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
     factDigest: "b".repeat(64),
     eventGroupId: randomUUID(),
     eventType: "sale",
+    packKey: null,
     packId: null,
+    collectibleKey: "collectible-stable-key",
     collectibleId: collectible.id,
     collectibleInstanceId: instance.id,
     fromProviderAccountId: account.id,
@@ -417,7 +484,9 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
       factDigest: "e".repeat(64),
       eventGroupId: null,
       eventType: "sale",
+      packKey: "pack-stable-key",
       packId: pack.id,
+      collectibleKey: null,
       collectibleId: null,
       collectibleInstanceId: null,
       fromProviderAccountId: null,
@@ -429,6 +498,298 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
       details: {},
     }),
     ProviderCanonicalImmutableFactConflictError,
+  );
+
+  const unresolvedPull = await repository.insertPull({
+    pullKey: "pull-before-catalog",
+    factDigest: "1".repeat(64),
+    packKey: "future-pack",
+    packId: null,
+    providerAccountId: null,
+    occurredAt: fixedInstant,
+    paidAmount: null,
+    paidCurrency: null,
+    items: [{
+      collectibleKey: "future-collectible",
+      collectibleId: null,
+      collectibleInstanceId: null,
+      quantity: 1n,
+      statedValueAmount: null,
+      statedValueCurrency: null,
+    }],
+  });
+  const packOnlyPull = await repository.insertPull({
+    pullKey: "pack-only-pull",
+    factDigest: "2".repeat(64),
+    packKey: "future-pack",
+    packId: null,
+    providerAccountId: null,
+    occurredAt: fixedInstant,
+    paidAmount: null,
+    paidCurrency: null,
+    items: [{
+      collectibleKey: null,
+      collectibleId: null,
+      collectibleInstanceId: null,
+      quantity: 1n,
+      statedValueAmount: null,
+      statedValueCurrency: null,
+    }],
+  });
+  const unresolvedMarketEvent = await repository.insertMarketEvent({
+    eventKey: "market-before-catalog",
+    factDigest: "3".repeat(64),
+    eventGroupId: null,
+    eventType: "sale",
+    packKey: "future-pack",
+    packId: null,
+    collectibleKey: "future-collectible",
+    collectibleId: null,
+    collectibleInstanceId: null,
+    fromProviderAccountId: null,
+    toProviderAccountId: null,
+    quantity: 1n,
+    occurredAt: fixedInstant,
+    amount: "10",
+    currency: "USD",
+    details: {},
+  });
+  await assert.rejects(
+    repository.insertPull({
+      pullKey: "subjectless-pull",
+      factDigest: "4".repeat(64),
+      packKey: null,
+      packId: null,
+      providerAccountId: null,
+      occurredAt: fixedInstant,
+      paidAmount: null,
+      paidCurrency: null,
+      items: [{
+        collectibleKey: null,
+        collectibleId: null,
+        collectibleInstanceId: null,
+        quantity: 1n,
+        statedValueAmount: null,
+        statedValueCurrency: null,
+      }],
+    }),
+    ProviderCanonicalInputError,
+  );
+  await assert.rejects(
+    repository.insertMarketEvent({
+      eventKey: "subjectless-event",
+      factDigest: "5".repeat(64),
+      eventGroupId: null,
+      eventType: "sale",
+      packKey: null,
+      packId: null,
+      collectibleKey: null,
+      collectibleId: null,
+      collectibleInstanceId: null,
+      fromProviderAccountId: null,
+      toProviderAccountId: null,
+      quantity: null,
+      occurredAt: fixedInstant,
+      amount: null,
+      currency: null,
+      details: {},
+    }),
+    ProviderCanonicalInputError,
+  );
+
+  const futurePack = await repository.upsertPack({
+    ...packInput(category.id),
+    packKey: "future-pack",
+    displayName: "Future Pack",
+  });
+  const futureCollectible = await repository.upsertCollectible(
+    collectibleInput(category.id, "future-collectible", "Future Card", "F1"),
+  );
+  const resolution = await repository.reconcileFactReferences(
+    reconciliationAuthority,
+  );
+  assert.ok(resolution);
+  assert.deepEqual(
+    {
+      pullPacks: resolution.pullPackCount,
+      pullItemCollectibles: resolution.pullItemCollectibleCount,
+      marketPacks: resolution.marketEventPackCount,
+      marketCollectibles: resolution.marketEventCollectibleCount,
+      changes: resolution.materialChangeCount,
+    },
+    {
+      pullPacks: 2,
+      pullItemCollectibles: 1,
+      marketPacks: 1,
+      marketCollectibles: 1,
+      changes: 5,
+    },
+  );
+  assert.ok(resolution.promotionRange);
+  assert.equal(
+    resolution.promotionRange.last - resolution.promotionRange.first + 1n,
+    5n,
+  );
+  assert.equal(
+    (await repository.reconcileFactReferences(reconciliationAuthority))
+      ?.materialChangeCount,
+    0,
+  );
+
+  const resolvedPull = await harness.client.pulls.findUniqueOrThrow({
+    where: { id: unresolvedPull.id },
+    include: { items: true },
+  });
+  assert.equal(resolvedPull.pack_key, "future-pack");
+  assert.equal(resolvedPull.pack_id, futurePack.id);
+  assert.equal(resolvedPull.row_version, 2n);
+  assert.equal(resolvedPull.items[0]?.collectible_key, "future-collectible");
+  assert.equal(resolvedPull.items[0]?.collectible_id, futureCollectible.id);
+  assert.equal(resolvedPull.items[0]?.row_version, 2n);
+  const resolvedPackOnlyPull = await harness.client.pulls.findUniqueOrThrow({
+    where: { id: packOnlyPull.id },
+    include: { items: true },
+  });
+  assert.equal(resolvedPackOnlyPull.pack_id, futurePack.id);
+  assert.equal(resolvedPackOnlyPull.items[0]?.collectible_key, null);
+  assert.equal(resolvedPackOnlyPull.items[0]?.collectible_id, null);
+  assert.equal(resolvedPackOnlyPull.items[0]?.row_version, 1n);
+  const resolvedEvent = await harness.client.market_events.findUniqueOrThrow({
+    where: { id: unresolvedMarketEvent.id },
+  });
+  assert.equal(resolvedEvent.pack_key, "future-pack");
+  assert.equal(resolvedEvent.pack_id, futurePack.id);
+  assert.equal(resolvedEvent.collectible_key, "future-collectible");
+  assert.equal(resolvedEvent.collectible_id, futureCollectible.id);
+  assert.equal(resolvedEvent.row_version, 3n);
+
+  const boundedEventIds = Array.from({ length: 501 }, () => randomUUID());
+  await harness.client.$transaction(async (transaction) => {
+    await transaction.market_events.createMany({
+      data: boundedEventIds.map((id, index) => ({
+        id,
+        event_key: `bounded-unresolved-${index}`,
+        fact_digest: "6".repeat(64),
+        event_group_id: null,
+        event_type: "sale",
+        pack_key: null,
+        pack_id: null,
+        collectible_key: "future-collectible",
+        collectible_id: null,
+        collectible_instance_id: null,
+        from_provider_account_id: null,
+        to_provider_account_id: null,
+        quantity: 1n,
+        occurred_at: fixedInstant,
+        amount: null,
+        currency: null,
+        details: {},
+      })),
+    });
+    const head = await transaction.promotion_ledger.update({
+      where: { singleton_key: true },
+      data: { last_sequence: { increment: BigInt(boundedEventIds.length) } },
+      select: { last_sequence: true },
+    });
+    const first = head.last_sequence - BigInt(boundedEventIds.length) + 1n;
+    await transaction.promotion_changes.createMany({
+      data: boundedEventIds.map((id, index) => ({
+        sequence: first + BigInt(index),
+        entity_type: "market_event",
+        entity_id: id,
+        entity_version: 1n,
+        operation: "upsert",
+        changed_at: fixedInstant,
+      })),
+    });
+  }, { maxWait: 5_000, timeout: 30_000 });
+  const firstBoundedResolution = await repository.reconcileFactReferences(
+    reconciliationAuthority,
+  );
+  assert.ok(firstBoundedResolution);
+  assert.equal(firstBoundedResolution.marketEventCollectibleCount, 500);
+  assert.equal(firstBoundedResolution.materialChangeCount, 500);
+  const finalBoundedResolution = await repository.reconcileFactReferences(
+    reconciliationAuthority,
+  );
+  assert.ok(finalBoundedResolution);
+  assert.equal(finalBoundedResolution.marketEventCollectibleCount, 1);
+  assert.equal(finalBoundedResolution.materialChangeCount, 1);
+  assert.equal(
+    (await repository.reconcileFactReferences(reconciliationAuthority))
+      ?.materialChangeCount,
+    0,
+  );
+  assert.equal(
+    await harness.client.market_events.count({
+      where: { id: { in: boundedEventIds }, collectible_id: null },
+    }),
+    0,
+  );
+
+  const fencedEvent = await repository.insertMarketEvent({
+    eventKey: "fenced-unresolved-event",
+    factDigest: "7".repeat(64),
+    eventGroupId: null,
+    eventType: "sale",
+    packKey: null,
+    packId: null,
+    collectibleKey: "fenced-future-collectible",
+    collectibleId: null,
+    collectibleInstanceId: null,
+    fromProviderAccountId: null,
+    toProviderAccountId: null,
+    quantity: 1n,
+    occurredAt: fixedInstant,
+    amount: null,
+    currency: null,
+    details: {},
+  });
+  const fencedCollectible = await repository.upsertCollectible(
+    collectibleInput(
+      category.id,
+      "fenced-future-collectible",
+      "Fenced Future Card",
+      "F1",
+    ),
+  );
+  assert.equal(await leases.release({
+    role: "import",
+    owner: leaseOwner,
+    fence: reconciliationAuthority.workerFence,
+  }), true);
+  assert.equal(
+    await repository.reconcileFactReferences(reconciliationAuthority),
+    null,
+  );
+  assert.equal(
+    (await harness.client.market_events.findUniqueOrThrow({
+      where: { id: fencedEvent.id },
+    })).collectible_id,
+    null,
+  );
+  const reacquired = await leases.acquire({
+    role: "import",
+    owner: leaseOwner,
+    leaseMilliseconds: 60_000,
+  });
+  if (reacquired.kind === "held") {
+    throw new Error("The isolated provider test import lease was not reacquired.");
+  }
+  reconciliationAuthority = {
+    workerId: leaseOwner,
+    workerFence: reacquired.lease.fence,
+  };
+  assert.equal(
+    (await repository.reconcileFactReferences(reconciliationAuthority))
+      ?.marketEventCollectibleCount,
+    1,
+  );
+  assert.equal(
+    (await harness.client.market_events.findUniqueOrThrow({
+      where: { id: fencedEvent.id },
+    })).collectible_id,
+    fencedCollectible.id,
   );
 
   const storedPack = await harness.client.packs.findUniqueOrThrow({ where: { id: pack.id } });
@@ -480,6 +841,11 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
   const head = await harness.client.promotion_ledger.findUniqueOrThrow({
     where: { singleton_key: true },
   });
+  await leases.release({
+    role: "import",
+    owner: leaseOwner,
+    fence: reconciliationAuthority.workerFence,
+  });
   return { categoryId: category.id, packId: pack.id, finalSequence: head.last_sequence };
 }
 
@@ -512,6 +878,541 @@ test(
       );
     } finally {
       await Promise.allSettled(harnesses.map((harness) => harness.close()));
+    }
+  },
+);
+
+test(
+  "provider fact relationships allow deferred source identities and only monotonic promoted resolution",
+  { concurrency: false },
+  async (context) => {
+    let harness: ProviderHarness;
+    try {
+      harness = await createProviderHarness();
+    } catch (error) {
+      if (!process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL) {
+        context.skip("PostgreSQL 16 test infrastructure is not available.");
+        return;
+      }
+      throw error;
+    }
+
+    try {
+      const repository = new ProviderCanonicalRepository(harness.client);
+      const category = await repository.upsertCategory({
+        categoryKey: "deferred-facts",
+        parentCategoryId: null,
+        displayName: "Deferred Facts",
+      });
+      const pack = await repository.upsertPack({
+        ...packInput(category.id),
+        packKey: "deferred-pack",
+        familyKey: "deferred-family",
+        displayName: "Deferred Pack",
+      });
+      const otherPack = await repository.upsertPack({
+        ...packInput(category.id),
+        packKey: "other-pack",
+        familyKey: "other-family",
+        displayName: "Other Pack",
+      });
+      const collectible = await repository.upsertCollectible(
+        collectibleInput(category.id, "deferred-card", "Deferred Card", "1"),
+      );
+      const otherCollectible = await repository.upsertCollectible(
+        collectibleInput(category.id, "other-card", "Other Card", "2"),
+      );
+
+      const keyedPull = await repository.insertPull({
+        pullKey: "keyed-unresolved-pull",
+        factDigest: "1".repeat(64),
+        packKey: "deferred-pack",
+        packId: null,
+        providerAccountId: null,
+        occurredAt: fixedInstant,
+        paidAmount: null,
+        paidCurrency: null,
+        items: [{
+          collectibleKey: "deferred-card",
+          collectibleId: null,
+          collectibleInstanceId: null,
+          quantity: 1n,
+          statedValueAmount: null,
+          statedValueCurrency: null,
+        }],
+      });
+      const unreportedPull = await repository.insertPull({
+        pullKey: "source-unreported-card-pull",
+        factDigest: "2".repeat(64),
+        packKey: "deferred-pack",
+        packId: null,
+        providerAccountId: null,
+        occurredAt: fixedInstant,
+        paidAmount: null,
+        paidCurrency: null,
+        items: [{
+          collectibleKey: null,
+          collectibleId: null,
+          collectibleInstanceId: null,
+          quantity: 1n,
+          statedValueAmount: null,
+          statedValueCurrency: null,
+        }],
+      });
+      const marketEvent = await repository.insertMarketEvent({
+        eventKey: "keyed-unresolved-market-event",
+        factDigest: "3".repeat(64),
+        eventGroupId: null,
+        eventType: "sale",
+        packKey: null,
+        packId: null,
+        collectibleKey: "deferred-card",
+        collectibleId: null,
+        collectibleInstanceId: null,
+        fromProviderAccountId: null,
+        toProviderAccountId: null,
+        quantity: 1n,
+        occurredAt: fixedInstant,
+        amount: "10",
+        currency: "USD",
+        details: { relationship: "deferred" },
+      });
+
+      const keyedPullBefore = await harness.client.pulls.findUniqueOrThrow({
+        where: { id: keyedPull.id },
+      });
+      const keyedItemBefore = await harness.client.pull_items.findUniqueOrThrow({
+        where: { id: keyedPull.itemIds[0]! },
+      });
+      const marketEventBefore = await harness.client.market_events.findUniqueOrThrow({
+        where: { id: marketEvent.id },
+      });
+      const unreportedItem = await harness.client.pull_items.findUniqueOrThrow({
+        where: { id: unreportedPull.itemIds[0]! },
+      });
+      assert.deepEqual(
+        {
+          packKey: keyedPullBefore.pack_key,
+          packId: keyedPullBefore.pack_id,
+          version: keyedPullBefore.row_version,
+        },
+        { packKey: "deferred-pack", packId: null, version: 1n },
+      );
+      assert.deepEqual(
+        {
+          collectibleKey: keyedItemBefore.collectible_key,
+          collectibleId: keyedItemBefore.collectible_id,
+          version: keyedItemBefore.row_version,
+        },
+        { collectibleKey: "deferred-card", collectibleId: null, version: 1n },
+      );
+      assert.deepEqual(
+        {
+          collectibleKey: marketEventBefore.collectible_key,
+          collectibleId: marketEventBefore.collectible_id,
+          version: marketEventBefore.row_version,
+        },
+        { collectibleKey: "deferred-card", collectibleId: null, version: 1n },
+      );
+      assert.deepEqual(
+        {
+          collectibleKey: unreportedItem.collectible_key,
+          collectibleId: unreportedItem.collectible_id,
+        },
+        { collectibleKey: null, collectibleId: null },
+      );
+
+      await assert.rejects(
+        harness.client.pulls.update({
+          where: { id: keyedPull.id },
+          data: { pack_id: otherPack.id, row_version: 2n },
+        }),
+        /pulls_pack_id_key_fkey|Foreign key constraint violated/iu,
+      );
+      await assert.rejects(
+        harness.client.pull_items.update({
+          where: { id: keyedPull.itemIds[0]! },
+          data: { collectible_id: otherCollectible.id, row_version: 2n },
+        }),
+        /pull_items_collectible_id_key_fkey|Foreign key constraint violated/iu,
+      );
+      await assert.rejects(
+        harness.client.pulls.create({
+          data: {
+            id: randomUUID(),
+            pull_key: "resolved-pack-without-source-key",
+            fact_digest: "4".repeat(64),
+            pack_key: null,
+            pack_id: pack.id,
+            provider_account_id: null,
+            item_count: 1,
+            occurred_at: fixedInstant,
+            paid_amount: null,
+            paid_currency: null,
+          },
+        }),
+        /pulls_pack_resolution_check|check constraint/iu,
+      );
+      await assert.rejects(
+        harness.client.market_events.create({
+          data: {
+            id: randomUUID(),
+            event_key: "market-event-without-source-subject",
+            fact_digest: "5".repeat(64),
+            event_group_id: null,
+            event_type: "sale",
+            pack_key: null,
+            pack_id: null,
+            collectible_key: null,
+            collectible_id: null,
+            collectible_instance_id: null,
+            from_provider_account_id: null,
+            to_provider_account_id: null,
+            quantity: 1n,
+            occurred_at: fixedInstant,
+            amount: null,
+            currency: null,
+            details: {},
+          },
+        }),
+        /market_events_subject_check|check constraint/iu,
+      );
+
+      await assert.rejects(
+        harness.client.pulls.update({
+          where: { id: keyedPull.id },
+          data: { pack_id: pack.id, row_version: 2n },
+        }),
+        /fact_write_requires_promotion_change/u,
+      );
+      assert.deepEqual(
+        await harness.client.pulls.findUniqueOrThrow({
+          where: { id: keyedPull.id },
+          select: { pack_id: true, row_version: true },
+        }),
+        { pack_id: null, row_version: 1n },
+      );
+
+      await harness.client.$transaction(async (transaction) => {
+        const resolvedPull = await transaction.pulls.update({
+          where: { id: keyedPull.id },
+          data: { pack_id: pack.id, row_version: 2n },
+        });
+        const resolvedItem = await transaction.pull_items.update({
+          where: { id: keyedPull.itemIds[0]! },
+          data: { collectible_id: collectible.id, row_version: 2n },
+        });
+        const resolvedEvent = await transaction.market_events.update({
+          where: { id: marketEvent.id },
+          data: { collectible_id: collectible.id, row_version: 2n },
+        });
+        const head = await transaction.promotion_ledger.update({
+          where: { singleton_key: true },
+          data: { last_sequence: { increment: 3n } },
+          select: { last_sequence: true },
+        });
+        const first = head.last_sequence - 2n;
+        await transaction.promotion_changes.createMany({
+          data: [{
+            sequence: first,
+            entity_type: "pull",
+            entity_id: resolvedPull.id,
+            entity_version: resolvedPull.row_version,
+            operation: "upsert",
+            changed_at: fixedInstant,
+          }, {
+            sequence: first + 1n,
+            entity_type: "pull_item",
+            entity_id: resolvedItem.id,
+            entity_version: resolvedItem.row_version,
+            operation: "upsert",
+            changed_at: fixedInstant,
+          }, {
+            sequence: first + 2n,
+            entity_type: "market_event",
+            entity_id: resolvedEvent.id,
+            entity_version: resolvedEvent.row_version,
+            operation: "upsert",
+            changed_at: fixedInstant,
+          }],
+        });
+      });
+
+      const keyedPullAfter = await harness.client.pulls.findUniqueOrThrow({
+        where: { id: keyedPull.id },
+      });
+      const keyedItemAfter = await harness.client.pull_items.findUniqueOrThrow({
+        where: { id: keyedPull.itemIds[0]! },
+      });
+      const marketEventAfter = await harness.client.market_events.findUniqueOrThrow({
+        where: { id: marketEvent.id },
+      });
+      assert.deepEqual(
+        {
+          packKey: keyedPullAfter.pack_key,
+          packId: keyedPullAfter.pack_id,
+          version: keyedPullAfter.row_version,
+        },
+        { packKey: "deferred-pack", packId: pack.id, version: 2n },
+      );
+      assert.deepEqual(
+        {
+          collectibleKey: keyedItemAfter.collectible_key,
+          collectibleId: keyedItemAfter.collectible_id,
+          version: keyedItemAfter.row_version,
+        },
+        { collectibleKey: "deferred-card", collectibleId: collectible.id, version: 2n },
+      );
+      assert.deepEqual(
+        {
+          collectibleKey: marketEventAfter.collectible_key,
+          collectibleId: marketEventAfter.collectible_id,
+          version: marketEventAfter.row_version,
+        },
+        { collectibleKey: "deferred-card", collectibleId: collectible.id, version: 2n },
+      );
+      assert.ok(keyedPullAfter.updated_at > keyedPullBefore.updated_at);
+      assert.ok(keyedItemAfter.updated_at > keyedItemBefore.updated_at);
+      assert.ok(marketEventAfter.updated_at > marketEventBefore.updated_at);
+      assert.equal(
+        await harness.client.promotion_changes.count({
+          where: {
+            entity_id: { in: [keyedPull.id, keyedPull.itemIds[0]!, marketEvent.id] },
+            entity_version: 2n,
+            operation: "upsert",
+          },
+        }),
+        3,
+      );
+
+      await assert.rejects(
+        harness.client.pulls.update({
+          where: { id: keyedPull.id },
+          data: { pack_id: null, row_version: 3n },
+        }),
+        /pulls_relationship_resolution_not_monotonic/u,
+      );
+      await assert.rejects(
+        harness.client.market_events.update({
+          where: { id: marketEvent.id },
+          data: { collectible_id: otherCollectible.id, row_version: 3n },
+        }),
+        /market_events_relationship_resolution_not_monotonic/u,
+      );
+      await assert.rejects(
+        harness.client.pull_items.update({
+          where: { id: keyedPull.itemIds[0]! },
+          data: { collectible_key: "mutated-source-card", row_version: 3n },
+        }),
+        /pull_items_source_fact_immutable/u,
+      );
+
+      await assert.rejects(
+        harness.client.$transaction(async (transaction) => {
+          const pullId = randomUUID();
+          await transaction.pulls.create({
+            data: {
+              id: pullId,
+              pull_key: "pull-with-zero-items",
+              fact_digest: "6".repeat(64),
+              pack_key: "deferred-pack",
+              pack_id: null,
+              provider_account_id: null,
+              item_count: 1,
+              occurred_at: fixedInstant,
+              paid_amount: null,
+              paid_currency: null,
+            },
+          });
+          const head = await transaction.promotion_ledger.update({
+            where: { singleton_key: true },
+            data: { last_sequence: { increment: 1n } },
+            select: { last_sequence: true },
+          });
+          await transaction.promotion_changes.create({
+            data: {
+              sequence: head.last_sequence,
+              entity_type: "pull",
+              entity_id: pullId,
+              entity_version: 1n,
+              operation: "upsert",
+              changed_at: fixedInstant,
+            },
+          });
+        }),
+        /pull_requires_item/u,
+      );
+
+      await assert.rejects(
+        harness.client.$transaction(async (transaction) => {
+          const eventId = randomUUID();
+          await transaction.market_events.create({
+            data: {
+              id: eventId,
+              event_key: "market-event-starting-at-version-two",
+              fact_digest: "7".repeat(64),
+              event_group_id: null,
+              event_type: "sale",
+              pack_key: null,
+              pack_id: null,
+              collectible_key: "deferred-card",
+              collectible_id: null,
+              collectible_instance_id: null,
+              from_provider_account_id: null,
+              to_provider_account_id: null,
+              quantity: 1n,
+              occurred_at: fixedInstant,
+              amount: null,
+              currency: null,
+              details: {},
+              row_version: 2n,
+            },
+          });
+          const head = await transaction.promotion_ledger.update({
+            where: { singleton_key: true },
+            data: { last_sequence: { increment: 2n } },
+            select: { last_sequence: true },
+          });
+          await transaction.promotion_changes.createMany({
+            data: [{
+              sequence: head.last_sequence - 1n,
+              entity_type: "market_event",
+              entity_id: eventId,
+              entity_version: 1n,
+              operation: "upsert",
+              changed_at: fixedInstant,
+            }, {
+              sequence: head.last_sequence,
+              entity_type: "market_event",
+              entity_id: eventId,
+              entity_version: 2n,
+              operation: "upsert",
+              changed_at: fixedInstant,
+            }],
+          });
+        }),
+        /promotion_fact_initial_version_invalid/u,
+      );
+    } finally {
+      await harness.close();
+    }
+  },
+);
+
+test(
+  "older catalog redelivery cannot regress newer pack or collectible state",
+  { concurrency: false },
+  async (context) => {
+    let harness: ProviderHarness;
+    try {
+      harness = await createProviderHarness();
+    } catch (error) {
+      if (!process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL) {
+        context.skip("PostgreSQL 16 test infrastructure is not available.");
+        return;
+      }
+      throw error;
+    }
+
+    try {
+      const repository = new ProviderCanonicalRepository(harness.client);
+      const category = await repository.upsertCategory({
+        categoryKey: "temporal-catalog",
+        parentCategoryId: null,
+        displayName: "Temporal Catalog",
+      });
+      const newerAt = new Date("2026-08-30T12:34:56.123Z");
+      const initialPack = {
+        ...packInput(category.id),
+        packKey: "temporal-pack",
+        displayName: "Initial Pack",
+      };
+      await repository.upsertPack(initialPack);
+      const newerPack = await repository.upsertPack({
+        ...initialPack,
+        displayName: "Newer Pack",
+        sourceUpdatedAt: newerAt,
+      });
+      assert.equal(newerPack.rowVersion, 2n);
+      assert.deepEqual(await repository.upsertPack(initialPack), {
+        id: newerPack.id,
+        rowVersion: 2n,
+        materialChange: false,
+        promotionSequence: null,
+      });
+      assert.deepEqual(
+        await harness.client.packs.findUniqueOrThrow({
+          where: { id: newerPack.id },
+          select: {
+            display_name: true,
+            source_updated_at: true,
+            row_version: true,
+          },
+        }),
+        {
+          display_name: "Newer Pack",
+          source_updated_at: newerAt,
+          row_version: 2n,
+        },
+      );
+      await assert.rejects(
+        repository.upsertPack({
+          ...initialPack,
+          displayName: "Contradictory Pack",
+          sourceUpdatedAt: newerAt,
+        }),
+        ProviderCanonicalWriteConflictError,
+      );
+
+      const initialCollectible = collectibleInput(
+        category.id,
+        "temporal-collectible",
+        "Initial Card",
+        "T1",
+      );
+      await repository.upsertCollectible(initialCollectible);
+      const newerCollectible = await repository.upsertCollectible({
+        ...initialCollectible,
+        displayName: "Newer Card",
+        normalizedName: "newer card",
+        dataAsOf: newerAt,
+      });
+      assert.equal(newerCollectible.rowVersion, 2n);
+      assert.deepEqual(
+        await repository.upsertCollectible(initialCollectible),
+        {
+          id: newerCollectible.id,
+          rowVersion: 2n,
+          materialChange: false,
+          promotionSequence: null,
+        },
+      );
+      assert.deepEqual(
+        await harness.client.collectibles.findUniqueOrThrow({
+          where: { id: newerCollectible.id },
+          select: {
+            display_name: true,
+            data_as_of: true,
+            row_version: true,
+          },
+        }),
+        {
+          display_name: "Newer Card",
+          data_as_of: newerAt,
+          row_version: 2n,
+        },
+      );
+      await assert.rejects(
+        repository.upsertCollectible({
+          ...initialCollectible,
+          displayName: "Contradictory Card",
+          normalizedName: "contradictory card",
+          dataAsOf: newerAt,
+        }),
+        ProviderCanonicalWriteConflictError,
+      );
+    } finally {
+      await harness.close();
     }
   },
 );

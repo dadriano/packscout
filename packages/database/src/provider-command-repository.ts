@@ -474,9 +474,19 @@ export class PrismaProviderCommandRepository {
     }, TRANSACTION_OPTIONS);
   }
 
-  async nextAccepted(): Promise<ProviderAcceptedControlCommand | null> {
+  async nextAccepted(input: Readonly<{
+    commandTypes?: readonly ProviderControlCommandType[];
+  }> = {}): Promise<ProviderAcceptedControlCommand | null> {
+    if (input.commandTypes?.length === 0) {
+      throw new TypeError("At least one accepted command type is required.");
+    }
     return this.database.control_commands.findFirst({
-      where: { state: "accepted" },
+      where: {
+        state: "accepted",
+        ...(input.commandTypes === undefined
+          ? {}
+          : { command_type: { in: [...input.commandTypes] } }),
+      },
       orderBy: [{ requested_at: "asc" }, { id: "asc" }],
     }) as Promise<ProviderAcceptedControlCommand | null>;
   }

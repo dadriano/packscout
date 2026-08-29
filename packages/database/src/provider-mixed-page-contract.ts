@@ -18,13 +18,14 @@ export const PROVIDER_MIXED_PAGE_MAX_RECORDS = 4_000;
 export const PROVIDER_MIXED_PAGE_MAX_BYTES = 8 * 1_024 * 1_024;
 export const PROVIDER_MIXED_PAGE_MAX_RECORD_BYTES = 262_144;
 export const PROVIDER_MIXED_PAGE_MAX_CURSOR_BYTES = 16_384;
-// One legal source page can contain 2,000 record-local failures (for example,
-// card-only pulls whose pack relationship is unavailable). The byte and
-// normalized-record caps remain independent fail-closed bounds.
+// One legal source page can contain 2,000 record-local mapping failures. Valid
+// unresolved relationships are stored as facts and do not consume this bound.
+// The byte and normalized-record caps remain independent fail-closed bounds.
 export const PROVIDER_MIXED_PAGE_MAX_QUARANTINES = 2_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const SOURCE_RECORD_KEY_PATTERN = /^source:[0-9a-f]{64}$/;
 const OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
 const MAXIMUM_BIGINT = 9_223_372_036_854_775_807n;
@@ -49,9 +50,14 @@ export interface ProviderMixedPageRecord {
   readonly position: number;
   readonly providerId: string;
   readonly kind: ProviderMixedPageRecordKind;
+  readonly disposition?: "quarantine";
   readonly operation?: "upsert" | "retire";
   readonly entityType?: ProviderMixedCatalogEntityType;
   readonly candidate: CanonicalJsonObject;
+  readonly sourceRecordKey?: string;
+  readonly reasonCode?: string;
+  readonly fieldPath?: string | null;
+  readonly sanitizedSummary?: string;
 }
 
 export interface ValidatedProviderMixedPage {
@@ -108,6 +114,22 @@ function requireContractPlainObject(
 
 function requireUuid(value: unknown, field: string): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) invalid(`${field} must be a UUID.`);
+  return value;
+}
+
+function requireBoundedText(
+  value: unknown,
+  field: string,
+  maximumLength: number,
+): string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value !== value.trim()
+    || value.length > maximumLength
+  ) {
+    invalid(`${field} must be bounded nonblank text.`);
+  }
   return value;
 }
 
@@ -283,6 +305,50 @@ export function validateProviderMixedPageRecord(
       "MIXED_PAGE_PROVIDER_MISMATCH",
       "A provider mixed page record belongs to another provider.",
     );
+  }
+  if (recordObject.disposition === "quarantine") {
+    const sourceRecordKey = requireBoundedText(
+      recordObject.sourceRecordKey,
+      `records[${input.position}].sourceRecordKey`,
+      512,
+    );
+    if (!SOURCE_RECORD_KEY_PATTERN.test(sourceRecordKey)) {
+      invalid(`records[${input.position}].sourceRecordKey is invalid.`);
+    }
+    const reasonCode = requireBoundedText(
+      recordObject.reasonCode,
+      `records[${input.position}].reasonCode`,
+      128,
+    );
+    if (!/^[A-Z][A-Z0-9_]*$/u.test(reasonCode)) {
+      invalid(`records[${input.position}].reasonCode is invalid.`);
+    }
+    const fieldPath = recordObject.fieldPath === null
+      ? null
+      : requireBoundedText(
+          recordObject.fieldPath,
+          `records[${input.position}].fieldPath`,
+          512,
+        );
+    const sanitizedSummary = requireBoundedText(
+      recordObject.sanitizedSummary,
+      `records[${input.position}].sanitizedSummary`,
+      512,
+    );
+    return {
+      position: input.position,
+      providerId: input.providerId,
+      kind: recordObject.kind as ProviderMixedPageRecordKind,
+      disposition: "quarantine",
+      candidate: requirePlainObject(
+        recordObject.candidate,
+        `records[${input.position}].candidate`,
+      ),
+      sourceRecordKey,
+      reasonCode,
+      fieldPath,
+      sanitizedSummary,
+    };
   }
   return {
     position: input.position,

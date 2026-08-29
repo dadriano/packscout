@@ -41,6 +41,7 @@ import type {
   ProviderCaptureAuthority,
   ProviderCapturePageSourceInput,
   ProviderCaptureTranslation,
+  ProviderMixedPageQuarantineRecordDraft,
 } from "./provider-capture-source-contract.ts";
 import type {
   DataforrestSourceAuthorityRequest,
@@ -223,38 +224,136 @@ function requestedCursor(input: Readonly<{
   return Object.freeze({ ...parsed.data });
 }
 
-function validatedDataforrestRecords(
-  captured: CapturedSourcePageV1,
-): readonly DataforrestEventRecordV1[] {
-  const outcomes = captured.normalizedPage.outcomes;
-  if (outcomes.some(({ status }) => status !== "valid")) {
-    failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
+interface PartitionedDataforrestRecords {
+  readonly records: readonly DataforrestEventRecordV1[];
+  readonly quarantines: readonly ProviderMixedPageQuarantineRecordDraft[];
+}
+
+function adapterInvalidRecordKind(
+  evidence: Readonly<Record<string, unknown>>,
+): ProviderMixedPageQuarantineRecordDraft["kind"] {
+  return evidence.stream === "pulls"
+    ? "pull"
+    : evidence.stream === "trades"
+      ? "market_event"
+      : "catalog";
+}
+
+function adapterInvalidReasonCode(reasonCode: string): string {
+  const prefix = "SOURCE_ADAPTER_";
+  const safeReason = reasonCode.toUpperCase()
+    .replaceAll(/[^A-Z0-9]+/gu, "_");
+  const candidate = `${prefix}${safeReason}`;
+  if (candidate.length <= 128) return candidate;
+  const digest = createHash("sha256").update(reasonCode).digest("hex")
+    .slice(0, 16);
+  return `${candidate.slice(0, 128 - digest.length - 1)}_${digest}`;
+}
+
+function adapterInvalidSourceScope(
+  evidence: Readonly<Record<string, unknown>>,
+): string {
+  if (evidence.stream === "pulls" || evidence.stream === "trades") {
+    return evidence.stream;
   }
-  const records = new Map<number, DataforrestEventRecordV1>();
+  if (evidence.stream === "catalog") {
+    return evidence.entity === "pack" || evidence.entity === "card"
+      ? `catalog:${evidence.entity}`
+      : "catalog:unknown";
+  }
+  return "unknown";
+}
+
+function adapterInvalidSourceRecordKey(input: Readonly<{
+  evidence: Readonly<Record<string, unknown>>;
+  providerId: string;
+}>): string {
+  const recordId = typeof input.evidence.record_id === "string"
+    && input.evidence.record_id.trim().length > 0
+    ? input.evidence.record_id.trim()
+    : null;
+  const digest = createHash("sha256")
+    .update("packscout.provider-source-record-identity.v1\u0000")
+    .update(JSON.stringify(recordId === null
+      ? [
+          input.providerId,
+          adapterInvalidSourceScope(input.evidence),
+          "record_digest",
+          providerMixedPageDigest(input.evidence),
+        ]
+      : [
+          input.providerId,
+          adapterInvalidSourceScope(input.evidence),
+          recordId,
+        ]))
+    .digest("hex");
+  return `source:${digest}`;
+}
+
+function partitionValidatedDataforrestRecords(
+  captured: CapturedSourcePageV1,
+  providerId: string,
+): PartitionedDataforrestRecords {
+  const outcomes = captured.normalizedPage.outcomes;
+  const evidenceByIndex = new Map<
+    number,
+    Readonly<Record<string, unknown>>
+  >();
   for (const evidence of captured.protectedNativeEvidence) {
     const match = /^page_record:(0|[1-9][0-9]*)$/u.exec(evidence.reference);
     if (match === null) continue;
     const index = Number(match[1]);
-    const parsed = dataforrestEventRecordV1Schema.safeParse(evidence.value);
     if (
       !Number.isSafeInteger(index)
       || index < 0
-      || !parsed.success
-      || records.has(index)
+      || evidenceByIndex.has(index)
     ) {
       failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
     }
-    records.set(index, parsed.data);
+    evidenceByIndex.set(index, evidence.value);
   }
   if (
-    records.size !== outcomes.length
+    evidenceByIndex.size !== outcomes.length
     || outcomes.some((outcome, index) => outcome.recordIndex !== index)
   ) {
     failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
   }
-  return Object.freeze(outcomes.map((_, index) =>
-    records.get(index) ?? failure("PROVIDER_DATAFORREST_RESPONSE_INVALID")
-  ));
+  const records: DataforrestEventRecordV1[] = [];
+  const quarantines: ProviderMixedPageQuarantineRecordDraft[] = [];
+  for (const [index, outcome] of outcomes.entries()) {
+    const expectedReference = `page_record:${index}`;
+    const evidence = evidenceByIndex.get(index)
+      ?? failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
+    const outcomeReference = outcome.status === "valid"
+      ? outcome.observation.protectedNativeEvidenceRef
+      : outcome.protectedNativeEvidenceRef;
+    if (outcomeReference !== expectedReference) {
+      failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
+    }
+    if (outcome.status === "valid") {
+      const parsed = dataforrestEventRecordV1Schema.safeParse(evidence);
+      if (!parsed.success) failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
+      records.push(parsed.data);
+      continue;
+    }
+    quarantines.push(Object.freeze({
+      kind: adapterInvalidRecordKind(evidence),
+      disposition: "quarantine" as const,
+      candidate: Object.freeze({}),
+      sourceRecordKey: adapterInvalidSourceRecordKey({
+        evidence,
+        providerId,
+      }),
+      reasonCode: adapterInvalidReasonCode(outcome.reasonCode),
+      fieldPath: outcome.fieldPaths[0] ?? null,
+      sanitizedSummary:
+        "The source adapter rejected this record before canonical translation; no retry artifact is retained.",
+    }));
+  }
+  return Object.freeze({
+    records: Object.freeze(records),
+    quarantines: Object.freeze(quarantines),
+  });
 }
 
 function mixedPage(input: Readonly<{
@@ -340,12 +439,8 @@ export class ProviderDataforrestMixedPageSource
     terminalizeRequest: SourceAdapterRequestTerminalizer;
     translationRecorder: ProviderDataforrestPageTranslationRecorder;
     workerId: string;
-    actorHmacKey: Uint8Array;
     adapter?: SourceAdapter;
   }>) {
-    if (input.actorHmacKey.byteLength < 32) {
-      failure("PROVIDER_DATAFORREST_AUTHORITY_INVALID");
-    }
     this.#authorityResolver = input.authorityResolver;
     this.#terminalizeRequest = input.terminalizeRequest;
     this.#translationRecorder = input.translationRecorder;
@@ -520,11 +615,22 @@ export class ProviderDataforrestMixedPageSource
       if (!completed.ok) adapterFailure(completed.failure.code);
       let translation: ProviderCaptureTranslation;
       try {
-        translation = translateClutchpacksDataforrestRecords({
-          records: validatedDataforrestRecords(completed.value),
+        const partition = partitionValidatedDataforrestRecords(
+          completed.value,
+          resolved.providerId,
+        );
+        const translated = translateClutchpacksDataforrestRecords({
+          records: partition.records,
           providerId: resolved.providerId,
           adapterVersion:
             DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+        });
+        translation = Object.freeze({
+          records: Object.freeze([
+            ...translated.records,
+            ...partition.quarantines,
+          ]),
+          counts: translated.counts,
         });
       } catch {
         failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");

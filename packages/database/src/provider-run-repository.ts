@@ -72,6 +72,22 @@ export type FinishProviderRunResult =
   | { readonly kind: "finished" | "already_terminal"; readonly run: ProviderRunSummary }
   | { readonly kind: "head_not_reached" | "lease_lost" | "not_found" };
 
+export type RecoverProviderRunResult =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "resumed" | "recovered";
+      readonly run: ProviderRunSummary;
+      readonly checkpoint: CanonicalJsonValue | null;
+      readonly checkpointFingerprint: string | null;
+    }
+  | {
+      readonly kind:
+        | "lease_lost"
+        | "runtime_unavailable"
+        | "config_expired"
+        | "config_mismatch";
+    };
+
 interface RuntimeRow {
   readonly central_provider_id: string;
   readonly operating_state: "idle" | "running" | "paused" | "stopped" | "error";
@@ -696,6 +712,245 @@ export class PrismaProviderRunRepository {
       const run = await lockRun(transaction, input.runId);
       if (!run) throw new Error("Started provider run is unavailable.");
       return { kind: "started" as const, run: toSummary(run) };
+    }, TRANSACTION_OPTIONS);
+  }
+
+  /**
+   * Resume a run still owned by this exact fence, or replace a stale running
+   * attempt with one recovery attempt under the newly acquired import fence.
+   * The prior attempt is made terminal before the new active row is inserted.
+   */
+  async recoverActive(input: {
+    readonly recoveryRunId: string;
+    readonly workerId: string;
+    readonly workerFence: bigint;
+    readonly correlationId: string;
+  }): Promise<RecoverProviderRunResult> {
+    requireUuid(input.recoveryRunId, "recoveryRunId");
+    requireUuid(input.correlationId, "correlationId");
+    requireSafeKey(input.workerId, "workerId");
+    return this.database.$transaction(async (transaction) => {
+      const lease = await lockProviderWorkerLease(transaction, "import");
+      if (!providerWorkerLeaseIsLive(lease, {
+        owner: input.workerId,
+        fence: input.workerFence,
+      })) {
+        return { kind: "lease_lost" as const };
+      }
+      await setProviderImportLeaseContext(transaction, {
+        owner: input.workerId,
+        fence: input.workerFence,
+      });
+      const recoveredAt = providerWorkerLeaseDatabaseNow(lease);
+      const active = await activeRun(transaction);
+      if (active === null || active.state === "queued") {
+        return { kind: "none" as const };
+      }
+      const runtime = await lockRuntime(transaction);
+      const eligibilityFailure = runtime.operating_state !== "running"
+        ? "runtime_unavailable" as const
+        : (
+        runtime.cached_config_version_id !== active.config_version_id
+        || runtime.cached_config_version_number !== active.config_version_number
+      )
+          ? "config_mismatch" as const
+          : (
+        runtime.config_expires_at !== null
+        && runtime.config_expires_at <= recoveredAt
+      )
+            ? "config_expired" as const
+            : null;
+      if (
+        active.worker_fence === input.workerFence
+        && eligibilityFailure === null
+      ) {
+        return {
+          kind: "resumed" as const,
+          run: toSummary(active),
+          checkpoint: runtime.source_cursor as CanonicalJsonValue | null,
+          checkpointFingerprint: runtime.source_cursor_hash,
+        };
+      }
+
+      const recoveryAllowed = eligibilityFailure === null;
+      const failureCode = eligibilityFailure === "config_expired"
+        ? "PROVIDER_IMPORT_CONFIG_EXPIRED"
+        : eligibilityFailure === "config_mismatch"
+          ? "PROVIDER_IMPORT_CONFIG_MISMATCH"
+          : eligibilityFailure === "runtime_unavailable"
+            ? "PROVIDER_IMPORT_RUNTIME_UNAVAILABLE"
+            : "PROVIDER_IMPORT_LEASE_EXPIRED";
+      const failureSummary = recoveryAllowed
+        ? "The import worker lease expired; a fenced recovery attempt resumed from the committed cursor."
+        : "The interrupted import could not continue under its pinned runtime authority.";
+      await transaction.provider_runs.update({
+        where: { id: active.id },
+        data: {
+          state: "incomplete",
+          final_cursor: jsonInput(
+            runtime.source_cursor as CanonicalJsonValue | null,
+          ),
+          final_cursor_hash: runtime.source_cursor_hash,
+          failure_code: failureCode,
+          failure_class: recoveryAllowed ? "worker" : "configuration",
+          failure_summary: failureSummary,
+          heartbeat_at: recoveredAt,
+          last_progress_at: recoveredAt,
+          finished_at: recoveredAt,
+          row_version: { increment: 1n },
+        },
+      });
+      const attemptNumber = active.attempt_number + 1;
+      if (recoveryAllowed) {
+        await transaction.provider_runs.create({
+          data: {
+            id: input.recoveryRunId,
+            recovery_of_run_id: active.id,
+            idempotency_key:
+              `recovery/${active.id}/${attemptNumber.toString()}`,
+            trigger: "recovery",
+            state: "running",
+            requested_by_operator_id: active.requested_by_operator_id,
+            config_version_id: active.config_version_id,
+            config_version_number: active.config_version_number,
+            worker_fence: input.workerFence,
+            attempt_number: attemptNumber,
+            requested_cursor: jsonInput(
+              runtime.source_cursor as CanonicalJsonValue | null,
+            ),
+            requested_cursor_hash: runtime.source_cursor_hash,
+            requested_at: recoveredAt,
+            started_at: recoveredAt,
+            heartbeat_at: recoveredAt,
+            last_progress_at: recoveredAt,
+          },
+        });
+      }
+      const shouldTransitionToError = !recoveryAllowed
+        && runtime.operating_state === "running";
+      const terminalGeneration = runtime.state_generation
+        + (shouldTransitionToError ? 1n : 0n);
+      if (shouldTransitionToError) {
+        await transaction.provider_state_events.create({
+          data: {
+            from_state: "running",
+            to_state: "error",
+            state_generation: terminalGeneration,
+            reason: failureCode,
+            actor_type: "runner",
+            actor_id: input.workerId,
+            correlation_id: input.correlationId,
+            occurred_at: recoveredAt,
+          },
+        });
+      }
+      await transaction.provider_runtime.update({
+        where: { singleton_key: true },
+        data: {
+          ...(shouldTransitionToError
+            ? {
+                operating_state: "error" as const,
+                state_reason: failureCode,
+                state_generation: terminalGeneration,
+              }
+            : {}),
+          consecutive_failures: { increment: 1 },
+          latest_failure_code: failureCode,
+          last_attempted_at: recoveredAt,
+          last_runner_heartbeat_at: recoveredAt,
+          row_version: { increment: 1n },
+        },
+      });
+      await appendProviderLocalAudit(transaction, {
+        correlationId: input.correlationId,
+        action: "provider.run.terminal",
+        targetType: "provider_run",
+        targetId: active.id,
+        outcome: "failure",
+        details: { runId: active.id, resultCode: failureCode },
+        occurredAt: recoveredAt,
+      });
+      await appendProviderActivityOutbox(transaction, {
+        eventType: "provider.run.terminal",
+        severity: "warning",
+        dedupeKey: `run:${active.id}:terminal`,
+        recoveryKey: `run:${active.id}`,
+        localRunId: active.id,
+        title: "Provider run interrupted",
+        summary: recoveryAllowed
+          ? "Provider run became incomplete after its worker lease expired."
+          : "Provider run became incomplete because its pinned runtime authority was unavailable.",
+        evidence: { runState: "incomplete", failureCode },
+        eventAt: recoveredAt,
+      });
+      if (!recoveryAllowed) {
+        if (shouldTransitionToError) {
+          await appendProviderLocalAudit(transaction, {
+            correlationId: input.correlationId,
+            action: "provider.runtime.transition",
+            targetType: "provider_runtime",
+            targetId: runtime.central_provider_id,
+            outcome: "failure",
+            details: {
+              fromState: "running",
+              toState: "error",
+              stateGeneration: terminalGeneration.toString(),
+            },
+            occurredAt: recoveredAt,
+          });
+          await appendProviderActivityOutbox(transaction, {
+            eventType: "provider.runtime.transitioned",
+            severity: "critical",
+            dedupeKey: `runtime:${terminalGeneration}`,
+            recoveryKey: "provider-runtime-state",
+            title: "Provider runtime requires attention",
+            summary: "Provider runtime entered error after an interrupted import could not recover.",
+            evidence: {
+              state: "error",
+              generation: terminalGeneration.toString(),
+              failureCode,
+            },
+            eventAt: recoveredAt,
+          });
+        }
+        return { kind: eligibilityFailure };
+      }
+      await appendProviderLocalAudit(transaction, {
+        correlationId: input.correlationId,
+        action: "provider.run.started",
+        targetType: "provider_run",
+        targetId: input.recoveryRunId,
+        outcome: "success",
+        details: {
+          runId: input.recoveryRunId,
+          leaseFence: input.workerFence.toString(),
+        },
+        occurredAt: recoveredAt,
+      });
+      await appendProviderActivityOutbox(transaction, {
+        eventType: "provider.run.recovered",
+        severity: "info",
+        dedupeKey: `run:${input.recoveryRunId}:recovered`,
+        recoveryKey: `run:${active.id}`,
+        localRunId: input.recoveryRunId,
+        title: "Provider run recovered",
+        summary: "Provider import resumed from its last committed cursor.",
+        evidence: {
+          priorRunId: active.id,
+          attemptNumber,
+        },
+        eventAt: recoveredAt,
+      });
+      const recovered = await lockRun(transaction, input.recoveryRunId);
+      if (recovered === null) {
+        throw new Error("Recovered provider run is unavailable.");
+      }
+      return {
+        kind: "recovered" as const,
+        run: toSummary(recovered),
+        checkpoint: runtime.source_cursor as CanonicalJsonValue | null,
+        checkpointFingerprint: runtime.source_cursor_hash,
+      };
     }, TRANSACTION_OPTIONS);
   }
 

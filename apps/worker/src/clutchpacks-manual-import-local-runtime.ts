@@ -27,8 +27,8 @@ export interface ClutchpacksManualImportLocalConfiguration {
   readonly databaseUrl: string;
   readonly providerId: string;
   readonly providerKey: "clutchpacks";
-  readonly captureRoot: string;
-  readonly actorHmacKey: Uint8Array;
+  readonly captureRoot: string | null;
+  readonly actorHmacKey: Uint8Array | null;
   readonly workerId: string;
 }
 
@@ -77,27 +77,30 @@ function base64Key(value: string | undefined): Uint8Array {
 export function readClutchpacksManualImportLocalConfiguration(
   environment: NodeJS.ProcessEnv,
   fallbackWorkerId: string,
+  sourceMode: "capture" | "live" = "capture",
 ): ClutchpacksManualImportLocalConfiguration {
   const providerId = required(environment.PACKSCOUT_PROVIDER_ID);
   const providerKey = required(environment.PACKSCOUT_PROVIDER_KEY);
-  const captureRoot = required(environment.PACKSCOUT_PROVIDER_CAPTURE_ROOT);
+  const captureRoot = sourceMode === "capture"
+    ? required(environment.PACKSCOUT_PROVIDER_CAPTURE_ROOT)
+    : null;
   const workerId = environment.PACKSCOUT_PROVIDER_WORKER_ID === undefined
     ? fallbackWorkerId
     : required(environment.PACKSCOUT_PROVIDER_WORKER_ID);
   if (
     !uuidPattern.test(providerId)
     || providerKey !== "clutchpacks"
-    || !path.isAbsolute(captureRoot)
+    || (captureRoot !== null && !path.isAbsolute(captureRoot))
     || !workerIdPattern.test(workerId)
   ) configurationError();
   return Object.freeze({
     databaseUrl: databaseUrl(environment.PACKSCOUT_PROVIDER_DATABASE_URL),
     providerId,
     providerKey,
-    captureRoot: path.normalize(captureRoot),
-    actorHmacKey: base64Key(
-      environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64,
-    ),
+    captureRoot: captureRoot === null ? null : path.normalize(captureRoot),
+    actorHmacKey: sourceMode === "capture"
+      ? base64Key(environment.PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64)
+      : null,
     workerId,
   });
 }
@@ -111,8 +114,8 @@ export interface ClutchpacksManualImportLocalDependencies {
   }>): Pick<ProviderDatabaseLifecycle, "client" | "start" | "close">;
   createExecutor(input: Readonly<{
     database: ProviderPrismaClient;
-    captureRoot: string;
-    actorHmacKey: Uint8Array;
+    captureRoot: string | null;
+    actorHmacKey: Uint8Array | null;
     workerId: string;
   }>): Pick<ClutchpacksManualImportExecutor, "executeNext">;
   relayProviderActivity?(): Promise<void>;
@@ -127,12 +130,14 @@ export interface ClutchpacksManualImportLocalDependencies {
 export async function runClutchpacksManualImportOnce(input: Readonly<{
   environment: NodeJS.ProcessEnv;
   fallbackWorkerId: string;
+  sourceMode?: "capture" | "live";
   signal?: AbortSignal;
   dependencies: ClutchpacksManualImportLocalDependencies;
 }>): Promise<ClutchpacksManualImportExecutionResult> {
   const configuration = readClutchpacksManualImportLocalConfiguration(
     input.environment,
     input.fallbackWorkerId,
+    input.sourceMode,
   );
   let lifecycle: ReturnType<
     ClutchpacksManualImportLocalDependencies["createDatabaseLifecycle"]

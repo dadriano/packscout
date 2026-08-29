@@ -122,7 +122,7 @@ test("the pinned ClutchPacks capture strictly validates with exact source counts
   }, { catalog: 14, pulls: 15, sales: 15 });
 });
 
-test("the ClutchPacks integration emits one deterministic full capture page and intentional pull quarantines", async (context) => {
+test("the ClutchPacks integration emits one deterministic full capture page with partial pulls", async (context) => {
   const sampleRoot = await requireSample(context);
   if (sampleRoot === null) return;
   const first = await allPages(source(sampleRoot));

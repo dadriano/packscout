@@ -193,10 +193,45 @@ function knownRecordFailure(error: unknown): {
 async function applyRecordWithSavepoint(
   transaction: ProviderTransactionClient,
   record: ProviderMixedPageRecord,
+  sourceQuarantineKeys: Set<string>,
 ): Promise<
   | { readonly kind: "accepted" | "duplicate"; readonly materialChange: boolean }
   | { readonly kind: "quarantined"; readonly draft: QuarantineDraft }
 > {
+  if (record.disposition === "quarantine") {
+    if (
+      record.sourceRecordKey === undefined
+      || record.reasonCode === undefined
+      || record.fieldPath === undefined
+      || record.sanitizedSummary === undefined
+    ) {
+      throw new ProviderMixedPageContractError(
+        "MIXED_PAGE_INVALID",
+        "A source quarantine record is incomplete.",
+      );
+    }
+    if (sourceQuarantineKeys.has(record.sourceRecordKey)) {
+      return { kind: "duplicate", materialChange: false };
+    }
+    const existing = await transaction.quarantine_records.findFirst({
+      where: { source_record_key: record.sourceRecordKey },
+      select: { id: true },
+    });
+    if (existing !== null) {
+      sourceQuarantineKeys.add(record.sourceRecordKey);
+      return { kind: "duplicate", materialChange: false };
+    }
+    sourceQuarantineKeys.add(record.sourceRecordKey);
+    return {
+      kind: "quarantined",
+      draft: {
+        id: randomUUID(),
+        record,
+        reasonCode: record.reasonCode,
+        fieldPath: record.fieldPath,
+      },
+    };
+  }
   await transaction.$executeRawUnsafe("SAVEPOINT packscout_mixed_record");
   try {
     const result = await applyProviderMixedPageRecord(
@@ -313,8 +348,13 @@ export class PrismaProviderMixedPageRepository {
       let duplicate = 0;
       let materialChanges = 0;
       const quarantines: QuarantineDraft[] = [];
+      const sourceQuarantineKeys = new Set<string>();
       for (const record of page.records) {
-        const result = await applyRecordWithSavepoint(transaction, record);
+        const result = await applyRecordWithSavepoint(
+          transaction,
+          record,
+          sourceQuarantineKeys,
+        );
         if (result.kind === "quarantined") {
           quarantines.push(result.draft);
           if (quarantines.length > PROVIDER_MIXED_PAGE_MAX_QUARANTINES) {
@@ -379,25 +419,54 @@ export class PrismaProviderMixedPageRepository {
         },
       });
       for (const quarantine of quarantines) {
+        const sourceQuarantine = quarantine.record.disposition === "quarantine";
         await transaction.quarantine_records.create({
           data: {
             id: quarantine.id, provider_run_id: page.runId, provider_run_page_id: page.pageId,
             record_index: quarantine.record.position, record_kind: quarantine.record.kind,
-            entity_key: providerMixedRecordEntityKey(quarantine.record), source_record_key: null,
+            entity_key: providerMixedRecordEntityKey(quarantine.record),
+            source_record_key: sourceQuarantine
+              ? quarantine.record.sourceRecordKey ?? null
+              : null,
             external_id: null, reason_code: quarantine.reasonCode, field_path: quarantine.fieldPath,
-            sanitized_summary: "The normalized candidate could not be committed to the provider catalog.",
+            sanitized_summary: sourceQuarantine
+              ? quarantine.record.sanitizedSummary
+                ?? "The validated source record could not be mapped to the provider schema."
+              : "The normalized candidate could not be committed to the provider catalog.",
             candidate_schema_version: page.contractVersion,
-            normalized_candidate: quarantine.record.candidate as ProviderPrisma.InputJsonObject,
+            normalized_candidate: sourceQuarantine
+              ? ProviderPrisma.DbNull
+              : quarantine.record.candidate as ProviderPrisma.InputJsonObject,
             protected_evidence: ProviderPrisma.DbNull,
+            created_at: committedAt,
+            updated_at: committedAt,
+            ...(sourceQuarantine
+              ? {
+                  evidence_expires_at: committedAt,
+                  evidence_expired_at: committedAt,
+                  state: "expired" as const,
+                }
+              : {}),
           },
         });
         await appendProviderActivityOutbox(transaction, {
-          eventType: "provider.quarantine.opened", severity: "warning",
-          dedupeKey: `quarantine:${quarantine.id}:open`, recoveryKey: `quarantine:${quarantine.id}`,
+          eventType: sourceQuarantine
+            ? "provider.quarantine.expired"
+            : "provider.quarantine.opened",
+          severity: "warning",
+          dedupeKey: `quarantine:${quarantine.id}:${sourceQuarantine ? "expired" : "open"}`,
+          recoveryKey: `quarantine:${quarantine.id}`,
           localRunId: page.runId, localQuarantineId: quarantine.id,
-          title: "Provider record quarantined",
-          summary: "A normalized provider record requires operator review before retry.",
-          evidence: { quarantineState: "open" }, eventAt: committedAt,
+          title: sourceQuarantine
+            ? "Provider source record rejected"
+            : "Provider record quarantined",
+          summary: sourceQuarantine
+            ? "A source record was rejected before canonical persistence and has no retained retry artifact."
+            : "A normalized provider record requires operator review before retry.",
+          evidence: {
+            quarantineState: sourceQuarantine ? "expired" : "open",
+          },
+          eventAt: committedAt,
         });
       }
       return {

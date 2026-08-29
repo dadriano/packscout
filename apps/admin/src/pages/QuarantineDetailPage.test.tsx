@@ -60,12 +60,12 @@ const session: AuthSessionResponse = {
   csrfToken: "fixture-csrf",
 };
 
-function route() {
+function route(currentEntry: QuarantineEntryDetail = entry) {
   return (
     <ToastProvider>
       <ConfirmProvider>
         <SessionProvider initialSession={session}>
-          <MemoryRouter initialEntries={[`/quarantine/${entry.id}`]}>
+          <MemoryRouter initialEntries={[`/quarantine/${currentEntry.id}`]}>
             <Routes>
               <Route path="/quarantine/:quarantineId" element={<QuarantineDetailPage />} />
             </Routes>
@@ -134,4 +134,27 @@ test("quarantine detail explains when the operator loses permission", async (con
   assert.match(pageText(renderer), /Your role no longer permits quarantine access/);
   assert.match(pageText(renderer), /Return to quarantine/);
   assert.doesNotMatch(pageText(renderer), /Retry record/);
+});
+
+test("expired source quarantines explain that no retry artifact was retained", async (context) => {
+  const expiredEntry: QuarantineEntryDetail = {
+    ...entry,
+    sanitizedSummary:
+      "The source adapter rejected this record before canonical translation; no retry artifact is retained.",
+    state: "expired",
+    rawExpiresAt: entry.firstFailureAt,
+  };
+  stubFetch(context, () => jsonResponse({ entry: expiredEntry }));
+  const renderer = await renderPage(route(expiredEntry));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /no retry artifact is retained/);
+  assert.match(pageText(renderer), /Retry artifact Unavailable/);
+  assert.doesNotMatch(pageText(renderer), /Source evidence expired/);
+  assert.equal(
+    [...renderer.container.querySelectorAll("button")]
+      .some((button) => button.textContent?.trim() === "Retry record"),
+    false,
+  );
 });

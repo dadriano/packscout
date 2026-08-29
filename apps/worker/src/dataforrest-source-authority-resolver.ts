@@ -84,15 +84,14 @@ interface StoredSourceConfiguration {
   readonly configuration: unknown;
   readonly expires_at: Date | null;
   readonly source_credential: StoredSourceCredential | null;
+  readonly provider: StoredProviderIdentity;
 }
 
-interface StoredProviderAuthority {
+interface StoredProviderIdentity {
   readonly id: string;
   readonly organization_id: string;
   readonly provider_key: string;
   readonly lifecycle: string;
-  readonly active_config_version_id: string | null;
-  readonly active_config_version: StoredSourceConfiguration | null;
 }
 
 function failure(code: DataforrestSourceAuthorityFailureCode): never {
@@ -162,49 +161,49 @@ export class CentralDataforrestSourceAuthorityResolver {
       return failure("PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID");
     }
     const now = input.now ?? new Date();
-    let provider: StoredProviderAuthority | null;
+    let config: StoredSourceConfiguration | null;
     try {
-      provider = await this.dependencies.central.providers.findUnique({
-        where: { id: input.providerId },
+      config = await this.dependencies.central.provider_config_versions.findUnique({
+        where: { id: input.configVersionId },
         select: {
           id: true,
-          organization_id: true,
-          provider_key: true,
-          lifecycle: true,
-          active_config_version_id: true,
-          active_config_version: {
+          provider_id: true,
+          version_number: true,
+          adapter_key: true,
+          endpoint_url: true,
+          source_credential_version_id: true,
+          configuration: true,
+          expires_at: true,
+          source_credential: {
             select: {
               id: true,
               provider_id: true,
+              credential_kind: true,
               version_number: true,
-              adapter_key: true,
-              endpoint_url: true,
-              source_credential_version_id: true,
-              configuration: true,
-              expires_at: true,
-              source_credential: {
-                select: {
-                  id: true,
-                  provider_id: true,
-                  credential_kind: true,
-                  version_number: true,
-                  ciphertext: true,
-                  nonce: true,
-                  auth_tag: true,
-                  key_version: true,
-                  lifecycle: true,
-                  activated_at: true,
-                  retired_at: true,
-                  revoked_at: true,
-                },
-              },
+              ciphertext: true,
+              nonce: true,
+              auth_tag: true,
+              key_version: true,
+              lifecycle: true,
+              activated_at: true,
+              retired_at: true,
+              revoked_at: true,
+            },
+          },
+          provider: {
+            select: {
+              id: true,
+              organization_id: true,
+              provider_key: true,
+              lifecycle: true,
             },
           },
         },
-      }) as StoredProviderAuthority | null;
+      }) as StoredSourceConfiguration | null;
     } catch {
       return failure("PROVIDER_SOURCE_AUTHORITY_UNAVAILABLE");
     }
+    const provider = config?.provider ?? null;
     if (
       provider === null
       || provider.lifecycle !== "active"
@@ -212,11 +211,9 @@ export class CentralDataforrestSourceAuthorityResolver {
     ) {
       return failure("PROVIDER_SOURCE_AUTHORITY_UNAVAILABLE");
     }
-    const config = provider.active_config_version;
     if (
       provider.id !== input.providerId
       || provider.provider_key !== input.providerKey
-      || provider.active_config_version_id !== input.configVersionId
       || config === null
       || config.id !== input.configVersionId
       || config.provider_id !== input.providerId

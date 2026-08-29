@@ -167,6 +167,49 @@ test("mixed page validator accepts one source-neutral ordered page", () => {
   assert.equal(validated.leaseFence, 1n);
 });
 
+test("mixed page validator accepts one bounded source-mapping quarantine", () => {
+  const providerId = randomUUID();
+  const validated = validateProviderMixedPage(mixedPage({
+    providerId,
+    records: [{
+      position: 0,
+      providerId,
+      kind: "pull",
+      disposition: "quarantine",
+      candidate: {},
+      sourceRecordKey: `source:${"a".repeat(64)}`,
+      reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
+      fieldPath: null,
+      sanitizedSummary:
+        "The validated source record could not be mapped to the provider schema.",
+    }],
+  }));
+  const record = validated.records[0];
+  assert.equal(record?.disposition, "quarantine");
+  assert.equal(record?.kind, "pull");
+  assert.equal(record?.sourceRecordKey, `source:${"a".repeat(64)}`);
+  assert.deepEqual(record?.candidate, {});
+
+  const unsafe = mixedPage({
+    providerId,
+    records: [{
+      position: 0,
+      providerId,
+      kind: "pull",
+      disposition: "quarantine",
+      candidate: {},
+      sourceRecordKey: "provider-native-record-id",
+      reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
+      fieldPath: null,
+      sanitizedSummary: "The source record could not be mapped.",
+    }],
+  });
+  assertContractCode(
+    "MIXED_PAGE_INVALID",
+    () => validateProviderMixedPage(unsafe),
+  );
+});
+
 test("mixed page validator rejects unknown fields at every contracted level", () => {
   const top = mixedPage({ overrides: { credential: "must-not-pass" } });
   assertContractCode("MIXED_PAGE_UNKNOWN_FIELD", () => validateProviderMixedPage(top));

@@ -27,6 +27,7 @@ import {
   type CollectibleInstanceWriteInput,
   type CollectibleNameAliasWriteInput,
   type CollectibleWriteInput,
+  type FactReferenceReconciliationResult,
   type MarketEventWriteInput,
   type PackContentWriteInput,
   type PackWriteInput,
@@ -38,6 +39,11 @@ import {
   type CanonicalFactWriteResult,
   type RetireCanonicalEntityInput,
 } from "./provider-canonical-contract.ts";
+import {
+  lockProviderWorkerLease,
+  providerWorkerLeaseIsLive,
+  setProviderImportLeaseContext,
+} from "./provider-worker-lease-repository.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -57,6 +63,13 @@ interface MutableRow {
   readonly lifecycle: "active" | "retired";
   readonly row_version: bigint;
 }
+
+interface ResolvedFactRow {
+  readonly id: string;
+  readonly row_version: bigint;
+}
+
+const FACT_REFERENCE_RECONCILIATION_LIMIT = 500;
 
 function nullableText(value: string | null, field: string): string | null {
   return value === null ? null : requireNonEmptyText(value, field);
@@ -179,6 +192,119 @@ async function appendPromotionRange(
     })),
   });
   return { first, last: head.last_sequence };
+}
+
+async function appendResolvedFactChanges(
+  client: ProviderQueryClient,
+  rows: readonly (ResolvedFactRow & {
+    readonly entityType: "pull" | "pull_item" | "market_event";
+  })[],
+): Promise<PromotionSequenceRange | null> {
+  return rows.length === 0 ? null : appendPromotionRange(
+    client,
+    rows.map((row) => ({
+      entityType: row.entityType,
+      entityId: row.id,
+      entityVersion: row.row_version,
+      operation: "upsert",
+    })),
+  );
+}
+
+async function reconcileFactReferencesBatch(
+  client: ProviderQueryClient,
+): Promise<FactReferenceReconciliationResult> {
+  const pulls = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
+    WITH candidates AS (
+      SELECT fact.id, target.id AS target_id
+      FROM pulls AS fact
+      JOIN packs AS target ON target.pack_key = fact.pack_key
+      WHERE fact.pack_id IS NULL
+      ORDER BY fact.id
+      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
+      FOR UPDATE OF fact SKIP LOCKED
+    )
+    UPDATE pulls AS fact
+    SET pack_id = candidates.target_id,
+        row_version = fact.row_version + 1,
+        updated_at = CURRENT_TIMESTAMP
+    FROM candidates
+    WHERE fact.id = candidates.id
+    RETURNING fact.id, fact.row_version
+  `);
+  const pullItems = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
+    WITH candidates AS (
+      SELECT fact.id, target.id AS target_id
+      FROM pull_items AS fact
+      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
+      WHERE fact.collectible_id IS NULL
+      ORDER BY fact.id
+      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
+      FOR UPDATE OF fact SKIP LOCKED
+    )
+    UPDATE pull_items AS fact
+    SET collectible_id = candidates.target_id,
+        row_version = fact.row_version + 1,
+        updated_at = CURRENT_TIMESTAMP
+    FROM candidates
+    WHERE fact.id = candidates.id
+    RETURNING fact.id, fact.row_version
+  `);
+  const marketEventPacks = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
+    WITH candidates AS (
+      SELECT fact.id, target.id AS target_id
+      FROM market_events AS fact
+      JOIN packs AS target ON target.pack_key = fact.pack_key
+      WHERE fact.pack_id IS NULL
+      ORDER BY fact.id
+      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
+      FOR UPDATE OF fact SKIP LOCKED
+    )
+    UPDATE market_events AS fact
+    SET pack_id = candidates.target_id,
+        row_version = fact.row_version + 1,
+        updated_at = CURRENT_TIMESTAMP
+    FROM candidates
+    WHERE fact.id = candidates.id
+    RETURNING fact.id, fact.row_version
+  `);
+  const marketEventCollectibles = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
+    WITH candidates AS (
+      SELECT fact.id, target.id AS target_id
+      FROM market_events AS fact
+      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
+      WHERE fact.collectible_id IS NULL
+      ORDER BY fact.id
+      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
+      FOR UPDATE OF fact SKIP LOCKED
+    )
+    UPDATE market_events AS fact
+    SET collectible_id = candidates.target_id,
+        row_version = fact.row_version + 1,
+        updated_at = CURRENT_TIMESTAMP
+    FROM candidates
+    WHERE fact.id = candidates.id
+    RETURNING fact.id, fact.row_version
+  `);
+  const promotionRange = await appendResolvedFactChanges(client, [
+    ...pulls.map((row) => ({ ...row, entityType: "pull" as const })),
+    ...pullItems.map((row) => ({ ...row, entityType: "pull_item" as const })),
+    ...marketEventPacks.map((row) => ({ ...row, entityType: "market_event" as const })),
+    ...marketEventCollectibles.map((row) => ({
+      ...row,
+      entityType: "market_event" as const,
+    })),
+  ]);
+  const materialChangeCount = pulls.length + pullItems.length
+    + marketEventPacks.length + marketEventCollectibles.length;
+  return {
+    pullPackCount: pulls.length,
+    pullItemCollectibleCount: pullItems.length,
+    marketEventPackCount: marketEventPacks.length,
+    marketEventCollectibleCount: marketEventCollectibles.length,
+    materialChangeCount,
+    promotionRange,
+  };
 }
 
 function mutableResult(
@@ -354,7 +480,13 @@ export class ProviderCanonicalTransaction {
       return mutableResult(row, range);
     }
     if (current.lifecycle === "retired") throw new ProviderCanonicalRetiredError();
-    if (hasSameMaterialFields(current, data)) return mutableResult(current, null);
+    const sameMaterial = hasSameMaterialFields(current, data);
+    const sourceOrder = data.source_updated_at.getTime()
+      - current.source_updated_at.getTime();
+    if (sourceOrder < 0 || sameMaterial) return mutableResult(current, null);
+    if (sourceOrder === 0) {
+      throw new ProviderCanonicalWriteConflictError();
+    }
     const nextVersion = current.row_version + 1n;
     const update = await this.#client.packs.updateMany({
       where: { id: current.id, row_version: current.row_version, lifecycle: "active" },
@@ -423,7 +555,12 @@ export class ProviderCanonicalTransaction {
       return mutableResult(row, range);
     }
     if (current.lifecycle === "retired") throw new ProviderCanonicalRetiredError();
-    if (hasSameMaterialFields(current, data)) return mutableResult(current, null);
+    const sameMaterial = hasSameMaterialFields(current, data);
+    const sourceOrder = data.data_as_of.getTime() - current.data_as_of.getTime();
+    if (sourceOrder < 0 || sameMaterial) return mutableResult(current, null);
+    if (sourceOrder === 0) {
+      throw new ProviderCanonicalWriteConflictError();
+    }
     const nextVersion = current.row_version + 1n;
     const update = await this.#client.collectibles.updateMany({
       where: { id: current.id, row_version: current.row_version, lifecycle: "active" },
@@ -654,9 +791,41 @@ export class ProviderCanonicalTransaction {
   async insertPull(input: PullWriteInput): Promise<PullWriteResult> {
     const pullKey = requireNonEmptyText(input.pullKey, "pullKey");
     const factDigest = requireDigest(input.factDigest);
+    const packKey = nullableText(input.packKey, "packKey");
     requirePairedValues(input.paidAmount, input.paidCurrency, "paid");
     if (input.items.length === 0) {
       throw new ProviderCanonicalInputError("A completed pull must contain at least one item.");
+    }
+    const items = input.items.map((item) => {
+      const collectibleKey = nullableText(item.collectibleKey, "collectibleKey");
+      if (item.collectibleId !== null && collectibleKey === null) {
+        throw new ProviderCanonicalInputError(
+          "A resolved pull item collectible requires its immutable source key.",
+        );
+      }
+      if (item.collectibleInstanceId !== null && item.collectibleId === null) {
+        throw new ProviderCanonicalInputError(
+          "A collectible instance subject requires its collectible.",
+        );
+      }
+      requirePairedValues(item.statedValueAmount, item.statedValueCurrency, "statedValue");
+      return {
+        ...item,
+        collectibleKey,
+        quantity: requirePositiveBigInt(item.quantity, "quantity"),
+        statedValueAmount: nullableMoney(item.statedValueAmount, "statedValueAmount"),
+        statedValueCurrency: nullableCurrency(item.statedValueCurrency, "statedValueCurrency"),
+      };
+    });
+    if (packKey === null && items.every((item) => item.collectibleKey === null)) {
+      throw new ProviderCanonicalInputError(
+        "A completed pull requires at least one source pack or collectible relationship.",
+      );
+    }
+    if (input.packId !== null && packKey === null) {
+      throw new ProviderCanonicalInputError(
+        "A resolved pull pack requires its immutable source key.",
+      );
     }
     const current = await this.#client.pulls.findUnique({
       where: { pull_key: pullKey },
@@ -684,27 +853,27 @@ export class ProviderCanonicalTransaction {
         id: pullId,
         pull_key: pullKey,
         fact_digest: factDigest,
+        pack_key: packKey,
         pack_id: input.packId,
         provider_account_id: input.providerAccountId,
+        item_count: items.length,
         occurred_at: requireDate(input.occurredAt, "occurredAt"),
         paid_amount: nullableMoney(input.paidAmount, "paidAmount"),
         paid_currency: nullableCurrency(input.paidCurrency, "paidCurrency"),
       },
     });
     await this.#client.pull_items.createMany({
-      data: input.items.map((item, index) => {
-        requirePairedValues(item.statedValueAmount, item.statedValueCurrency, "statedValue");
-        return {
+      data: items.map((item, index) => ({
           id: itemIds[index] ?? randomUUID(),
           pull_id: pullId,
           ordinal: index + 1,
+          collectible_key: item.collectibleKey,
           collectible_id: item.collectibleId,
           collectible_instance_id: item.collectibleInstanceId,
-          quantity: requirePositiveBigInt(item.quantity, "quantity"),
-          stated_value_amount: nullableMoney(item.statedValueAmount, "statedValueAmount"),
-          stated_value_currency: nullableCurrency(item.statedValueCurrency, "statedValueCurrency"),
-        };
-      }),
+          quantity: item.quantity,
+          stated_value_amount: item.statedValueAmount,
+          stated_value_currency: item.statedValueCurrency,
+        })),
     });
     const range = await appendPromotionRange(this.#client, [
       { entityType: "pull", entityId: pullId, entityVersion: 1n, operation: "upsert" },
@@ -721,9 +890,21 @@ export class ProviderCanonicalTransaction {
   async insertMarketEvent(input: MarketEventWriteInput): Promise<CanonicalFactWriteResult> {
     const eventKey = requireNonEmptyText(input.eventKey, "eventKey");
     const factDigest = requireDigest(input.factDigest);
+    const packKey = nullableText(input.packKey, "packKey");
+    const collectibleKey = nullableText(input.collectibleKey, "collectibleKey");
     requirePairedValues(input.amount, input.currency, "amount");
-    if (input.packId === null && input.collectibleId === null && input.collectibleInstanceId === null) {
-      throw new ProviderCanonicalInputError("A market event requires at least one local subject.");
+    if (packKey === null && collectibleKey === null) {
+      throw new ProviderCanonicalInputError("A market event requires at least one source subject.");
+    }
+    if (input.packId !== null && packKey === null) {
+      throw new ProviderCanonicalInputError(
+        "A resolved market-event pack requires its immutable source key.",
+      );
+    }
+    if (input.collectibleId !== null && collectibleKey === null) {
+      throw new ProviderCanonicalInputError(
+        "A resolved market-event collectible requires its immutable source key.",
+      );
     }
     if (input.collectibleInstanceId !== null && input.collectibleId === null) {
       throw new ProviderCanonicalInputError("A collectible instance subject requires its collectible.");
@@ -746,7 +927,9 @@ export class ProviderCanonicalTransaction {
         fact_digest: factDigest,
         event_group_id: input.eventGroupId,
         event_type: input.eventType,
+        pack_key: packKey,
         pack_id: input.packId,
+        collectible_key: collectibleKey,
         collectible_id: input.collectibleId,
         collectible_instance_id: input.collectibleInstanceId,
         from_provider_account_id: input.fromProviderAccountId,
@@ -890,6 +1073,31 @@ export class ProviderCanonicalRepository {
 
   insertMarketEvent(input: MarketEventWriteInput): Promise<CanonicalFactWriteResult> {
     return this.transaction((canonical) => canonical.insertMarketEvent(input));
+  }
+
+  /**
+   * Resolve one bounded batch under the current import fence. Callers renew
+   * before this transaction and drain by repeating until the count is zero.
+   * A null result means the supplied worker no longer owns a live lease.
+   */
+  reconcileFactReferences(input: Readonly<{
+    workerId: string;
+    workerFence: bigint;
+  }>): Promise<FactReferenceReconciliationResult | null> {
+    return this.#client.$transaction(async (client) => {
+      const lease = await lockProviderWorkerLease(client, "import");
+      if (!providerWorkerLeaseIsLive(lease, {
+        owner: input.workerId,
+        fence: input.workerFence,
+      })) {
+        return null;
+      }
+      await setProviderImportLeaseContext(client, {
+        owner: input.workerId,
+        fence: input.workerFence,
+      });
+      return reconcileFactReferencesBatch(client);
+    }, TRANSACTION_OPTIONS);
   }
 
   retireCategory(input: RetireCanonicalEntityInput): Promise<CanonicalWriteResult> {

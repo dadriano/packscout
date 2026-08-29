@@ -35,9 +35,11 @@ const localAuditEvidenceKeys = new Set([
   "workerRole",
 ]);
 const activityEvidenceKeys = new Set([
+  "attemptNumber",
   "expiredCount",
   "failureCode",
   "generation",
+  "priorRunId",
   "quarantineState",
   "retentionState",
   "runState",

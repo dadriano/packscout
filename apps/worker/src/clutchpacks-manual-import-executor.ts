@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
+  PROVIDER_FACT_QUARANTINE_RECONCILIATION_MAX_BATCH,
   PrismaProviderCommandRepository,
+  PrismaProviderFactQuarantineReconciliationRepository,
+  ProviderCanonicalRepository,
   PrismaProviderMixedPageRepository,
   PrismaProviderRunRepository,
   PrismaProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
   validateProviderMixedPage,
+  type ProviderFactQuarantineScanCursor,
   type ProviderPrismaClient,
   type ProviderRunCounters,
+  type ProviderRunSummary,
 } from "@packscout/database";
 import { ProviderCaptureMixedPageSource } from
   "./provider-capture-mixed-page-source.ts";
@@ -20,6 +25,7 @@ import { ProviderDataforrestSourceError } from
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_IMPORT_PAGES = 10_000;
+const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
 
 export type ClutchpacksManualImportExecutionResult =
   | Readonly<{ kind: "idle" | "contended" }>
@@ -124,40 +130,31 @@ export class ClutchpacksManualImportExecutor {
       return { kind: "blocked", runId: null, failureCode: "PROVIDER_CAPTURE_ABORTED" };
     }
     const commands = new PrismaProviderCommandRepository(this.dependencies.database);
-    const command = await commands.nextAccepted();
-    if (command === null) return { kind: "idle" };
-    if (command.command_type !== "run") {
-      return {
-        kind: "blocked",
-        runId: null,
-        failureCode: "PROVIDER_MANUAL_COMMAND_UNSUPPORTED",
-      };
-    }
+    const command = await commands.nextAccepted({ commandTypes: ["run"] });
 
-    // Capability is checked before acquiring a lease or changing the queued
-    // command/run. A stale or unknown adapter therefore cannot consume local
-    // execution authority and leaves the accepted command available for an
-    // operator-visible configuration correction.
     const runtime = await new PrismaProviderRuntimeRepository(
       this.dependencies.database,
     ).snapshot();
     const configuration = runtime.cachedConfiguration;
-    if (configuration === null) {
+    const adapterKey = configuration?.configuration.adapterKey;
+    const capabilityFailure = configuration === null
+      ? "PROVIDER_CONFIGURATION_UNAVAILABLE"
+      : typeof adapterKey !== "string"
+        || !this.dependencies.source.supports(adapterKey, runtime.providerKey)
+        ? "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE"
+        : null;
+    const runs = new PrismaProviderRunRepository(this.dependencies.database);
+    const activeBeforeLease = await runs.active();
+
+    // A new or merely queued run has not consumed execution authority yet, so
+    // an unavailable adapter is rejected before taking the lease or mutating
+    // command/run state. A running attempt must pass through fenced recovery
+    // first so an old fence can never leave it permanently active.
+    if (activeBeforeLease?.state !== "running" && capabilityFailure !== null) {
       return {
         kind: "blocked",
         runId: null,
-        failureCode: "PROVIDER_CONFIGURATION_UNAVAILABLE",
-      };
-    }
-    const adapterKey = configuration.configuration.adapterKey;
-    if (
-      typeof adapterKey !== "string"
-      || !this.dependencies.source.supports(adapterKey, runtime.providerKey)
-    ) {
-      return {
-        kind: "blocked",
-        runId: null,
-        failureCode: "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+        failureCode: capabilityFailure,
       };
     }
 
@@ -171,35 +168,90 @@ export class ClutchpacksManualImportExecutor {
     });
     if (acquired.kind === "held") return { kind: "contended" };
     const fence = acquired.lease.fence;
-    const runs = new PrismaProviderRunRepository(this.dependencies.database);
     let runId: string | null = null;
     try {
-      const started = await runs.start({
-        runId: randomUUID(),
-        idempotencyKey: "command/" + command.id,
-        trigger: "manual",
-        requestedByOperatorId: command.requested_by_operator_id,
-        configVersionId: configuration.id,
-        configVersionNumber: configuration.version,
+      const recovery = await runs.recoverActive({
+        recoveryRunId: randomUUID(),
         workerId: this.#workerId,
         workerFence: fence,
-        correlationId: command.correlation_id,
-        requestedAt: command.requested_at,
-        controlCommandId: command.id,
+        correlationId: randomUUID(),
       });
+      if (recovery.kind === "lease_lost") {
+        return {
+          kind: "blocked",
+          runId: null,
+          failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+        };
+      }
       if (
-        started.kind !== "started"
-        && started.kind !== "deduplicated"
-        && started.kind !== "active"
+        recovery.kind !== "none"
+        && recovery.kind !== "resumed"
+        && recovery.kind !== "recovered"
       ) {
         return {
           kind: "blocked",
           runId: null,
-          failureCode: "PROVIDER_RUN_" + started.kind.toUpperCase(),
+          failureCode: "PROVIDER_RUN_RECOVERY_" + recovery.kind.toUpperCase(),
         };
       }
-      runId = started.run.id;
-      if (started.run.state !== "running") {
+
+      let runningRun: ProviderRunSummary | null =
+        recovery.kind === "resumed" || recovery.kind === "recovered"
+          ? recovery.run
+          : null;
+      if (capabilityFailure !== null) {
+        if (runningRun !== null) {
+          runId = runningRun.id;
+          return await this.failRun(
+            runs,
+            runId,
+            fence,
+            capabilityFailure,
+          );
+        }
+        return {
+          kind: "blocked",
+          runId: null,
+          failureCode: capabilityFailure,
+        };
+      }
+      if (configuration === null) {
+        return {
+          kind: "blocked",
+          runId: runningRun?.id ?? null,
+          failureCode: "PROVIDER_CONFIGURATION_UNAVAILABLE",
+        };
+      }
+      if (command !== null) {
+        const started = await runs.start({
+          runId: randomUUID(),
+          idempotencyKey: "command/" + command.id,
+          trigger: "manual",
+          requestedByOperatorId: command.requested_by_operator_id,
+          configVersionId: configuration.id,
+          configVersionNumber: configuration.version,
+          workerId: this.#workerId,
+          workerFence: fence,
+          correlationId: command.correlation_id,
+          requestedAt: command.requested_at,
+          controlCommandId: command.id,
+        });
+        if (
+          started.kind !== "started"
+          && started.kind !== "deduplicated"
+          && started.kind !== "active"
+        ) {
+          return {
+            kind: "blocked",
+            runId: runningRun?.id ?? null,
+            failureCode: "PROVIDER_RUN_" + started.kind.toUpperCase(),
+          };
+        }
+        runningRun = started.run;
+      }
+      if (runningRun === null) return { kind: "idle" };
+      runId = runningRun.id;
+      if (runningRun.state !== "running") {
         return {
           kind: "blocked",
           runId,
@@ -207,19 +259,32 @@ export class ClutchpacksManualImportExecutor {
         };
       }
 
-      let checkpoint = started.run.requestedCursor;
-      let checkpointFingerprint = started.run.requestedCursorFingerprint;
-      const startingPageNumber = started.run.counters.pages + 1;
+      let checkpoint = recovery.kind === "resumed"
+          || recovery.kind === "recovered"
+        ? recovery.checkpoint
+        : runningRun.requestedCursor;
+      let checkpointFingerprint = recovery.kind === "resumed"
+          || recovery.kind === "recovered"
+        ? recovery.checkpointFingerprint
+        : runningRun.requestedCursorFingerprint;
+      const startingPageNumber = runningRun.counters.pages + 1;
       const pages = new PrismaProviderMixedPageRepository(
         this.dependencies.database,
       );
+      const canonical = new ProviderCanonicalRepository(
+        this.dependencies.database,
+      );
+      const historicalFactQuarantines =
+        new PrismaProviderFactQuarantineReconciliationRepository(
+          this.dependencies.database,
+        );
       for (
         let index = 0;
         startingPageNumber + index <= MAXIMUM_IMPORT_PAGES;
         index += 1
       ) {
         if (signal.aborted) {
-          return this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
+          return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
         const renewed = await leases.renew({
           role: "import",
@@ -255,7 +320,7 @@ export class ClutchpacksManualImportExecutor {
           page,
         });
         if (committed.kind !== "committed" && committed.kind !== "replayed") {
-          return this.failRun(
+          return await this.failRun(
             runs,
             runId,
             fence,
@@ -264,7 +329,142 @@ export class ClutchpacksManualImportExecutor {
         }
         checkpoint = validatedPage.nextCursor;
         checkpointFingerprint = committed.resultingCursorFingerprint;
+        if (signal.aborted) {
+          return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
+        }
+        const firstReconciliationLease = await leases.renew({
+          role: "import",
+          owner: this.#workerId,
+          fence,
+          leaseMilliseconds: this.#leaseMilliseconds,
+        });
+        if (firstReconciliationLease === null) {
+          return {
+            kind: "blocked",
+            runId,
+            failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+          };
+        }
+        let reconciliation = await canonical.reconcileFactReferences({
+          workerId: this.#workerId,
+          workerFence: fence,
+        });
+        if (reconciliation === null) {
+          return {
+            kind: "blocked",
+            runId,
+            failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+          };
+        }
         if (!committed.reachedHead) continue;
+        for (
+          let batch = 1;
+          reconciliation.materialChangeCount > 0;
+          batch += 1
+        ) {
+          if (batch >= MAXIMUM_HEAD_RECONCILIATION_BATCHES) {
+            return await this.failRun(
+              runs,
+              runId,
+              fence,
+              "PROVIDER_FACT_RECONCILIATION_LIMIT_EXCEEDED",
+            );
+          }
+          if (signal.aborted) {
+            return await this.failRun(
+              runs,
+              runId,
+              fence,
+              "PROVIDER_CAPTURE_ABORTED",
+            );
+          }
+          const reconciliationLease = await leases.renew({
+            role: "import",
+            owner: this.#workerId,
+            fence,
+            leaseMilliseconds: this.#leaseMilliseconds,
+          });
+          if (reconciliationLease === null) {
+            return {
+              kind: "blocked",
+              runId,
+              failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+            };
+          }
+          const nextReconciliation = await canonical.reconcileFactReferences({
+            workerId: this.#workerId,
+            workerFence: fence,
+          });
+          if (nextReconciliation === null) {
+            return {
+              kind: "blocked",
+              runId,
+              failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+            };
+          }
+          reconciliation = nextReconciliation;
+        }
+        if (
+          runningRun.requestedCursor === null
+          && runningRun.requestedCursorFingerprint === null
+        ) {
+          let scanCursor: ProviderFactQuarantineScanCursor | undefined;
+          for (
+            let batch = 0;
+            batch < MAXIMUM_HEAD_RECONCILIATION_BATCHES;
+            batch += 1
+          ) {
+            if (signal.aborted) {
+              return await this.failRun(
+                runs,
+                runId,
+                fence,
+                "PROVIDER_CAPTURE_ABORTED",
+              );
+            }
+            const quarantineLease = await leases.renew({
+              role: "import",
+              owner: this.#workerId,
+              fence,
+              leaseMilliseconds: this.#leaseMilliseconds,
+            });
+            if (quarantineLease === null) {
+              return {
+                kind: "blocked",
+                runId,
+                failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+              };
+            }
+            const quarantineReconciliation =
+              await historicalFactQuarantines.reconcileBatch({
+                runId,
+                workerId: this.#workerId,
+                workerFence: fence,
+                limit: PROVIDER_FACT_QUARANTINE_RECONCILIATION_MAX_BATCH,
+                ...(scanCursor === undefined ? {} : { after: scanCursor }),
+              });
+            if (quarantineReconciliation.kind !== "reconciled") {
+              return await this.failRun(
+                runs,
+                runId,
+                fence,
+                quarantineReconciliation.kind === "lease_lost"
+                  ? "PROVIDER_IMPORT_LEASE_LOST"
+                  : "PROVIDER_FACT_QUARANTINE_RECONCILIATION_NOT_READY",
+              );
+            }
+            if (quarantineReconciliation.nextScanCursor === null) break;
+            scanCursor = quarantineReconciliation.nextScanCursor;
+            if (batch + 1 >= MAXIMUM_HEAD_RECONCILIATION_BATCHES) {
+              return await this.failRun(
+                runs,
+                runId,
+                fence,
+                "PROVIDER_FACT_QUARANTINE_RECONCILIATION_LIMIT_EXCEEDED",
+              );
+            }
+          }
+        }
         const finished = await runs.finish({
           runId,
           workerId: this.#workerId,
@@ -283,7 +483,9 @@ export class ClutchpacksManualImportExecutor {
           return {
             kind: "blocked",
             runId,
-            failureCode: "PROVIDER_RUN_FINISH_" + finished.kind.toUpperCase(),
+            failureCode: finished.kind === "lease_lost"
+              ? "PROVIDER_IMPORT_LEASE_LOST"
+              : "PROVIDER_RUN_FINISH_" + finished.kind.toUpperCase(),
           };
         }
         return {
@@ -293,7 +495,7 @@ export class ClutchpacksManualImportExecutor {
           counters: finished.run.counters,
         };
       }
-      return this.failRun(
+      return await this.failRun(
         runs,
         runId,
         fence,
@@ -303,7 +505,7 @@ export class ClutchpacksManualImportExecutor {
       if (runId === null) {
         return { kind: "failed", runId: null, failureCode: safeFailureCode(error) };
       }
-      return this.failRun(runs, runId, fence, safeFailureCode(error));
+      return await this.failRun(runs, runId, fence, safeFailureCode(error));
     } finally {
       await leases.release({
         role: "import",
@@ -319,7 +521,7 @@ export class ClutchpacksManualImportExecutor {
     fence: bigint,
     failureCode: string,
   ): Promise<ClutchpacksManualImportExecutionResult> {
-    await runs.finish({
+    const finished = await runs.finish({
       runId,
       workerId: this.#workerId,
       workerFence: fence,
@@ -330,30 +532,53 @@ export class ClutchpacksManualImportExecutor {
       correlationId: randomUUID(),
       finishedAt: new Date(),
     });
-    return { kind: "failed", runId, failureCode };
+    if (!("run" in finished)) {
+      return {
+        kind: "blocked",
+        runId,
+        failureCode: finished.kind === "lease_lost"
+          ? "PROVIDER_IMPORT_LEASE_LOST"
+          : "PROVIDER_RUN_FINISH_" + finished.kind.toUpperCase(),
+      };
+    }
+    if (finished.run.state === "succeeded") {
+      return {
+        kind: "completed",
+        runId,
+        pageCount: finished.run.counters.pages,
+        counters: finished.run.counters,
+      };
+    }
+    return {
+      kind: "failed",
+      runId,
+      failureCode: finished.run.failureCode ?? failureCode,
+    };
   }
 }
 
 export function createClutchpacksManualImportExecutor(input: Readonly<{
   database: ProviderPrismaClient;
-  captureRoot: string;
-  actorHmacKey: Uint8Array;
+  captureRoot: string | null;
+  actorHmacKey: Uint8Array | null;
   workerId: string;
   liveSource?: ProviderManualImportPageSource;
   leaseMilliseconds?: number;
 }>): ClutchpacksManualImportExecutor {
-  const captureSource = new ProviderCaptureMixedPageSource({
-    captureRoot: input.captureRoot,
-    actorHmacKey: input.actorHmacKey,
-  });
+  const source = input.liveSource ?? (() => {
+    if (input.captureRoot === null || input.actorHmacKey === null) {
+      throw new TypeError(
+        "Capture imports require a capture root and actor pseudonymization key.",
+      );
+    }
+    return new ProviderCaptureMixedPageSource({
+      captureRoot: input.captureRoot,
+      actorHmacKey: input.actorHmacKey,
+    });
+  })();
   return new ClutchpacksManualImportExecutor({
     database: input.database,
-    source: input.liveSource === undefined
-      ? captureSource
-      : new ProviderManualImportPageSourceRouter([
-          captureSource,
-          input.liveSource,
-        ]),
+    source,
     workerId: input.workerId,
     ...(input.leaseMilliseconds === undefined
       ? {}

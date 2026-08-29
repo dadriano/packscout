@@ -156,6 +156,16 @@ async function resolvePackId(
   return row.id;
 }
 
+async function resolveFactPackId(
+  transaction: ProviderTransactionClient,
+  packKey: string | null,
+): Promise<string | null> {
+  if (packKey === null) return null;
+  return (await transaction.packs.findUnique({
+    where: { pack_key: packKey }, select: { id: true },
+  }))?.id ?? null;
+}
+
 async function resolveCollectibleId(
   transaction: ProviderTransactionClient,
   value: CanonicalJsonObject,
@@ -168,6 +178,16 @@ async function resolveCollectibleId(
   });
   if (row?.lifecycle !== "active") candidateError(key);
   return row.id;
+}
+
+async function resolveFactCollectibleId(
+  transaction: ProviderTransactionClient,
+  collectibleKey: string | null,
+): Promise<string | null> {
+  if (collectibleKey === null) return null;
+  return (await transaction.collectibles.findUnique({
+    where: { collectible_key: collectibleKey }, select: { id: true },
+  }))?.id ?? null;
 }
 
 async function resolveInstanceId(
@@ -300,11 +320,21 @@ async function pullItem(
 ): Promise<PullItemWriteInput> {
   if (value === null || Array.isArray(value) || typeof value !== "object") candidateError(`items[${index}]`);
   const object = value as CanonicalJsonObject;
-  const collectibleId = await resolveCollectibleId(transaction, object, "collectibleKey");
-  if (collectibleId === null) candidateError(`items[${index}].collectibleKey`);
+  const collectibleKey = nullableString(object, "collectibleKey");
+  const collectibleInstanceKey = nullableString(
+    object,
+    "collectibleInstanceKey",
+  );
+  const collectibleId = await resolveFactCollectibleId(transaction, collectibleKey);
+  if (collectibleInstanceKey !== null && collectibleId === null) {
+    candidateError(`items[${index}].collectibleInstanceKey`);
+  }
   return {
+    collectibleKey,
     collectibleId,
-    collectibleInstanceId: await resolveInstanceId(transaction, object, "collectibleInstanceKey"),
+    collectibleInstanceId: collectibleInstanceKey === null
+      ? null
+      : await resolveInstanceId(transaction, object, "collectibleInstanceKey"),
     quantity: bigintValue(object, "quantity"), statedValueAmount: nullableString(object, "statedValueAmount"),
     statedValueCurrency: nullableString(object, "statedValueCurrency"),
   };
@@ -315,15 +345,15 @@ async function pullCandidate(
   value: CanonicalJsonObject,
 ): Promise<PullWriteInput> {
   if (!Array.isArray(value.items)) candidateError("items");
-  const packId = await resolvePackId(transaction, value, "packKey");
-  if (packId === null) candidateError("packKey");
+  const packKey = nullableString(value, "packKey");
   const items: PullItemWriteInput[] = [];
   for (const [index, item] of value.items.entries()) {
     items.push(await pullItem(transaction, item, index));
   }
   return {
     pullKey: stringValue(value, "pullKey"), factDigest: stringValue(value, "factDigest"),
-    packId, providerAccountId: await resolveAccountId(transaction, value, "providerAccountKey"),
+    packKey, packId: await resolveFactPackId(transaction, packKey),
+    providerAccountId: await resolveAccountId(transaction, value, "providerAccountKey"),
     occurredAt: dateValue(value, "occurredAt"), paidAmount: nullableString(value, "paidAmount"),
     paidCurrency: nullableString(value, "paidCurrency"),
     items,
@@ -334,13 +364,25 @@ async function marketEventCandidate(
   transaction: ProviderTransactionClient,
   value: CanonicalJsonObject,
 ): Promise<MarketEventWriteInput> {
+  const packKey = nullableString(value, "packKey");
+  const collectibleKey = nullableString(value, "collectibleKey");
+  const collectibleInstanceKey = nullableString(
+    value,
+    "collectibleInstanceKey",
+  );
+  const collectibleId = await resolveFactCollectibleId(transaction, collectibleKey);
+  if (collectibleInstanceKey !== null && collectibleId === null) {
+    candidateError("collectibleInstanceKey");
+  }
   return {
     eventKey: stringValue(value, "eventKey"), factDigest: stringValue(value, "factDigest"),
     eventGroupId: nullableUuid(value, "eventGroupId"),
     eventType: enumValue(value, "eventType", ["sale", "buyback", "mint", "burn", "transfer", "list", "unlist", "swap", "ship", "other"]),
-    packId: await resolvePackId(transaction, value, "packKey"),
-    collectibleId: await resolveCollectibleId(transaction, value, "collectibleKey"),
-    collectibleInstanceId: await resolveInstanceId(transaction, value, "collectibleInstanceKey"),
+    packKey, packId: await resolveFactPackId(transaction, packKey),
+    collectibleKey, collectibleId,
+    collectibleInstanceId: collectibleInstanceKey === null
+      ? null
+      : await resolveInstanceId(transaction, value, "collectibleInstanceKey"),
     fromProviderAccountId: await resolveAccountId(transaction, value, "fromProviderAccountKey"),
     toProviderAccountId: await resolveAccountId(transaction, value, "toProviderAccountKey"),
     quantity: nullableBigint(value, "quantity"), occurredAt: dateValue(value, "occurredAt"),
@@ -426,12 +468,18 @@ export async function applyProviderMixedPageRecord(
   if (record.kind === "catalog") return applyCatalog(transaction, canonical, record);
   if (record.kind === "pull") {
     const result = await canonical.insertPull(await pullCandidate(transaction, record.candidate));
-    return { duplicate: result.replayed, materialChange: !result.replayed };
+    return {
+      duplicate: result.replayed && result.promotionRange === null,
+      materialChange: result.promotionRange !== null,
+    };
   }
   const result = await canonical.insertMarketEvent(
     await marketEventCandidate(transaction, record.candidate),
   );
-  return { duplicate: result.replayed, materialChange: !result.replayed };
+  return {
+    duplicate: result.replayed && result.promotionRange === null,
+    materialChange: result.promotionRange !== null,
+  };
 }
 
 export function providerMixedRecordEntityKey(record: ProviderMixedPageRecord): string | null {

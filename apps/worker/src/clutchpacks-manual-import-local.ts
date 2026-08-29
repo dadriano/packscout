@@ -119,6 +119,7 @@ async function runWithCentralAuthority(): Promise<Awaited<ReturnType<
     return await runClutchpacksManualImportOnce({
       environment: process.env,
       fallbackWorkerId,
+      sourceMode: "live",
       dependencies: {
         createDatabaseLifecycle: createProviderDatabaseLifecycle,
         createExecutor(input) {
@@ -127,7 +128,6 @@ async function runWithCentralAuthority(): Promise<Awaited<ReturnType<
           );
           const liveSource = new ProviderDataforrestMixedPageSource({
             authorityResolver,
-            actorHmacKey: input.actorHmacKey,
             workerId: input.workerId,
             translationRecorder: audit,
             terminalizeRequest:

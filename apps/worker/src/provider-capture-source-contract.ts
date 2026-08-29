@@ -51,7 +51,7 @@ export interface ProviderCapturePageSourceInput {
   readonly signal: AbortSignal;
 }
 
-export interface ProviderMixedPageRecordDraft {
+export interface ProviderMixedPageCandidateRecordDraft {
   readonly kind: ProviderMixedPageRecordKind;
   readonly operation?: "upsert" | "retire";
   readonly entityType?:
@@ -64,6 +64,20 @@ export interface ProviderMixedPageRecordDraft {
     | "provider_account";
   readonly candidate: CanonicalJsonObject;
 }
+
+export interface ProviderMixedPageQuarantineRecordDraft {
+  readonly kind: ProviderMixedPageRecordKind;
+  readonly disposition: "quarantine";
+  readonly candidate: CanonicalJsonObject;
+  readonly sourceRecordKey: string;
+  readonly reasonCode: string;
+  readonly fieldPath: string | null;
+  readonly sanitizedSummary: string;
+}
+
+export type ProviderMixedPageRecordDraft =
+  | ProviderMixedPageCandidateRecordDraft
+  | ProviderMixedPageQuarantineRecordDraft;
 
 export interface ProviderCaptureTranslationCounts {
   readonly categories: number;

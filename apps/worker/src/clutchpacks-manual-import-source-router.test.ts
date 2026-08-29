@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ProviderPrismaClient } from "@packscout/database";
 import {
+  ClutchpacksManualImportExecutor,
   ProviderManualImportPageSourceRouter,
+  createClutchpacksManualImportExecutor,
   type ProviderManualImportPageSource,
 } from "./clutchpacks-manual-import-executor.ts";
 import { ProviderCaptureSourceError } from
@@ -65,5 +68,26 @@ test("manual import source router fails closed for missing or duplicate authorit
     () => missing.nextPage(request(null)),
     (error: unknown) => error instanceof ProviderCaptureSourceError
       && error.code === "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+  );
+});
+
+test("live executor construction does not require capture-only configuration", () => {
+  const executor = createClutchpacksManualImportExecutor({
+    database: {} as ProviderPrismaClient,
+    captureRoot: null,
+    actorHmacKey: null,
+    workerId: "fixture:live-worker",
+    liveSource: source("live-v3", "live"),
+  });
+  assert.equal(executor instanceof ClutchpacksManualImportExecutor, true);
+
+  assert.throws(
+    () => createClutchpacksManualImportExecutor({
+      database: {} as ProviderPrismaClient,
+      captureRoot: null,
+      actorHmacKey: null,
+      workerId: "fixture:capture-worker",
+    }),
+    /Capture imports require a capture root/u,
   );
 });

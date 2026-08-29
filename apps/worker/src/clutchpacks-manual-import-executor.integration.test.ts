@@ -11,6 +11,9 @@ import { Pool } from "pg";
 import {
   createProviderDatabaseLifecycle,
   initializeProviderDatabaseIdentity,
+  PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+  providerMixedCursorFingerprint,
+  providerMixedPageDigest,
   PrismaAdminProviderRuntimeRepository,
   PrismaProviderActivityOutboxRepository,
   PrismaProviderCommandRepository,
@@ -165,6 +168,236 @@ function isolatedClutchSource(captureRoot: string): ProviderManualImportPageSour
   };
 }
 
+function mixedQuarantineSource(
+  includeCandidateFailure = true,
+): ProviderManualImportPageSource {
+  return {
+    supports(adapterKey) {
+      return adapterKey === CLUTCHPACKS_CAPTURE_ADAPTER_KEY;
+    },
+    nextPage(input) {
+      const records = [
+        {
+          position: 0,
+          providerId: input.authority.providerId,
+          kind: "catalog",
+          disposition: "quarantine",
+          candidate: {},
+          sourceRecordKey: `source:${"a".repeat(64)}`,
+          reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
+          fieldPath: null,
+          sanitizedSummary:
+            "The validated source record could not be mapped; no retry artifact is retained.",
+        },
+        ...(includeCandidateFailure ? [{
+          position: 1,
+          providerId: input.authority.providerId,
+          kind: "catalog",
+          operation: "upsert",
+          entityType: "pack",
+          candidate: {},
+        }] : []),
+      ];
+      const body = {
+        contractVersion: PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+        providerId: input.authority.providerId,
+        runId: input.runId,
+        configVersionId: input.authority.configVersionId,
+        configVersionNumber: input.authority.configVersionNumber.toString(),
+        leaseFence: input.workerFence.toString(),
+        pageId: randomUUID(),
+        pageNumber: input.pageNumber,
+        inputCursor: input.sourceCheckpoint,
+        inputCursorFingerprint: input.sourceCheckpointFingerprint,
+        nextCursor: null,
+        nextCursorFingerprint: null,
+        continuation: "head",
+        records,
+      };
+      return Promise.resolve({
+        ...body,
+        responseDigest: providerMixedPageDigest(body),
+      });
+    },
+  };
+}
+
+const deferredPackKey = "pack:deferred-catalog";
+const deferredCollectibleKey = "collectible:deferred-catalog";
+const deferredPullKey = "pull:deferred-catalog";
+const deferredEventKey = "event:deferred-catalog";
+const deferredPageCursor = { after: "deferred-facts" } as const;
+
+function deferredCatalogSource(
+  assertFirstPage: (runId: string) => Promise<void>,
+): ProviderManualImportPageSource {
+  let requestCount = 0;
+  return {
+    supports(adapterKey) {
+      return adapterKey === CLUTCHPACKS_CAPTURE_ADAPTER_KEY;
+    },
+    async nextPage(input) {
+      requestCount += 1;
+      assert.equal(input.pageNumber, requestCount);
+      const firstPage = requestCount === 1;
+      if (!firstPage) {
+        assert.equal(requestCount, 2);
+        assert.deepEqual(input.sourceCheckpoint, deferredPageCursor);
+        assert.equal(
+          input.sourceCheckpointFingerprint,
+          providerMixedCursorFingerprint(deferredPageCursor),
+        );
+        await assertFirstPage(input.runId);
+      } else {
+        assert.equal(input.sourceCheckpoint, null);
+        assert.equal(input.sourceCheckpointFingerprint, null);
+      }
+
+      const nextCursor = firstPage ? deferredPageCursor : null;
+      const records = firstPage
+        ? [
+            {
+              position: 0,
+              providerId: input.authority.providerId,
+              kind: "pull",
+              candidate: {
+                pullKey: deferredPullKey,
+                factDigest: "a".repeat(64),
+                packKey: deferredPackKey,
+                providerAccountKey: null,
+                occurredAt: "2026-08-29T12:00:00.000Z",
+                paidAmount: "25",
+                paidCurrency: "USD",
+                items: [{
+                  collectibleKey: deferredCollectibleKey,
+                  collectibleInstanceKey: null,
+                  quantity: "1",
+                  statedValueAmount: "40",
+                  statedValueCurrency: "USD",
+                }],
+              },
+            },
+            {
+              position: 1,
+              providerId: input.authority.providerId,
+              kind: "market_event",
+              candidate: {
+                eventKey: deferredEventKey,
+                factDigest: "b".repeat(64),
+                eventGroupId: null,
+                eventType: "sale",
+                packKey: deferredPackKey,
+                collectibleKey: deferredCollectibleKey,
+                collectibleInstanceKey: null,
+                fromProviderAccountKey: null,
+                toProviderAccountKey: null,
+                quantity: "1",
+                occurredAt: "2026-08-29T12:01:00.000Z",
+                amount: "40",
+                currency: "USD",
+                details: {},
+              },
+            },
+          ]
+        : [
+            {
+              position: 0,
+              providerId: input.authority.providerId,
+              kind: "catalog",
+              operation: "upsert",
+              entityType: "pack",
+              candidate: {
+                packKey: deferredPackKey,
+                categoryKey: null,
+                familyKey: null,
+                displayName: "Deferred Pack",
+                description: null,
+                packFormat: "repack",
+                availability: "available",
+                contentEvidence: "unknown",
+                totalInventory: null,
+                remainingInventory: null,
+                priceAmount: "25",
+                priceCurrency: "USD",
+                priceUsdAmount: "25",
+                priceUnavailableReason: null,
+                buybackRate: null,
+                buybackSourceKind: null,
+                vendorEvAmount: null,
+                vendorEvCurrency: null,
+                vendorEvObservedAt: null,
+                vendorEvUnavailableReason: "source_unavailable",
+                packscoutEvAmount: null,
+                packscoutEvCurrency: null,
+                packscoutEvModelVersion: "not_calculated",
+                packscoutEvConfidencePolicyVersion: "not_calculated",
+                packscoutEvConfidence: null,
+                packscoutEvDataAsOf: null,
+                packscoutEvCalculatedAt: null,
+                packscoutEvUnavailableReason: "not_calculated",
+                primaryImageUrl: null,
+                primaryImageAlt: null,
+                listingUrl: null,
+                attributes: {},
+                sourceUpdatedAt: "2026-08-29T12:02:00.000Z",
+                expectedRowVersion: null,
+              },
+            },
+            {
+              position: 1,
+              providerId: input.authority.providerId,
+              kind: "catalog",
+              operation: "upsert",
+              entityType: "collectible",
+              candidate: {
+                collectibleKey: deferredCollectibleKey,
+                categoryKey: null,
+                collectibleType: "card",
+                displayName: "Deferred Card",
+                normalizedName: "deferred card",
+                year: null,
+                brand: null,
+                setOrSeries: null,
+                cardNumber: null,
+                referenceNumber: null,
+                subject: null,
+                grade: null,
+                grader: null,
+                primaryImageUrl: null,
+                primaryImageAlt: null,
+                valuationAmount: "40",
+                valuationCurrency: "USD",
+                valuationUsdAmount: "40",
+                valuationUnavailableReason: null,
+                valuationType: "provider_statement",
+                valuationObservedAt: "2026-08-29T12:02:00.000Z",
+                dataAsOf: "2026-08-29T12:02:00.000Z",
+                attributes: {},
+                expectedRowVersion: null,
+              },
+            },
+          ];
+      const body = {
+        contractVersion: PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+        providerId: input.authority.providerId,
+        runId: input.runId,
+        configVersionId: input.authority.configVersionId,
+        configVersionNumber: input.authority.configVersionNumber.toString(),
+        leaseFence: input.workerFence.toString(),
+        pageId: randomUUID(),
+        pageNumber: input.pageNumber,
+        inputCursor: input.sourceCheckpoint,
+        inputCursorFingerprint: input.sourceCheckpointFingerprint,
+        nextCursor,
+        nextCursorFingerprint: providerMixedCursorFingerprint(nextCursor),
+        continuation: firstPage ? "more" : "head",
+        records,
+      };
+      return { ...body, responseDigest: providerMixedPageDigest(body) };
+    },
+  };
+}
+
 async function enqueue(
   harness: ProviderHarness,
   configVersionId: string,
@@ -190,6 +423,306 @@ async function enqueue(
   if (result.kind !== "created") throw new Error("Run was not queued.");
   return result.run.id;
 }
+
+test("executor retains facts before catalog and promotes monotonic reference reconciliation", async (context) => {
+  if (process.env.PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION !== "1") {
+    context.skip(
+      "Set PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION=1 to run the disposable database proof.",
+    );
+    return;
+  }
+
+  const harness = await createHarness();
+  try {
+    const configVersionId = randomUUID();
+    const runtime = new PrismaProviderRuntimeRepository(harness.client);
+    assert.equal((await runtime.synchronizeConfiguration({
+      centralProviderId: harness.providerId,
+      providerKey: harness.providerKey,
+      configVersionId,
+      configVersionNumber: 1n,
+      configuration: {
+        adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+        settings: { lanes: [{ name: "catalog", enabled: true }] },
+      },
+      expiresAt: null,
+      scheduleSeconds: 300,
+      nextDueAt: null,
+      synchronizedAt: new Date(),
+    })).kind, "updated");
+
+    let firstPageState: Readonly<{
+      pullId: string;
+      pullItemId: string;
+      marketEventId: string;
+    }> | undefined;
+    const runId = await enqueue(harness, configVersionId, 1);
+    const source = deferredCatalogSource(async (pageRunId) => {
+      assert.equal(pageRunId, runId);
+      assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({
+        where: { id: runId },
+        select: {
+          state: true,
+          page_count: true,
+          catalog_record_count: true,
+          pull_record_count: true,
+          market_event_record_count: true,
+          accepted_count: true,
+          quarantined_count: true,
+          reached_source_head: true,
+        },
+      }), {
+        state: "running",
+        page_count: 1,
+        catalog_record_count: 0,
+        pull_record_count: 1,
+        market_event_record_count: 1,
+        accepted_count: 2,
+        quarantined_count: 0,
+        reached_source_head: false,
+      });
+      const pull = await harness.client.pulls.findUniqueOrThrow({
+        where: { pull_key: deferredPullKey },
+        select: {
+          id: true,
+          pack_key: true,
+          pack_id: true,
+          row_version: true,
+          items: {
+            select: {
+              id: true,
+              collectible_key: true,
+              collectible_id: true,
+              row_version: true,
+            },
+          },
+        },
+      });
+      const marketEvent = await harness.client.market_events.findUniqueOrThrow({
+        where: { event_key: deferredEventKey },
+        select: {
+          id: true,
+          pack_key: true,
+          pack_id: true,
+          collectible_key: true,
+          collectible_id: true,
+          row_version: true,
+        },
+      });
+      const pullItem = pull.items[0];
+      assert.ok(pullItem);
+      assert.deepEqual({
+        packKey: pull.pack_key,
+        packId: pull.pack_id,
+        rowVersion: pull.row_version,
+        itemCollectibleKey: pullItem.collectible_key,
+        itemCollectibleId: pullItem.collectible_id,
+        itemRowVersion: pullItem.row_version,
+      }, {
+        packKey: deferredPackKey,
+        packId: null,
+        rowVersion: 1n,
+        itemCollectibleKey: deferredCollectibleKey,
+        itemCollectibleId: null,
+        itemRowVersion: 1n,
+      });
+      assert.deepEqual({
+        packKey: marketEvent.pack_key,
+        packId: marketEvent.pack_id,
+        collectibleKey: marketEvent.collectible_key,
+        collectibleId: marketEvent.collectible_id,
+        rowVersion: marketEvent.row_version,
+      }, {
+        packKey: deferredPackKey,
+        packId: null,
+        collectibleKey: deferredCollectibleKey,
+        collectibleId: null,
+        rowVersion: 1n,
+      });
+      assert.deepEqual((await harness.client.promotion_changes.findMany({
+        where: {
+          entity_id: { in: [pull.id, pullItem.id, marketEvent.id] },
+        },
+        orderBy: { sequence: "asc" },
+        select: {
+          entity_type: true,
+          entity_id: true,
+          entity_version: true,
+          operation: true,
+        },
+      })), [
+        {
+          entity_type: "pull",
+          entity_id: pull.id,
+          entity_version: 1n,
+          operation: "upsert",
+        },
+        {
+          entity_type: "pull_item",
+          entity_id: pullItem.id,
+          entity_version: 1n,
+          operation: "upsert",
+        },
+        {
+          entity_type: "market_event",
+          entity_id: marketEvent.id,
+          entity_version: 1n,
+          operation: "upsert",
+        },
+      ]);
+      assert.equal(await harness.client.quarantine_records.count(), 0);
+      firstPageState = {
+        pullId: pull.id,
+        pullItemId: pullItem.id,
+        marketEventId: marketEvent.id,
+      };
+    });
+
+    const result = await new ClutchpacksManualImportExecutor({
+      database: harness.client,
+      source,
+      workerId: "integration:clutchpacks-deferred-catalog",
+      leaseMilliseconds: 30_000,
+    }).executeNext();
+    assert.deepEqual(result, {
+      kind: "completed",
+      runId,
+      pageCount: 2,
+      counters: {
+        pages: 2,
+        catalog: 2,
+        pulls: 1,
+        marketEvents: 1,
+        accepted: 4,
+        duplicate: 0,
+        quarantined: 0,
+        materialChanges: 4,
+      },
+    });
+    assert.ok(firstPageState);
+    const retainedFacts = firstPageState;
+    const pack = await harness.client.packs.findUniqueOrThrow({
+      where: { pack_key: deferredPackKey },
+      select: { id: true },
+    });
+    const collectible = await harness.client.collectibles.findUniqueOrThrow({
+      where: { collectible_key: deferredCollectibleKey },
+      select: { id: true },
+    });
+    const pull = await harness.client.pulls.findUniqueOrThrow({
+      where: { pull_key: deferredPullKey },
+      select: {
+        id: true,
+        pack_key: true,
+        pack_id: true,
+        row_version: true,
+        items: {
+          select: {
+            id: true,
+            collectible_key: true,
+            collectible_id: true,
+            row_version: true,
+          },
+        },
+      },
+    });
+    const marketEvent = await harness.client.market_events.findUniqueOrThrow({
+      where: { event_key: deferredEventKey },
+      select: {
+        id: true,
+        pack_key: true,
+        pack_id: true,
+        collectible_key: true,
+        collectible_id: true,
+        row_version: true,
+      },
+    });
+    assert.deepEqual(pull, {
+      id: retainedFacts.pullId,
+      pack_key: deferredPackKey,
+      pack_id: pack.id,
+      row_version: 2n,
+      items: [{
+        id: retainedFacts.pullItemId,
+        collectible_key: deferredCollectibleKey,
+        collectible_id: collectible.id,
+        row_version: 2n,
+      }],
+    });
+    assert.deepEqual(marketEvent, {
+      id: retainedFacts.marketEventId,
+      pack_key: deferredPackKey,
+      pack_id: pack.id,
+      collectible_key: deferredCollectibleKey,
+      collectible_id: collectible.id,
+      row_version: 3n,
+    });
+    assert.deepEqual((await harness.client.promotion_changes.findMany({
+      where: {
+        entity_id: {
+          in: [
+            retainedFacts.pullId,
+            retainedFacts.pullItemId,
+            retainedFacts.marketEventId,
+          ],
+        },
+      },
+      orderBy: { sequence: "asc" },
+      select: {
+        entity_type: true,
+        entity_id: true,
+        entity_version: true,
+        operation: true,
+      },
+    })), [
+      {
+        entity_type: "pull",
+        entity_id: retainedFacts.pullId,
+        entity_version: 1n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "pull_item",
+        entity_id: retainedFacts.pullItemId,
+        entity_version: 1n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "market_event",
+        entity_id: retainedFacts.marketEventId,
+        entity_version: 1n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "pull",
+        entity_id: retainedFacts.pullId,
+        entity_version: 2n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "pull_item",
+        entity_id: retainedFacts.pullItemId,
+        entity_version: 2n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "market_event",
+        entity_id: retainedFacts.marketEventId,
+        entity_version: 2n,
+        operation: "upsert",
+      },
+      {
+        entity_type: "market_event",
+        entity_id: retainedFacts.marketEventId,
+        entity_version: 3n,
+        operation: "upsert",
+      },
+    ]);
+    assert.equal(await harness.client.quarantine_records.count(), 0);
+  } finally {
+    await harness.close();
+  }
+});
 
 test("admin queue executes one isolated Clutch page and replay stays canonical-idempotent", async (context) => {
   if (process.env.PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION !== "1") {
@@ -286,10 +819,10 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
         catalog: 946,
         pulls: 15,
         marketEvents: 15,
-        accepted: 961,
+        accepted: 976,
         duplicate: 0,
-        quarantined: 15,
-        materialChanges: 961,
+        quarantined: 0,
+        materialChanges: 976,
       },
     });
 
@@ -305,17 +838,29 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
       harness.client.quarantine_records.count(),
       harness.client.provider_run_pages.count({ where: { provider_run_id: firstRunId } }),
     ]);
-    assert.deepEqual(counts, [8, 14, 907, 17, 0, 0, 0, 15, 15, 1]);
+    assert.deepEqual(counts, [8, 14, 907, 17, 0, 15, 15, 15, 0, 1]);
+    const storedPulls = await harness.client.pulls.findMany({
+      select: {
+        pack_key: true,
+        pack_id: true,
+        items: {
+          select: { collectible_key: true, collectible_id: true },
+        },
+      },
+    });
+    assert.equal(storedPulls.length, 15);
+    assert.equal(storedPulls.every((pull) =>
+      pull.pack_key === null
+      && pull.pack_id === null
+      && pull.items.length === 1
+      && pull.items[0]?.collectible_key !== null
+      && pull.items[0]?.collectible_id !== null
+    ), true);
     const quarantines = await harness.client.quarantine_records.findMany({
       where: { provider_run_id: firstRunId },
       select: { record_kind: true, reason_code: true, field_path: true },
     });
-    assert.equal(quarantines.length, 15);
-    assert.equal(quarantines.every((entry) =>
-      entry.record_kind === "pull"
-      && entry.reason_code === "NORMALIZED_CANDIDATE_INVALID"
-      && entry.field_path === "packKey"
-    ), true);
+    assert.deepEqual(quarantines, []);
     const outbox = new PrismaProviderActivityOutboxRepository(harness.client);
     const pendingActivity = await outbox.readPendingBatch({
       providerId: harness.providerId,
@@ -325,11 +870,7 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
     const quarantineActivity = pendingActivity.events.filter(
       ({ eventType }) => eventType === "provider.quarantine.opened",
     );
-    assert.equal(quarantineActivity.length, 15);
-    assert.equal(quarantineActivity.every((event) =>
-      event.localRunId === firstRunId
-      && event.localQuarantineId !== null
-    ), true);
+    assert.equal(quarantineActivity.length, 0);
     const terminalActivity = pendingActivity.events.find((event) =>
       event.eventType === "provider.run.terminal"
       && event.localRunId === firstRunId
@@ -361,8 +902,8 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
     assert.equal(replay.runId, secondRunId);
     if (replay.kind !== "completed") throw new Error("Replay did not complete.");
     assert.equal(replay.pageCount, 1);
-    assert.equal(replay.counters.duplicate, 961);
-    assert.equal(replay.counters.quarantined, 15);
+    assert.equal(replay.counters.duplicate, 976);
+    assert.equal(replay.counters.quarantined, 0);
     assert.equal(replay.counters.materialChanges, 0);
     assert.deepEqual(await Promise.all([
       harness.client.packs.count(),
@@ -370,7 +911,152 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
       harness.client.pulls.count(),
       harness.client.market_events.count(),
       harness.client.quarantine_records.count(),
-    ]), [14, 907, 0, 15, 30]);
+    ]), [14, 907, 15, 15, 0]);
+    assert.equal((await harness.client.promotion_ledger.findUniqueOrThrow({
+      where: { singleton_key: true },
+      select: { last_sequence: true },
+    })).last_sequence, firstSequence);
+
+    const quarantineRunId = await enqueue(harness, configVersionId, 3);
+    const quarantineResult = await new ClutchpacksManualImportExecutor({
+      database: harness.client,
+      source: mixedQuarantineSource(),
+      workerId: "integration:clutchpacks-quarantine",
+      leaseMilliseconds: 30_000,
+    }).executeNext();
+    assert.deepEqual(quarantineResult, {
+      kind: "completed",
+      runId: quarantineRunId,
+      pageCount: 1,
+      counters: {
+        pages: 1,
+        catalog: 2,
+        pulls: 0,
+        marketEvents: 0,
+        accepted: 0,
+        duplicate: 0,
+        quarantined: 2,
+        materialChanges: 0,
+      },
+    });
+    const storedQuarantines = await harness.client.quarantine_records.findMany({
+      where: { provider_run_id: quarantineRunId },
+      orderBy: { record_index: "asc" },
+      select: {
+        record_index: true,
+        record_kind: true,
+        source_record_key: true,
+        reason_code: true,
+        sanitized_summary: true,
+        normalized_candidate: true,
+        protected_evidence: true,
+        evidence_expires_at: true,
+        evidence_expired_at: true,
+        retry_count: true,
+        state: true,
+      },
+    });
+    const sourceQuarantine = storedQuarantines[0];
+    const candidateQuarantine = storedQuarantines[1];
+    assert.ok(sourceQuarantine);
+    assert.deepEqual({
+      record_index: sourceQuarantine.record_index,
+      record_kind: sourceQuarantine.record_kind,
+      source_record_key: sourceQuarantine.source_record_key,
+      reason_code: sourceQuarantine.reason_code,
+      sanitized_summary: sourceQuarantine.sanitized_summary,
+      normalized_candidate: sourceQuarantine.normalized_candidate,
+      protected_evidence: sourceQuarantine.protected_evidence,
+      retry_count: sourceQuarantine.retry_count,
+      state: sourceQuarantine.state,
+    }, {
+      record_index: 0,
+      record_kind: "catalog",
+      source_record_key: `source:${"a".repeat(64)}`,
+      reason_code: "SOURCE_RECORD_MAPPING_INVALID",
+      sanitized_summary:
+        "The validated source record could not be mapped; no retry artifact is retained.",
+      normalized_candidate: null,
+      protected_evidence: null,
+      retry_count: 0,
+      state: "expired",
+    });
+    assert.deepEqual(
+      sourceQuarantine.evidence_expired_at,
+      sourceQuarantine.evidence_expires_at,
+    );
+    assert.ok(candidateQuarantine);
+    assert.equal(candidateQuarantine.record_index, 1);
+    assert.equal(candidateQuarantine.source_record_key, null);
+    assert.equal(candidateQuarantine.state, "open");
+    assert.equal(candidateQuarantine.evidence_expired_at, null);
+    assert.deepEqual(candidateQuarantine.normalized_candidate, {});
+    const quarantineEvents = await harness.client.provider_activity_outbox.findMany({
+      where: { local_run_id: quarantineRunId },
+      orderBy: { event_at: "asc" },
+      select: {
+        event_type: true,
+        title: true,
+        summary: true,
+        evidence: true,
+      },
+    });
+    assert.deepEqual(
+      quarantineEvents.filter(({ event_type }) =>
+        event_type.startsWith("provider.quarantine.")
+      ),
+      [
+        {
+          event_type: "provider.quarantine.expired",
+          title: "Provider source record rejected",
+          summary:
+            "A source record was rejected before canonical persistence and has no retained retry artifact.",
+          evidence: { quarantineState: "expired" },
+        },
+        {
+          event_type: "provider.quarantine.opened",
+          title: "Provider record quarantined",
+          summary:
+            "A normalized provider record requires operator review before retry.",
+          evidence: { quarantineState: "open" },
+        },
+      ],
+    );
+    const replayedQuarantineRunId = await enqueue(
+      harness,
+      configVersionId,
+      4,
+    );
+    const replayedQuarantine = await new ClutchpacksManualImportExecutor({
+      database: harness.client,
+      source: mixedQuarantineSource(false),
+      workerId: "integration:clutchpacks-quarantine-replay",
+      leaseMilliseconds: 30_000,
+    }).executeNext();
+    assert.deepEqual(replayedQuarantine, {
+      kind: "completed",
+      runId: replayedQuarantineRunId,
+      pageCount: 1,
+      counters: {
+        pages: 1,
+        catalog: 1,
+        pulls: 0,
+        marketEvents: 0,
+        accepted: 0,
+        duplicate: 1,
+        quarantined: 0,
+        materialChanges: 0,
+      },
+    });
+    assert.equal(await harness.client.quarantine_records.count({
+      where: { source_record_key: `source:${"a".repeat(64)}` },
+    }), 1);
+    assert.equal(await harness.client.provider_activity_outbox.count({
+      where: {
+        local_run_id: replayedQuarantineRunId,
+        event_type: { startsWith: "provider.quarantine." },
+      },
+    }), 0);
     assert.equal((await harness.client.promotion_ledger.findUniqueOrThrow({
       where: { singleton_key: true },
       select: { last_sequence: true },

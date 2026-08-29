@@ -20,7 +20,10 @@ import {
   DataforrestEventsSourceAdapter,
   type SourceAdapterRequestTerminalizationInput,
 } from "@packscout/services";
-import type { ResolvedDataforrestSourceAuthority } from
+import type {
+  DataforrestSourceAuthorityRequest,
+  ResolvedDataforrestSourceAuthority,
+} from
   "./dataforrest-source-authority-resolver.ts";
 import {
   ProviderDataforrestMixedPageSource,
@@ -162,6 +165,25 @@ function cardRecord(recordId: string): DataforrestEventRecordV1 {
   };
 }
 
+function unmappableCardRecord(recordId: string): DataforrestEventRecordV1 {
+  return {
+    ...cardRecord(recordId),
+    data: {
+      asset: {
+        title: "",
+        front_image_url: rawMarker,
+      },
+    },
+  };
+}
+
+function unmappablePackRecord(recordId: string): DataforrestEventRecordV1 {
+  return {
+    ...minimalPackRecord(recordId),
+    data: { name: "" },
+  };
+}
+
 function cardOnlyPullRecord(recordId: string): DataforrestEventRecordV1 {
   return {
     stream: "pulls",
@@ -214,10 +236,42 @@ function nullTransactionTradeRecord(recordId: string): DataforrestEventRecordV1 
   };
 }
 
+function adapterInvalidCatalogRecord(): DataforrestEventsPageV1["records"][number] {
+  return {
+    stream: "catalog",
+    platform: "clutchpacks",
+    record_id: "",
+    occurred_at: "2026-08-29T12:05:00.000Z",
+    collected_at: "2026-08-29T12:05:01.000Z",
+    entity: "pack",
+    first_seen_at: "2026-08-29T12:05:00.000Z",
+    available: true,
+    data: { name: rawMarker },
+    native_secret: bearerToken,
+  };
+}
+
+function adapterInvalidTimestampCatalogRecord(
+  recordId: string,
+): DataforrestEventsPageV1["records"][number] {
+  return {
+    stream: "catalog",
+    platform: "clutchpacks",
+    record_id: recordId,
+    occurred_at: "not-a-timestamp",
+    collected_at: "2026-08-29T12:05:01.000Z",
+    entity: "pack",
+    first_seen_at: "2026-08-29T12:05:00.000Z",
+    available: true,
+    data: { name: rawMarker },
+    native_secret: bearerToken,
+  };
+}
+
 function sourcePage(input: Readonly<{
   cursor: string;
   continuation: "continue" | "head";
-  records: readonly DataforrestEventRecordV1[];
+  records: readonly DataforrestEventsPageV1["records"][number][];
 }>): DataforrestEventsPageV1 {
   return {
     records: [...input.records],
@@ -252,7 +306,9 @@ function jsonResponse(value: unknown): Response {
 function sourceFixture(input: Readonly<{
   pages: readonly DataforrestEventsPageV1[];
   pageLimit?: number;
-  resolver?: () => Promise<ResolvedDataforrestSourceAuthority>;
+  resolver?: (
+    request: DataforrestSourceAuthorityRequest,
+  ) => Promise<ResolvedDataforrestSourceAuthority>;
   terminalize?: (
     attempt: SourceAdapterRequestTerminalizationInput,
   ) => Promise<Readonly<{
@@ -319,7 +375,6 @@ function sourceFixture(input: Readonly<{
       },
     },
     workerId: "fixture:clutchpacks",
-    actorHmacKey: Buffer.alloc(32, 0x5a),
     adapter,
   });
   return {
@@ -395,7 +450,11 @@ test("live DataForrest records map directly without leaking native actors or pro
   assert.equal(pulls.some(({ candidate }) => (
     candidate.packKey === "pack:pack-001"
     && Array.isArray(candidate.items)
-    && candidate.items.length === 0
+    && candidate.items.length === 1
+    && typeof candidate.items[0] === "object"
+    && candidate.items[0] !== null
+    && !Array.isArray(candidate.items[0])
+    && (candidate.items[0] as Record<string, unknown>).collectibleKey === null
   )), true);
   const marketEvent = first.records.find(({ kind }) => kind === "market_event");
   assert.ok(marketEvent);
@@ -463,6 +522,61 @@ test("live DataForrest records map directly without leaking native actors or pro
   assert.equal(durableSurface.includes(actorMarker), false);
 });
 
+test("every page keeps the run's immutable config pin when the central active pointer moves", async () => {
+  const nextActiveConfigVersionId =
+    "55555555-5555-4555-8555-555555555555";
+  let ambientActiveConfigVersionId = configVersionId;
+  const resolutions: Array<Readonly<{
+    requestedConfigVersionId: string;
+    ambientActiveConfigVersionId: string;
+  }>> = [];
+  const fixture = sourceFixture({
+    pages: [
+      sourcePage({
+        cursor: "pinned-cursor-001",
+        continuation: "continue",
+        records: [minimalPackRecord("pinned-pack-001")],
+      }),
+      sourcePage({
+        cursor: "pinned-cursor-001",
+        continuation: "head",
+        records: [],
+      }),
+    ],
+    resolver: (request) => {
+      resolutions.push({
+        requestedConfigVersionId: request.configVersionId,
+        ambientActiveConfigVersionId,
+      });
+      return Promise.resolve(resolvedAuthority);
+    },
+  });
+
+  const first = validateProviderMixedPage(
+    await fixture.source.nextPage(sourceInput()),
+  );
+  ambientActiveConfigVersionId = nextActiveConfigVersionId;
+  const second = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({
+      pageNumber: 2,
+      checkpoint: first.nextCursor,
+      checkpointFingerprint: first.nextCursorFingerprint,
+    }),
+  ));
+
+  assert.equal(second.continuation, "head");
+  assert.deepEqual(resolutions, [
+    {
+      requestedConfigVersionId: configVersionId,
+      ambientActiveConfigVersionId: configVersionId,
+    },
+    {
+      requestedConfigVersionId: configVersionId,
+      ambientActiveConfigVersionId: nextActiveConfigVersionId,
+    },
+  ]);
+});
+
 test("authority resolution fails closed before a DataForrest request", async () => {
   const fixture = sourceFixture({
     pages: [sourcePage({
@@ -479,6 +593,158 @@ test("authority resolution fails closed before a DataForrest request", async () 
   );
   assert.equal(fixture.requestedUrls.length, 0);
   assert.equal(fixture.terminalizations.length, 0);
+});
+
+test("mapper-invalid records quarantine independently with entity-scoped source identities", async () => {
+  const sharedRecordId = "shared-invalid-catalog-id";
+  const fixture = sourceFixture({
+    pages: [sourcePage({
+      cursor: "clutchpacks-cursor-record-local-quarantine",
+      continuation: "head",
+      records: [
+        minimalPackRecord("pack-before-invalid-card"),
+        unmappablePackRecord(sharedRecordId),
+        unmappableCardRecord(sharedRecordId),
+        cardOnlyPullRecord("pull-after-invalid-card"),
+      ],
+    })],
+  });
+
+  const page = validateProviderMixedPage(
+    await fixture.source.nextPage(sourceInput()),
+  );
+  assert.equal(page.continuation, "head");
+  assert.equal(page.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "pack"
+  ), true);
+  assert.equal(page.records.some((record) => record.kind === "pull"), true);
+  const quarantines = page.records.filter(
+    (record) => record.disposition === "quarantine",
+  );
+  assert.equal(quarantines.length, 2);
+  assert.equal(quarantines.every((record) =>
+    record.kind === "catalog"
+    && record.reasonCode === "SOURCE_RECORD_MAPPING_INVALID"
+    && /^source:[0-9a-f]{64}$/u.test(record.sourceRecordKey ?? "")
+    && JSON.stringify(record.candidate) === "{}"
+  ), true);
+  assert.notEqual(
+    quarantines[0]?.sourceRecordKey,
+    quarantines[1]?.sourceRecordKey,
+  );
+  assert.equal(JSON.stringify(
+    page,
+    (_key, value: unknown) => typeof value === "bigint"
+      ? value.toString()
+      : value,
+  ).includes(rawMarker), false);
+  assert.deepEqual(fixture.translations, [{
+    sourceRecordCount: 4,
+    normalizedRecordCount: page.records.length,
+  }]);
+});
+
+test("adapter-invalid records quarantine locally with stable identity while valid records and continuation survive", async () => {
+  const invalidTimestampRecordId = "adapter-invalid-timestamp-pack";
+  const fixture = sourceFixture({
+    pages: [
+      sourcePage({
+        cursor: "clutchpacks-cursor-adapter-invalid",
+        continuation: "continue",
+        records: [
+          minimalPackRecord("pack-before-adapter-invalid"),
+          adapterInvalidCatalogRecord(),
+          adapterInvalidTimestampCatalogRecord(invalidTimestampRecordId),
+        ],
+      }),
+      sourcePage({
+        cursor: "clutchpacks-cursor-adapter-invalid",
+        continuation: "head",
+        records: [
+          adapterInvalidCatalogRecord(),
+          adapterInvalidTimestampCatalogRecord(invalidTimestampRecordId),
+        ],
+      }),
+    ],
+  });
+
+  const first = validateProviderMixedPage(
+    await fixture.source.nextPage(sourceInput()),
+  );
+  assert.equal(first.continuation, "more");
+  assert.equal(first.records.some((record) =>
+    record.disposition !== "quarantine"
+    && record.kind === "catalog"
+    && record.entityType === "pack"
+    && record.candidate.packKey === "pack:pack-before-adapter-invalid"
+  ), true);
+  const quarantines = first.records.filter(
+    (record) => record.disposition === "quarantine",
+  );
+  assert.equal(quarantines.length, 2);
+  const missingIdentity = quarantines.find(({ reasonCode }) =>
+    reasonCode === "SOURCE_ADAPTER_MISSING_IDENTITY"
+  );
+  const invalidTimestamp = quarantines.find(({ reasonCode }) =>
+    reasonCode === "SOURCE_ADAPTER_INVALID_TIMESTAMP"
+  );
+  assert.ok(missingIdentity);
+  assert.ok(invalidTimestamp);
+  assert.equal(missingIdentity.kind, "catalog");
+  assert.equal(missingIdentity.fieldPath, "record_id");
+  assert.equal(invalidTimestamp.fieldPath, "occurred_at");
+  assert.equal(
+    missingIdentity.sanitizedSummary,
+    "The source adapter rejected this record before canonical translation; no retry artifact is retained.",
+  );
+  assert.equal(
+    invalidTimestamp.sanitizedSummary,
+    missingIdentity.sanitizedSummary,
+  );
+  assert.match(missingIdentity.sourceRecordKey ?? "", /^source:[0-9a-f]{64}$/u);
+  assert.match(invalidTimestamp.sourceRecordKey ?? "", /^source:[0-9a-f]{64}$/u);
+  assert.notEqual(
+    missingIdentity.sourceRecordKey,
+    invalidTimestamp.sourceRecordKey,
+  );
+  assert.deepEqual(missingIdentity.candidate, {});
+  assert.deepEqual(invalidTimestamp.candidate, {});
+
+  const second = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({
+      pageNumber: 2,
+      checkpoint: first.nextCursor,
+      checkpointFingerprint: first.nextCursorFingerprint,
+    }),
+  ));
+  assert.equal(second.continuation, "head");
+  const replayedQuarantines = second.records.filter(
+    (record) => record.disposition === "quarantine",
+  );
+  assert.equal(replayedQuarantines.length, 2);
+  assert.deepEqual(
+    Object.fromEntries(quarantines.map((record) => [
+      record.reasonCode,
+      record.sourceRecordKey,
+    ])),
+    Object.fromEntries(replayedQuarantines.map((record) => [
+      record.reasonCode,
+      record.sourceRecordKey,
+    ])),
+  );
+  assert.deepEqual(fixture.translations, [
+    { sourceRecordCount: 3, normalizedRecordCount: first.records.length },
+    { sourceRecordCount: 2, normalizedRecordCount: second.records.length },
+  ]);
+  const durableSurface = JSON.stringify(
+    { first, second },
+    (_key, value: unknown) => typeof value === "bigint"
+      ? value.toString()
+      : value,
+  );
+  assert.equal(durableSurface.includes(rawMarker), false);
+  assert.equal(durableSurface.includes(bearerToken), false);
 });
 
 test("an exact 2,000-record API page can expand to the bounded 4,000-record mixed page", async () => {

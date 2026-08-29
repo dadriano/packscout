@@ -148,7 +148,9 @@ function isPositiveBigint(value: string): boolean {
   return /^[1-9][0-9]*$/u.test(value);
 }
 
-async function loadRepositoryEnvironment(): Promise<Record<string, string>> {
+export async function loadClutchpacksDataforrestRepositoryEnvironment(): Promise<
+  Record<string, string>
+> {
   try {
     const metadata = await lstat(repositoryEnvironmentPath);
     const currentUserId = typeof process.getuid === "function"
@@ -841,7 +843,8 @@ export async function runClutchpacksDataforrestActivationCli(input: Readonly<{
   let central: Pool | null = null;
   let provider: Pool | null = null;
   try {
-    fileEnvironment = await loadRepositoryEnvironment();
+    fileEnvironment =
+      await loadClutchpacksDataforrestRepositoryEnvironment();
     environment = readClutchpacksDataforrestActivationEnvironment({
       processEnvironment,
       fileEnvironment,

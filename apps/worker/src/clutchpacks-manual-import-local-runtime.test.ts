@@ -33,8 +33,22 @@ test("local ClutchPacks configuration stays explicit and provider-scoped", () =>
   assert.equal(configuration.providerId, providerId);
   assert.equal(configuration.providerKey, "clutchpacks");
   assert.equal(configuration.captureRoot, "/srv/packscout/captures");
-  assert.equal(configuration.actorHmacKey.byteLength, 32);
+  assert.equal(configuration.actorHmacKey?.byteLength, 32);
   assert.equal(configuration.workerId, "preview:worker");
+});
+
+test("live ClutchPacks configuration does not require capture-only settings", () => {
+  const configuration = readClutchpacksManualImportLocalConfiguration(
+    environment({
+      PACKSCOUT_PROVIDER_CAPTURE_ROOT: undefined,
+      PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: undefined,
+    }),
+    "preview:worker",
+    "live",
+  );
+
+  assert.equal(configuration.captureRoot, null);
+  assert.equal(configuration.actorHmacKey, null);
 });
 
 test("local composition rejects another provider before constructing a database", async () => {
@@ -94,10 +108,10 @@ test("local composition starts one provider database and consumes one command", 
                 catalog: 946,
                 pulls: 15,
                 marketEvents: 15,
-                accepted: 961,
+                accepted: 976,
                 duplicate: 0,
-                quarantined: 15,
-                materialChanges: 961,
+                quarantined: 0,
+                materialChanges: 976,
               },
             };
           },

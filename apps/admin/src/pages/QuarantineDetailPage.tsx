@@ -15,7 +15,7 @@ function outcomeMessage(outcome: QuarantineRetryOutcome["outcome"]): string {
   if (outcome === "failed") return "The retry finished, but the record still needs review.";
   if (outcome === "already_retrying") return "A retry is already in progress for this record.";
   if (outcome === "already_resolved") return "This record was already resolved. No duplicate retry was created.";
-  if (outcome === "expired") return "Source evidence expired; this record cannot be retried.";
+  if (outcome === "expired") return "No retry artifact is available for this record.";
   return "The quarantine entry no longer exists in this workspace.";
 }
 
@@ -88,7 +88,7 @@ export function QuarantineDetailPage() {
       {outcome ? <section className={`ops-retry-result${outcome.outcome === "failed" || outcome.outcome === "expired" ? " is-failure" : ""}`} aria-live={outcome.outcome === "failed" ? "assertive" : "polite"}><strong>{humanize(outcome.outcome)}</strong><p>{outcomeMessage(outcome.outcome)}</p></section> : null}
 
       <section className="ops-run-lead" aria-labelledby="quarantine-state-title">
-        <div><span className="admin-kicker">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? "Source evidence expired; this record cannot be retried. Expired does not mean corrected." : entry.sanitizedSummary}</p></div>
+        <div><span className="admin-kicker">Current quality state</span><h2 id="quarantine-state-title">{humanize(entry.state)}</h2><p>{entry.state === "resolved" ? entry.resolutionSummary ?? "The record is resolved." : entry.state === "expired" ? `${entry.sanitizedSummary} This record cannot be retried.` : entry.sanitizedSummary}</p></div>
         <QuarantineStatus state={entry.state} />
       </section>
 
@@ -109,7 +109,7 @@ export function QuarantineDetailPage() {
           <dl>
             <div><dt>First failure</dt><dd>{dateTime(entry.firstFailureAt)}</dd></div>
             <div><dt>Latest failure</dt><dd>{dateTime(entry.latestFailureAt)}</dd></div>
-            <div><dt>Evidence expires</dt><dd>{dateTime(entry.rawExpiresAt)}</dd></div>
+            <div><dt>Retry artifact</dt><dd>{retryable ? `Retained until ${dateTime(entry.rawExpiresAt)}` : "Unavailable"}</dd></div>
             <div><dt>Attempts</dt><dd>{entry.attemptCount}</dd></div>
             <div><dt>Resolved</dt><dd>{dateTime(entry.resolvedAt)}</dd></div>
             <div><dt>Origin run</dt><dd><Link to={`/runs/${entry.runId}`}>{entry.runId.slice(0, 12)}</Link></dd></div>

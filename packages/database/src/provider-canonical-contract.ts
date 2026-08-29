@@ -77,6 +77,15 @@ export interface PullWriteResult extends CanonicalFactWriteResult {
   readonly itemIds: readonly string[];
 }
 
+export interface FactReferenceReconciliationResult {
+  readonly pullPackCount: number;
+  readonly pullItemCollectibleCount: number;
+  readonly marketEventPackCount: number;
+  readonly marketEventCollectibleCount: number;
+  readonly materialChangeCount: number;
+  readonly promotionRange: PromotionSequenceRange | null;
+}
+
 export interface MutableWriteControl {
   readonly expectedRowVersion?: bigint;
 }
@@ -186,7 +195,8 @@ export interface ProviderAccountWriteInput extends MutableWriteControl {
 }
 
 export interface PullItemWriteInput {
-  readonly collectibleId: string;
+  readonly collectibleKey: string | null;
+  readonly collectibleId: string | null;
   readonly collectibleInstanceId: string | null;
   readonly quantity: bigint;
   readonly statedValueAmount: string | null;
@@ -196,7 +206,8 @@ export interface PullItemWriteInput {
 export interface PullWriteInput {
   readonly pullKey: string;
   readonly factDigest: string;
-  readonly packId: string;
+  readonly packKey: string | null;
+  readonly packId: string | null;
   readonly providerAccountId: string | null;
   readonly occurredAt: Date;
   readonly paidAmount: string | null;
@@ -209,7 +220,9 @@ export interface MarketEventWriteInput {
   readonly factDigest: string;
   readonly eventGroupId: string | null;
   readonly eventType: ProviderMarketEventType;
+  readonly packKey: string | null;
   readonly packId: string | null;
+  readonly collectibleKey: string | null;
   readonly collectibleId: string | null;
   readonly collectibleInstanceId: string | null;
   readonly fromProviderAccountId: string | null;

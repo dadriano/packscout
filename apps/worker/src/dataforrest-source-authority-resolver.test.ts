@@ -52,25 +52,19 @@ interface ConfigurationFixture {
   configuration: unknown;
   expires_at: Date | null;
   source_credential: CredentialFixture | null;
+  provider: ProviderIdentityFixture;
 }
 
-interface ProviderFixture {
+interface ProviderIdentityFixture {
   id: string;
   organization_id: string;
   provider_key: string;
   lifecycle: string;
-  active_config_version_id: string | null;
-  active_config_version: ConfigurationFixture | null;
 }
 
 interface ValidConfigurationFixture extends ConfigurationFixture {
   source_credential_version_id: string;
   source_credential: CredentialFixture;
-}
-
-interface ValidProviderFixture extends ProviderFixture {
-  active_config_version_id: string;
-  active_config_version: ValidConfigurationFixture;
 }
 
 const request: DataforrestSourceAuthorityRequest = Object.freeze({
@@ -93,45 +87,44 @@ function encryptedSourceCredential(
   });
 }
 
-function validProvider(): ValidProviderFixture {
+function validConfiguration(): ValidConfigurationFixture {
   const encrypted = encryptedSourceCredential();
   return {
-    id: providerId,
-    organization_id: organizationId,
-    provider_key: "clutchpacks",
-    lifecycle: "active" as const,
-    active_config_version_id: configVersionId,
-    active_config_version: {
-      id: configVersionId,
+    id: configVersionId,
+    provider_id: providerId,
+    version_number: 2n,
+    adapter_key: adapterKey,
+    endpoint_url: DATAFORREST_EVENTS_V1_ENDPOINT,
+    source_credential_version_id: sourceCredentialVersionId,
+    configuration: { platform: "clutchpacks" },
+    expires_at: null,
+    source_credential: {
+      id: sourceCredentialVersionId,
       provider_id: providerId,
-      version_number: 2n,
-      adapter_key: adapterKey,
-      endpoint_url: DATAFORREST_EVENTS_V1_ENDPOINT,
-      source_credential_version_id: sourceCredentialVersionId,
-      configuration: { platform: "clutchpacks" },
-      expires_at: null,
-      source_credential: {
-        id: sourceCredentialVersionId,
-        provider_id: providerId,
-        credential_kind: "source" as const,
-        version_number: 3n,
-        ciphertext: encrypted.ciphertext,
-        nonce: encrypted.nonce,
-        auth_tag: encrypted.authTag,
-        key_version: encrypted.keyVersion,
-        lifecycle: "active" as const,
-        activated_at: new Date("2026-08-29T17:00:00.000Z"),
-        retired_at: null,
-        revoked_at: null,
-      },
+      credential_kind: "source" as const,
+      version_number: 3n,
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      auth_tag: encrypted.authTag,
+      key_version: encrypted.keyVersion,
+      lifecycle: "active" as const,
+      activated_at: new Date("2026-08-29T17:00:00.000Z"),
+      retired_at: null,
+      revoked_at: null,
+    },
+    provider: {
+      id: providerId,
+      organization_id: organizationId,
+      provider_key: "clutchpacks",
+      lifecycle: "active" as const,
     },
   };
 }
 
-function resolverFor(row: ProviderFixture | null | Error) {
+function resolverFor(row: ConfigurationFixture | null | Error) {
   let receivedQuery: unknown;
   const central = {
-    providers: {
+    provider_config_versions: {
       async findUnique(input: unknown) {
         receivedQuery = input;
         if (row instanceof Error) throw row;
@@ -162,8 +155,8 @@ async function rejectsWith(
 }
 
 describe("central DataForrest source authority", () => {
-  test("loads the exact active configuration and decrypts only its source credential", async () => {
-    const harness = resolverFor(validProvider());
+  test("loads the exact pinned configuration and decrypts only its source credential", async () => {
+    const harness = resolverFor(validConfiguration());
     const authority = await harness.resolver.resolve(request);
 
     assert.deepEqual(authority, {
@@ -186,14 +179,19 @@ describe("central DataForrest source authority", () => {
     });
     assert.deepEqual(
       (harness.query() as { where: unknown }).where,
-      { id: providerId },
+      { id: configVersionId },
+    );
+    assert.equal(
+      "active_config_version" in
+        ((harness.query() as { select: Record<string, unknown> }).select),
+      false,
     );
     assert.equal("ciphertext" in authority, false);
   });
 
   test("accepts the schema's null activation timestamp for an active credential", async () => {
-    const row = validProvider();
-    row.active_config_version.source_credential.activated_at = null;
+    const row = validConfiguration();
+    row.source_credential.activated_at = null;
 
     const authority = await resolverFor(row).resolver.resolve(request);
 
@@ -202,7 +200,7 @@ describe("central DataForrest source authority", () => {
   });
 
   test("rejects malformed server pins before querying central", async () => {
-    const harness = resolverFor(validProvider());
+    const harness = resolverFor(validConfiguration());
     await rejectsWith(harness.resolver.resolve({
       ...request,
       providerId: "not-a-provider-id",
@@ -217,7 +215,10 @@ describe("central DataForrest source authority", () => {
       "PROVIDER_SOURCE_AUTHORITY_UNAVAILABLE",
     );
     await rejectsWith(
-      resolverFor({ ...validProvider(), lifecycle: "disabled" }).resolver
+      resolverFor({
+        ...validConfiguration(),
+        provider: { ...validConfiguration().provider, lifecycle: "disabled" },
+      }).resolver
         .resolve(request),
       "PROVIDER_SOURCE_AUTHORITY_UNAVAILABLE",
     );
@@ -225,49 +226,36 @@ describe("central DataForrest source authority", () => {
 
   test("rejects stale provider, configuration, and adapter identity pins", async () => {
     const mismatches = [
-      { ...validProvider(), provider_key: "courtyard" },
-      { ...validProvider(), active_config_version_id: null },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          provider_id: "10000000-0000-4000-8000-000000000099",
+        ...validConfiguration(),
+        provider: {
+          ...validConfiguration().provider,
+          provider_key: "courtyard",
         },
       },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          version_number: 9n,
-        },
+        ...validConfiguration(),
+        provider_id: "10000000-0000-4000-8000-000000000099",
       },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          adapter_key: "dataforrest-events-adapter-v2",
-        },
+        ...validConfiguration(),
+        version_number: 9n,
       },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          endpoint_url: "https://example.invalid/v1/events",
-        },
+        ...validConfiguration(),
+        adapter_key: "dataforrest-events-adapter-v2",
       },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          configuration: { platform: "courtyard" },
-        },
+        ...validConfiguration(),
+        endpoint_url: "https://example.invalid/v1/events",
       },
       {
-        ...validProvider(),
-        active_config_version: {
-          ...validProvider().active_config_version,
-          expires_at: new Date(Number.NaN),
-        },
+        ...validConfiguration(),
+        configuration: { platform: "courtyard" },
+      },
+      {
+        ...validConfiguration(),
+        expires_at: new Date(Number.NaN),
       },
     ];
     for (const row of mismatches) {
@@ -279,8 +267,8 @@ describe("central DataForrest source authority", () => {
   });
 
   test("treats the exact expiration instant as expired", async () => {
-    const row = validProvider();
-    row.active_config_version.expires_at = new Date(now);
+    const row = validConfiguration();
+    row.expires_at = new Date(now);
     await rejectsWith(
       resolverFor(row).resolver.resolve(request),
       "PROVIDER_SOURCE_CONFIGURATION_EXPIRED",
@@ -288,26 +276,23 @@ describe("central DataForrest source authority", () => {
   });
 
   test("rejects missing, foreign, inactive, and not-yet-active source credentials", async () => {
-    const validMissing = validProvider();
-    const missing: ProviderFixture = {
+    const validMissing = validConfiguration();
+    const missing: ConfigurationFixture = {
       ...validMissing,
-      active_config_version: {
-        ...validMissing.active_config_version,
-        source_credential: null,
-      },
+      source_credential: null,
     };
-    const wrongKind = validProvider();
-    wrongKind.active_config_version.source_credential.credential_kind =
+    const wrongKind = validConfiguration();
+    wrongKind.source_credential.credential_kind =
       "database" as "source";
-    const foreign = validProvider();
-    foreign.active_config_version.source_credential.provider_id =
+    const foreign = validConfiguration();
+    foreign.source_credential.provider_id =
       "10000000-0000-4000-8000-000000000099";
-    const revoked = validProvider();
-    revoked.active_config_version.source_credential.lifecycle =
+    const revoked = validConfiguration();
+    revoked.source_credential.lifecycle =
       "revoked" as "active";
-    revoked.active_config_version.source_credential.revoked_at = new Date(now);
-    const future = validProvider();
-    future.active_config_version.source_credential.activated_at =
+    revoked.source_credential.revoked_at = new Date(now);
+    const future = validConfiguration();
+    future.source_credential.activated_at =
       new Date("2026-08-29T19:00:00.000Z");
 
     for (const row of [missing, wrongKind, foreign, revoked, future]) {
@@ -319,16 +304,14 @@ describe("central DataForrest source authority", () => {
   });
 
   test("uses the source credential version ID as cipher revision scope", async () => {
-    const row = validProvider();
+    const row = validConfiguration();
     const incorrectlyScoped = encryptedSourceCredential(
       bearerToken,
       configVersionId,
     );
-    row.active_config_version.source_credential.ciphertext =
-      incorrectlyScoped.ciphertext;
-    row.active_config_version.source_credential.nonce = incorrectlyScoped.nonce;
-    row.active_config_version.source_credential.auth_tag =
-      incorrectlyScoped.authTag;
+    row.source_credential.ciphertext = incorrectlyScoped.ciphertext;
+    row.source_credential.nonce = incorrectlyScoped.nonce;
+    row.source_credential.auth_tag = incorrectlyScoped.authTag;
     await rejectsWith(
       resolverFor(row).resolver.resolve(request),
       "PROVIDER_SOURCE_CREDENTIAL_INVALID",
@@ -336,11 +319,11 @@ describe("central DataForrest source authority", () => {
   });
 
   test("rejects decrypted bearer text outside the production adapter contract", async () => {
-    const row = validProvider();
+    const row = validConfiguration();
     const invalid = encryptedSourceCredential(` ${bearerToken}`);
-    row.active_config_version.source_credential.ciphertext = invalid.ciphertext;
-    row.active_config_version.source_credential.nonce = invalid.nonce;
-    row.active_config_version.source_credential.auth_tag = invalid.authTag;
+    row.source_credential.ciphertext = invalid.ciphertext;
+    row.source_credential.nonce = invalid.nonce;
+    row.source_credential.auth_tag = invalid.authTag;
     await rejectsWith(
       resolverFor(row).resolver.resolve(request),
       "PROVIDER_SOURCE_CREDENTIAL_INVALID",

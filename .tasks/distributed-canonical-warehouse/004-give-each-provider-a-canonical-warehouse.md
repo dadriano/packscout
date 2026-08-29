@@ -34,7 +34,7 @@ The canonical core contains resolved product and transaction facts. Pending pull
 ### Pull and market facts
 
 - Store stable `PROVIDER_ACCOUNTS` keyed by provider account identity rather than mutable display names.
-- Store one immutable `PULL` with stable local key, one pack, optional provider account, occurrence time, and nullable exact paid amount and currency; every completed pull has at least one ordered `PULL_ITEM`.
+- Store one immutable `PULL` with stable local key, source-reported pack identity, optional resolved local pack and provider account, occurrence time, nullable exact paid amount and currency, and an immutable positive expected item count; at commit the count must exactly match its ordered `PULL_ITEM` rows.
 - Give each pull item positive quantity, collectible, optional exact instance, and nullable exact stated value and currency; the instance must belong to the referenced collectible.
 - Store immutable `MARKET_EVENTS` for `sale`, `buyback`, `mint`, `burn`, `transfer`, `list`, `unlist`, `swap`, `ship`, and `other`, with occurrence time, nullable exact amount and currency, at least one resolved local pack, collectible, or instance subject, and bounded provider-account parties.
 - Use a nullable deterministic `event_group_id` to group atomic rows from one compound transaction without collapsing their individual amounts or directions.
@@ -50,7 +50,7 @@ The canonical core contains resolved product and transaction facts. Pending pull
 ### Change tracking
 
 - Give every mutable entity `created_at`, `updated_at`, and monotonic `row_version` values that change only on a material update.
-- Store append-only `PROMOTION_CHANGES` with a provider-local sequence, entity type, entity ID, entity version, `upsert | retire` operation, and change time for every canonical insert, material update, immutable-fact insertion, and retirement covered by the provider change contract.
+- Store append-only `PROMOTION_CHANGES` with a provider-local sequence, entity type, entity ID, entity version, `upsert | retire` operation, and change time for every canonical insert, material update, immutable-fact insertion or relationship resolution, and retirement covered by the provider change contract.
 - Commit the canonical mutation or immutable-fact insertion and its promotion-change row in the same provider transaction.
 - Avoid a promotion-change row for a byte-for-byte or semantically unchanged write.
 - Retain change rows after publication so checkpoint and receipt reconciliation remains auditable.
@@ -95,7 +95,8 @@ Consumers address local entities only through a validated provider database cont
   entity plus immutable pull/item and market-event facts; no generic entity or
   relationship graph is used.
 - PostgreSQL deferred constraints reject category cycles, instance mismatches,
-  empty completed pulls, unresolved market subjects, orphan promotion changes,
+  empty completed pulls, market events missing every source subject, illegal
+  relationship relinks, orphan promotion changes,
   history mutation, and canonical deletes.
 - The live two-provider integration test proves exact decimal round trips,
   multi-collectible packs, multi-item pulls, material/no-op replay behavior,

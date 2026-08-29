@@ -257,6 +257,7 @@ model packs {
   market_events             market_events[]
   ev_recomputation_requests pack_ev_recomputation_requests[]
 
+  @@unique([id, pack_key], map: "packs_id_pack_key_key")
   @@index([category_id, lifecycle], map: "packs_category_lifecycle_idx")
   @@index([availability, lifecycle], map: "packs_availability_lifecycle_idx")
 }
@@ -299,6 +300,7 @@ model collectibles {
   pull_items    pull_items[]
   market_events market_events[]
 
+  @@unique([id, collectible_key], map: "collectibles_id_collectible_key_key")
   @@index([category_id, collectible_type], map: "collectibles_category_type_idx")
   @@index([normalized_name], map: "collectibles_normalized_name_idx")
   @@index([lifecycle], map: "collectibles_lifecycle_idx")
@@ -392,18 +394,24 @@ model pulls {
   id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   pull_key            String   @unique(map: "pulls_pull_key_key")
   fact_digest         String   @db.Char(64)
-  pack_id             String   @db.Uuid
+  pack_key            String?
+  pack_id             String?  @db.Uuid
   provider_account_id String?  @db.Uuid
+  item_count          Int
   occurred_at         DateTime @db.Timestamptz(6)
   paid_amount         Decimal? @db.Decimal(38, 18)
   paid_currency       String?  @db.VarChar(42)
+  row_version         BigInt   @default(1)
   created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
 
-  pack             packs              @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pulls_pack_id_fkey")
+  pack             packs?             @relation(fields: [pack_id, pack_key], references: [id, pack_key], onDelete: Restrict, onUpdate: NoAction, map: "pulls_pack_id_key_fkey")
   provider_account provider_accounts? @relation(fields: [provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pulls_provider_account_id_fkey")
   items            pull_items[]
 
   @@index([pack_id, occurred_at(sort: Desc)], map: "pulls_pack_occurred_idx")
+  // The keyed-unresolved lookup uses a migration-only partial index because
+  // Prisma cannot express an index predicate.
   @@index([provider_account_id, occurred_at(sort: Desc)], map: "pulls_account_occurred_idx")
 }
 
@@ -411,16 +419,21 @@ model pull_items {
   id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   pull_id                 String   @db.Uuid
   ordinal                 Int
-  collectible_id          String   @db.Uuid
+  collectible_key         String?
+  collectible_id          String?  @db.Uuid
   collectible_instance_id String?  @db.Uuid
   quantity                BigInt
   stated_value_amount     Decimal? @db.Decimal(38, 18)
   stated_value_currency   String?  @db.VarChar(42)
+  row_version             BigInt   @default(1)
   created_at              DateTime @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime @default(now()) @db.Timestamptz(6)
 
   pull                 pulls                  @relation(fields: [pull_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_pull_id_fkey")
-  collectible          collectibles           @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_collectible_id_fkey")
+  collectible          collectibles?          @relation(fields: [collectible_id, collectible_key], references: [id, collectible_key], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_collectible_id_key_fkey")
   collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "pull_items_instance_collectible_fkey")
+  // The keyed-unresolved lookup uses a migration-only partial index because
+  // Prisma cannot express an index predicate.
 
   @@unique([pull_id, ordinal], map: "pull_items_pull_id_ordinal_key")
 }
@@ -431,7 +444,9 @@ model market_events {
   fact_digest              String            @db.Char(64)
   event_group_id           String?           @db.Uuid
   event_type               market_event_type
+  pack_key                 String?
   pack_id                  String?           @db.Uuid
+  collectible_key          String?
   collectible_id           String?           @db.Uuid
   collectible_instance_id  String?           @db.Uuid
   from_provider_account_id String?           @db.Uuid
@@ -441,10 +456,12 @@ model market_events {
   amount                   Decimal?          @db.Decimal(38, 18)
   currency                 String?           @db.VarChar(42)
   details                  Json              @default("{}") @db.JsonB
+  row_version              BigInt            @default(1)
   created_at               DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime          @default(now()) @db.Timestamptz(6)
 
-  pack                 packs?                 @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_pack_id_fkey")
-  collectible          collectibles?          @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_collectible_id_fkey")
+  pack                 packs?                 @relation(fields: [pack_id, pack_key], references: [id, pack_key], onDelete: Restrict, onUpdate: NoAction, map: "market_events_pack_id_key_fkey")
+  collectible          collectibles?          @relation(fields: [collectible_id, collectible_key], references: [id, collectible_key], onDelete: Restrict, onUpdate: NoAction, map: "market_events_collectible_id_key_fkey")
   collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_instance_collectible_fkey")
   from_account         provider_accounts?     @relation("market_events_from_account", fields: [from_provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_from_account_id_fkey")
   to_account           provider_accounts?     @relation("market_events_to_account", fields: [to_provider_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "market_events_to_account_id_fkey")
@@ -452,6 +469,8 @@ model market_events {
   @@index([event_group_id, event_type, occurred_at(sort: Desc)], map: "market_events_group_type_occurred_idx")
   @@index([pack_id, occurred_at(sort: Desc)], map: "market_events_pack_occurred_idx")
   @@index([collectible_id, occurred_at(sort: Desc)], map: "market_events_collectible_occurred_idx")
+  // Keyed-unresolved lookups use migration-only partial indexes because
+  // Prisma cannot express index predicates.
   @@index([collectible_instance_id, occurred_at(sort: Desc)], map: "market_events_instance_occurred_idx")
 }
 
@@ -645,7 +664,7 @@ model quarantine_records {
   record_index             Int
   record_kind              String
   entity_key               String?
-  source_record_key        String?
+  source_record_key        String?          @unique(map: "quarantine_records_source_record_key_key")
   external_id              String?
   reason_code              String
   field_path               String?

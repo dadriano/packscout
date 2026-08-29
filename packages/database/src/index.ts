@@ -35,6 +35,7 @@ export * from "./provider-database-destination-policy.ts";
 export * from "./provider-database-gateway.ts";
 export * from "./provider-canonical-contract.ts";
 export * from "./provider-canonical-repository.ts";
+export * from "./provider-fact-quarantine-reconciliation-repository.ts";
 export * from "./provider-mixed-page-contract.ts";
 export * from "./provider-mixed-page-repository.ts";
 export * from "./provider-runtime-repository.ts";
