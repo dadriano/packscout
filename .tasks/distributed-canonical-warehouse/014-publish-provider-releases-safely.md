@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/015, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including authenticated operations, idempotent receipts, and lost-response recovery
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

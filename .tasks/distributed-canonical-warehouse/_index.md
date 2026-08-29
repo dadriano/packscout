@@ -4,7 +4,7 @@
 
 Open task `distributed-canonical-warehouse/001` and produce the database ownership matrix, naming rules, and cross-database boundary contract. The first checkpoint is a clean non-production topology with one `packscout` database and two independently reachable provider databases.
 
-**Progress:** 10/20 tasks complete
+**Progress:** 11/20 tasks complete
 
 ## Context
 
@@ -101,8 +101,8 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 |---|---|---|---|---|---|
 | 011 | Preserve the Data Feed Lab | small | 1–2 days | done | 002, 003 |
 | 012 | Publish shared catalog versions safely | large | 3–5 days | done | 006 |
-| 013 | Assemble immutable provider releases | large | 5–7 days | in progress | 006, 007, 012 |
-| 014 | Publish provider releases safely | large | 4–6 days | not started | 013 |
+| 013 | Assemble immutable provider releases | large | 5–7 days | done | 006, 007, 012 |
+| 014 | Publish provider releases safely | large | 4–6 days | in progress | 013 |
 | 015 | Advance provider manifest gates independently | large | 4–6 days | not started | 012, 014 |
 
 ### Delivery and proof

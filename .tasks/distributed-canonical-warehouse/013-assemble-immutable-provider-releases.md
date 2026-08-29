@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/014
 **Estimated scope:** large
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -69,22 +69,30 @@ The assembler consumes provider-local typed rows and promotion state plus a comp
 
 ### Snapshot acceptance
 
-- [ ] One stable provider checkpoint and one complete catalog version produce a deterministic immutable release descriptor and batches.
-- [ ] Concurrent later provider or catalog updates do not change the claimed release and remain pending for a later release.
-- [ ] Missing, stale, cross-provider, incomplete, or incompatible soft references block completion without advancing checkpoints.
-- [ ] Provisional identities publish, while unresolved suggestions and unresolved local subjects do not.
-- [ ] An unchanged public projection reuses the prior complete release.
+- [x] One stable provider checkpoint and one complete catalog version produce a deterministic immutable release descriptor and batches.
+- [x] Concurrent later provider or catalog updates do not change the claimed release and remain pending for a later release.
+- [x] Missing, stale, cross-provider, incomplete, or incompatible soft references block completion without advancing checkpoints.
+- [x] Provisional identities publish, while unresolved suggestions and unresolved local subjects do not.
+- [x] An unchanged public projection reuses the prior complete release.
 
 ### Public-boundary acceptance
 
-- [ ] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
-- [ ] Exact instances, accounts, pulls, events, credentials, raw evidence, runtime, quarantine, and audit data are absent from every artifact.
-- [ ] Counts, hashes, ordering, category paths, references, money pairs, and public bounds reconcile before lifecycle becomes complete.
-- [ ] One provider assembly failure leaves another provider and the prior complete release unaffected.
-- [ ] Representative mixed-collectible fixtures and unavailable-value fixtures pass release validation.
+- [x] Provider, repack, category, collectible, chase, economics, freshness, and retirement projections preserve current public field semantics.
+- [x] Exact instances, accounts, pulls, events, credentials, raw evidence, runtime, quarantine, and audit data are absent from every artifact.
+- [x] Counts, hashes, ordering, category paths, references, money pairs, and public bounds reconcile before lifecycle becomes complete.
+- [x] One provider assembly failure leaves another provider and the prior complete release unaffected.
+- [x] Representative mixed-collectible fixtures and unavailable-value fixtures pass release validation.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Assembly requires a complete immutable catalog version and pins its correlation and public-profile hashes before opening the provider snapshot.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- A repeatable-read, lease-fenced provider snapshot now binds one promotion boundary to one reverified complete catalog artifact, temporal correlation snapshot, and active public profile without a distributed transaction.
+- Deterministic descriptors and bounded hash-chained batches publish provider identity, global category paths, cards, watches, art, provisional identities, repacks, chases, economics, freshness, retirements, and search records while excluding exact instances and all protected operational facts.
+- Public-equivalence fingerprints reuse a prior complete immutable release only when all published bytes and pinned public inputs match; the returned selected sequence remains distinct so later receipt-gated publication can advance the provider checkpoint safely.
+- Stored assembled/complete artifacts are rehashed and exact-compared before resume; failed, blocked, corrupt, stale, or cross-provider state fails closed without moving a checkpoint or changing a prior complete release.
+- The task branch passed `npm run verify:framework`; integrated contract/database/services/Convex typechecks and 10 focused pin, projection, exact-token-currency, determinism, equivalence, isolation, and safe-diagnostic tests passed.
