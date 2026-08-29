@@ -70,7 +70,7 @@ function goldenEligibility() {
       (product) => product.publicRepackId === publicRepackId,
     )!.productKey;
   return new Map<string, PackScoutBuybackEvPublicationEligibilityV1 | null>([
-    [productKeyOf(REPACK_A), buildPublishableEligibility(12_000)],
+    [productKeyOf(REPACK_A), buildPublishableEligibility(9_000)],
     [productKeyOf(REPACK_B), buildPublishableEligibility(8_500)],
     [productKeyOf(REPACK_C), buildUnavailableEligibility("BUYBACK_UNAVAILABLE")],
   ]);
@@ -135,32 +135,100 @@ test("identical replay assembles a byte-identical plan", async () => {
   assert.deepEqual(second, first);
 });
 
-test("an expired-since-calculation revision publishes the deterministic stale state", async () => {
+test("an expired-since-calculation revision preserves its known economics", async () => {
   const snapshot = buildReleaseSnapshot([
     buildReleaseProduct({ publicRepackId: REPACK_A }),
   ]);
+  const eligibility = buildExpiredEligibility();
   const assembler = new DataReleaseV3ReleaseAssembler(
     catalogPort(snapshot),
     eligibilityPort(
-      new Map([[snapshot.products[0]!.productKey, buildExpiredEligibility()]]),
+      new Map([[snapshot.products[0]!.productKey, eligibility]]),
     ),
   );
-  // The stale conversion is honest only once the read clock has passed the
-  // 60-minute deadline for the frozen observation.
+  // Release assembly preserves the immutable calculation after its old
+  // deadline. The public read boundary derives current versus last-known at
+  // one evaluation clock without rewriting the release.
+  assert.equal(eligibility.projection.dataAsOf.state, "known");
+  if (eligibility.projection.dataAsOf.state !== "known") return;
   const readAt = new Date(
-    Date.parse(RELEASE_READ_AT) + 61 * 60_000,
+    Date.parse(eligibility.projection.dataAsOf.observedAt) + 60 * 60_000 + 1,
   ).toISOString();
   const plan = await assembler.assemble({ readAt });
   assert.equal(plan.classification, "publish");
   if (plan.classification !== "publish") return;
   const [detail] = repackDetails(plan);
-  assert.equal(detail!.evEstimates.packScout.status, "unavailable");
-  if (detail!.evEstimates.packScout.status !== "unavailable") return;
-  assert.equal(detail!.evEstimates.packScout.reason, "SOURCE_DATA_STALE");
+  assert.equal(detail!.evEstimates.packScout.status, "current");
+  if (detail!.evEstimates.packScout.status !== "current") return;
+  assert.deepEqual(
+    detail!.evEstimates.packScout.metrics,
+    eligibility.projection.status === "available"
+      ? eligibility.projection.metrics
+      : null,
+  );
   assert.deepEqual(detail!.evEstimates.packScout.dataAsOf, {
     state: "known",
-    observedAt: buildExpiredEligibility().projection.dataAsOf.observedAt,
+    observedAt: eligibility.projection.dataAsOf.observedAt,
   });
+});
+
+test("positive raw current EV fails closed per pack without altering the revision", async () => {
+  const snapshot = buildReleaseSnapshot([
+    buildReleaseProduct({ publicRepackId: REPACK_A }),
+  ]);
+  const eligibility = buildPublishableEligibility(12_000);
+  const assembler = new DataReleaseV3ReleaseAssembler(
+    catalogPort(snapshot),
+    eligibilityPort(new Map([[snapshot.products[0]!.productKey, eligibility]])),
+  );
+
+  const plan = await assembler.assemble({ readAt: RELEASE_READ_AT });
+  assert.equal(plan.classification, "publish");
+  if (plan.classification !== "publish") return;
+  const [detail] = repackDetails(plan);
+  assert.deepEqual(detail?.evEstimates.packScout, {
+    status: "unavailable",
+    methodVersion: eligibility.revision.methodVersion,
+    confidencePolicyVersion: eligibility.revision.confidencePolicyVersion,
+    metrics: null,
+    confidence: null,
+    calculatedAt: eligibility.projection.calculatedAt,
+    dataAsOf: eligibility.projection.dataAsOf,
+    reason: "CALCULATION_UNAVAILABLE",
+  });
+  assert.equal(
+    eligibility.projection.status === "available"
+      ? eligibility.projection.metrics.evDollars.minorUnits
+      : null,
+    2_000,
+    "the protected raw revision remains exact",
+  );
+});
+
+test("positive raw EV cannot enter a sold-out historical public estimate", async () => {
+  const snapshot = buildReleaseSnapshot([
+    buildReleaseProduct({
+      publicRepackId: REPACK_A,
+      availability: "sold_out",
+      soldOutAt: RELEASE_SOLD_OUT_AT,
+      actionAvailability: { promo: true, repackLink: false },
+      actions: { promo: { code: "SCOUT", label: "Use SCOUT" } },
+    }),
+  ]);
+  const assembler = new DataReleaseV3ReleaseAssembler(
+    catalogPort(snapshot),
+    eligibilityPort(
+      new Map([[snapshot.products[0]!.productKey, buildPublishableEligibility(12_000)]]),
+    ),
+  );
+
+  const plan = await assembler.assemble({ readAt: RELEASE_READ_AT });
+  assert.equal(plan.classification, "publish");
+  if (plan.classification !== "publish") return;
+  assert.equal(
+    repackDetails(plan)[0]?.evEstimates.packScout.status,
+    "unavailable",
+  );
 });
 
 test("a product with no completed revision publishes the explicit unknown-evidence state", async () => {

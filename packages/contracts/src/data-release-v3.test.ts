@@ -4,6 +4,7 @@ import {
   buildAllAvailabilityStatesPublicRepackListPageV3,
   buildDataReleaseV3Identity,
   buildDesiredCollectibleRepackResultsV3,
+  buildHealthyPublicProviderHealthSummaryV1,
   buildNonPurchasablePublicRepackDetailV3,
   buildPackScoutPublicEvCurrentV3,
   buildPackScoutPublicEvMetricsV3,
@@ -15,9 +16,11 @@ import {
   buildPublicEvEstimatesV3,
   buildPublicRepackDetailV3,
   buildPublicRepackListPageV3,
+  buildPublicShellStatusV3,
   buildPublicRepackViewDetailV3,
   buildSoldOutPublicRepackDetailV3,
   DATA_RELEASE_V3_EXPIRES_AT,
+  DATA_RELEASE_V3_OBSERVED_AT,
   DATA_RELEASE_V3_SECONDARY_REPACK_ID,
 } from "./__fixtures__/data-release-v3.fixture.ts";
 import {
@@ -28,8 +31,9 @@ import {
   publicRepackDetailV3Schema,
   publicRepackListPageV3Schema,
   publicRepackSummaryV3FromDetail,
-  publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
+  publicRepackViewDetailV3Schema,
+  publicShellStatusV3Schema,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3MatchesDetail,
   repackEvSortRowV3Schema,
@@ -229,13 +233,10 @@ test("packs that are not available stay discoverable but never rank or act", () 
       "a frozen sold-out estimate requires the authoritative sold-out state",
     );
 
-    const view = publicRepackViewDetailV3Schema.parse({
-      ...detail,
-      heat: unavailableRepackHeat(),
-    });
+    const view = buildPublicRepackViewDetailV3(detail);
     assert.equal(
       publicDashboardBundleV3Schema.safeParse({
-        release: buildDataReleaseV3Identity(),
+        ...buildPublicDashboardBundleV3(),
         opportunities: [publicRepackViewSummaryV3FromDetail(view)],
         details: [view],
         selectedRepack: view,
@@ -295,7 +296,7 @@ test("heat, chase matching, and actions stay independent of EV confidence", () =
   };
   assert.equal(
     publicDashboardBundleV3Schema.safeParse({
-      release: buildDataReleaseV3Identity(),
+      ...buildPublicDashboardBundleV3(),
       opportunities: [publicRepackViewSummaryV3FromDetail(reheated)],
       details: [reheated],
       selectedRepack: reheated,
@@ -312,7 +313,7 @@ test("summary and detail projections carry byte-equivalent EV estimates", () => 
 
   const divergent = buildPublicRepackDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -348,7 +349,7 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
   });
   assert.equal(
     publicDashboardBundleV3Schema.safeParse({
-      release: buildDataReleaseV3Identity(),
+      ...bundle,
       opportunities: [publicRepackViewSummaryV3FromDetail(soldOut)],
       details: [soldOut],
       selectedRepack: soldOut,
@@ -359,7 +360,7 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
 
   const divergentDetail = buildPublicRepackViewDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -388,13 +389,154 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
   );
 });
 
+test("dynamic views bind last-known EV and distinct confidence and health clocks", () => {
+  const confidenceEvaluatedAt = "2026-08-20T19:00:00.000Z";
+  const lastKnown = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt },
+  );
+  assert.equal(lastKnown.evEstimates.packScout.status, "current");
+  assert.equal(lastKnown.packScoutEvPresentation.status, "last_known");
+  assert.equal(
+    lastKnown.packScoutEvPresentation.confidence?.scoreBasisPoints,
+    3_750,
+  );
+
+  const baseline = buildPublicDashboardBundleV3();
+  const oneLastKnownOpportunity = {
+    ...baseline,
+    confidenceEvaluatedAt,
+    providerHealthEvaluatedAt: "2026-08-20T19:10:00.000Z",
+    providerHealthSummary: {
+      state: "healthy" as const,
+      observedAt: "2026-08-20T19:10:00.000Z",
+      freshThrough: "2026-08-20T20:00:00.000Z",
+      totalProviderCount: 1,
+      delayedProviderCount: 0,
+      nextHealthEvaluationAt: "2026-08-20T20:00:00.000Z",
+    },
+    opportunityEligibility: {
+      rankingEligibleRepackCount: 1,
+      providerIneligibleRepackCount: 0,
+    },
+    opportunities: [publicRepackViewSummaryV3FromDetail(lastKnown)],
+    details: [lastKnown],
+    selectedRepack: lastKnown,
+  };
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse(oneLastKnownOpportunity).success,
+    true,
+    "age alone does not exclude a healthy last-known estimate",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      providerHealthEvaluatedAt: "2026-08-20T18:59:59.999Z",
+    }).success,
+    false,
+    "provider health cannot be evaluated before cursor-pinned confidence",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    }).success,
+    false,
+    "response and live presentation clocks cannot diverge",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      opportunityEligibility: {
+        rankingEligibleRepackCount: 0,
+        providerIneligibleRepackCount: 0,
+      },
+    }).success,
+    false,
+    "eligibility counts cannot under-report emitted opportunities",
+  );
+
+  const tamperedPresentation = structuredClone(lastKnown);
+  if (tamperedPresentation.packScoutEvPresentation.status === "unavailable") {
+    throw new Error("unexpected unavailable fixture");
+  }
+  tamperedPresentation.packScoutEvPresentation.confidence.scoreBasisPoints -= 1;
+  assert.equal(
+    publicRepackViewDetailV3Schema.safeParse(tamperedPresentation).success,
+    false,
+    "the presentation overlay must remain derived from stored V3",
+  );
+
+  const delayed = buildPublicRepackViewDetailV3(
+    {},
+    {
+      confidenceEvaluatedAt,
+      providerHealth: {
+        state: "delayed",
+        observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+        rankingEligible: false,
+        rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+      },
+    },
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      opportunities: [publicRepackViewSummaryV3FromDetail(delayed)],
+      details: [delayed],
+      selectedRepack: delayed,
+    }).success,
+    false,
+    "provider-ineligible estimates remain visible but cannot rank",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...baseline,
+      providerHealthSummary: {
+        state: "delayed",
+        observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+        freshThrough: DATA_RELEASE_V3_EXPIRES_AT,
+        totalProviderCount: 1,
+        delayedProviderCount: 1,
+        nextHealthEvaluationAt: null,
+      },
+      opportunityEligibility: {
+        rankingEligibleRepackCount: 0,
+        providerIneligibleRepackCount: 1,
+      },
+      opportunities: [],
+      details: [],
+      selectedRepack: null,
+    }).success,
+    true,
+    "an empty opportunity list can explain provider ineligibility",
+  );
+
+  const list = buildPublicRepackListPageV3();
+  assert.equal(list.providerHealthSummary.state, "healthy");
+  assert.equal(list.publicFreshnessPolicyVersion, baseline.publicFreshnessPolicyVersion);
+  assert.equal(publicShellStatusV3Schema.safeParse(buildPublicShellStatusV3()).success, true);
+  assert.equal(
+    publicShellStatusV3Schema.safeParse({
+      release: buildDataReleaseV3Identity(),
+      publicFreshnessPolicyVersion: baseline.publicFreshnessPolicyVersion,
+      confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    }).success,
+    false,
+  );
+  assert.equal(
+    buildHealthyPublicProviderHealthSummaryV1().state,
+    "healthy",
+  );
+});
+
 test("list pages keep rows, details, selection, and desired matches aligned", () => {
   const page = buildPublicRepackListPageV3();
   assert.equal(page.rows.length, 2);
 
   const divergentDetail = buildPublicRepackViewDetailV3({
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_000),
     }),
   });
   assert.equal(
@@ -448,9 +590,9 @@ test("list pages keep rows, details, selection, and desired matches aligned", ()
 
 test("sort rows materialize only bounded values with honest null ranks", () => {
   const current = repackEvSortRowV3FromDetail(buildPublicRepackDetailV3());
-  assert.equal(current.packScoutEvDollarsMinor, 2_000);
+  assert.equal(current.packScoutEvDollarsMinor, -1_500);
   assert.equal(current.packScoutEvDollarsNullRank, 0);
-  assert.equal(current.packScoutGrossEvMinor, 12_000);
+  assert.equal(current.packScoutGrossEvMinor, 8_500);
   assert.equal(current.packScoutConfidenceBand, "high");
   assert.equal(current.vendorReportedEvUsdMinor, 8_500);
   assert.equal(
@@ -504,6 +646,7 @@ test("sort rows materialize only bounded values with honest null ranks", () => {
 test("the release identity requires data_release_v3 and the exact versions", () => {
   const identity = buildDataReleaseV3Identity();
   assert.equal(identity.schemaVersion, "data_release_v3");
+  assert.equal(identity.publicEvPolicyVersion, "packscout-public-ev-nonpositive-v1");
   assert.equal(
     dataReleaseV3IdentitySchema.safeParse({
       ...identity,
@@ -523,6 +666,13 @@ test("the release identity requires data_release_v3 and the exact versions", () 
     dataReleaseV3IdentitySchema.safeParse({
       ...identity,
       confidencePolicyVersion: "confidence-v1",
+    }).success,
+    false,
+  );
+  assert.equal(
+    dataReleaseV3IdentitySchema.safeParse({
+      ...identity,
+      publicEvPolicyVersion: "packscout-public-ev-positive-v1",
     }).success,
     false,
   );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  safePresentPackScoutPublicEvV3,
   type PackScoutBuybackEvPublicReasonCodeV1,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -38,11 +39,11 @@ import type { PackScoutBuybackEvRecomputationCommandV1 } from "./buyback-adjuste
 /**
  * Task-012 failure and recovery drills, DB-backed through the real
  * recomputation boundary: every deterministic evidence-failure class fails
- * closed into its bounded public reason, expiry removes an estimate from the
- * release without zeroing it or mutating immutable history, an interrupted
- * publication leaves the last coherent release active and converges on retry
- * under the same identity, a malformed projection blocks assembly, and full
- * replay never rewrites completed revisions.
+ * closed into its bounded public reason, old calculable evidence remains in
+ * the release and presents as last-known without mutating immutable history,
+ * an interrupted publication leaves the last coherent release active and
+ * converges on retry under the same identity, a malformed projection blocks
+ * assembly, and full replay never rewrites completed revisions.
  */
 
 const ids = {
@@ -381,8 +382,8 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
       DRILLS.length + 1,
     );
 
-    // Phase D — expiry removes the estimate from the release without zeroing
-    // it and without mutating the immutable revision.
+    // Phase D — crossing the current window preserves the immutable estimate
+    // in the release and derives a last-known presentation at the read clock.
     const availableRowBefore =
       await harness.database.buyback_ev_revisions.findFirstOrThrow({
         where: { product_key: AVAILABLE_PRODUCT_KEY },
@@ -394,15 +395,35 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
       (detail) => freshByKey.get(detail.publicRepackId) === AVAILABLE_PRODUCT_KEY,
     )!;
     const expiredPackScout = expiredDetail.evEstimates.packScout;
-    assert.equal(expiredPackScout.status, "unavailable");
-    if (expiredPackScout.status === "unavailable") {
-      assert.equal(expiredPackScout.reason, "SOURCE_DATA_STALE");
-      assert.equal(expiredPackScout.metrics, null);
-      assert.deepEqual(expiredPackScout.dataAsOf, {
-        state: "known",
-        observedAt: OBSERVED_AT,
-      });
-    }
+    assert.equal(expiredPackScout.status, "current");
+    const freshPackScout = freshDetails.find(
+      (detail) =>
+        freshByKey.get(detail.publicRepackId) === AVAILABLE_PRODUCT_KEY,
+    )?.evEstimates.packScout;
+    assert.equal(freshPackScout?.status, "current");
+    assert.deepEqual(expiredPackScout.dataAsOf, {
+      state: "known",
+      observedAt: OBSERVED_AT,
+    });
+    if (expiredPackScout.status !== "current") return;
+    if (freshPackScout?.status !== "current") return;
+    assert.deepEqual(expiredPackScout.metrics, freshPackScout.metrics);
+    const presented = safePresentPackScoutPublicEvV3(
+      expiredPackScout,
+      READ_EXPIRED,
+    );
+    assert.equal(presented.success, true);
+    if (!presented.success) return;
+    assert.equal(presented.presentation.status, "last_known");
+    assert.deepEqual(
+      presented.presentation.metrics,
+      expiredPackScout.metrics,
+    );
+    assert.ok(
+      presented.presentation.confidence.limitationCodes.includes(
+        "source_age_over_60_minutes",
+      ),
+    );
     const availableRowAfter =
       await harness.database.buyback_ev_revisions.findFirstOrThrow({
         where: { product_key: AVAILABLE_PRODUCT_KEY },

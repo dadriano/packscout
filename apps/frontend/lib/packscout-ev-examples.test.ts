@@ -17,12 +17,11 @@ function rows(pairs: ReadonlyArray<readonly [string, string]>) {
   return pairs.map(([label, value]) => ({ label, value }));
 }
 
-test("exposes exactly the six approved worked examples in teaching order", () => {
+test("exposes exactly the five public-policy worked examples in teaching order", () => {
   assert.deepEqual(
     PACKSCOUT_EV_WORKED_EXAMPLES.map(({ id }) => id),
     [
       "canonical_buyback",
-      "positive_above_break_even",
       "neutral_break_even",
       "negative_below_break_even",
       "valid_zero_payout",
@@ -94,24 +93,7 @@ test("the canonical $100 × 85% example matches the shared presentation exactly"
   assert.ok(canonical.narrative.includes(CANONICAL_BUYBACK_EQUATION));
 });
 
-test("positive, neutral, and negative companions carry exact signed values", () => {
-  const positive = getPackScoutEvWorkedExample("positive_above_break_even");
-  assert.deepEqual(
-    positive.metricRows.map(({ label, value }) => ({ label, value })),
-    rows([
-      ["Pack Price", "$100.00"],
-      ["Gross EV $", "$108.00"],
-      ["Gross EV %", "108.00%"],
-      ["EV $", "+$8.00"],
-      ["EV %", "+8.00%"],
-    ]),
-  );
-  assert.equal(positive.presentation.semanticLabel, "Positive");
-  assert.deepEqual(
-    positive.inputRows.map(({ value }) => value),
-    ["$120.00", "90%"],
-  );
-
+test("neutral and negative companions carry exact signed values", () => {
   const neutral = getPackScoutEvWorkedExample("neutral_break_even");
   assert.deepEqual(
     neutral.metricRows.map(({ label, value }) => ({ label, value })),

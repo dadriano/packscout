@@ -34,6 +34,11 @@ export default defineApp({
     // visible. Absent by default: while the beta is on, catalog reads fail
     // closed to admitted identities only until it is configured.
     PACKSCOUT_CATALOG_READ_TOKEN: v.optional(v.string()),
+    // Domain-separated HMAC key for opaque public catalog cursors. This keeps
+    // visitor-controlled URLs from selecting an offset or confidence clock.
+    // A configured catalog-read token is accepted as a rotation fallback, but
+    // deployments should provision this dedicated key in every environment.
+    PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY: v.optional(v.string()),
     PRIVY_APP_ID: v.optional(v.string()),
   },
 });

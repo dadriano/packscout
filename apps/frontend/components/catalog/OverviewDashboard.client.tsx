@@ -75,6 +75,7 @@ export function OverviewDashboard({
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
+          opportunityEligibility={bundle.opportunityEligibility}
           repacksHref={repacksHref}
           selectedPublicRepackId={selectedId}
         />
@@ -110,7 +111,7 @@ export function OverviewDashboard({
               <p>
                 {selectedId
                   ? "Updating selected repack details…"
-                  : "Select an opportunity to inspect its current evidence."}
+                  : "Select an opportunity to inspect its published evidence."}
               </p>
             </aside>
           )}

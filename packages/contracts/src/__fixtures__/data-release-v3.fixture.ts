@@ -18,7 +18,10 @@ import {
   publicRepackListPageV3Schema,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
+  safePresentPackScoutPublicEvV3,
   vendorReportedEvV3Schema,
+  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
   type PackScoutPublicEvV3,
@@ -28,6 +31,9 @@ import {
   type PublicRepackDetailV3,
   type PublicRepackListPageV3,
   type PublicRepackViewDetailV3,
+  type PublicProviderHealthV1,
+  type PublicProviderHealthSummaryV1,
+  type PublicShellStatusV3,
   type VendorReportedEvV3,
 } from "../data-release-v3.ts";
 
@@ -135,11 +141,6 @@ export function buildPackScoutPublicEvCurrentV3(
     sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
     expiresAt: DATA_RELEASE_V3_EXPIRES_AT,
   });
-}
-
-/** Gross EV $120 on a $100 pack: signed EV is +$20 and +20%. */
-export function buildPackScoutPublicEvPositiveV3(): PackScoutPublicEvV3 {
-  return buildPackScoutPublicEvCurrentV3(12_000);
 }
 
 /** Gross EV $100 on a $100 pack: signed EV is exactly $0 and 0%. */
@@ -267,7 +268,7 @@ export function buildPublicEvEstimatesV3(
   overrides: Partial<PublicEvEstimatesV3> = {},
 ): PublicEvEstimatesV3 {
   return publicEvEstimatesV3Schema.parse({
-    packScout: buildPackScoutPublicEvPositiveV3(),
+    packScout: buildPackScoutPublicEvNegativeV3(),
     vendorReported: buildVendorReportedEvAvailableV3(),
     ...overrides,
   });
@@ -380,10 +381,10 @@ export function buildSoldOutPublicRepackDetailV3(
 /**
  * A discoverable pack outside both `available` and `sold_out`.
  *
- * It deliberately keeps the default current, positive PackScout estimate:
+ * It deliberately keeps the default current PackScout estimate:
  * pack availability and PackScout EV availability are independent axes, so
- * this is a legal projection that must still never rank, never count toward
- * a positive-EV summary, and never carry an outbound purchase link.
+ * this is a legal projection that must still never rank or carry an outbound
+ * purchase link.
  */
 export function buildNonPurchasablePublicRepackDetailV3(
   availability: Exclude<PublicPackAvailability, "available" | "sold_out">,
@@ -399,11 +400,62 @@ export function buildNonPurchasablePublicRepackDetailV3(
 
 export function buildPublicRepackViewDetailV3(
   overrides: Partial<PublicRepackDetailV3> = {},
+  options: Readonly<{
+    confidenceEvaluatedAt?: string;
+    providerHealth?: PublicProviderHealthV1;
+  }> = {},
 ): PublicRepackViewDetailV3 {
+  const detail = buildPublicRepackDetailV3(overrides);
+  const confidenceEvaluatedAt =
+    options.confidenceEvaluatedAt ??
+    (detail.evEstimates.packScout.status === "sold_out_historical"
+      ? detail.evEstimates.packScout.soldOutAt
+      : detail.evEstimates.packScout.calculatedAt);
+  const presented = safePresentPackScoutPublicEvV3(
+    detail.evEstimates.packScout,
+    confidenceEvaluatedAt,
+  );
+  if (!presented.success) {
+    throw new Error(`fixture EV presentation failed: ${presented.reason}`);
+  }
   return publicRepackViewDetailV3Schema.parse({
-    ...buildPublicRepackDetailV3(overrides),
+    ...detail,
     heat: unavailableRepackHeat(),
+    packScoutEvPresentation: presented.presentation,
+    providerHealth:
+      options.providerHealth ?? buildHealthyPublicProviderHealthV1(),
   });
+}
+
+export function buildHealthyPublicProviderHealthV1(): PublicProviderHealthV1 {
+  return {
+    state: "healthy",
+    observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    rankingEligible: true,
+    rankingIneligibilityReason: null,
+  };
+}
+
+export function buildHealthyPublicProviderHealthSummaryV1(): PublicProviderHealthSummaryV1 {
+  return {
+    state: "healthy",
+    observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    freshThrough: DATA_RELEASE_V3_EXPIRES_AT,
+    totalProviderCount: 1,
+    delayedProviderCount: 0,
+    nextHealthEvaluationAt: DATA_RELEASE_V3_EXPIRES_AT,
+  };
+}
+
+export function buildPublicShellStatusV3(): PublicShellStatusV3 {
+  return {
+    release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
+  };
 }
 
 export function buildDataReleaseV3Identity(): DataReleaseV3Identity {
@@ -412,43 +464,60 @@ export function buildDataReleaseV3Identity(): DataReleaseV3Identity {
     publicReleaseId: "20000000-0000-4000-8000-000000000003",
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+    publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
     dataAsOf: DATA_RELEASE_V3_OBSERVED_AT,
     completedAt: "2026-08-19T18:05:00.000Z",
   });
 }
 
-/** Two available current-EV repacks ranked by signed EV dollars descending. */
+/** Two available nonpositive-EV repacks ranked by signed EV dollars descending. */
 export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
   const primary = buildPublicRepackViewDetailV3();
   const secondary = buildPublicRepackViewDetailV3({
     publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
     name: "Pokémon Value Gacha",
     evEstimates: buildPublicEvEstimatesV3({
-      packScout: buildPackScoutPublicEvCurrentV3(10_500),
+      packScout: buildPackScoutPublicEvCurrentV3(9_500),
     }),
   });
   return publicDashboardBundleV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
+    opportunityEligibility: {
+      rankingEligibleRepackCount: 2,
+      providerIneligibleRepackCount: 0,
+    },
     opportunities: [
-      publicRepackViewSummaryV3FromDetail(primary),
       publicRepackViewSummaryV3FromDetail(secondary),
+      publicRepackViewSummaryV3FromDetail(primary),
     ],
-    details: [primary, secondary],
-    selectedRepack: primary,
+    details: [secondary, primary],
+    selectedRepack: secondary,
   });
 }
 
 export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
-  const primary = buildPublicRepackViewDetailV3();
-  const soldOut = publicRepackViewDetailV3Schema.parse({
-    ...buildSoldOutPublicRepackDetailV3({
+  const primary = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const soldOut = buildPublicRepackViewDetailV3(
+    buildSoldOutPublicRepackDetailV3({
       publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
       name: "Pokémon Vault Repack",
     }),
-    heat: unavailableRepackHeat(),
-  });
+  );
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
     rows: [
       publicRepackViewSummaryV3FromDetail(primary),
       publicRepackViewSummaryV3FromDetail(soldOut),
@@ -467,31 +536,38 @@ export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
  * so it is the only legal selection for a purchase-oriented flow.
  */
 export function buildAllAvailabilityStatesPublicRepackListPageV3(): PublicRepackListPageV3 {
-  const available = buildPublicRepackViewDetailV3();
-  const soldOut = publicRepackViewDetailV3Schema.parse({
-    ...buildSoldOutPublicRepackDetailV3({
+  const available = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const soldOut = buildPublicRepackViewDetailV3(
+    buildSoldOutPublicRepackDetailV3({
       publicRepackId: DATA_RELEASE_V3_SECONDARY_REPACK_ID,
       name: "Pokémon Vault Repack",
     }),
-    heat: unavailableRepackHeat(),
-  });
-  const unavailable = publicRepackViewDetailV3Schema.parse({
-    ...buildNonPurchasablePublicRepackDetailV3("unavailable", {
+  );
+  const unavailable = buildPublicRepackViewDetailV3(
+    buildNonPurchasablePublicRepackDetailV3("unavailable", {
       publicRepackId: DATA_RELEASE_V3_UNAVAILABLE_REPACK_ID,
       name: "Pokémon Withdrawn Gacha",
     }),
-    heat: unavailableRepackHeat(),
-  });
-  const unknown = publicRepackViewDetailV3Schema.parse({
-    ...buildNonPurchasablePublicRepackDetailV3("unknown", {
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
+  const unknown = buildPublicRepackViewDetailV3(
+    buildNonPurchasablePublicRepackDetailV3("unknown", {
       publicRepackId: DATA_RELEASE_V3_UNKNOWN_REPACK_ID,
       name: "Pokémon Unverified Gacha",
     }),
-    heat: unavailableRepackHeat(),
-  });
+    { confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT },
+  );
   const details = [available, soldOut, unavailable, unknown];
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
+    providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
     rows: details.map(publicRepackViewSummaryV3FromDetail),
     details,
     selectedRepack: available,
@@ -505,6 +581,10 @@ export function buildDesiredCollectibleRepackResultsV3(): DesiredCollectibleRepa
   const primary = buildPublicRepackViewDetailV3();
   return desiredCollectibleRepackResultsV3Schema.parse({
     release: buildDataReleaseV3Identity(),
+    publicFreshnessPolicyVersion:
+      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+    confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     desiredCollectible: chaseCollectibleDisplay,
     matches: [
       {

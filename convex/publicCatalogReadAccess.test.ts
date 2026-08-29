@@ -13,6 +13,7 @@ import {
   v3FinalizeRequest,
   v3StartRequest,
   V3_COLLECTIBLE_ID,
+  V3_FIXTURE_NOW,
   V3_REPACK_ID_A,
 } from "./dataReleaseV3Fixture.test-support";
 import { seedMockCatalogManifestGraph } from "./mockCatalogManifestSeed";
@@ -53,7 +54,10 @@ const ACCESS_REFUSAL = publicReadError("RELEASE_UNAVAILABLE");
 
 type CatalogAccessTest = TestConvex<typeof schema>;
 /** Anything that can run a query: the anonymous test client or an identity. */
-type CatalogReader = Readonly<{ query: CatalogAccessTest["query"] }>;
+type CatalogReader = Readonly<{
+  query: CatalogAccessTest["query"];
+  action: CatalogAccessTest["action"];
+}>;
 
 type SeededCatalog = Readonly<{
   publicReleaseId: string;
@@ -246,7 +250,10 @@ function discoverPublicQueryExports(): ReadonlySet<string> {
       );
     }
     const moduleName = path.replace(/^\.\//u, "").replace(/\.ts$/u, "");
-    for (const match of source.matchAll(/^export const (\w+) = query\(\{/gmu)) {
+    const registrationPattern = path.endsWith("/publicRepacksV3.ts")
+      ? /^export const (\w+) = (?:query|action)\(\{/gmu
+      : /^export const (\w+) = query\(\{/gmu;
+    for (const match of source.matchAll(registrationPattern)) {
       discovered.add(`${moduleName}.${match[1]!}`);
     }
   }
@@ -299,22 +306,15 @@ const CATALOG_QUERY_INVOCATIONS: Readonly<
       ...extra,
     }),
   "publicRepacksV3.getPublicShellStatusV3": (reader, _seeded, extra) =>
-    reader.query(api.publicRepacksV3.getPublicShellStatusV3, { ...extra }),
+    reader.action(api.publicRepacksV3.getPublicShellStatusV3, { ...extra }),
   "publicRepacksV3.getDashboardBundleV3": (reader, _seeded, extra) =>
-    reader.query(api.publicRepacksV3.getDashboardBundleV3, {
-      currentTime: Date.now(),
-      ...extra,
-    }),
+    reader.action(api.publicRepacksV3.getDashboardBundleV3, { ...extra }),
   "publicRepacksV3.listPublicRepacksV3": (reader, _seeded, extra) =>
-    reader.query(api.publicRepacksV3.listPublicRepacksV3, {
-      currentTime: Date.now(),
-      ...extra,
-    }),
+    reader.action(api.publicRepacksV3.listPublicRepacksV3, { ...extra }),
   "publicRepacksV3.getPublicRepackV3": (reader, seeded, extra) =>
-    reader.query(api.publicRepacksV3.getPublicRepackV3, {
+    reader.action(api.publicRepacksV3.getPublicRepackV3, {
       publicRepackId: seeded.v3PublicRepackId,
       publicReleaseId: seeded.v3PublicReleaseId,
-      currentTime: Date.now(),
       ...extra,
     }),
   "publicRepacksV3.searchPublicCollectiblesV3": (reader, _seeded, extra) =>
@@ -323,9 +323,8 @@ const CATALOG_QUERY_INVOCATIONS: Readonly<
       ...extra,
     }),
   "publicRepacksV3.findRepacksByDesiredCollectibleV3": (reader, seeded, extra) =>
-    reader.query(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, {
+    reader.action(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, {
       publicCollectibleId: seeded.v3PublicCollectibleId,
-      currentTime: Date.now(),
       ...extra,
     }),
 });
@@ -350,7 +349,7 @@ afterEach(() => {
 
 function stubLocalRuntime() {
   vi.useFakeTimers();
-  vi.setSystemTime(SEED_TIME);
+  vi.setSystemTime(V3_FIXTURE_NOW);
   vi.stubEnv("PACKSCOUT_RUNTIME_ENVIRONMENT", "local");
 }
 
@@ -436,9 +435,7 @@ describe("catalog read refusal semantics", () => {
     // The v3 read refuses with the byte-identical result, so which read model
     // serves the product is not observable from a refusal.
     await expect(
-      t.query(api.publicRepacksV3.getDashboardBundleV3, {
-        currentTime: Date.now(),
-      }),
+      t.action(api.publicRepacksV3.getDashboardBundleV3, {}),
     ).resolves.toEqual(refusal);
 
     // Nothing about the seeded release, the credential, or admission leaks.

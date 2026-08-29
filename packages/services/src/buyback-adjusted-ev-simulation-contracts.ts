@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   canonicalJson,
   parsePackScoutBuybackEvTimestampMillisV1,
 } from "@packscout/contracts";
@@ -244,6 +245,7 @@ export interface PackScoutBuybackEvSimulationProtocolVersionsV1 {
   readonly publicationSchemaVersion: string;
   readonly methodVersion: string;
   readonly confidencePolicyVersion: string;
+  readonly publicEvPolicyVersion: string;
   readonly scenarioVersion: string;
 }
 
@@ -257,6 +259,7 @@ export function assertPackScoutBuybackEvSimulationProtocolVersionsV1(
     versions.methodVersion !== PACKSCOUT_BUYBACK_EV_METHOD_VERSION ||
     versions.confidencePolicyVersion !==
       PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION ||
+    versions.publicEvPolicyVersion !== PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 ||
     versions.scenarioVersion !==
       PACKSCOUT_BUYBACK_EV_SIMULATION_SCENARIO_VERSION
   ) {
@@ -281,7 +284,8 @@ export function assertPackScoutBuybackEvSimulationActiveReleaseV1(
   if (
     active.methodVersion !== PACKSCOUT_BUYBACK_EV_METHOD_VERSION ||
     active.confidencePolicyVersion !==
-      PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION
+      PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION ||
+    active.publicEvPolicyVersion !== PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3
   ) {
     refuse(
       "UNSUPPORTED_PROTOCOL_VERSION",

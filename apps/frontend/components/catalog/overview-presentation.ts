@@ -1,6 +1,5 @@
 import type {
   DashboardKpis,
-  PackScoutPublicEvV3,
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
@@ -23,13 +22,13 @@ const COUNT_FORMATTER = new Intl.NumberFormat("en-US", {
 });
 
 export type KpiPresentation = Readonly<{
-  id: "repacks" | "positiveEv" | "medianEv" | "highestChase";
-  label: "Repacks" | "Positive EV" | "Median EV" | "Highest Chase";
+  id: "repacks" | "medianEv" | "highestChase";
+  label: "Repacks" | "Median EV" | "Highest Chase";
   value: string;
   helper: string;
   accessibleLabel: string;
   state: MetricSemanticState | "plain";
-  stateLabel?: "Positive" | "Neutral" | "Negative" | "Unavailable";
+  stateLabel?: "Neutral" | "Negative" | "Unavailable";
   reasonCopy?: string;
 }>;
 
@@ -62,13 +61,7 @@ function countLabel(count: number): string {
   return COUNT_FORMATTER.format(count);
 }
 
-/**
- * Formats the server-materialized dashboard KPIs. The positive-EV count is
- * computed server-side over available packs with a current estimate above zero
- * only — `unavailable`, `unknown`, and `sold_out` packs are all excluded from
- * the count while staying discoverable in the catalog — and the browser never
- * recounts or re-ranks.
- */
+/** Formats the server-materialized dashboard KPIs without browser recomputation. */
 export function presentDashboardKpis(
   kpis: DashboardKpis,
 ): readonly KpiPresentation[] {
@@ -96,20 +89,11 @@ export function presentDashboardKpis(
       state: "plain",
     },
     {
-      id: "positiveEv",
-      label: "Positive EV",
-      value: countLabel(kpis.positiveEvRepacks),
-      helper: "Available repacks with EV $ above zero",
-      accessibleLabel: `${countLabel(kpis.positiveEvRepacks)} available repacks have a current PackScout estimate with EV $ above zero. Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired.`,
-      state: "positive",
-      stateLabel: "Positive",
-    },
-    {
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Median EV % · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
-      accessibleLabel: median.accessibleLabel,
+      helper: `Known current + last-known EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      accessibleLabel: `${median.accessibleLabel} Includes known current and last-known estimates. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
       ...(median.availability === "unavailable"
@@ -134,13 +118,14 @@ export function presentDashboardKpis(
 
 /**
  * Presents one server-ranked opportunity row. The rank comes from the
- * server's signed-EV-dollar ordering, and `estimate` is the deadline-resolved
- * PackScout estimate for the row (defaults to the served projection).
+ * server's signed-EV-dollar ordering, and `estimate` is the server-evaluated
+ * PackScout presentation for the row (defaults to the served projection).
  */
 export function presentOpportunityRow(
   repack: PublicRepackViewSummaryV3,
   rank: number,
-  estimate: PackScoutPublicEvV3 = repack.evEstimates.packScout,
+  estimate: PublicRepackViewSummaryV3["packScoutEvPresentation"] =
+    repack.packScoutEvPresentation,
 ): OpportunityPresentation {
   return Object.freeze({
     rank,
@@ -202,7 +187,7 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median known current and last-known EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );

@@ -5,11 +5,10 @@ import type {
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
-  buildV3CurrentEv,
+  buildV3LastKnownPresentation,
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
-import { resolvePackScoutEvV3AtTime } from "@/lib/packscout-ev-deadline.client";
 import {
   presentCatalogSummaries,
   presentDashboardKpis,
@@ -17,11 +16,10 @@ import {
   resolveOverviewSelection,
 } from "./overview-presentation";
 
-test("always presents four overview KPIs with buyback-adjusted meaning", () => {
+test("presents the three nonpositive-policy overview KPIs", () => {
   const kpis: DashboardKpis = {
     totalRepacks: 1_248,
-    positiveEvRepacks: 612,
-    medianPackScoutEvPercent: { status: "available", basisPoints: 180 },
+    medianPackScoutEvPercent: { status: "available", basisPoints: -180 },
     highestChaseValueUsdMinor: null,
     highConfidenceRepacks: 500,
   };
@@ -30,29 +28,37 @@ test("always presents four overview KPIs with buyback-adjusted meaning", () => {
 
   assert.deepEqual(
     presentation.map(({ id }) => id),
-    ["repacks", "positiveEv", "medianEv", "highestChase"],
+    ["repacks", "medianEv", "highestChase"],
   );
   assert.deepEqual(
     presentation.map(({ value }) => value),
-    ["1,248", "612", "+1.80%", "Unavailable"],
+    ["1,248", "-1.80%", "Unavailable"],
   );
   assert.equal(
     presentation[1]?.helper,
-    "Available repacks with EV $ above zero",
+    "Known current + last-known EV · 500 high confidence",
   );
+  assert.equal(
+    presentation[1]?.accessibleLabel,
+    "Median EV %: -1.80%. Negative. Includes known current and last-known estimates. 500 high-confidence repacks.",
+  );
+  assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
+});
+
+test("overview opportunity rows retain server-presented last-known EV", () => {
+  const repack = buildV3ViewSummary({
+    packScoutEvPresentation: buildV3LastKnownPresentation(),
+  });
+  const row = presentOpportunityRow(repack, 1);
+
+  assert.equal(row.packScoutEv.status, "last_known");
+  assert.equal(row.packScoutEv.statusLabel, "Last-known estimate");
+  assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
+  assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 72%");
   assert.match(
-    presentation[1]?.accessibleLabel ?? "",
-    /Excludes packs labeled Unavailable, Availability unknown, or Sold out, and packs whose estimate is unavailable or expired/,
+    row.packScoutEv.freshness.dataAsOfLabel,
+    /^Source evidence last observed /,
   );
-  assert.equal(
-    presentation[2]?.helper,
-    "Median EV % · 500 high confidence",
-  );
-  assert.equal(
-    presentation[2]?.accessibleLabel,
-    "Median EV %: +1.80%. Positive.",
-  );
-  assert.equal(presentation[3]?.reasonCopy, "Collectible value unavailable.");
 });
 
 test("presents server-ranked opportunities without re-sorting or recomputing", () => {
@@ -69,23 +75,6 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.buyback.displayValue, "85%");
   assert.equal(row.topChaseValue.displayValue, "$850.00");
   assert.equal(row.simulated, false);
-});
-
-test("a deadline-resolved estimate flows into the row unchanged in shape", () => {
-  const repack = buildV3ViewSummary();
-  const current = buildV3CurrentEv(8_500);
-  assert.equal(current.status, "current");
-  const deadline =
-    current.status === "current" ? Date.parse(current.expiresAt) : 0;
-  const expired = resolvePackScoutEvV3AtTime(current, deadline + 1);
-
-  const row = presentOpportunityRow(repack, 1, expired);
-  assert.equal(row.packScoutEv.status, "expired");
-  assert.equal(row.packScoutEv.evDollars.displayValue, "Unavailable");
-  assert.equal(
-    row.packScoutEv.reasonCopy,
-    "Expired: source data is older than 60 minutes.",
-  );
 });
 
 test("keeps valid overview selection and otherwise falls back deterministically", () => {
@@ -106,7 +95,7 @@ test("scales repack groups and retains unavailable reasons", () => {
       key: "collector_crypt",
       label: "Collector Crypt",
       repackCount: 732,
-      medianPackScoutEvPercent: { status: "available", basisPoints: 230 },
+      medianPackScoutEvPercent: { status: "available", basisPoints: -230 },
     },
     {
       key: "courtyard",
@@ -123,6 +112,6 @@ test("scales repack groups and retains unavailable reasons", () => {
   const presentation = presentCatalogSummaries(summaries);
 
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
-  assert.equal(presentation[0]?.medianEvPercent.displayValue, "+2.30%");
+  assert.equal(presentation[0]?.medianEvPercent.displayValue, "-2.30%");
   assert.equal(presentation[1]?.medianEvPercent.displayValue, "Unavailable");
 });

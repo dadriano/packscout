@@ -2,11 +2,10 @@ import {
   packScoutBuybackEvMetricsAreConsistentV1,
   type DashboardKpis,
   type DataReleaseV3Identity,
-  type PackScoutPublicEvSourceAgeStateV3,
-  type PackScoutPublicEvV3,
   type PublicBuybackSummaryV3,
   type PublicRepackChase,
   type PublicRepackSummaryV3,
+  type PublicRepackViewSummaryV3,
   type VendorReportedEvV3,
 } from "@packscout/contracts";
 import { presentConfidenceLimitations } from "./confidence-limitations";
@@ -34,14 +33,18 @@ const PRESENTATION_LOCALE = "en-US" as const;
 
 type PublicMoney = Readonly<{ minorUnits: number; currency: string }>;
 type PublicPrice = PublicRepackSummaryV3["price"];
+type PackScoutPublicEvPresentationV3 =
+  PublicRepackViewSummaryV3["packScoutEvPresentation"];
+type AvailablePackScoutPublicEvPresentationV3 = Exclude<
+  PackScoutPublicEvPresentationV3,
+  { status: "unavailable" }
+>;
+type PackScoutPublicEvSourceAgeStateV3 =
+  AvailablePackScoutPublicEvPresentationV3["sourceAge"]["state"];
 
-export type MetricSemanticState =
-  | "positive"
-  | "neutral"
-  | "negative"
-  | "unavailable";
+export type MetricSemanticState = "neutral" | "negative" | "unavailable";
 
-export type MetricSemanticLabel = "Positive" | "Neutral" | "Negative";
+export type MetricSemanticLabel = "Neutral" | "Negative";
 
 export type AvailableMetricValue = Readonly<{
   availability: "available";
@@ -86,16 +89,17 @@ export type PackScoutEvFreshnessPresentation = Readonly<{
   calculatedLabel: string;
   dataAsOf: string | null;
   dataAsOfLabel: string;
-  expiresAt: string | null;
+  confidenceEvaluatedAt: string;
+  confidenceEvaluatedLabel: string;
   soldOutAt: string | null;
   soldOutLabel: string | null;
 }>;
 
 export type PackScoutEvStatusKind =
   | "current"
-  | "sold_out_historical"
-  | "unavailable"
-  | "expired";
+  | "last_known"
+  | "historical"
+  | "unavailable";
 
 export type PackScoutEvV3Presentation = Readonly<{
   availability: "available" | "unavailable";
@@ -135,7 +139,7 @@ export type VendorReportedEvV3Presentation = Readonly<{
 }>;
 
 export type PackScoutEvV3PresentationInput = Readonly<{
-  estimate: PackScoutPublicEvV3;
+  estimate: PackScoutPublicEvPresentationV3;
   price: PublicPrice;
   availability: PublicRepackSummaryV3["availability"];
   repackName?: string;
@@ -246,7 +250,9 @@ export function formatGrossEvPercent(basisPoints: number): string {
 export function semanticStateForSignedBasisPoints(
   basisPoints: number,
 ): Exclude<MetricSemanticState, "unavailable"> {
-  if (basisPoints > 0) return "positive";
+  if (basisPoints > 0) {
+    throw new RangeError("public PackScout EV cannot be positive");
+  }
   if (basisPoints < 0) return "negative";
   return "neutral";
 }
@@ -254,7 +260,6 @@ export function semanticStateForSignedBasisPoints(
 function semanticLabel(
   state: Exclude<MetricSemanticState, "unavailable">,
 ): MetricSemanticLabel {
-  if (state === "positive") return "Positive";
   if (state === "negative") return "Negative";
   return "Neutral";
 }
@@ -402,8 +407,8 @@ export function presentBuybackSummaryV3(
 // --- confidence --------------------------------------------------------------
 
 type PackScoutConfidence = Extract<
-  PackScoutPublicEvV3,
-  { status: "current" }
+  PackScoutPublicEvPresentationV3,
+  { status: "current" | "last_known" | "historical" }
 >["confidence"];
 
 export function presentPackScoutConfidence(
@@ -443,7 +448,7 @@ export function presentPackScoutConfidence(
 // --- freshness and timestamps -------------------------------------------------
 
 function presentFreshness(
-  estimate: PackScoutPublicEvV3,
+  estimate: PackScoutPublicEvPresentationV3,
 ): PackScoutEvFreshnessPresentation {
   const sourceAgeState =
     estimate.status === "unavailable" ? null : estimate.sourceAge.state;
@@ -461,12 +466,14 @@ function presentFreshness(
     dataAsOfLabel:
       dataAsOf === null
         ? ESTIMATE_STATUS_COPY.unknownSourceTime
-        : `Source data as of ${formatPublicTimestamp(dataAsOf)}`,
-    expiresAt: estimate.status === "current" ? estimate.expiresAt : null,
+        : `Source evidence last observed ${formatPublicTimestamp(dataAsOf)}`,
+    confidenceEvaluatedAt: estimate.confidenceEvaluatedAt,
+    confidenceEvaluatedLabel:
+      `Confidence evaluated ${formatPublicTimestamp(estimate.confidenceEvaluatedAt)}`,
     soldOutAt:
-      estimate.status === "sold_out_historical" ? estimate.soldOutAt : null,
+      estimate.status === "historical" ? estimate.soldOutAt : null,
     soldOutLabel:
-      estimate.status === "sold_out_historical"
+      estimate.status === "historical"
         ? `Sold out ${formatPublicTimestamp(estimate.soldOutAt)}`
         : null,
   });
@@ -496,6 +503,13 @@ export function packScoutMetricConsistencyIssuesV3(
     }
   }
   if (issues.length > 0) return Object.freeze(issues);
+  if (
+    metrics.grossReturnBasisPoints > 10_000 ||
+    metrics.evDollars.minorUnits > 0 ||
+    metrics.evPercentBasisPoints > 0
+  ) {
+    issues.push("public PackScout EV must be nonpositive");
+  }
   if (
     metrics.evPercentBasisPoints !==
     metrics.grossReturnBasisPoints - 10_000
@@ -540,21 +554,14 @@ function packPurchaseActionsAllowed(
   return presentPackAvailability(availability).purchaseActionsAvailable;
 }
 
-function unavailableStatus(
-  reason: PublicMetricReason,
-): Readonly<{ status: PackScoutEvStatusKind; statusLabel: string }> {
-  return reason === "SOURCE_DATA_STALE"
-    ? { status: "expired", statusLabel: ESTIMATE_STATUS_COPY.expired }
-    : { status: "unavailable", statusLabel: ESTIMATE_STATUS_COPY.unavailable };
-}
-
 function unavailablePackScoutPresentation(
   reason: PublicMetricReason,
   input: PackScoutEvV3PresentationInput,
   freshness: PackScoutEvFreshnessPresentation,
 ): PackScoutEvV3Presentation {
   const reasonCopy = getPublicReasonCopy(reason);
-  const { status, statusLabel } = unavailableStatus(reason);
+  const status = "unavailable" as const;
+  const statusLabel = ESTIMATE_STATUS_COPY.unavailable;
   const simulated = isSimulatedRepackListing(input.repackName);
   return Object.freeze({
     availability: "unavailable" as const,
@@ -619,7 +626,7 @@ export function presentPackScoutEvV3(
   }
 
   const { metrics, confidence } = input.estimate;
-  const historical = input.estimate.status === "sold_out_historical";
+  const historical = input.estimate.status === "historical";
   const state = semanticStateForSignedBasisPoints(metrics.evPercentBasisPoints);
   const stateLabel = semanticLabel(state);
   const zeroPayout = metrics.grossEvMoney.minorUnits === 0;
@@ -645,9 +652,7 @@ export function presentPackScoutEvV3(
   );
   const packPrice = presentRepackPrice(input.price);
   const confidencePresentation = presentPackScoutConfidence(confidence);
-  const statusLabel = historical
-    ? ESTIMATE_STATUS_COPY.sold_out_historical
-    : ESTIMATE_STATUS_COPY.current;
+  const statusLabel = ESTIMATE_STATUS_COPY[input.estimate.status];
   const simulated = isSimulatedRepackListing(input.repackName);
   return Object.freeze({
     availability: "available" as const,
@@ -688,6 +693,8 @@ export function presentPackScoutEvV3(
         : []),
       confidencePresentation.accessibleLabel,
       ...(freshness.sourceAgeLabel ? [`${freshness.sourceAgeLabel}.`] : []),
+      `${freshness.dataAsOfLabel}.`,
+      `${freshness.confidenceEvaluatedLabel}.`,
       METRIC_TRUST_COPY.sourceLine + ".",
       METRIC_TRUST_COPY.adviceLine + ".",
     ].join(" "),
@@ -776,6 +783,9 @@ export function presentSignedEvPercentMetric(
 ): MetricValuePresentation {
   if (metric.status === "unavailable") {
     return unavailableMetric(label, "evPercent", metric.reason);
+  }
+  if (metric.basisPoints > 0) {
+    return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
   }
   const state = semanticStateForSignedBasisPoints(metric.basisPoints);
   return availableMetric(

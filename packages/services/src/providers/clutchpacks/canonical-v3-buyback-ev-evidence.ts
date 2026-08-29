@@ -232,6 +232,57 @@ function parseSemanticContent(
   return parsed.data as ClutchpacksPackSemanticContentV1;
 }
 
+function contentWithCanonicalDerivedProbabilities(
+  content: ClutchpacksPackSemanticContentV1,
+): ClutchpacksPackSemanticContentV1 {
+  const evInputFact = content.providerFacts.evInput;
+  if (evInputFact.state !== "present") return content;
+  const evInput = evInputFact.value;
+  const totalQuantity = evInput.totalQuantity;
+  if (
+    totalQuantity === null ||
+    !Number.isSafeInteger(totalQuantity) ||
+    totalQuantity <= 0 ||
+    evInput.buckets.length === 0 ||
+    evInput.buckets.some(
+      (bucket) =>
+        bucket.quantity === null ||
+        !Number.isSafeInteger(bucket.quantity) ||
+        bucket.quantity <= 0 ||
+        !probabilityMatchesCount(
+          bucket.probability,
+          bucket.quantity,
+          totalQuantity,
+        ),
+    ) ||
+    evInput.buckets.reduce(
+      (sum, bucket) => sum + (bucket.quantity ?? 0),
+      0,
+    ) !== totalQuantity
+  ) {
+    return content;
+  }
+  return {
+    ...content,
+    providerFacts: {
+      ...content.providerFacts,
+      evInput: {
+        state: "present",
+        value: {
+          ...evInput,
+          // The ClutchPacks adapter derives every probability from these
+          // integer counts. Recreate that value after JSONB persistence so a
+          // storage codec's shorter decimal cannot change canonical lineage.
+          buckets: evInput.buckets.map((bucket) => ({
+            ...bucket,
+            probability: (bucket.quantity ?? 0) / totalQuantity,
+          })),
+        },
+      },
+    },
+  };
+}
+
 function validateCanonicalProjection(
   product: ClutchpacksCanonicalV3BuybackEvProductObservationV1,
   observation: ClutchpacksCanonicalV3BuybackEvObservationV1,
@@ -241,6 +292,7 @@ function validateCanonicalProjection(
 ): void {
   let mapped: ReturnType<typeof clutchpacksProviderObservationMapper.map>;
   try {
+    const canonicalContent = contentWithCanonicalDerivedProbabilities(content);
     mapped = clutchpacksProviderObservationMapper.map({
       organizationId,
       providerId,
@@ -250,7 +302,7 @@ function validateCanonicalProjection(
       normalizedContractVersion: observation.pins.normalizedContractVersion,
       identityNamespaceKey: observation.pins.identityNamespaceKey,
       observation: {
-        ...content,
+        ...canonicalContent,
         collectedAt: observation.collectedAt,
         protectedNativeEvidenceRef:
           "source-native:clutchpacks:buyback-ev-evidence",
@@ -442,7 +494,10 @@ async function evidenceDraft(
   return {
     observation: {
       providerKey: CLUTCHPACKS_CANONICAL_V3_PLATFORM_KEY,
-      sourceRevisionId: `semantic:${observation.semanticObservationId}`,
+      // Freshness and the guarded collection proof belong to this exact
+      // delivery. A later delivery of the same semantic observation must not
+      // reuse the immutable calculation identity of the earlier collection.
+      sourceRevisionId: `delivery:${observation.deliveryOccurrenceId}`,
       sourceManifestSha256: observation.normalizedContentHash,
       observedAt: observation.collectedAt,
       coherence: { kind: "guarded_collection", collectionGuardSha256: guard },
@@ -585,6 +640,9 @@ implements PackScoutBuybackEvBackfillEvidenceSourceV1 {
         },
         {
           sourceRevisionId: `delivery:${observation.deliveryOccurrenceId}`,
+          // Bind the delivery identity to the independently retained semantic
+          // bytes while preserving the semantic observation reference above.
+          sourceManifestSha256: observation.normalizedContentHash,
         },
         {
           sourceRevisionId: `canonical:${product.productRevisionId}`,

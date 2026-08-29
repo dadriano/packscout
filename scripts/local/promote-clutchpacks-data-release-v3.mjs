@@ -33,18 +33,25 @@ import {
 
 export const CLUTCHPACKS_PLATFORM_KEY = "clutchpacks";
 export const CLUTCHPACKS_EXPECTED_REPACK_COUNT = 17;
-export const CLUTCHPACKS_SETTLEMENT_MAX_AGE_MILLISECONDS = 3_600_000;
-export const CLUTCHPACKS_RELEASE_MIN_REMAINING_LIFETIME_MILLISECONDS =
-  15 * 60_000;
-export const CLUTCHPACKS_CONVEX_AUTH_CLOCK_SKEW_ALLOWANCE_MILLISECONDS =
-  5 * 60_000;
 export const CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES = 64;
+export const CLUTCHPACKS_MAX_PROVIDER_OBSERVATION_FRESHNESS_MILLISECONDS =
+  24 * 60 * 60_000;
 export const CLUTCHPACKS_CANARY_DATABASE_NAME =
   "packscout_clutchpacks_v3_canary";
 export const CLUTCHPACKS_CONVEX_PUBLICATION_URL =
   "https://shiny-newt-310.convex.site/";
 export const CLUTCHPACKS_CONVEX_QUERY_URL =
   "https://shiny-newt-310.convex.cloud/";
+
+export function clutchpacksConvexHttpClientAddress(queryUrl) {
+  if (queryUrl !== CLUTCHPACKS_CONVEX_QUERY_URL) {
+    refuse("CLUTCHPACKS_V3_TARGET_INVALID");
+  }
+  // ConvexHttpClient appends `/api/query` directly to the supplied address.
+  // The protected target is represented canonically with a trailing slash,
+  // so pass only its origin to avoid issuing a `//api/query` request.
+  return new URL(queryUrl).origin;
+}
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -67,11 +74,11 @@ const ERROR_MESSAGES = Object.freeze({
   CLUTCHPACKS_V3_CANONICAL_UNSETTLED:
     "The requested read is not the latest fully settled ClutchPacks canonical watermark.",
   CLUTCHPACKS_V3_SETTLEMENT_STALE:
-    "The latest settled ClutchPacks canonical watermark is outside the 60-minute publication window.",
+    "The latest settled ClutchPacks canonical watermark is ahead of the promotion clock.",
   CLUTCHPACKS_V3_BACKFILL_BLOCKED:
     "The ClutchPacks EV backfill did not reconcile completely.",
   CLUTCHPACKS_V3_EVIDENCE_STALE:
-    "ClutchPacks evidence lacks the required remaining publication lifetime; a fresh settled canonical cause is required.",
+    "ClutchPacks evidence has an unknown or incoherent source time.",
   CLUTCHPACKS_V3_PLAN_BLOCKED:
     "The ClutchPacks data release plan is blocked.",
   CLUTCHPACKS_V3_POSITIVE_EV:
@@ -421,6 +428,152 @@ function exactIdSet(values) {
   return [...new Set(values)].sort();
 }
 
+function clutchpacksCanonicalAssetKey(externalId) {
+  return `${CLUTCHPACKS_PLATFORM_KEY}\0${externalId}`;
+}
+
+/**
+ * ClutchPacks alone currently emits schema-valid, metadata-free catalog rows
+ * before some provider records receive their public payload. Keep the generic
+ * V3 adapter fail-closed: this local boundary removes only unconfigured exact
+ * shells and their otherwise-valid relationship rows. Once any public-bearing
+ * field arrives, the predicate returns false and the next catalog refresh must
+ * map the asset before this source can assemble it. Every other ClutchPacks
+ * asset must have both a valid public name and an approved mapping here,
+ * including unavailable and unassociated records that the generic adapter can
+ * otherwise omit.
+ */
+export function clutchpacksCatalogSourceWithEmptyShellOmissions(
+  source,
+  { parseConfiguration, hasPublicName, isOmittablePublicShell },
+) {
+  if (
+    typeof source?.loadSourceSnapshot !== "function" ||
+    typeof parseConfiguration !== "function" ||
+    typeof hasPublicName !== "function" ||
+    typeof isOmittablePublicShell !== "function"
+  ) {
+    throw new TypeError("Invalid ClutchPacks catalog source policy.");
+  }
+  return Object.freeze({
+    async loadSourceSnapshot(input) {
+      const snapshot = await source.loadSourceSnapshot(input);
+      const parsedConfiguration = parseConfiguration(
+        snapshot?.configuration?.configuration,
+      );
+      if (
+        parsedConfiguration?.success !== true ||
+        !Array.isArray(snapshot?.revisions) ||
+        !Array.isArray(snapshot?.assetPackAssociations) ||
+        !(snapshot?.readAt instanceof Date) ||
+        !Number.isFinite(snapshot.readAt.getTime())
+      ) {
+        return snapshot;
+      }
+      const configuredAssetKeys = new Set(
+        parsedConfiguration.data.collectibles
+          .filter(({ platformKey }) =>
+            platformKey === CLUTCHPACKS_PLATFORM_KEY)
+          .map(({ externalId }) => clutchpacksCanonicalAssetKey(externalId)),
+      );
+      const assetRevisionCounts = new Map();
+      const packKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const revisionKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        if (revision.recordKind === "pack") packKeys.add(revisionKey);
+        if (revision.recordKind === "catalog_asset") {
+          assetRevisionCounts.set(
+            revisionKey,
+            (assetRevisionCounts.get(revisionKey) ?? 0) + 1,
+          );
+        }
+      }
+      const associationSourceIds = new Set();
+      const associationPairs = new Set();
+      const associatedAssetKeys = new Set();
+      let relationshipsAreValid = true;
+      for (const association of snapshot.assetPackAssociations) {
+        if (association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY) continue;
+        const assetKey = clutchpacksCanonicalAssetKey(
+          association.assetExternalId,
+        );
+        const packKey = clutchpacksCanonicalAssetKey(
+          association.packExternalId,
+        );
+        const pairKey = `${assetKey}\0${association.packExternalId}`;
+        if (
+          typeof association.assetExternalId !== "string" ||
+          association.assetExternalId.length === 0 ||
+          typeof association.packExternalId !== "string" ||
+          association.packExternalId.length === 0 ||
+          typeof association.sourceEntityId !== "string" ||
+          association.sourceEntityId.length === 0 ||
+          typeof association.publicChangeSequence !== "bigint" ||
+          association.publicChangeSequence <= 0n ||
+          !(association.associatedAt instanceof Date) ||
+          !Number.isFinite(association.associatedAt.getTime()) ||
+          association.associatedAt.getTime() > snapshot.readAt.getTime() ||
+          assetRevisionCounts.get(assetKey) !== 1 ||
+          !packKeys.has(packKey) ||
+          associationSourceIds.has(association.sourceEntityId) ||
+          associationPairs.has(pairKey)
+        ) {
+          relationshipsAreValid = false;
+          break;
+        }
+        associationSourceIds.add(association.sourceEntityId);
+        associationPairs.add(pairKey);
+        associatedAssetKeys.add(assetKey);
+      }
+      if (!relationshipsAreValid) return snapshot;
+
+      const omittedAssetKeys = new Set();
+      for (const revision of snapshot.revisions) {
+        if (
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset"
+        ) {
+          continue;
+        }
+        const assetKey = clutchpacksCanonicalAssetKey(revision.externalId);
+        const asset = {
+          externalId: revision.externalId,
+          content: revision.content,
+          associated: associatedAssetKeys.has(assetKey),
+        };
+        const configured = configuredAssetKeys.has(assetKey);
+        const omittable = assetRevisionCounts.get(assetKey) === 1 &&
+          isOmittablePublicShell(asset);
+        if (omittable && !configured) {
+          omittedAssetKeys.add(assetKey);
+          continue;
+        }
+        if (!configured || !hasPublicName(asset)) {
+          refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+        }
+      }
+      if (omittedAssetKeys.size === 0) return snapshot;
+      return Object.freeze({
+        ...snapshot,
+        revisions: Object.freeze(snapshot.revisions.filter((revision) =>
+          revision?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+          revision.recordKind !== "catalog_asset" ||
+          !omittedAssetKeys.has(
+            clutchpacksCanonicalAssetKey(revision.externalId),
+          ))),
+        assetPackAssociations: Object.freeze(
+          snapshot.assetPackAssociations.filter((association) =>
+            association?.platformKey !== CLUTCHPACKS_PLATFORM_KEY ||
+            !omittedAssetKeys.has(
+              clutchpacksCanonicalAssetKey(association.assetExternalId),
+            )),
+        ),
+      });
+    },
+  });
+}
+
 export function assertClutchpacksCatalogScope(snapshot) {
   const products = snapshot?.products;
   const categories = snapshot?.categories;
@@ -557,13 +710,7 @@ export function assertLatestClutchpacksSettledWatermark(watermark, command) {
   }
 }
 
-/**
- * The governed read clock is also a publication clock. Replaying a historical
- * watermark can look fresh when evidence is scored at `readAt`, while the
- * public server clock expires that same estimate immediately. Refuse future
- * clocks and clocks older than the public 60-minute source-age window before
- * recomputation can write a revision.
- */
+/** A historical settled cause is valid; only a future cause is incoherent. */
 export function assertClutchpacksSettlementPublishableNow(
   watermark,
   currentTimeMilliseconds,
@@ -572,9 +719,7 @@ export function assertClutchpacksSettlementPublishableNow(
   if (
     !Number.isSafeInteger(currentTimeMilliseconds) ||
     !Number.isFinite(settledAtMilliseconds) ||
-    settledAtMilliseconds > currentTimeMilliseconds ||
-    currentTimeMilliseconds - settledAtMilliseconds >
-      CLUTCHPACKS_SETTLEMENT_MAX_AGE_MILLISECONDS
+    settledAtMilliseconds > currentTimeMilliseconds
   ) {
     refuse("CLUTCHPACKS_V3_SETTLEMENT_STALE");
   }
@@ -599,11 +744,9 @@ export function assertClutchpacksBackfill(backfill, expectedPublicRepackIds) {
   ) {
     refuse("CLUTCHPACKS_V3_BACKFILL_BLOCKED");
   }
-  // A duplicate-only delivery occurrence does not advance the canonical
-  // watermark and is intentionally outside this read clock. Never treat it
-  // as an EV refresh: staging waits for a fresh governed canonical cause.
+  // Age alone never erases known economics. An unknown source clock remains
+  // unpublishable because no deterministic last-known age can be presented.
   if (ledger.rows.some((row) =>
-    row.sourceAgeBucket === "stale_or_expired" ||
     row.sourceAgeBucket === "unknown_source_time")) {
     refuse("CLUTCHPACKS_V3_EVIDENCE_STALE");
   }
@@ -642,43 +785,258 @@ export function assertNoPositiveClutchpacksEv(plan, expectedPublicRepackIds) {
   return details;
 }
 
-/**
- * A release assembled at a valid historical read clock can still be stale at
- * the wall clock used by Convex public queries. Current estimates must retain
- * enough of their exact publication deadline for the write, exhaustive
- * readback, and operator handoff. Convex signed publication auth permits five
- * minutes of clock skew, so every local gate reserves that allowance in
- * addition to the fifteen minutes advertised by a successful result. Sold-out
- * history is intentionally permanent and therefore carries a null expiry.
- */
-export function assertClutchpacksPlanFreshAtWallClock(
+function exactClutchpacksPublicVendor(plan) {
+  const vendors = new Map();
+  for (const detail of repackRecords(plan)) {
+    if (
+      !UUID_PATTERN.test(detail.publicVendorId ?? "") ||
+      detail.vendorKey !== CLUTCHPACKS_PLATFORM_KEY
+    ) {
+      refuse("CLUTCHPACKS_V3_PLAN_BLOCKED");
+    }
+    vendors.set(detail.publicVendorId, detail.vendorKey);
+  }
+  if (vendors.size !== 1) refuse("CLUTCHPACKS_V3_PLAN_BLOCKED");
+  return [...vendors.keys()][0];
+}
+
+/** Builds the independently signed health observation from local source facts. */
+export function buildClutchpacksProviderObservationRequest({
   plan,
+  watermark,
+  facts,
   currentTimeMilliseconds,
-) {
-  if (!Number.isSafeInteger(currentTimeMilliseconds)) {
+}) {
+  if (
+    !Number.isSafeInteger(currentTimeMilliseconds) ||
+    currentTimeMilliseconds < 1 ||
+    !["active", "paused", "disabled"].includes(facts?.sourceLifecycle) ||
+    !["healthy", "degraded", "unhealthy", "unknown"].includes(
+      facts?.connectionState,
+    ) ||
+    !["healthy", "degraded", "unhealthy", "unknown"].includes(
+      facts?.qualityState,
+    ) ||
+    !Number.isSafeInteger(facts?.freshnessHorizonMilliseconds) ||
+    facts.freshnessHorizonMilliseconds < 1 ||
+    facts.freshnessHorizonMilliseconds >
+      CLUTCHPACKS_MAX_PROVIDER_OBSERVATION_FRESHNESS_MILLISECONDS ||
+    typeof watermark?.settledSequence !== "bigint" ||
+    typeof watermark?.sourceHeadSequence !== "bigint" ||
+    watermark.settledSequence < 0n ||
+    watermark.sourceHeadSequence < watermark.settledSequence
+  ) {
+    refuse("CLUTCHPACKS_V3_PLAN_BLOCKED");
+  }
+  const observedAt = new Date(currentTimeMilliseconds).toISOString();
+  const lastHeadReachedAt = facts.lastHeadReachedAt === null
+    ? null
+    : facts.lastHeadReachedAt?.toISOString?.();
+  if (
+    (facts.lastHeadReachedAt !== null &&
+      (lastHeadReachedAt === undefined ||
+        facts.lastHeadReachedAt.getTime() > currentTimeMilliseconds))
+  ) {
     refuse("CLUTCHPACKS_V3_EVIDENCE_STALE");
   }
-  for (const detail of repackRecords(plan)) {
-    const estimate = detail.evEstimates?.packScout;
-    if (estimate?.status === "unavailable") continue;
-    if (estimate?.status === "sold_out_historical") {
-      if (estimate.expiresAt !== null) {
-        refuse("CLUTCHPACKS_V3_EVIDENCE_STALE");
-      }
-      continue;
-    }
-    const expiresAtMilliseconds = Date.parse(estimate?.expiresAt ?? "");
-    if (
-      estimate?.status !== "current" ||
-      !Number.isFinite(expiresAtMilliseconds) ||
-      new Date(expiresAtMilliseconds).toISOString() !== estimate.expiresAt ||
-      expiresAtMilliseconds - currentTimeMilliseconds <
-        CLUTCHPACKS_RELEASE_MIN_REMAINING_LIFETIME_MILLISECONDS +
-          CLUTCHPACKS_CONVEX_AUTH_CLOCK_SKEW_ALLOWANCE_MILLISECONDS
-    ) {
-      refuse("CLUTCHPACKS_V3_EVIDENCE_STALE");
-    }
+  const observationSequence = currentTimeMilliseconds;
+  const operationId =
+    `${plan.publicReleaseId}:provider-observation:${observationSequence}`;
+  return Object.freeze({
+    schemaVersion: "data_release_v3",
+    operationId,
+    idempotencyKey: operationId,
+    publicReleaseId: plan.publicReleaseId,
+    releaseFingerprint: plan.releaseFingerprint,
+    publicVendorId: exactClutchpacksPublicVendor(plan),
+    vendorKey: CLUTCHPACKS_PLATFORM_KEY,
+    observationSequence,
+    observedAt,
+    freshThrough: new Date(
+      currentTimeMilliseconds + facts.freshnessHorizonMilliseconds,
+    ).toISOString(),
+    lastHeadReachedAt,
+    sourceHeadSequence: watermark.sourceHeadSequence.toString(),
+    settledSequence: watermark.settledSequence.toString(),
+    sourceLifecycle: facts.sourceLifecycle,
+    connectionState: facts.connectionState,
+    qualityState: facts.qualityState,
+    releaseAlignment: watermark.sourceHeadSequence === watermark.settledSequence
+      ? "aligned"
+      : "behind",
+  });
+}
+
+function publicProviderHealthForObservation(observation, currentTimeMilliseconds) {
+  const observedAtMilliseconds = Date.parse(observation.observedAt);
+  const freshThroughMilliseconds = Date.parse(observation.freshThrough);
+  if (
+    !Number.isSafeInteger(observedAtMilliseconds) ||
+    !Number.isSafeInteger(freshThroughMilliseconds) ||
+    freshThroughMilliseconds < observedAtMilliseconds ||
+    currentTimeMilliseconds < observedAtMilliseconds
+  ) {
+    return {
+      state: "delayed",
+      observedAt: observation.observedAt,
+      rankingEligible: false,
+      rankingIneligibilityReason: "PROVIDER_UNHEALTHY",
+    };
   }
+  if (observation.sourceLifecycle !== "active") {
+    return {
+      state: "delayed",
+      observedAt: observation.observedAt,
+      rankingEligible: false,
+      rankingIneligibilityReason: "PROVIDER_PAUSED",
+    };
+  }
+  if (
+    observation.connectionState !== "healthy" ||
+    observation.qualityState !== "healthy"
+  ) {
+    return {
+      state: "delayed",
+      observedAt: observation.observedAt,
+      rankingEligible: false,
+      rankingIneligibilityReason: "PROVIDER_UNHEALTHY",
+    };
+  }
+  if (
+    observation.releaseAlignment !== "aligned" ||
+    observation.lastHeadReachedAt === null ||
+    observation.sourceHeadSequence !== observation.settledSequence
+  ) {
+    return {
+      state: "delayed",
+      observedAt: observation.observedAt,
+      rankingEligible: false,
+      rankingIneligibilityReason: "PROVIDER_BEHIND",
+    };
+  }
+  if (currentTimeMilliseconds >= freshThroughMilliseconds) {
+    return {
+      state: "delayed",
+      observedAt: observation.observedAt,
+      rankingEligible: false,
+      rankingIneligibilityReason: "PROVIDER_OBSERVATION_STALE",
+    };
+  }
+  return {
+    state: "healthy",
+    observedAt: observation.observedAt,
+    rankingEligible: true,
+    rankingIneligibilityReason: null,
+  };
+}
+
+function providerHealthSummaryForObservation(observation, health) {
+  return {
+    state: health.state,
+    observedAt: observation.observedAt,
+    freshThrough: observation.freshThrough,
+    nextHealthEvaluationAt: health.rankingEligible
+      ? observation.freshThrough
+      : null,
+    totalProviderCount: 1,
+    delayedProviderCount: health.rankingEligible ? 0 : 1,
+  };
+}
+
+function exactPublicReadClock(data) {
+  const confidenceEvaluatedAt = data?.confidenceEvaluatedAt;
+  const currentTimeMilliseconds = typeof confidenceEvaluatedAt === "string"
+    ? Date.parse(confidenceEvaluatedAt)
+    : Number.NaN;
+  if (
+    !Number.isSafeInteger(currentTimeMilliseconds) ||
+    currentTimeMilliseconds < 1 ||
+    new Date(currentTimeMilliseconds).toISOString() !== confidenceEvaluatedAt
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  return Object.freeze({
+    confidenceEvaluatedAt,
+    currentTimeMilliseconds,
+  });
+}
+
+function expectedProviderReadContext(observation, data) {
+  const clock = exactPublicReadClock(data);
+  const providerHealthEvaluatedAt = data?.providerHealthEvaluatedAt;
+  const providerHealthEvaluationMilliseconds =
+    typeof providerHealthEvaluatedAt === "string"
+      ? Date.parse(providerHealthEvaluatedAt)
+      : Number.NaN;
+  if (
+    !Number.isSafeInteger(providerHealthEvaluationMilliseconds) ||
+    providerHealthEvaluationMilliseconds < clock.currentTimeMilliseconds ||
+    new Date(providerHealthEvaluationMilliseconds).toISOString() !==
+      providerHealthEvaluatedAt
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  const providerHealth = publicProviderHealthForObservation(
+    observation,
+    providerHealthEvaluationMilliseconds,
+  );
+  return Object.freeze({
+    ...clock,
+    providerHealthEvaluatedAt,
+    providerHealthEvaluationMilliseconds,
+    providerHealth,
+    providerHealthSummary: providerHealthSummaryForObservation(
+      observation,
+      providerHealth,
+    ),
+  });
+}
+
+function providerHealthMatchesObservationWithoutClock(observation, actual) {
+  const freshThroughMilliseconds = Date.parse(observation.freshThrough);
+  if (!Number.isSafeInteger(freshThroughMilliseconds)) return false;
+  const candidates = [
+    publicProviderHealthForObservation(
+      observation,
+      freshThroughMilliseconds - 1,
+    ),
+    publicProviderHealthForObservation(observation, freshThroughMilliseconds),
+  ];
+  return candidates.some((candidate) => isDeepStrictEqual(actual, candidate));
+}
+
+function assertClutchpacksProviderObservationReceipt(receipt, request) {
+  if (
+    receipt?.operationKind !== "refreshProviderObservation" ||
+    receipt.operationId !== request.operationId ||
+    receipt.idempotencyKey !== request.idempotencyKey ||
+    receipt.publicReleaseId !== request.publicReleaseId ||
+    ![
+      "provider_observation_created",
+      "provider_observation_updated",
+      "provider_observation_replayed",
+    ].includes(receipt.result) ||
+    receipt.details?.publicVendorId !== request.publicVendorId ||
+    receipt.details?.vendorKey !== request.vendorKey ||
+    receipt.details?.observationSequence !== request.observationSequence ||
+    receipt.details?.observedAt !== request.observedAt ||
+    receipt.details?.freshThrough !== request.freshThrough
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  return receipt;
+}
+
+function exactProviderObservationServerTime(value) {
+  const milliseconds = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (
+    !Number.isSafeInteger(milliseconds) ||
+    milliseconds < 1 ||
+    new Date(milliseconds).toISOString() !== value
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  return milliseconds;
 }
 
 function assertStatusMatchesPlan(status, plan) {
@@ -722,16 +1080,28 @@ function publicCollectibleDisplay(collectible) {
   };
 }
 
-function withoutDynamicHeat(record) {
+function withoutDynamicPublicFields(record) {
   if (
     record === null ||
     typeof record !== "object" ||
-    !Object.hasOwn(record, "heat")
+    !Object.hasOwn(record, "heat") ||
+    !Object.hasOwn(record, "packScoutEvPresentation") ||
+    !Object.hasOwn(record, "providerHealth")
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
-  const { heat, ...stored } = record;
-  if (heat === null || typeof heat !== "object") {
+  const {
+    heat,
+    packScoutEvPresentation,
+    providerHealth,
+    ...stored
+  } = record;
+  if (
+    heat === null || typeof heat !== "object" ||
+    packScoutEvPresentation === null ||
+    typeof packScoutEvPresentation !== "object" ||
+    providerHealth === null || typeof providerHealth !== "object"
+  ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
   return stored;
@@ -752,13 +1122,45 @@ function firstMiddleLast(records) {
   return indexes.map((index) => records[index]);
 }
 
+function boundedFirstMiddleLast(records, maximumCount) {
+  if (records.length <= maximumCount) return [...records];
+  const requiredIndexes = new Set([
+    0,
+    Math.floor((records.length - 1) / 2),
+    records.length - 1,
+  ]);
+  if (maximumCount < requiredIndexes.size) {
+    refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
+  }
+  for (
+    let sampleIndex = 0;
+    sampleIndex < maximumCount && requiredIndexes.size < maximumCount;
+    sampleIndex += 1
+  ) {
+    requiredIndexes.add(Math.floor(
+      sampleIndex * (records.length - 1) / (maximumCount - 1),
+    ));
+  }
+  for (
+    let recordIndex = 0;
+    recordIndex < records.length && requiredIndexes.size < maximumCount;
+    recordIndex += 1
+  ) {
+    requiredIndexes.add(recordIndex);
+  }
+  return [...requiredIndexes]
+    .sort((left, right) => left - right)
+    .map((index) => records[index]);
+}
+
 /**
  * A full public lookup sweep over thousands of standalone collectibles would
  * be both operationally unsafe and redundant: every public V3 query first
  * proves the active release's finalized accepted counts and entity-chain
  * hashes. We therefore add deterministic first/middle/last direct and search
- * probes, plus exhaustive direct probes for every collectible referenced by a
- * chase while that chase surface remains within this command's fixed budget.
+ * probes, then spend the remaining fixed direct-read budget on a deterministic
+ * sample of chase-linked collectibles. The sampled lookups prove the public
+ * relationship path without making catalog growth a publication blocker.
  */
 export function clutchpacksCollectibleReadbackProbes(scope) {
   const collectibles = sortedEntityRecords(
@@ -768,11 +1170,7 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
   const chaseCollectibleIds = exactIdSet(
     (scope?.entities?.chases ?? []).map((chase) => chase.publicCollectibleId),
   );
-  if (
-    collectibles.length === 0 ||
-    chaseCollectibleIds.length >
-      CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES
-  ) {
+  if (collectibles.length === 0) {
     refuse("CLUTCHPACKS_V3_SCOPE_INVALID");
   }
   const byId = new Map(collectibles.map((collectible) => [
@@ -780,11 +1178,23 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
     collectible,
   ]));
   const directRepresentative = firstMiddleLast(collectibles);
-  const directIds = exactIdSet([
-    ...directRepresentative.map((collectible) =>
-      collectible.publicCollectibleId),
-    ...chaseCollectibleIds,
-  ]);
+  const directIdSet = new Set(directRepresentative.map((collectible) =>
+    collectible.publicCollectibleId));
+  for (const publicCollectibleId of firstMiddleLast(chaseCollectibleIds)) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const remainingChaseIds = chaseCollectibleIds.filter(
+    (publicCollectibleId) => !directIdSet.has(publicCollectibleId),
+  );
+  const remainingDirectBudget =
+    CLUTCHPACKS_MAX_CHASE_READBACK_COLLECTIBLES - directIdSet.size;
+  for (const publicCollectibleId of boundedFirstMiddleLast(
+    remainingChaseIds,
+    remainingDirectBudget,
+  )) {
+    directIdSet.add(publicCollectibleId);
+  }
+  const directIds = exactIdSet([...directIdSet]);
   const direct = directIds.map((publicCollectibleId) => {
     const collectible = byId.get(publicCollectibleId);
     if (collectible === undefined) {
@@ -814,7 +1224,14 @@ export function clutchpacksCollectibleReadbackProbes(scope) {
   });
 }
 
-export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
+export async function assertClutchpacksPublicReadBack(
+  readBack,
+  plan,
+  scope,
+  verification,
+) {
+  const safePresentPackScoutPublicEvV3 = verification?.presentPackScoutPublicEv;
+  const publicFreshnessPolicyVersion = verification?.publicFreshnessPolicyVersion;
   const shell = readBack?.shell;
   const list = readBack?.list;
   const details = readBack?.details;
@@ -827,6 +1244,14 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     scope.entities.products.flatMap((product) =>
       product.categories.map((category) => category.publicCategoryId)),
   );
+  const observation = verification?.providerObservation;
+  if (
+    observation === undefined ||
+    typeof safePresentPackScoutPublicEvV3 !== "function" ||
+    typeof publicFreshnessPolicyVersion !== "string"
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
   if (
     shell?.ok !== true ||
     shell.data?.release?.publicReleaseId !== plan.publicReleaseId ||
@@ -834,8 +1259,14 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     shell.data.release.methodVersion !== plan.manifest.methodVersion ||
     shell.data.release.confidencePolicyVersion !==
       plan.manifest.confidencePolicyVersion ||
+    shell.data.release.publicEvPolicyVersion !==
+      plan.manifest.publicEvPolicyVersion ||
+    shell.data.publicFreshnessPolicyVersion !==
+      publicFreshnessPolicyVersion ||
     list?.ok !== true ||
     list.data?.release?.publicReleaseId !== plan.publicReleaseId ||
+    list.data?.publicFreshnessPolicyVersion !==
+      publicFreshnessPolicyVersion ||
     list.data?.range?.total !== CLUTCHPACKS_EXPECTED_REPACK_COUNT ||
     list.data?.rows?.length !== CLUTCHPACKS_EXPECTED_REPACK_COUNT ||
     list.data?.details?.length !== CLUTCHPACKS_EXPECTED_REPACK_COUNT ||
@@ -855,6 +1286,10 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     ) ||
     dashboard?.ok !== true ||
     dashboard.data?.release?.publicReleaseId !== plan.publicReleaseId ||
+    dashboard.data?.publicFreshnessPolicyVersion !==
+      publicFreshnessPolicyVersion ||
+    !Array.isArray(dashboard.data?.opportunities) ||
+    !Array.isArray(dashboard.data?.details) ||
     !isDeepStrictEqual(
       exactIdSet(dashboard.data?.facets?.categories?.map(
         (category) => category.key,
@@ -868,14 +1303,79 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
+  const shellContext = expectedProviderReadContext(observation, shell.data);
+  const listContext = expectedProviderReadContext(observation, list.data);
+  const dashboardContext = expectedProviderReadContext(
+    observation,
+    dashboard.data,
+  );
+  const opportunityCandidates = [];
+  for (const detail of repackRecords(plan)) {
+    const presented = safePresentPackScoutPublicEvV3(
+      detail.evEstimates?.packScout,
+      dashboardContext.confidenceEvaluatedAt,
+    );
+    if (!presented.success) {
+      refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+    }
+    if (
+      detail.availability === "available" &&
+      ["current", "last_known"].includes(presented.presentation.status)
+    ) {
+      opportunityCandidates.push({ detail, presentation: presented.presentation });
+    }
+  }
+  opportunityCandidates.sort((left, right) =>
+    right.presentation.metrics.evDollars.minorUnits -
+      left.presentation.metrics.evDollars.minorUnits ||
+    left.detail.publicRepackId.localeCompare(right.detail.publicRepackId));
+  const expectedOpportunityDetails = dashboardContext.providerHealth
+      .rankingEligible
+    ? opportunityCandidates.slice(0, 6).map(({ detail }) => detail)
+    : [];
+  const expectedOpportunityEligibility = {
+    rankingEligibleRepackCount: dashboardContext.providerHealth.rankingEligible
+      ? opportunityCandidates.length
+      : 0,
+    providerIneligibleRepackCount: dashboardContext.providerHealth
+        .rankingEligible
+      ? 0
+      : opportunityCandidates.length,
+  };
+  if (
+    !isDeepStrictEqual(
+      shell.data.providerHealthSummary,
+      shellContext.providerHealthSummary,
+    ) ||
+    !isDeepStrictEqual(
+      list.data.providerHealthSummary,
+      listContext.providerHealthSummary,
+    ) ||
+    !isDeepStrictEqual(
+      dashboard.data.providerHealthSummary,
+      dashboardContext.providerHealthSummary,
+    ) ||
+    !isDeepStrictEqual(
+      dashboard.data.opportunityEligibility,
+      expectedOpportunityEligibility,
+    ) ||
+    dashboard.data.opportunities.length !== expectedOpportunityDetails.length ||
+    dashboard.data.details.length !== expectedOpportunityDetails.length ||
+    (expectedOpportunityDetails.length === 0
+      ? dashboard.data.selectedRepack !== null
+      : dashboard.data.selectedRepack?.publicRepackId !==
+        expectedOpportunityDetails[0].publicRepackId)
+  ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
   const plannedDetails = sortedEntityRecords("repacks", repackRecords(plan));
   const listedDetails = sortedEntityRecords(
     "repacks",
-    list.data.details.map(withoutDynamicHeat),
+    list.data.details.map(withoutDynamicPublicFields),
   );
   const directDetails = sortedEntityRecords(
     "repacks",
-    details.map((result) => withoutDynamicHeat(result.data)),
+    details.map((result) => withoutDynamicPublicFields(result.data)),
   );
   const plannedSummaries = sortedEntityRecords(
     "repacks",
@@ -883,17 +1383,29 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
   );
   const listedSummaries = sortedEntityRecords(
     "repacks",
-    list.data.rows.map(withoutDynamicHeat),
+    list.data.rows.map(withoutDynamicPublicFields),
+  );
+  const dashboardDetails = dashboard.data.details.map(
+    withoutDynamicPublicFields,
+  );
+  const dashboardSummaries = dashboard.data.opportunities.map(
+    withoutDynamicPublicFields,
+  );
+  const expectedDashboardSummaries = expectedOpportunityDetails.map(
+    plannedRepackSummary,
   );
   if (
     !isDeepStrictEqual(listedDetails, plannedDetails) ||
     !isDeepStrictEqual(directDetails, plannedDetails) ||
-    !isDeepStrictEqual(listedSummaries, plannedSummaries)
+    !isDeepStrictEqual(listedSummaries, plannedSummaries) ||
+    !isDeepStrictEqual(dashboardDetails, expectedOpportunityDetails) ||
+    !isDeepStrictEqual(dashboardSummaries, expectedDashboardSummaries)
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
   const collectibleReadById = new Map();
   const publicChases = [];
+  const collectibleMatchViews = [];
   for (const read of collectibleReads) {
     const result = read?.result;
     const desired = result?.data?.desiredCollectible;
@@ -901,6 +1413,8 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
       read?.publicCollectibleId !== desired?.publicCollectibleId ||
       result?.ok !== true ||
       result.data?.release?.publicReleaseId !== plan.publicReleaseId ||
+      result.data?.publicFreshnessPolicyVersion !==
+        publicFreshnessPolicyVersion ||
       typeof desired?.publicCollectibleId !== "string" ||
       collectibleReadById.has(desired.publicCollectibleId) ||
       !Array.isArray(result.data.matches) ||
@@ -908,8 +1422,13 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
     ) {
       refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
     }
+    const readContext = expectedProviderReadContext(observation, result.data);
     collectibleReadById.set(desired.publicCollectibleId, result);
     publicChases.push(...result.data.matches.map((match) => match.chase));
+    collectibleMatchViews.push(...result.data.matches.map((match) => ({
+      detail: match.repack,
+      readContext,
+    })));
   }
   for (const collectible of probes.direct) {
     const result = collectibleReadById.get(collectible.publicCollectibleId);
@@ -951,29 +1470,101 @@ export function assertClutchpacksPublicReadBack(readBack, plan, scope) {
       refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
     }
   }
+  const probedCollectibleIds = new Set(
+    probes.direct.map((collectible) => collectible.publicCollectibleId),
+  );
+  const expectedPublicChases = scope.entities.chases.filter((chase) =>
+    probedCollectibleIds.has(chase.publicCollectibleId));
   if (
     !isDeepStrictEqual(
       sortedEntityRecords("chases", publicChases),
-      sortedEntityRecords("chases", scope.entities.chases),
+      sortedEntityRecords("chases", expectedPublicChases),
     )
   ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  const plannedSummaryById = new Map(plannedSummaries.map((summary) => [
+    summary.publicRepackId,
+    summary,
+  ]));
+  const collectibleMatchSummaries = collectibleMatchViews.map(
+    ({ detail }) => detail,
+  );
+  if (collectibleMatchSummaries.some((summary) =>
+    summary === undefined ||
+    !isDeepStrictEqual(
+      withoutDynamicPublicFields(summary),
+      plannedSummaryById.get(summary.publicRepackId),
+    ))) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
   const plannedById = new Map(plannedDetails.map((detail) => [
     detail.publicRepackId,
     detail.evEstimates?.packScout,
   ]));
-  const publicDetails = [
-    ...list.data.details,
-    ...details.map((result) => result.data),
+  const publicViews = [
+    ...list.data.rows.map((detail) => ({ detail, readContext: listContext })),
+    ...list.data.details.map((detail) => ({ detail, readContext: listContext })),
+    ...details.map((result) => {
+      const detail = result.data;
+      const clock = exactPublicReadClock({
+        confidenceEvaluatedAt:
+          detail.packScoutEvPresentation?.confidenceEvaluatedAt,
+      });
+      const readContext = {
+        ...clock,
+        providerHealth:
+          detail.packScoutEvPresentation?.status === "historical"
+            ? null
+            : publicProviderHealthForObservation(
+                observation,
+                clock.currentTimeMilliseconds,
+              ),
+      };
+      return { detail, readContext };
+    }),
+    ...dashboard.data.opportunities.map((detail) => ({
+      detail,
+      readContext: dashboardContext,
+    })),
+    ...dashboard.data.details.map((detail) => ({
+      detail,
+      readContext: dashboardContext,
+    })),
+    ...(dashboard.data.selectedRepack === null
+      ? []
+      : [{
+          detail: dashboard.data.selectedRepack,
+          readContext: dashboardContext,
+        }]),
+    ...collectibleMatchViews,
   ];
-  for (const detail of publicDetails) {
+  for (const { detail, readContext } of publicViews) {
     const estimate = detail.evEstimates?.packScout;
     const planned = plannedById.get(detail.publicRepackId);
+    const expectedPresentation = safePresentPackScoutPublicEvV3(
+      planned,
+      readContext.confidenceEvaluatedAt,
+    );
+    const providerHealthMatches = readContext.providerHealth === null
+      ? providerHealthMatchesObservationWithoutClock(
+          observation,
+          detail.providerHealth,
+        )
+      : isDeepStrictEqual(
+          detail.providerHealth,
+          readContext.providerHealth,
+        );
     if (
       planned === undefined ||
       !estimate ||
       !isDeepStrictEqual(estimate, planned) ||
+      !expectedPresentation.success ||
+      !isDeepStrictEqual(
+        detail.packScoutEvPresentation,
+        expectedPresentation.presentation,
+      ) ||
+      !providerHealthMatches ||
       !["current", "sold_out_historical", "unavailable"].includes(
         estimate.status,
       ) ||
@@ -1041,7 +1632,7 @@ export function operatorBoundDataReleaseV3ActivationPort(
 
 function recoveryRequiredResult(command, plan, verificationError) {
   return Object.freeze({
-    schemaVersion: "packscout.clutchpacks-data-release-v3-result.v1",
+    schemaVersion: "packscout.clutchpacks-data-release-v3-result.v2",
     status: "activated_but_unverified_recovery_required",
     targetDigest: command.targetDigest,
     databaseIdentity: command.databaseIdentity,
@@ -1049,8 +1640,6 @@ function recoveryRequiredResult(command, plan, verificationError) {
     releaseFingerprint: plan.releaseFingerprint,
     expectedRepackCount: CLUTCHPACKS_EXPECTED_REPACK_COUNT,
     acceptedEntityCounts: Object.freeze({ ...plan.manifest.counts }),
-    minimumRemainingLifetimeMilliseconds:
-      CLUTCHPACKS_RELEASE_MIN_REMAINING_LIFETIME_MILLISECONDS,
     expectedPriorPublicReleaseId: command.expectedActivePublicReleaseId,
     verificationCode:
       verificationError instanceof ClutchpacksDataReleaseV3PromotionError
@@ -1108,7 +1697,7 @@ function assertPlanIdentity(first, second) {
 
 /**
  * Allows the reconciliation runner to stage only the exact plan that already
- * passed the Clutch scope, freshness, and signed-EV gates. A changed second
+ * passed the Clutch scope, source-time, and signed-EV gates. A changed second
  * canonical read is refused at `start`, before the real port receives a
  * staging write; activation and rollback are impossible through this port.
  */
@@ -1242,7 +1831,7 @@ export async function runClutchpacksDataReleaseV3Promotion({
     assertClutchpacksDataReleaseV3Confirmation(command, environment);
     if (command.mode === "dry_run") {
       const result = Object.freeze({
-        schemaVersion: "packscout.clutchpacks-data-release-v3-result.v1",
+        schemaVersion: "packscout.clutchpacks-data-release-v3-result.v2",
         status: "planned",
         targetDigest: command.targetDigest,
         databaseIdentity: command.databaseIdentity,
@@ -1293,7 +1882,6 @@ export async function runClutchpacksDataReleaseV3Promotion({
     const plan = await opened.assembler.assemble({ readAt: command.readAt });
     assertClutchpacksPlanCompleteness(plan, scope);
     assertNoPositiveClutchpacksEv(plan, expectedIds);
-    assertClutchpacksPlanFreshAtWallClock(plan, dependencies.now());
 
     if (command.mode === "stage") {
       const activeBefore = await opened.publication.activeState();
@@ -1304,7 +1892,6 @@ export async function runClutchpacksDataReleaseV3Promotion({
         stagingWatermark,
         stagingCurrentTime,
       );
-      assertClutchpacksPlanFreshAtWallClock(plan, stagingCurrentTime);
       await reverifyClutchpacksDataReleaseV3Database(
         opened,
         command.databaseIdentity,
@@ -1322,7 +1909,6 @@ export async function runClutchpacksDataReleaseV3Promotion({
       assertPlanIdentity(plan, stagedPlan);
       assertClutchpacksPlanCompleteness(stagedPlan, scope);
       assertNoPositiveClutchpacksEv(stagedPlan, expectedIds);
-      assertClutchpacksPlanFreshAtWallClock(stagedPlan, dependencies.now());
       const status = await opened.publication.status(plan.publicReleaseId);
       assertStatusMatchesPlan(status, plan);
       const activeAfter = await opened.publication.activeState();
@@ -1332,7 +1918,7 @@ export async function runClutchpacksDataReleaseV3Promotion({
       const expectedActivePublicReleaseId =
         activeBefore.activeRelease?.publicReleaseId ?? null;
       const result = Object.freeze({
-        schemaVersion: "packscout.clutchpacks-data-release-v3-result.v1",
+        schemaVersion: "packscout.clutchpacks-data-release-v3-result.v2",
         status: "staged",
         targetDigest: command.targetDigest,
         databaseIdentity: command.databaseIdentity,
@@ -1345,8 +1931,6 @@ export async function runClutchpacksDataReleaseV3Promotion({
           searchShards: plan.manifest.counts.searchShards,
         }),
         acceptedEntityCounts: Object.freeze({ ...status.acceptedCounts }),
-        minimumRemainingLifetimeMilliseconds:
-          CLUTCHPACKS_RELEASE_MIN_REMAINING_LIFETIME_MILLISECONDS,
         activePointerMoved: false,
         expectedActivePublicReleaseId,
         requiredActivationConfirmation:
@@ -1381,7 +1965,6 @@ export async function runClutchpacksDataReleaseV3Promotion({
       activationWatermark,
       activationCurrentTime,
     );
-    assertClutchpacksPlanFreshAtWallClock(plan, activationCurrentTime);
     await reverifyClutchpacksDataReleaseV3Database(
       opened,
       command.databaseIdentity,
@@ -1409,21 +1992,50 @@ export async function runClutchpacksDataReleaseV3Promotion({
       return recovery;
     }
     let readBack;
+    let providerObservation;
+    let providerObservationReceipt;
     try {
-      const readBackCurrentTime = dependencies.now();
-      assertClutchpacksPlanFreshAtWallClock(plan, readBackCurrentTime);
+      const observationServerTime = outcome.outcome === "activated"
+        ? outcome.receipts?.activate?.serverTime
+        : await opened.readPublicServerTime();
+      const observationCurrentTime = exactProviderObservationServerTime(
+        observationServerTime,
+      );
+      const observationWatermark = await opened.loadSettledWatermark();
+      assertLatestClutchpacksSettledWatermark(observationWatermark, command);
+      assertClutchpacksSettlementPublishableNow(
+        observationWatermark,
+        observationCurrentTime,
+      );
+      await reverifyClutchpacksDataReleaseV3Database(
+        opened,
+        command.databaseIdentity,
+      );
+      providerObservation = buildClutchpacksProviderObservationRequest({
+        plan,
+        watermark: observationWatermark,
+        facts: await opened.loadProviderObservationFacts({
+          currentTime: observationCurrentTime,
+        }),
+        currentTimeMilliseconds: observationCurrentTime,
+      });
+      providerObservationReceipt =
+        await opened.refreshProviderObservation(providerObservation);
+      assertClutchpacksProviderObservationReceipt(
+        providerObservationReceipt,
+        providerObservation,
+      );
       readBack = await opened.readPublicRelease({
         plan,
         scope,
         expectedIds,
-        currentTime: readBackCurrentTime,
         catalogReadToken: command.catalogReadToken,
       });
-      assertClutchpacksPublicReadBack(readBack, plan, scope);
-      // Network/readback time consumes the same release lifetime. Re-read the
-      // wall clock so a slow but internally successful proof cannot report an
-      // already-short-lived release as activated.
-      assertClutchpacksPlanFreshAtWallClock(plan, dependencies.now());
+      await assertClutchpacksPublicReadBack(readBack, plan, scope, {
+        providerObservation,
+        presentPackScoutPublicEv: opened.presentPackScoutPublicEv,
+        publicFreshnessPolicyVersion: opened.publicFreshnessPolicyVersion,
+      });
     } catch (verificationError) {
       if (outcome.outcome !== "activated") throw verificationError;
       const recovery = await recoverUnverifiedActivation(
@@ -1442,7 +2054,7 @@ export async function runClutchpacksDataReleaseV3Promotion({
       return recovery;
     }
     const result = Object.freeze({
-      schemaVersion: "packscout.clutchpacks-data-release-v3-result.v1",
+      schemaVersion: "packscout.clutchpacks-data-release-v3-result.v2",
       status: outcome.outcome === "unchanged" ? "already_active" : "activated",
       targetDigest: command.targetDigest,
       databaseIdentity: command.databaseIdentity,
@@ -1466,8 +2078,17 @@ export async function runClutchpacksDataReleaseV3Promotion({
         collectibleDirect: readBack.collectibleReads.length,
         collectibleSearch: readBack.collectibleSearches.length,
       }),
-      minimumRemainingLifetimeMilliseconds:
-        CLUTCHPACKS_RELEASE_MIN_REMAINING_LIFETIME_MILLISECONDS,
+      providerObservation: Object.freeze({
+        operationId: providerObservation.operationId,
+        observationSequence: providerObservation.observationSequence,
+        observedAt: providerObservation.observedAt,
+        sourceLifecycle: providerObservation.sourceLifecycle,
+        publicHealth: Object.freeze(publicProviderHealthForObservation(
+          providerObservation,
+          Date.parse(providerObservation.observedAt),
+        )),
+        result: providerObservationReceipt.result,
+      }),
       classificationCounts: ledger.counts,
     });
     writeOutput(result);
@@ -1481,6 +2102,82 @@ export async function runClutchpacksDataReleaseV3Promotion({
   } finally {
     await opened?.close();
   }
+}
+
+async function loadClutchpacksLocalProviderObservationFacts(
+  database,
+  client,
+  organizationId,
+  currentTimeMilliseconds,
+) {
+  const catalog = new database.ProviderSourceAdminCatalogRepository(client);
+  const providers = (await catalog.listProviders(organizationId)).filter(
+    ({ provider }) => provider === CLUTCHPACKS_PLATFORM_KEY,
+  );
+  const allSources = (await catalog.listSources(organizationId)).filter(
+    ({ providerId }) => providerId === providers[0]?.id,
+  );
+  const runningSources = allSources.filter(({ state }) =>
+    state === "active" || state === "paused");
+  const selected = runningSources.length === 1
+    ? runningSources[0]
+    : runningSources.length === 0
+      ? allSources.filter(({ state }) => state === "disabled")[0]
+      : undefined;
+  if (
+    providers.length !== 1 ||
+    selected === undefined ||
+    (runningSources.length === 0 &&
+      allSources.filter(({ state }) => state === "disabled").length !== 1)
+  ) {
+    refuse("CLUTCHPACKS_V3_PLAN_BLOCKED");
+  }
+  const overview = await new database.ProviderSourceOperationsRepository(
+    client,
+  ).readOverview({
+    organizationId,
+    providerIds: [selected.providerId],
+    sourceInstanceIds: [selected.sourceInstanceId],
+    connectionProfileIds: [selected.connectionProfileId],
+  });
+  const facts = overview.sources.find(
+    ({ sourceInstanceId }) => sourceInstanceId === selected.sourceInstanceId,
+  );
+  if (facts === undefined) refuse("CLUTCHPACKS_V3_PLAN_BLOCKED");
+  const sourceLifecycle = selected.state === "active" && !selected.pauseRequested
+    ? "active"
+    : selected.state === "disabled"
+      ? "disabled"
+      : "paused";
+  const connectionState = selected.connectionRevisionId === null
+    ? "unknown"
+    : overview.connectionEpisodes.some(
+        ({ connectionProfileId }) =>
+          connectionProfileId === selected.connectionProfileId,
+      )
+      ? "unhealthy"
+      : "healthy";
+  const freshnessHorizonMilliseconds =
+    (selected.intervalSeconds + selected.freshnessGraceSeconds) * 1_000;
+  const lastHeadReachedAt = facts.health?.lastHeadReachedAt ?? null;
+  const headIsFresh = lastHeadReachedAt !== null &&
+    currentTimeMilliseconds - lastHeadReachedAt.getTime() <=
+      freshnessHorizonMilliseconds;
+  const qualityState = facts.health === null
+    ? "unknown"
+    : facts.health.latestFailureCode !== null ||
+        facts.health.consecutiveFailures > 0 ||
+        facts.openQuarantine > 0 ||
+        !headIsFresh
+      ? "degraded"
+      : "healthy";
+  return Object.freeze({
+    sourceLifecycle,
+    connectionState,
+    qualityState,
+    lastHeadReachedAt,
+    freshnessHorizonMilliseconds,
+  });
 }
 
 export function createProductionDependencies() {
@@ -1503,18 +2200,38 @@ export function createProductionDependencies() {
       }
     },
     async open(command) {
-      const [database, services] = await Promise.all([
+      const [
+        database,
+        services,
+        contracts,
+        catalogCandidate,
+      ] = await Promise.all([
         import("../../packages/database/src/index.ts"),
         import("../../packages/services/src/index.ts"),
+        import("../../packages/contracts/src/index.ts"),
+        import("./generate-clutchpacks-v3-public-catalog-candidate.mts"),
       ]);
       const lifecycle = database.createPrismaClientLifecycle({
         databaseUrl: command.databaseUrl,
       });
       await lifecycle.start();
       try {
-        const source = new database.PrismaDataReleaseV3CanonicalCatalogSource(
-          lifecycle.client,
-          command.organizationId,
+        const canonicalSource =
+          new database.PrismaDataReleaseV3CanonicalCatalogSource(
+            lifecycle.client,
+            command.organizationId,
+          );
+        const source = clutchpacksCatalogSourceWithEmptyShellOmissions(
+          canonicalSource,
+          {
+            parseConfiguration: (value) =>
+              contracts.approvedPublicCatalogConfigurationV1Schema.safeParse(
+                value,
+              ),
+            hasPublicName: catalogCandidate.clutchpacksAssetHasPublicName,
+            isOmittablePublicShell:
+              catalogCandidate.clutchpacksAssetIsOmittablePublicShell,
+          },
         );
         const catalog = new services.DataReleaseV3CanonicalCatalogAdapter(source);
         const repository = new database.BuybackEvRevisionRepository(
@@ -1560,6 +2277,9 @@ export function createProductionDependencies() {
           catalog,
           assembler,
           publication,
+          presentPackScoutPublicEv: contracts.safePresentPackScoutPublicEvV3,
+          publicFreshnessPolicyVersion:
+            contracts.PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
           readDatabaseIdentity: () =>
             readClutchpacksDataReleaseV3DatabaseIdentity(lifecycle.client),
           loadSettledWatermark: () =>
@@ -1577,6 +2297,16 @@ export function createProductionDependencies() {
               ),
             ).publish(plan),
           rollback: (input) => publisher.rollback(input),
+          loadProviderObservationFacts: ({ currentTime }) =>
+            loadClutchpacksLocalProviderObservationFacts(
+              database,
+              lifecycle.client,
+              command.organizationId,
+              currentTime,
+            ),
+          refreshProviderObservation: (request) =>
+            publication.refreshProviderObservation(request),
+          readPublicServerTime: () => readPublicServerTime(command),
           readPublicRelease: (input) => readPublicRelease(command, input),
           close: () => lifecycle.close(),
         };
@@ -1588,54 +2318,81 @@ export function createProductionDependencies() {
   };
 }
 
+async function readPublicServerTime(command) {
+  const [{ ConvexHttpClient }, { api }] = await Promise.all([
+    import("convex/browser"),
+    import("../../convex/_generated/api.js"),
+  ]);
+  const client = new ConvexHttpClient(
+    clutchpacksConvexHttpClientAddress(command.queryUrl),
+  );
+  const args = command.catalogReadToken === null
+    ? {}
+    : { catalogReadToken: command.catalogReadToken };
+  const shell = await client.action(
+    api.publicRepacksV3.getPublicShellStatusV3,
+    args,
+  );
+  if (shell?.ok !== true) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  return shell.data?.confidenceEvaluatedAt;
+}
+
 async function readPublicRelease(command, input) {
   const [{ ConvexHttpClient }, { api }] = await Promise.all([
     import("convex/browser"),
     import("../../convex/_generated/api.js"),
   ]);
-  const client = new ConvexHttpClient(command.queryUrl);
+  const client = new ConvexHttpClient(
+    clutchpacksConvexHttpClientAddress(command.queryUrl),
+  );
+  return readClutchpacksPublicReleaseWithClient(client, api, command, input);
+}
+
+export async function readClutchpacksPublicReleaseWithClient(
+  client,
+  api,
+  command,
+  input,
+) {
   const withToken = (value) => command.catalogReadToken === null
     ? value
     : { ...value, catalogReadToken: command.catalogReadToken };
-  const shell = await client.query(
+  const shell = await client.action(
     api.publicRepacksV3.getPublicShellStatusV3,
     withToken({}),
   );
-  const list = await client.query(
+  const list = await client.action(
     api.publicRepacksV3.listPublicRepacksV3,
-    withToken({ pageSize: 50, currentTime: input.currentTime }),
+    withToken({ pageSize: 50 }),
   );
   const details = list?.ok === true
-    ? await Promise.all(list.data.rows.map((row) => client.query(
+    ? await Promise.all(list.data.rows.map((row) => client.action(
       api.publicRepacksV3.getPublicRepackV3,
       withToken({
         publicRepackId: row.publicRepackId,
         publicReleaseId: input.plan.publicReleaseId,
-        currentTime: input.currentTime,
       }),
     )))
     : [];
-  const dashboard = await client.query(
+  const dashboard = await client.action(
     api.publicRepacksV3.getDashboardBundleV3,
-    withToken({
-      filters: { availability: "all" },
-      currentTime: input.currentTime,
-    }),
+    withToken({ filters: { availability: "all" } }),
   );
   const probes = clutchpacksCollectibleReadbackProbes(input.scope);
   const collectibleReads = await Promise.all(
     probes.direct.map(async (collectible) => ({
       publicCollectibleId: collectible.publicCollectibleId,
-      result: await client.query(
-      api.publicRepacksV3.findRepacksByDesiredCollectibleV3,
-      withToken({
-        publicCollectibleId: collectible.publicCollectibleId,
-        filters: { availability: "all" },
-        sort: "match_confidence",
-        direction: "desc",
-        limit: 50,
-        currentTime: input.currentTime,
-      }),
+      result: await client.action(
+        api.publicRepacksV3.findRepacksByDesiredCollectibleV3,
+        withToken({
+          publicCollectibleId: collectible.publicCollectibleId,
+          filters: { availability: "all" },
+          sort: "match_confidence",
+          direction: "desc",
+          limit: 50,
+        }),
       ),
     })),
   );

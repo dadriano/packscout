@@ -764,6 +764,18 @@ http.route({
 });
 
 http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedDataReleaseV3Request(
+      ctx,
+      request,
+      internal.dataReleaseV3ProviderObservation.refresh,
+    ),
+  ),
+});
+
+http.route({
   path: PRODUCTION_DATA_RELEASE_V3_PATHS.rollback,
   method: "POST",
   handler: httpAction((ctx, request) =>

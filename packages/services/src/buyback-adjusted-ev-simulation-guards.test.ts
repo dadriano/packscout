@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
 } from "@packscout/contracts";
 import { DataReleaseV3PublisherError } from "./buyback-adjusted-ev-release-publisher.ts";
 import { InMemoryDataReleaseV3Port } from "./buyback-adjusted-ev-release.test-support.ts";
@@ -46,6 +47,7 @@ const SUPPORTED_VERSIONS = {
   publicationSchemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION,
   methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+  publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   scenarioVersion: PACKSCOUT_BUYBACK_EV_SIMULATION_SCENARIO_VERSION,
 } as const;
 
@@ -67,6 +69,7 @@ function pointer(publicReleaseId: string): DataReleaseV3Pointer {
     releaseFingerprint: "a".repeat(64),
     methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+    publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
     dataAsOf: "2026-08-19T12:00:00.000Z",
     completedAt: "2026-08-19T12:00:01.000Z",
     counts: {
@@ -117,6 +120,7 @@ test("exact protocol versions are required before any simulation write", () => {
     { publicationSchemaVersion: "data_release_v2" },
     { methodVersion: "packscout-estimated-ev-v1" },
     { confidencePolicyVersion: "some-other-policy" },
+    { publicEvPolicyVersion: "some-other-public-policy" },
     { scenarioVersion: "packscout-buyback-ev-simulation-scenarios-v2" },
   ]) {
     assert.equal(

@@ -329,7 +329,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. EV $ and EV % are signed against Pack Price, so values above break-even carry an explicit plus sign and values below render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
+          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. Public V3 only exposes signed EV at or below break-even; a positive raw result is labeled Unavailable under the versioned nonpositive-EV publication policy. Values below break-even render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
         },
       ],
       metricKeys: EXPECTED_VALUE_METRIC_KEYS,
@@ -377,7 +377,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Evidence age uses the oldest essential source observation. Data at most 15 minutes old carries no penalty, older data is progressively penalized, and once the oldest essential evidence is over 60 minutes old an active estimate becomes Expired and leaves the EV rankings. A sold-out repack instead freezes its last valid estimate as an explicit historical state.",
+          text: "Evidence age uses the oldest essential source observation. Data at most 15 minutes old carries no penalty, older data is progressively penalized, and once the oldest essential evidence is over 60 minutes old the estimate becomes Last-known. Its economics remain visible and sortable while confidence continues to decay toward zero. A sold-out repack instead freezes its last valid estimate as an explicit historical state.",
         },
         {
           type: "paragraph",
@@ -385,7 +385,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Missing essential evidence is never a low-confidence estimate: price, currency, probabilities, stated values, eligibility, buyback terms, draw count, provenance, and observation times must all be complete, or the estimate is Unavailable. An unavailable value is not zero.",
+          text: "Missing essential evidence is never a low-confidence estimate: price, currency, probabilities, stated values, eligibility, buyback terms, draw count, provenance, and observation times must all be complete, or the estimate is Unavailable. Unavailable means required supported inputs are missing. Age alone does not make an estimate unavailable, and an unavailable value is not zero.",
         },
       ],
       callout: {
@@ -395,6 +395,7 @@ export const EXPECTED_VALUE_GUIDE = {
           PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
           PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_15_through_30_minutes,
           PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_30_through_60_minutes,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_60_minutes,
         ],
       },
     },

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   PRODUCTION_AUTH_HEADER_NAMES,
   canonicalJson,
   productionPublicationReceiptSigningValue,
@@ -18,6 +19,8 @@ import {
   DataReleaseV3PublicationPortError,
   EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
   type DataReleaseV3PublicationPort,
+  type DataReleaseV3ProviderObservationPort,
+  type DataReleaseV3RefreshProviderObservationRequest,
   type DataReleaseV3StartRequest,
 } from "./buyback-adjusted-ev-release-types.ts";
 import {
@@ -44,6 +47,7 @@ const pointer = Object.freeze({
   releaseFingerprint: fingerprint,
   methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+  publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   dataAsOf: "2026-08-19T11:55:00.000Z",
   completedAt: "2026-08-19T11:56:00.000Z",
   counts,
@@ -63,6 +67,7 @@ function startRequest(): DataReleaseV3StartRequest {
     manifest: {
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+      publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
       dataAsOf: "2026-08-19T11:55:00.000Z",
       contentHash: "5".repeat(64),
       searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -77,6 +82,28 @@ function startRequest(): DataReleaseV3StartRequest {
       batchCount: 4,
       batchChainHash: "6".repeat(64),
     },
+  };
+}
+
+function providerObservationRequest(): DataReleaseV3RefreshProviderObservationRequest {
+  return {
+    schemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION,
+    operationId: `${releaseId}:provider-observation:clutchpacks:1`,
+    idempotencyKey: `${releaseId}:provider-observation:clutchpacks:1`,
+    publicReleaseId: releaseId,
+    releaseFingerprint: fingerprint,
+    publicVendorId: "00000000-0000-5000-8000-000000000001",
+    vendorKey: "clutchpacks",
+    observationSequence: 1,
+    observedAt: now.toISOString(),
+    freshThrough: new Date(now.getTime() + 15 * 60_000).toISOString(),
+    lastHeadReachedAt: now.toISOString(),
+    sourceHeadSequence: "17367",
+    settledSequence: "17367",
+    sourceLifecycle: "active",
+    connectionState: "healthy",
+    qualityState: "healthy",
+    releaseAlignment: "aligned",
   };
 }
 
@@ -191,6 +218,54 @@ test("v3 active state rides the shared signed HTTP byte and nonce boundary", asy
   assert.deepEqual(bodies, [expectedBody, expectedBody]);
 });
 
+test("v3 active state accepts only the exact retained pre-policy pointer shape", async () => {
+  const {
+    publicEvPolicyVersion: _legacyMissingPolicyMarker,
+    ...legacyPointer
+  } = pointer;
+  void _legacyMissingPolicyMarker;
+  const transport = client(async (_input, init) => {
+    const bodyJson = String(init?.body);
+    return new Response(JSON.stringify(await signedEnvelope({
+      ...activeStateReceiptBody(bodyJson),
+      details: {
+        generation: 3,
+        activeRelease: legacyPointer,
+        previousRelease: null,
+      },
+    })));
+  });
+
+  assert.deepEqual(await transport.activeState(), {
+    generation: 3,
+    activeRelease: legacyPointer,
+    previousRelease: null,
+  });
+});
+
+test("v3 active state rejects non-current markers and other pointer drift", async () => {
+  for (const activeRelease of [
+    { ...pointer, publicEvPolicyVersion: "some-other-public-policy" },
+    { ...pointer, unexpectedLegacyField: true },
+    (({ methodVersion: _missingRequiredField, ...rest }) => {
+      void _missingRequiredField;
+      return rest;
+    })(pointer),
+  ]) {
+    const transport = client(async (_input, init) => {
+      const bodyJson = String(init?.body);
+      return new Response(JSON.stringify(await signedEnvelope({
+        ...activeStateReceiptBody(bodyJson),
+        details: { generation: 3, activeRelease, previousRelease: null },
+      })));
+    });
+    await assert.rejects(
+      transport.activeState(),
+      expectsPortError("PUBLICATION_RESPONSE_INVALID", true),
+    );
+  }
+});
+
 test("v3 start sends canonical bytes and returns the bound verified receipt", async () => {
   const request = startRequest();
   const transport = client(async (input, init) => {
@@ -221,6 +296,38 @@ test("v3 start sends canonical bytes and returns the bound verified receipt", as
   );
   const port: DataReleaseV3PublicationPort = transport;
   assert.equal(typeof port.rollback, "function");
+});
+
+test("v3 provider health refresh uses the signed release boundary", async () => {
+  const request = providerObservationRequest();
+  const transport = client(async (input, init) => {
+    assert.equal(
+      String(input),
+      "https://convex.example/internal/data-release/v3/refresh-provider-observation",
+    );
+    const bodyJson = String(init?.body);
+    assert.equal(bodyJson, canonicalJson(request));
+    return new Response(JSON.stringify(await signedEnvelope({
+      schemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION,
+      operationKind: "refreshProviderObservation",
+      operationId: request.operationId,
+      idempotencyKey: request.idempotencyKey,
+      publicReleaseId: releaseId,
+      result: "provider_observation_created",
+      serverTime: now.toISOString(),
+      requestDigest: sha256(bodyJson),
+      details: {
+        publicVendorId: request.publicVendorId,
+        observationSequence: request.observationSequence,
+      },
+    })));
+  });
+
+  const receipt = await transport.refreshProviderObservation(request);
+  assert.equal(receipt.operationKind, "refreshProviderObservation");
+  assert.equal(receipt.result, "provider_observation_created");
+  const port: DataReleaseV3ProviderObservationPort = transport;
+  assert.equal(typeof port.refreshProviderObservation, "function");
 });
 
 test("v3 auth rejection and conflict envelopes pass through as terminal port errors", async () => {

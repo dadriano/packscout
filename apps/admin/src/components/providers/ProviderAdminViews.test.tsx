@@ -3,7 +3,10 @@ import { test } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import type { ProviderConfigurationSummary } from "@packscout/contracts";
+import type {
+  ProviderConfigurationSummary,
+  ProviderSourceRootSummary,
+} from "@packscout/contracts";
 import { ProviderForm } from "./ProviderForm.tsx";
 import { ProviderLedger } from "./ProviderLedger.tsx";
 
@@ -32,33 +35,26 @@ const provider: ProviderConfigurationSummary = {
   updatedAt: "2026-08-06T12:00:00.000Z",
 };
 
-test("provider ledger exposes operational evidence with masked authentication", () => {
+const providerRoot: ProviderSourceRootSummary = {
+  id: provider.id,
+  platformKey: provider.platformKey,
+  displayName: provider.displayName,
+  state: "draft",
+  createdAt: provider.createdAt,
+  updatedAt: provider.updatedAt,
+};
+
+test("provider ledger exposes source-native provider identity", () => {
   Object.assign(globalThis, { React });
   const html = renderToStaticMarkup(
     <MemoryRouter>
-      <ProviderLedger items={[{
-        provider,
-        health: {
-          providerId: provider.id,
-          freshnessState: "stale",
-          qualityState: "warning",
-          activeRun: { id: "run-1", state: "running" },
-          latestRun: { id: "run-1", state: "running" },
-          lastHeadReachedAt: null,
-          nextDueAt: "2026-08-06T12:05:00.000Z",
-          openQuarantineCount: 2,
-          consecutiveFailures: 0,
-          latestFailureClass: null,
-          recoveryHint: "Run through provider head.",
-        },
-      }]} />
+      <ProviderLedger items={[providerRoot]} />
     </MemoryRouter>,
   );
   assert.match(html, /Fanatics cards/);
-  assert.match(html, /Bearer · configured/);
-  assert.match(html, /Stale/);
-  assert.match(html, /Warning/);
-  assert.doesNotMatch(html, /bearerSecret|authorization/i);
+  assert.match(html, /fanatics/);
+  assert.match(html, /Draft/);
+  assert.doesNotMatch(html, /Bearer|latest revision|health/i);
 });
 
 test("revision form preserves a stored bearer credential without rendering its value", () => {

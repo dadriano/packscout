@@ -17,9 +17,11 @@ database, or stop the Collector Crypt, Courtyard, or Phygitals lanes.
   local database rather than to client-specific URL options.
 - Both URLs must resolve to different, explicitly named local databases.
 - Before every driver action, the active V1 source database must prove the
-  exact platform-request-lanes migration checksum and its intentional
-  84-application-table subset. The target independently proves the current
-  91-table composite schema through its full lifecycle startup.
+  exact five-checksum current composite migration set: buyback-EV revisions,
+  source relationship confirmations, Heat relationship causality, platform
+  request lanes, and buyback-EV provider-source origin. It must also prove the
+  exact 91-application-table schema. The target independently proves that same
+  current schema through its full lifecycle startup.
 - The target contains exactly one organization, one active ClutchPacks provider
   root, one DataForrest connection profile, and one ClutchPacks source.
 - The provider root is identity-only: it has no legacy active revision, next
@@ -206,8 +208,8 @@ reserve to make admission pass.
 Stop and inspect before making another mutation when the driver reports any of
 these categories:
 
-- original V1 database is not the exact 84-table/checksum subset, or its source
-  is not exact, paused, or drained;
+- original V1 database is not the exact 91-table/five-checksum schema, or its
+  source is not exact, paused, or drained;
 - target topology, lifecycle pins, cursor, or pristine lineage is not exact;
 - during qualification or replay start, the target supervisor is absent,
   stale, capacity-blocked, or not one slot;

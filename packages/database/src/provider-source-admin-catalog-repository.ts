@@ -1,5 +1,41 @@
 import type { PackscoutPrismaClient } from "./database.ts";
 
+export interface ProviderSourceAdminProviderRecord {
+  readonly id: string;
+  readonly provider: string;
+  readonly displayName: string;
+  readonly state: "draft" | "active" | "disabled" | "archived";
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+const providerSelection = {
+  id: true,
+  platform_key: true,
+  display_name: true,
+  state: true,
+  created_at: true,
+  updated_at: true,
+} as const;
+
+function providerRecord(provider: {
+  readonly id: string;
+  readonly platform_key: string;
+  readonly display_name: string;
+  readonly state: "draft" | "active" | "disabled" | "archived";
+  readonly created_at: Date;
+  readonly updated_at: Date;
+}): ProviderSourceAdminProviderRecord {
+  return {
+    id: provider.id,
+    provider: provider.platform_key,
+    displayName: provider.display_name,
+    state: provider.state,
+    createdAt: provider.created_at,
+    updatedAt: provider.updated_at,
+  };
+}
+
 function strings(value: unknown): readonly string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
@@ -13,12 +49,20 @@ export class ProviderSourceAdminCatalogRepository {
     const providers = await this.database.provider_sources.findMany({
       where: { organization_id: organizationId },
       orderBy: [{ platform_key: "asc" }, { id: "asc" }],
-      select: { id: true, platform_key: true },
+      select: providerSelection,
     });
-    return providers.map((provider) => ({
-      id: provider.id,
-      provider: provider.platform_key,
-    }));
+    return providers.map(providerRecord);
+  }
+
+  async getProvider(
+    organizationId: string,
+    providerId: string,
+  ): Promise<ProviderSourceAdminProviderRecord | null> {
+    const provider = await this.database.provider_sources.findFirst({
+      where: { id: providerId, organization_id: organizationId },
+      select: providerSelection,
+    });
+    return provider === null ? null : providerRecord(provider);
   }
 
   async listConnections(organizationId: string) {

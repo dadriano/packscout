@@ -1,9 +1,11 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
+  packScoutPublicEvMetricsAreNonpositiveV3,
   parsePackScoutBuybackEvTimestampMillisV1,
   publicRepackDetailV3Schema,
   sha256CanonicalJson,
@@ -91,9 +93,10 @@ function requireTimestamp(value: string, productKey: string | null): number {
  * publication-eligible revision at the release read clock.
  *
  * - A publishable available revision becomes the frozen `current` estimate.
- * - `expired_since_calculation` fails closed into the deterministic
- *   `SOURCE_DATA_STALE` state evaluated at the read clock, so a missed expiry
- *   transition can never publish a live estimate.
+ * - `expired_since_calculation` retains the immutable calculable estimate.
+ *   Public reads apply the versioned current/last-known freshness policy at
+ *   one evaluation clock; release assembly never erases known economics due
+ *   to age alone.
  * - A sold-out product freezes the last estimate that was still current at
  *   sellout as explicit history; an incoherent freeze blocks the release.
  * - A missing revision is an explicit unknown-time unavailable state.
@@ -142,6 +145,17 @@ function composePackScoutPublicEv(
     };
   }
   const observedAt = projection.dataAsOf.observedAt;
+  const violatesPublicEvPolicy =
+    !packScoutPublicEvMetricsAreNonpositiveV3(projection.metrics);
+  const unavailableByPublicEvPolicy = (): PackScoutPublicEvV3 => ({
+    status: "unavailable",
+    ...versions,
+    metrics: null,
+    confidence: null,
+    calculatedAt: projection.calculatedAt,
+    dataAsOf: { state: "known", observedAt },
+    reason: "CALCULATION_UNAVAILABLE",
+  });
   const frozenObservation = {
     metrics: {
       grossEvMoney: { ...projection.metrics.grossEvMoney },
@@ -177,6 +191,7 @@ function composePackScoutPublicEv(
       soldOutMillis - observedMillis <=
         PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3
     ) {
+      if (violatesPublicEvPolicy) return unavailableByPublicEvPolicy();
       return {
         status: "sold_out_historical",
         ...versions,
@@ -203,17 +218,7 @@ function composePackScoutPublicEv(
       reason: "SOURCE_DATA_STALE",
     };
   }
-  if (eligibility.readState.state === "expired_since_calculation") {
-    return {
-      status: "unavailable",
-      ...versions,
-      metrics: null,
-      confidence: null,
-      calculatedAt: readAt,
-      dataAsOf: { state: "known", observedAt },
-      reason: "SOURCE_DATA_STALE",
-    };
-  }
+  if (violatesPublicEvPolicy) return unavailableByPublicEvPolicy();
   return {
     status: "current",
     ...versions,
@@ -435,6 +440,7 @@ export class DataReleaseV3ReleaseAssembler {
       await sha256CanonicalJson(DATA_RELEASE_V3_RELEASE_ID_DOMAIN, {
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -449,6 +455,7 @@ export class DataReleaseV3ReleaseAssembler {
         publicReleaseId,
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
@@ -463,6 +470,7 @@ export class DataReleaseV3ReleaseAssembler {
       manifest: {
         methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
         confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+        publicEvPolicyVersion: PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
         dataAsOf: readAt,
         contentHash,
         searchAlgorithmVersion: DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,

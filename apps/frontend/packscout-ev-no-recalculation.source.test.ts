@@ -94,7 +94,7 @@ test("components never format EV numbers or own break-even thresholds", () => {
   }
 });
 
-test("public surfaces resolve deadlines through the shared client store only", () => {
+test("public surfaces render the server-evaluated estimate without browser clock policy", () => {
   for (const name of [
     "components/catalog/OpportunityTable.client.tsx",
     "components/catalog/AllRepacksTable.client.tsx",
@@ -102,20 +102,28 @@ test("public surfaces resolve deadlines through the shared client store only", (
     "components/catalog/PackInspector.client.tsx",
   ]) {
     const source = readFileSync(path.join(frontendRoot, name), "utf8");
-    assert.match(source, /useDeadlineBoundPackScoutEv/, name);
-    assert.doesNotMatch(source, /Date\.now|setInterval/, name);
-    // No passive clock-tick live regions around EV state.
+    if (name === "components/catalog/OpportunityTable.client.tsx") {
+      assert.match(source, /presentOpportunityRow/, name);
+    } else {
+      assert.match(source, /packScoutEvPresentation/, name);
+    }
+    assert.doesNotMatch(source, /evEstimates\.packScout/, name);
+    assert.doesNotMatch(source, /safePresentPackScoutPublicEvV3/, name);
+    assert.doesNotMatch(source, /packscout-ev-deadline/, name);
+    assert.doesNotMatch(source, /Date\.now|setInterval|setTimeout/, name);
+    // Confidence is evaluated by the trusted public-read boundary. Components
+    // neither rescore it nor announce passive clock ticks.
+    assert.doesNotMatch(source, /scoreBasisPoints\s*[+*/-]/, name);
     assert.doesNotMatch(source, /aria-live="assertive"/, name);
   }
-});
 
-test("the deadline hook is hydration-safe with a stable server snapshot", () => {
-  const source = readFileSync(
-    path.join(frontendRoot, "lib/packscout-ev-deadline.client.ts"),
+  const overviewPresenter = readFileSync(
+    path.join(
+      frontendRoot,
+      "components/catalog/overview-presentation.ts",
+    ),
     "utf8",
   );
-  assert.match(source, /useSyncExternalStore/);
-  assert.match(source, /getServerSnapshot/);
-  assert.match(source, /function serverDeadlineSnapshot\(\): false/);
-  assert.doesNotMatch(source, /aria-live/);
+  assert.match(overviewPresenter, /packScoutEvPresentation/);
+  assert.doesNotMatch(overviewPresenter, /evEstimates\.packScout/);
 });

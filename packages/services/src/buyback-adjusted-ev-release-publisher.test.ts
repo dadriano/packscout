@@ -23,7 +23,7 @@ const REPACK_B = "00000000-0000-5000-8000-000000000302";
 
 async function assemblePlan(
   snapshot: DataReleaseV3CanonicalSnapshot,
-  gross = 12_000,
+  gross = 8_500,
 ): Promise<DataReleaseV3PublishPlan> {
   const assembler = new DataReleaseV3ReleaseAssembler(
     { loadCatalogSnapshot: async () => snapshot },

@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
   ApprovedPublicCatalogConfigurationV1,
   PackScoutBuybackEvEvidenceOutcomeV1,
+  PackScoutPublicEvPresentationV1,
   PublicRepackDetailV3,
   PublicRepackSummaryV3,
 } from "@packscout/contracts";
@@ -12,6 +13,7 @@ import {
   packScoutEvProjectionsAreByteEquivalentV3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
+  safePresentPackScoutPublicEvV3,
 } from "@packscout/contracts";
 import {
   BuybackEvRevisionRepository,
@@ -485,7 +487,7 @@ export async function seedBuybackEvCertificationCatalog(
 /** The narrow structural surface of the task-010 presentation boundary. */
 export interface PackScoutEvPresentationBoundary {
   presentPackScoutEvV3(input: {
-    estimate: PublicRepackDetailV3["evEstimates"]["packScout"];
+    estimate: PackScoutPublicEvPresentationV1;
     price: PublicRepackSummaryV3["price"];
     availability: PublicRepackSummaryV3["availability"];
     repackName?: string;
@@ -493,7 +495,7 @@ export interface PackScoutEvPresentationBoundary {
     availability: "available" | "unavailable";
     status: string;
     statusLabel: string;
-    semanticState: "positive" | "neutral" | "negative" | "unavailable";
+    semanticState: "neutral" | "negative" | "unavailable";
     simulated: boolean;
     zeroPayout: boolean;
     sourceLine: string;
@@ -776,6 +778,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     const platform = seed.platforms.get(fixture.providerKey)!;
     const evidence = fixture.normalize();
     const expected = fixture.expected;
+    const publicStatus = expected.publicStatus ?? expected.status;
 
     // Hop 1: source revision -> normalized evidence.
     check(
@@ -890,7 +893,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     check(state, detail !== null, "the staged release lost the repack row");
     if (detail !== null) {
       const estimate = detail.evEstimates.packScout;
-      if (expected.status === "current") {
+      if (publicStatus === "current") {
         const releaseMetrics = metricsOf(detail);
         check(
           state,
@@ -937,8 +940,18 @@ export async function runBuybackEvLaunchCertificationHarness(
       );
 
       // Hop 6: rendered presentation output.
-      const rendered = input.presentation.presentPackScoutEvV3({
+      const publicPresentation = safePresentPackScoutPublicEvV3(
         estimate,
+        CERTIFICATION_TIMELINE.readAt,
+      );
+      check(
+        state,
+        publicPresentation.success,
+        "the public freshness presentation could not be derived",
+      );
+      if (!publicPresentation.success) continue;
+      const rendered = input.presentation.presentPackScoutEvV3({
+        estimate: publicPresentation.presentation,
         price: detail.price,
         availability: detail.availability,
         repackName: detail.name,
@@ -967,7 +980,7 @@ export async function runBuybackEvLaunchCertificationHarness(
           rendered.adviceLine === "Not financial or gambling advice",
         "trust copy, provenance labeling, or the outbound-action rule diverged",
       );
-      if (expected.sourceAgeState !== null) {
+      if (publicStatus === "current" && expected.sourceAgeState !== null) {
         check(
           state,
           rendered.freshness.sourceAgeState === expected.sourceAgeState &&
@@ -1022,11 +1035,11 @@ export async function runBuybackEvLaunchCertificationHarness(
         calculatedAt: CERTIFICATION_TIMELINE.calculatedAt,
         effectiveFingerprint: fingerprint,
         revisionId: orEmpty(revision?.revisionId),
-        status: expected.status,
+        status: publicStatus,
         publicReason: expected.publicReason,
-        metrics: expected.status === "current" ? metricsOf(detail) : null,
+        metrics: publicStatus === "current" ? metricsOf(detail) : null,
         confidence:
-          expected.status === "current" &&
+          publicStatus === "current" &&
           detail.evEstimates.packScout.status === "current"
             ? {
                 scoreBasisPoints:
@@ -1052,7 +1065,7 @@ export async function runBuybackEvLaunchCertificationHarness(
         calculatedAt: CERTIFICATION_TIMELINE.calculatedAt,
         effectiveFingerprint: fingerprint,
         revisionId: orEmpty(revision?.revisionId),
-        status: expected.status,
+        status: publicStatus,
         publicReason: expected.publicReason,
         metrics: null,
         confidence: null,
@@ -1109,7 +1122,7 @@ export async function runBuybackEvLaunchCertificationHarness(
     readAt: CERTIFICATION_TIMELINE.readAtAfterPulls,
   });
   let secondReleaseId = "";
-  let pullsReleaseGross = -1;
+  let pullsReleasePolicyUnavailable = false;
   if (secondPlan.classification === "publish") {
     secondReleaseId = secondPlan.publicReleaseId;
     const secondDetails = secondPlan.batches
@@ -1122,10 +1135,10 @@ export async function runBuybackEvLaunchCertificationHarness(
     );
     if (
       clutchDetail !== undefined &&
-      clutchDetail.evEstimates.packScout.status === "current"
+      clutchDetail.evEstimates.packScout.status === "unavailable" &&
+      clutchDetail.evEstimates.packScout.reason === "CALCULATION_UNAVAILABLE"
     ) {
-      pullsReleaseGross =
-        clutchDetail.evEstimates.packScout.metrics.grossEvMoney.minorUnits;
+      pullsReleasePolicyUnavailable = true;
     }
   }
   const unprovenCommand: PackScoutBuybackEvRecomputationCommandV1 = {
@@ -1159,8 +1172,8 @@ export async function runBuybackEvLaunchCertificationHarness(
       : -1;
   const pullsVerifiedInventoryOnly =
     provenPullsGross === 4_900 &&
-    pullsReleaseGross === 4_900 &&
-    unprovenGross === 3_350;
+    unprovenGross === 3_350 &&
+    pullsReleasePolicyUnavailable;
 
   // Public-boundary sanitization: the serialized staged releases and every
   // rendered presentation must carry none of the forbidden tokens, and the

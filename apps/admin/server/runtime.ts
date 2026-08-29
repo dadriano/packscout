@@ -5,9 +5,8 @@ import {
   PrismaAuthAuditSink,
   PrismaAuthRepository,
   PrismaCanonicalInspectionRepository,
-  PrismaProviderConfigurationRepository,
-  PrismaProviderHealthRepository,
   PrismaProviderPromotionFactsRepository,
+  ProviderSourceAdminCatalogRepository,
 } from "@packscout/database";
 import {
   CanonicalInspectionService,
@@ -185,7 +184,6 @@ export async function createAdminRuntime(
     const canonicalInspection = new CanonicalInspectionService(
       new PrismaCanonicalInspectionRepository(database),
     );
-    const providerRepository = new PrismaProviderConfigurationRepository(database);
     const operational = createAdminOperationalRuntime({
       database,
       actorPseudonymKey: providerActorKey,
@@ -227,9 +225,7 @@ export async function createAdminRuntime(
       trustedProxyHops: input.trustedProxyHops,
       auth,
       providers: createProviderAdminRuntime({
-        repository: providerRepository,
-        healthRepository: new PrismaProviderHealthRepository(database),
-        operational,
+        repository: new ProviderSourceAdminCatalogRepository(database),
       }),
       importOperations: createAdminImportOperationsRuntime({
         database,

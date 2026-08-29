@@ -1,30 +1,39 @@
-import {
-  PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3,
-  type DataReleaseV3Identity,
-} from "@packscout/contracts";
 import type { DataReleaseStatusValue } from "./data-release-status.client";
-import type { GetPublicShellStatusV3Result } from "./public-repacks-v3";
+import type {
+  GetPublicShellStatusV3Result,
+  PublicShellStatusV3,
+} from "./public-repacks-v3";
 
 /**
- * Maps the active data_release_v3 identity to the shell freshness status.
- * The release carries no separate staleness policy, so the approved public
- * EV freshness window (60 minutes from the release data-as-of time) is the
- * one honest delay boundary.
+ * Maps the independently refreshed provider-health summary to the shell
+ * status. Immutable release age and per-estimate evidence age are deliberately
+ * not provider-health proxies.
  */
-export function dataReleaseStatusFromRelease(
-  release: DataReleaseV3Identity,
-  now: number = Date.now(),
+export function dataReleaseStatusFromProviderHealth(
+  health: PublicShellStatusV3["providerHealthSummary"],
+  providerHealthEvaluatedAt: string,
 ): DataReleaseStatusValue {
-  const dataAsOfMillis = Date.parse(release.dataAsOf);
-  const staleAtMillis =
-    dataAsOfMillis + PACKSCOUT_PUBLIC_EV_FRESHNESS_WINDOW_MILLISECONDS_V3;
+  if (
+    health.state === "unavailable" ||
+    health.observedAt === null ||
+    health.freshThrough === null
+  ) {
+    return health.nextHealthEvaluationAt === null
+      ? { state: "unavailable" }
+      : {
+          state: "unavailable",
+          evaluatedAt: providerHealthEvaluatedAt,
+          nextHealthEvaluationAt: health.nextHealthEvaluationAt,
+        };
+  }
   return {
-    state:
-      Number.isFinite(staleAtMillis) && now < staleAtMillis
-        ? "fresh"
-        : "delayed",
-    updatedAt: release.dataAsOf,
-    staleAt: new Date(staleAtMillis).toISOString(),
+    state: health.state === "healthy" ? "fresh" : "delayed",
+    updatedAt: health.observedAt,
+    freshThrough: health.freshThrough,
+    evaluatedAt: providerHealthEvaluatedAt,
+    nextHealthEvaluationAt: health.nextHealthEvaluationAt,
+    totalProviderCount: health.totalProviderCount,
+    delayedProviderCount: health.delayedProviderCount,
   };
 }
 
@@ -32,5 +41,8 @@ export function dataReleaseStatusFromPublicResult(
   result: GetPublicShellStatusV3Result,
 ): DataReleaseStatusValue {
   if (!result.ok) return { state: "unavailable" };
-  return dataReleaseStatusFromRelease(result.data.release);
+  return dataReleaseStatusFromProviderHealth(
+    result.data.providerHealthSummary,
+    result.data.providerHealthEvaluatedAt,
+  );
 }

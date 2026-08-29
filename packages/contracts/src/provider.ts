@@ -168,6 +168,19 @@ export interface ProviderConfigurationSummary {
   updatedAt: string;
 }
 
+/**
+ * Source-native provider identity stored at the root of Provider Sources.
+ * It deliberately excludes the retired provider configuration projection.
+ */
+export interface ProviderSourceRootSummary {
+  id: string;
+  platformKey: string;
+  displayName: string;
+  state: ProviderLifecycleState;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const providerConfigurationErrorCodes = [
   "BEARER_SECRET_REQUIRED",
   "CONFIG_REVISION_CONFLICT",

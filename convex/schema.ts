@@ -542,6 +542,48 @@ const buybackEvMethodVersionValidator = v.literal(
 const buybackEvConfidencePolicyVersionValidator = v.literal(
   "packscout-buyback-adjusted-ev-confidence-v1",
 );
+const publicEvPolicyVersionV3Validator = v.literal(
+  "packscout-public-ev-nonpositive-v1",
+);
+
+const dataReleaseV3ProviderSourceLifecycleValidator = v.union(
+  v.literal("active"),
+  v.literal("paused"),
+  v.literal("disabled"),
+);
+
+const dataReleaseV3ProviderHealthStateValidator = v.union(
+  v.literal("healthy"),
+  v.literal("degraded"),
+  v.literal("unhealthy"),
+  v.literal("unknown"),
+);
+
+const dataReleaseV3ProviderReleaseAlignmentValidator = v.union(
+  v.literal("aligned"),
+  v.literal("behind"),
+);
+
+/**
+ * Temporary retained-document compatibility for the public-EV-policy marker.
+ *
+ * Exact legacy shape: `dataReleaseV3Releases` rows and the active/previous
+ * pointer snapshots written before the nonpositive public-EV policy shipped do
+ * not have `publicEvPolicyVersion`. Convex validates those retained documents
+ * before deploying a schema, so requiring the field in its introducing deploy
+ * would make that deploy impossible. New release and pointer writers still
+ * always set the marker, while every serving/rollback reader rejects an absent
+ * or non-current marker.
+ *
+ * Owner: PackScout data-release V3 promotion maintainers.
+ * Removal condition: in a separate audited migration, backfill or retire every
+ * retained release without the marker and replace the singleton's active and
+ * previous pointer snapshots; after a bounded audit reports zero missing
+ * markers in both tables, make these two fields required in the next deploy.
+ */
+const retainedDataReleaseV3PublicEvPolicyVersionValidator = v.optional(
+  publicEvPolicyVersionV3Validator,
+);
 
 const buybackEvConfidenceResultValidator = v.object({
   policyVersion: buybackEvConfidencePolicyVersionValidator,
@@ -737,6 +779,7 @@ export const dataReleaseV3PointerValidator = v.object({
   releaseFingerprint: sha256Validator,
   methodVersion: buybackEvMethodVersionValidator,
   confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+  publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
   dataAsOf: timestampValidator,
   completedAt: timestampValidator,
   counts: dataReleaseV3CountsValidator,
@@ -1598,6 +1641,7 @@ export default defineSchema({
     ),
     methodVersion: buybackEvMethodVersionValidator,
     confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
     dataAsOf: timestampValidator,
     contentHash: sha256Validator,
     searchAlgorithmVersion: v.literal("repack_ev_search_v3"),
@@ -1714,6 +1758,30 @@ export default defineSchema({
   })
     .index("by_operation_id", ["operationId"])
     .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"]),
+
+  // Provider operations change independently of an immutable catalog release.
+  // Keep their high-churn observation state in a dedicated table so freshness
+  // updates never rewrite stable release documents or their active pointer.
+  dataReleaseV3ProviderObservations: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicReleaseId: v.string(),
+    releaseFingerprint: sha256Validator,
+    publicVendorId: v.string(),
+    vendorKey: v.string(),
+    observationSequence: v.number(),
+    observedAt: timestampValidator,
+    freshThrough: timestampValidator,
+    lastHeadReachedAt: nullableTimestampValidator,
+    sourceHeadSequence: v.string(),
+    settledSequence: v.string(),
+    sourceLifecycle: dataReleaseV3ProviderSourceLifecycleValidator,
+    connectionState: dataReleaseV3ProviderHealthStateValidator,
+    qualityState: dataReleaseV3ProviderHealthStateValidator,
+    releaseAlignment: dataReleaseV3ProviderReleaseAlignmentValidator,
+  }).index("by_release_id_and_public_vendor_id", [
+    "releaseId",
+    "publicVendorId",
+  ]),
 
   activeDataReleaseV3State: defineTable({
     key: v.literal("singleton"),

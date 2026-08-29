@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   publicRepackViewDetailV3Schema,
+  safePresentPackScoutPublicEvV3,
   unavailableRepackHeat,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -197,16 +198,16 @@ test("seed, clock, and frame control changes each produce the expected new resul
   );
   assert.equal(shifted[0]!.readAt, "2026-08-19T13:00:00.000Z");
 
-  // Price-driven transition: the $100 listing reprices to $80 and turns
-  // positive; pull-driven and value-driven transitions also change bytes.
+  // Price-driven transition: the $100 listing reprices to $80, its raw result
+  // turns positive, and the public policy makes the estimate unavailable.
   const frame0 = baseline[0]!;
   const frame1 = baseline[1]!;
   const priced0 = detailFor(frame0, "courtyard-uniform-price-shift");
   const priced1 = detailFor(frame1, "courtyard-uniform-price-shift");
   assert.ok(priced0.evEstimates.packScout.status === "current");
-  assert.ok(priced1.evEstimates.packScout.status === "current");
+  assert.ok(priced1.evEstimates.packScout.status === "unavailable");
   assert.equal(priced0.evEstimates.packScout.metrics.evDollars.minorUnits, -1_500);
-  assert.equal(priced1.evEstimates.packScout.metrics.evDollars.minorUnits, 500);
+  assert.equal(priced1.evEstimates.packScout.reason, "CALCULATION_UNAVAILABLE");
 
   const transitioned = ["courtyard-uniform-price-shift", "clutchpacks-pool-pulls", "trove-per-draw-final-payout"]
     .filter((scenarioKey) =>
@@ -242,10 +243,23 @@ test("every approved public state appears and passes the production contracts", 
       assert.ok(isPackScoutBuybackEvSimulatedPublicIdV1(detail.publicRepackId));
       assert.ok(detail.vendorKey.startsWith("simulated-"));
       assert.ok(detail.name.startsWith("[Simulated]"));
+      const presented = safePresentPackScoutPublicEvV3(
+        detail.evEstimates.packScout,
+        result.readAt,
+      );
+      assert.equal(presented.success, true);
+      if (!presented.success) continue;
       // Heat stays explicitly unavailable on v3 views (documented divergence).
       const view = publicRepackViewDetailV3Schema.safeParse({
         ...detail,
         heat: unavailableRepackHeat(),
+        packScoutEvPresentation: presented.presentation,
+        providerHealth: {
+          state: "healthy",
+          observedAt: result.readAt,
+          rankingEligible: true,
+          rankingIneligibilityReason: null,
+        },
       });
       assert.ok(view.success);
       assert.ok(!JSON.stringify(detail).includes('"heat"'));
@@ -259,10 +273,14 @@ test("every approved public state appears and passes the production contracts", 
   const frame2 = results[2]!;
   const frame3 = results[3]!;
 
-  // Positive, neutral, negative, and valid zero-payout available states.
-  const positive = detailFor(results[1]!, "courtyard-uniform-price-shift");
-  assert.ok(positive.evEstimates.packScout.status === "current");
-  assert.ok(positive.evEstimates.packScout.metrics.evDollars.minorUnits > 0);
+  // Positive raw results fail closed; neutral, negative, and valid zero-payout
+  // states remain available.
+  const positiveRaw = detailFor(results[1]!, "courtyard-uniform-price-shift");
+  assert.ok(positiveRaw.evEstimates.packScout.status === "unavailable");
+  assert.equal(
+    positiveRaw.evEstimates.packScout.reason,
+    "CALCULATION_UNAVAILABLE",
+  );
   const neutral = detailFor(frame2, "gamestop-fixed-offers");
   assert.ok(neutral.evEstimates.packScout.status === "current");
   assert.equal(neutral.evEstimates.packScout.metrics.evDollars.minorUnits, 0);
@@ -313,20 +331,21 @@ test("every approved public state appears and passes the production contracts", 
     "unavailable:VALUE_UNAVAILABLE",
   );
 
-  // The fixed observation expires purely by advancing the calculation clock.
+  // The fixed observation becomes last-known purely by advancing the read
+  // clock; its immutable release metrics remain present.
   assert.deepEqual(states.get("courtyard-source-age-expiry"), [
     "current",
     "current",
-    "unavailable:SOURCE_DATA_STALE",
-    "unavailable:SOURCE_DATA_STALE",
+    "last_known",
+    "last_known",
   ]);
 
   // Sold-out history stays frozen with its original confidence.
   assert.deepEqual(states.get("trove-sold-out-historical"), [
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
+    "historical",
+    "historical",
+    "historical",
+    "historical",
   ]);
 
   // Per-pack and per-draw unit bases both traverse the path.

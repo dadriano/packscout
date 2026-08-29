@@ -9,8 +9,9 @@ import {
   type PublicRepackChase,
 } from "@packscout/contracts";
 import { convexTest, type TestConvex } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
+import { MAX_DATA_RELEASE_V3_REPACKS } from "./dataReleaseV3Search";
 import schema from "./schema";
 import {
   buildV3Chase,
@@ -32,6 +33,7 @@ import {
   V3_REPACK_ID_A,
   V3_REPACK_ID_B,
   V3_REPACK_ID_C,
+  V3_VENDOR_ID,
   type V3FixturePlan,
 } from "./dataReleaseV3Fixture.test-support";
 
@@ -41,6 +43,25 @@ type V3Test = TestConvex<typeof schema>;
 const RELEASE_ID_1 = "10000000-0000-4000-8000-000000000001";
 const NOW = V3_FIXTURE_NOW;
 const AFTER_DEADLINE = Date.parse(V3_EXPIRES_AT) + 1;
+const CURSOR_HMAC_KEY = "packscout-v3-cursor-test-key-000000000000000001";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
+
+function tamperCursorEvaluationTime(cursor: string): string {
+  const base64 = cursor.replace(/-/gu, "+").replace(/_/gu, "/");
+  const decoded = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
+  const envelope = JSON.parse(decoded) as {
+    confidenceEvaluatedAtMillis: number;
+  };
+  envelope.confidenceEvaluatedAtMillis -= 1;
+  return btoa(JSON.stringify(envelope))
+    .replace(/\+/gu, "-")
+    .replace(/\//gu, "_")
+    .replace(/=+$/u, "");
+}
 
 function unavailableVendorEv() {
   return {
@@ -53,7 +74,7 @@ function unavailableVendorEv() {
 }
 
 /**
- * Fixture set: B ranks first (+$25 EV), A second (+$20 EV), C is sold out
+ * Fixture set: B ranks first (-$5 EV), A second (-$15 EV), C is sold out
  * with visible history, D is available without an estimate.
  */
 const V3_REPACK_ID_D = "00000000-0000-5000-8000-000000000304";
@@ -136,7 +157,7 @@ function fixtureDetails() {
       publicRepackId: V3_REPACK_ID_B,
       name: "Pokemon Value Gacha",
       evEstimates: {
-        packScout: buildV3CurrentEv(12_500),
+        packScout: buildV3CurrentEv(9_500),
         vendorReported: unavailableVendorEv(),
       },
     }),
@@ -184,7 +205,54 @@ async function publishFixture(
     internal.dataReleaseV3Lifecycle.activate,
     await v3Body(v3ActivateRequest(plan, null)),
   );
+  await seedHealthyProviderObservations(t, plan);
   return plan;
+}
+
+async function seedHealthyProviderObservations(
+  t: V3Test,
+  plan: V3FixturePlan,
+): Promise<void> {
+  await t.run(async (ctx) => {
+    const release = await ctx.db
+      .query("dataReleaseV3Releases")
+      .withIndex("by_public_release_id", (index) =>
+        index.eq("publicReleaseId", plan.publicReleaseId),
+      )
+      .unique();
+    if (release === null) throw new Error("missing fixture release");
+    const shards = await ctx.db
+      .query("dataReleaseV3SearchShards")
+      .withIndex("by_release_id_and_shard_number", (index) =>
+        index.eq("releaseId", release._id),
+      )
+      .collect();
+    const vendors = new Map<string, string>();
+    for (const row of shards.flatMap(({ rows }) => rows)) {
+      vendors.set(row.publicVendorId, row.vendorKey);
+    }
+    const observedAt = new Date(NOW).toISOString();
+    const freshThrough = new Date(NOW + 24 * 60 * 60_000).toISOString();
+    for (const [publicVendorId, vendorKey] of vendors) {
+      await ctx.db.insert("dataReleaseV3ProviderObservations", {
+        releaseId: release._id,
+        publicReleaseId: plan.publicReleaseId,
+        releaseFingerprint: plan.releaseFingerprint,
+        publicVendorId,
+        vendorKey,
+        observationSequence: 1,
+        observedAt,
+        freshThrough,
+        lastHeadReachedAt: observedAt,
+        sourceHeadSequence: "100",
+        settledSequence: "100",
+        sourceLifecycle: "active",
+        connectionState: "healthy",
+        qualityState: "healthy",
+        releaseAlignment: "aligned",
+      });
+    }
+  });
 }
 
 type AnyResult = { ok: boolean } & Record<string, unknown>;
@@ -192,21 +260,28 @@ type AnyResult = { ok: boolean } & Record<string, unknown>;
 describe("data_release_v3 public reads", () => {
   test("no reads succeed before activation and shell status carries the release identity after", async () => {
     const t = convexTest(schema, modules);
-    const before = (await t.query(api.publicRepacksV3.getPublicShellStatusV3, {})) as AnyResult;
+    const before = (await t.query(internal.publicRepacksV3.getPublicShellStatusV3AtTime, {
+      currentTime: NOW,
+    })) as AnyResult;
     expect(before.ok).toBe(false);
     expect((before as { code?: string }).code).toBe("RELEASE_UNAVAILABLE");
     await publishFixture(t);
-    const after = (await t.query(api.publicRepacksV3.getPublicShellStatusV3, {})) as AnyResult;
+    const after = (await t.query(internal.publicRepacksV3.getPublicShellStatusV3AtTime, {
+      currentTime: NOW,
+    })) as AnyResult;
     expect(after.ok).toBe(true);
     const release = (after.data as { release: Record<string, unknown> }).release;
     expect(release.publicReleaseId).toBe(RELEASE_ID_1);
     expect(release.methodVersion).toBe("packscout-buyback-adjusted-ev-v1");
+    expect(release.publicEvPolicyVersion).toBe(
+      "packscout-public-ev-nonpositive-v1",
+    );
   });
 
   test("dashboard ranks by signed EV dollars, excludes ineligible repacks, and aggregates with the same rules", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
-    const result = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+    const result = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
       filters: { availability: "all" },
       currentTime: NOW,
     })) as AnyResult;
@@ -215,7 +290,6 @@ describe("data_release_v3 public reads", () => {
       opportunities: { publicRepackId: string }[];
       kpis: {
         totalRepacks: number;
-        positiveEvRepacks: number;
         highConfidenceRepacks: number;
         medianPackScoutEvPercent: { status: string; basisPoints: number | null };
       };
@@ -225,23 +299,21 @@ describe("data_release_v3 public reads", () => {
       }[];
       selectedRepack: { publicRepackId: string } | null;
     };
-    // B (+$25) outranks A (+$20); sold-out C and unavailable D never rank.
+    // B (-$5) outranks A (-$15); sold-out C and unavailable D never rank.
     expect(data.opportunities.map(({ publicRepackId }) => publicRepackId)).toEqual([
       V3_REPACK_ID_B,
       V3_REPACK_ID_A,
     ]);
     expect(data.selectedRepack?.publicRepackId).toBe(V3_REPACK_ID_B);
     expect(data.kpis.totalRepacks).toBe(4);
-    // Positive-EV counts admit only available repacks with a current estimate.
-    expect(data.kpis.positiveEvRepacks).toBe(2);
-    // Median excludes unavailable and sold-out estimates: (2000+2500)/2.
+    // Median excludes unavailable and sold-out estimates: (-1500+-500)/2.
     expect(data.kpis.medianPackScoutEvPercent).toEqual({
       status: "available",
-      basisPoints: 2_250,
+      basisPoints: -1_000,
     });
     expect(data.vendorSummaries[0]?.repackCount).toBe(4);
     expect(data.vendorSummaries[0]?.medianPackScoutEvPercent.basisPoints).toBe(
-      2_250,
+      -1_000,
     );
   });
 
@@ -272,7 +344,8 @@ describe("data_release_v3 public reads", () => {
       internal.dataReleaseV3Lifecycle.activate,
       await v3Body(v3ActivateRequest(plan, null)),
     );
-    const result = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+    await seedHealthyProviderObservations(t, plan);
+    const result = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
       currentTime: NOW,
     })) as AnyResult;
     expect(result.ok).toBe(true);
@@ -286,7 +359,7 @@ describe("data_release_v3 public reads", () => {
   test("the list keeps sold-out history visible without ranking or action and keeps unavailable reasons public", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
-    const result = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const result = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       filters: { availability: "all" },
       sort: "packscout_ev_dollars",
       direction: "desc",
@@ -325,7 +398,7 @@ describe("data_release_v3 public reads", () => {
     expect(unavailable.evEstimates.packScout.status).toBe("unavailable");
     expect(unavailable.evEstimates.packScout.reason).toBe("BUYBACK_UNAVAILABLE");
     // Null EV rows also rank last on ascending sorts.
-    const ascending = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const ascending = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       filters: { availability: "all" },
       sort: "packscout_ev_dollars",
       direction: "asc",
@@ -339,7 +412,7 @@ describe("data_release_v3 public reads", () => {
       V3_REPACK_ID_D,
     ]);
     // The v3 contract has no vendor-reported percent projection to sort by.
-    const unsupported = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const unsupported = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       sort: "vendor_reported_ev_percent",
       currentTime: NOW,
     })) as AnyResult;
@@ -350,8 +423,8 @@ describe("data_release_v3 public reads", () => {
     const t = convexTest(schema, modules);
     // Every non-available pack here carries a *current* PackScout estimate, so
     // only the availability guard itself can keep them out of the filtered
-    // list, the opportunity ranking, and the positive-EV count. All three also
-    // out-chase the available pack, so any headline KPI that reads an ungated
+    // list and the opportunity ranking. They also out-chase the available
+    // pack, so any headline KPI that reads an ungated
     // row reports their number instead of the available pack's.
     await publishFixture(
       t,
@@ -377,7 +450,7 @@ describe("data_release_v3 public reads", () => {
     );
 
     // The default filter is "available": nothing else may appear.
-    const filtered = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const filtered = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       currentTime: NOW,
     })) as AnyResult;
     expect(filtered.ok).toBe(true);
@@ -392,7 +465,7 @@ describe("data_release_v3 public reads", () => {
 
     // "all" is the only way the other three states become visible, each
     // presented with its exact public availability value.
-    const everything = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const everything = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       filters: { availability: "all" },
       currentTime: NOW,
     })) as AnyResult;
@@ -428,8 +501,8 @@ describe("data_release_v3 public reads", () => {
       ).toBe(detail.availability !== "available");
     }
 
-    // Ranking and the positive-EV KPI admit the available pack alone.
-    const dashboard = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+    // Ranking admits the available pack alone.
+    const dashboard = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
       filters: { availability: "all" },
       currentTime: NOW,
     })) as AnyResult;
@@ -438,7 +511,6 @@ describe("data_release_v3 public reads", () => {
       opportunities: { publicRepackId: string }[];
       kpis: {
         totalRepacks: number;
-        positiveEvRepacks: number;
         highestChaseValueUsdMinor: number | null;
       };
     };
@@ -447,7 +519,6 @@ describe("data_release_v3 public reads", () => {
     ).toEqual([V3_REPACK_ID_A]);
     // The catalog total stays ungated: all four states remain discoverable.
     expect(dashboardData.kpis.totalRepacks).toBe(4);
-    expect(dashboardData.kpis.positiveEvRepacks).toBe(1);
     // The headline chase value reports the available pack's chase, never the
     // richer chase sitting inside a sold_out, unavailable, or unknown pack.
     expect(dashboardData.kpis.highestChaseValueUsdMinor).toBe(
@@ -455,10 +526,10 @@ describe("data_release_v3 public reads", () => {
     );
   });
 
-  test("a current estimate past its deadline fails closed at read time without any new transition", async () => {
+  test("a current estimate past 60 minutes remains visible as last known with decayed confidence", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
-    const result = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+    const result = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
       filters: { availability: "all" },
       currentTime: AFTER_DEADLINE,
     })) as AnyResult;
@@ -466,42 +537,445 @@ describe("data_release_v3 public reads", () => {
     const data = result.data as {
       opportunities: unknown[];
       kpis: {
-        positiveEvRepacks: number;
         medianPackScoutEvPercent: { status: string };
       };
     };
-    expect(data.opportunities).toEqual([]);
-    expect(data.kpis.positiveEvRepacks).toBe(0);
-    expect(data.kpis.medianPackScoutEvPercent.status).toBe("unavailable");
+    expect(data.opportunities).toHaveLength(2);
+    expect(data.kpis.medianPackScoutEvPercent.status).toBe("available");
 
-    const detail = (await t.query(api.publicRepacksV3.getPublicRepackV3, {
+    const detail = (await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
       publicRepackId: V3_REPACK_ID_A,
       publicReleaseId: RELEASE_ID_1,
       currentTime: AFTER_DEADLINE,
     })) as AnyResult;
     expect(detail.ok).toBe(true);
-    const packScout = (detail.data as {
+    const detailData = detail.data as {
       evEstimates: {
-        packScout: { status: string; reason?: string; dataAsOf?: unknown };
+        packScout: { status: string; metrics?: unknown; dataAsOf?: unknown };
       };
-    }).evEstimates.packScout;
-    expect(packScout.status).toBe("unavailable");
-    expect(packScout.reason).toBe("SOURCE_DATA_STALE");
-    expect(packScout.dataAsOf).toEqual({
+      packScoutEvPresentation: {
+        status: string;
+        metrics: unknown;
+        confidence: { scoreBasisPoints: number };
+      };
+    };
+    // The immutable release estimate is never rewritten by a public read.
+    expect(detailData.evEstimates.packScout.status).toBe("current");
+    expect(detailData.evEstimates.packScout.metrics).toBeDefined();
+    expect(detailData.evEstimates.packScout.dataAsOf).toEqual({
       state: "known",
       observedAt: new Date(NOW - 5 * 60_000).toISOString(),
     });
-    // At the exact deadline the estimate is still presentable.
-    const atDeadline = (await t.query(api.publicRepacksV3.getPublicRepackV3, {
+    expect(detailData.packScoutEvPresentation.status).toBe("last_known");
+    expect(detailData.packScoutEvPresentation.metrics).toBeDefined();
+    expect(
+      detailData.packScoutEvPresentation.confidence.scoreBasisPoints,
+    ).toBeLessThanOrEqual(7_500);
+    // At the exact 60-minute boundary the public overlay is still current.
+    const atDeadline = (await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
       publicRepackId: V3_REPACK_ID_A,
       publicReleaseId: RELEASE_ID_1,
       currentTime: Date.parse(V3_EXPIRES_AT),
     })) as AnyResult;
     expect(
-      (atDeadline.data as { evEstimates: { packScout: { status: string } } })
-        .evEstimates.packScout.status,
+      (atDeadline.data as { packScoutEvPresentation: { status: string } })
+        .packScoutEvPresentation.status,
     ).toBe("current");
   });
+
+  test("the public detail action evaluates freshness from the trusted server clock", async () => {
+    const t = convexTest(schema, modules);
+    await publishFixture(t);
+    vi.useFakeTimers();
+    vi.setSystemTime(AFTER_DEADLINE);
+
+    const detail = (await t.action(api.publicRepacksV3.getPublicRepackV3, {
+      publicRepackId: V3_REPACK_ID_A,
+      publicReleaseId: RELEASE_ID_1,
+    })) as AnyResult;
+
+    expect(detail.ok).toBe(true);
+    expect(
+      (detail.data as {
+        packScoutEvPresentation: {
+          status: string;
+          confidenceEvaluatedAt: string;
+        };
+      }).packScoutEvPresentation,
+    ).toMatchObject({
+      status: "last_known",
+      confidenceEvaluatedAt: new Date(AFTER_DEADLINE).toISOString(),
+    });
+  });
+
+  test("provider health fails Top Opportunities closed without hiding EV", async () => {
+    const scenarios = [
+      {
+        name: "missing",
+        reason: "PROVIDER_HEALTH_UNAVAILABLE",
+        summaryState: "unavailable",
+      },
+      {
+        name: "paused",
+        reason: "PROVIDER_PAUSED",
+        summaryState: "delayed",
+      },
+      {
+        name: "unhealthy",
+        reason: "PROVIDER_UNHEALTHY",
+        summaryState: "delayed",
+      },
+      {
+        name: "behind",
+        reason: "PROVIDER_BEHIND",
+        summaryState: "delayed",
+      },
+      {
+        name: "stale",
+        reason: "PROVIDER_OBSERVATION_STALE",
+        summaryState: "delayed",
+      },
+      {
+        name: "fresh_boundary",
+        reason: "PROVIDER_OBSERVATION_STALE",
+        summaryState: "delayed",
+      },
+      {
+        name: "future_observation",
+        reason: "PROVIDER_UNHEALTHY",
+        summaryState: "delayed",
+      },
+      {
+        name: "corrupt_timestamp",
+        reason: "PROVIDER_HEALTH_UNAVAILABLE",
+        summaryState: "unavailable",
+      },
+      {
+        name: "release_mismatch",
+        reason: "RELEASE_MISMATCH",
+        summaryState: "delayed",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const t = convexTest(schema, modules);
+      await publishFixture(t);
+      await t.run(async (ctx) => {
+        const observation = await ctx.db
+          .query("dataReleaseV3ProviderObservations")
+          .unique();
+        if (observation === null) throw new Error("missing provider fixture");
+        switch (scenario.name) {
+          case "missing":
+            await ctx.db.delete(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+            );
+            break;
+          case "paused":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { sourceLifecycle: "paused" },
+            );
+            break;
+          case "unhealthy":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { connectionState: "degraded" },
+            );
+            break;
+          case "behind":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { releaseAlignment: "behind" },
+            );
+            break;
+          case "stale": {
+            const observedAt = new Date(NOW - 10 * 60_000).toISOString();
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              {
+                observedAt,
+                freshThrough: new Date(NOW - 1).toISOString(),
+                lastHeadReachedAt: observedAt,
+              },
+            );
+            break;
+          }
+          case "fresh_boundary":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { freshThrough: new Date(NOW).toISOString() },
+            );
+            break;
+          case "future_observation": {
+            const observedAt = new Date(NOW + 60_000).toISOString();
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              {
+                observedAt,
+                lastHeadReachedAt: observedAt,
+              },
+            );
+            break;
+          }
+          case "corrupt_timestamp":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { observedAt: "not-a-timestamp" },
+            );
+            break;
+          case "release_mismatch":
+            await ctx.db.patch(
+              "dataReleaseV3ProviderObservations",
+              observation._id,
+              { releaseFingerprint: "f".repeat(64) },
+            );
+            break;
+        }
+      });
+
+      const dashboard = (await t.query(
+        internal.publicRepacksV3.getDashboardBundleV3AtTime,
+        { currentTime: NOW },
+      )) as AnyResult;
+      expect(dashboard.ok, scenario.name).toBe(true);
+      const dashboardData = dashboard.data as {
+        opportunities: unknown[];
+        providerHealthSummary: { state: string };
+        opportunityEligibility: {
+          rankingEligibleRepackCount: number;
+          providerIneligibleRepackCount: number;
+        };
+        kpis: { medianPackScoutEvPercent: { status: string } };
+      };
+      expect(dashboardData.opportunities, scenario.name).toEqual([]);
+      expect(dashboardData.providerHealthSummary.state, scenario.name).toBe(
+        scenario.summaryState,
+      );
+      expect(dashboardData.opportunityEligibility, scenario.name).toEqual({
+        rankingEligibleRepackCount: 0,
+        providerIneligibleRepackCount: 2,
+      });
+      expect(
+        dashboardData.kpis.medianPackScoutEvPercent.status,
+        scenario.name,
+      ).toBe("available");
+
+      const list = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+        currentTime: NOW,
+      })) as AnyResult;
+      expect(list.ok, scenario.name).toBe(true);
+      const detail = (
+        list.data as {
+          details: {
+            publicRepackId: string;
+            providerHealth: {
+              rankingEligible: boolean;
+              rankingIneligibilityReason: string | null;
+            };
+            packScoutEvPresentation: { status: string; metrics: unknown };
+          }[];
+        }
+      ).details.find(({ publicRepackId }) => publicRepackId === V3_REPACK_ID_A)!;
+      expect(detail.providerHealth, scenario.name).toMatchObject({
+        rankingEligible: false,
+        rankingIneligibilityReason: scenario.reason,
+      });
+      expect(detail.packScoutEvPresentation.status, scenario.name).toBe(
+        "current",
+      );
+      expect(detail.packScoutEvPresentation.metrics, scenario.name).not.toBeNull();
+    }
+  });
+
+  test("a delayed provider still exposes the next eligible provider-health deadline", async () => {
+    const t = convexTest(schema, modules);
+    const secondVendorId = "00000000-0000-5000-8000-000000000009";
+    await publishFixture(t, [
+      buildV3Detail({ publicRepackId: V3_REPACK_ID_A }),
+      buildV3Detail({
+        publicRepackId: V3_REPACK_ID_B,
+        publicVendorId: secondVendorId,
+        vendorKey: "second_vendor",
+        vendorDisplayName: "Second Vendor",
+      }),
+    ]);
+    const nextHealthEvaluationAt = new Date(NOW + 60_000).toISOString();
+    await t.run(async (ctx) => {
+      const observations = await ctx.db
+        .query("dataReleaseV3ProviderObservations")
+        .collect();
+      const first = observations.find(
+        ({ publicVendorId }) => publicVendorId === V3_VENDOR_ID,
+      );
+      const second = observations.find(
+        ({ publicVendorId }) => publicVendorId === secondVendorId,
+      );
+      if (first === undefined || second === undefined) {
+        throw new Error("missing provider observations");
+      }
+      const delayedObservedAt = new Date(NOW - 10 * 60_000).toISOString();
+      await ctx.db.patch("dataReleaseV3ProviderObservations", first._id, {
+        sourceLifecycle: "paused",
+        observedAt: delayedObservedAt,
+        lastHeadReachedAt: delayedObservedAt,
+        freshThrough: new Date(NOW - 1).toISOString(),
+      });
+      await ctx.db.patch("dataReleaseV3ProviderObservations", second._id, {
+        freshThrough: nextHealthEvaluationAt,
+      });
+    });
+
+    const beforeBoundary = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: NOW },
+    )) as AnyResult;
+    expect(beforeBoundary.ok).toBe(true);
+    expect(beforeBoundary.data).toMatchObject({
+      providerHealthSummary: {
+        state: "delayed",
+        freshThrough: new Date(NOW - 1).toISOString(),
+        nextHealthEvaluationAt,
+      },
+      opportunities: [{ publicRepackId: V3_REPACK_ID_B }],
+    });
+
+    const atBoundary = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: NOW + 60_000 },
+    )) as AnyResult;
+    expect(atBoundary.ok).toBe(true);
+    expect(atBoundary.data).toMatchObject({
+      providerHealthSummary: {
+        state: "delayed",
+        nextHealthEvaluationAt: null,
+      },
+      opportunities: [],
+    });
+  });
+
+  test("retained V6 rows without static confidence metadata hydrate exactly", async () => {
+    const t = convexTest(schema, modules);
+    await publishFixture(t);
+    await t.run(async (ctx) => {
+      const shards = await ctx.db.query("dataReleaseV3SearchShards").collect();
+      for (const shard of shards) {
+        await ctx.db.patch("dataReleaseV3SearchShards", shard._id, {
+          rows: shard.rows.map((row) => {
+            const {
+              packScoutStaticConfidencePenaltyBasisPoints: _omitted,
+              ...retainedRow
+            } = row;
+            return retainedRow;
+          }),
+        });
+      }
+    });
+
+    const dashboard = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: AFTER_DEADLINE },
+    )) as AnyResult;
+    expect(dashboard.ok).toBe(true);
+    expect(
+      (dashboard.data as { kpis: { highConfidenceRepacks: number } }).kpis
+        .highConfidenceRepacks,
+    ).toBe(0);
+
+    const list = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+      sort: "packscout_confidence",
+      direction: "desc",
+      currentTime: AFTER_DEADLINE,
+    })) as AnyResult;
+    expect(list.ok).toBe(true);
+    const presented = (
+      list.data as {
+        details: {
+          publicRepackId: string;
+          packScoutEvPresentation: {
+            status: string;
+            confidence: { scoreBasisPoints: number } | null;
+          };
+        }[];
+      }
+    ).details.find(({ publicRepackId }) => publicRepackId === V3_REPACK_ID_A)!;
+    expect(presented.packScoutEvPresentation.status).toBe("last_known");
+    expect(
+      presented.packScoutEvPresentation.confidence?.scoreBasisPoints,
+    ).toBeLessThanOrEqual(7_500);
+  });
+
+  test("retained confidence hydration supports the full release bound while new rows stay on the hot path", async () => {
+    const details = Array.from(
+      { length: MAX_DATA_RELEASE_V3_REPACKS },
+      (_, index) =>
+        buildV3Detail({
+          publicRepackId:
+            `00000000-0000-5000-8000-${String(index + 1_000).padStart(12, "0")}`,
+          name: `Capacity Pack ${index + 1}`,
+        }),
+    );
+
+    const t = convexTest(schema, modules);
+    await publishFixture(t, details);
+    const currentDashboard = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: AFTER_DEADLINE },
+    )) as AnyResult;
+    expect(currentDashboard.ok).toBe(true);
+
+    await t.run(async (ctx) => {
+      const shards = await ctx.db.query("dataReleaseV3SearchShards").collect();
+      for (const shard of shards) {
+        await ctx.db.patch("dataReleaseV3SearchShards", shard._id, {
+          rows: shard.rows.map((row) => {
+            const {
+              packScoutStaticConfidencePenaltyBasisPoints: _omitted,
+              ...retainedRow
+            } = row;
+            return retainedRow;
+          }),
+        });
+      }
+    });
+    const retainedDashboard = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: AFTER_DEADLINE },
+    )) as AnyResult;
+    expect(retainedDashboard.ok).toBe(true);
+    expect(
+      (retainedDashboard.data as { kpis: { totalRepacks: number } }).kpis
+        .totalRepacks,
+    ).toBe(MAX_DATA_RELEASE_V3_REPACKS);
+
+    await t.run(async (ctx) => {
+      const stored = await ctx.db
+        .query("dataReleaseV3Repacks")
+        .withIndex("by_release_id_and_public_repack_id")
+        .order("desc")
+        .first();
+      if (stored === null) throw new Error("missing capacity detail");
+      await ctx.db.patch("dataReleaseV3Repacks", stored._id, {
+        detail: { ...stored.detail, name: "Mismatched capacity detail" },
+      });
+    });
+    const mismatchedDashboard = (await t.query(
+      internal.publicRepacksV3.getDashboardBundleV3AtTime,
+      { currentTime: AFTER_DEADLINE },
+    )) as AnyResult;
+    expect(mismatchedDashboard).toMatchObject({
+      ok: false,
+      code: "RELEASE_UNAVAILABLE",
+    });
+  }, 15_000);
 
   test("desired-collectible matching binds rows to chases and search stays bounded", async () => {
     const t = convexTest(schema, modules);
@@ -509,7 +983,7 @@ describe("data_release_v3 public reads", () => {
       buildV3Collectible(),
       standaloneCollectible(),
     ]);
-    const list = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const list = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       desiredPublicCollectibleId: V3_COLLECTIBLE_ID,
       currentTime: NOW,
     })) as AnyResult;
@@ -530,7 +1004,7 @@ describe("data_release_v3 public reads", () => {
       data.desiredChaseMatches.map(({ publicRepackId }) => publicRepackId).sort(),
     ).toEqual([V3_REPACK_ID_A, V3_REPACK_ID_B, V3_REPACK_ID_D].sort());
 
-    const found = (await t.query(api.publicRepacksV3.findRepacksByDesiredCollectibleV3, {
+    const found = (await t.query(internal.publicRepacksV3.findRepacksByDesiredCollectibleV3AtTime, {
       publicCollectibleId: V3_COLLECTIBLE_ID,
       currentTime: NOW,
     })) as AnyResult;
@@ -565,7 +1039,7 @@ describe("data_release_v3 public reads", () => {
     ).toBe(V3_STANDALONE_COLLECTIBLE_ID);
 
     const noRepackMatches = (await t.query(
-      api.publicRepacksV3.findRepacksByDesiredCollectibleV3,
+      internal.publicRepacksV3.findRepacksByDesiredCollectibleV3AtTime,
       {
         publicCollectibleId: V3_STANDALONE_COLLECTIBLE_ID,
         currentTime: NOW,
@@ -576,47 +1050,186 @@ describe("data_release_v3 public reads", () => {
   });
 
   test("pagination is bounded, fingerprinted, and survives release changes explicitly", async () => {
+    vi.stubEnv("PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY", CURSOR_HMAC_KEY);
     const t = convexTest(schema, modules);
     await publishFixture(t);
-    const first = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    await t.run(async (ctx) => {
+      const observations = await ctx.db
+        .query("dataReleaseV3ProviderObservations")
+        .collect();
+      for (const observation of observations) {
+        await ctx.db.patch("dataReleaseV3ProviderObservations", observation._id, {
+          freshThrough: V3_EXPIRES_AT,
+        });
+      }
+    });
+    const firstEvaluationTime = Date.parse(V3_EXPIRES_AT) - 5 * 60_000;
+    const laterWallTime = firstEvaluationTime + 10 * 60_000;
+    const first = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       filters: { availability: "all" },
+      sort: "packscout_confidence",
+      direction: "desc",
       pageSize: 2,
-      currentTime: NOW,
+      currentTime: firstEvaluationTime,
     })) as AnyResult;
     expect(first.ok).toBe(true);
     const firstPage = first.data as {
       rows: { publicRepackId: string }[];
       nextCursor: string | null;
       queryFingerprint: string;
+      confidenceEvaluatedAt: string;
+      providerHealthEvaluatedAt: string;
+      providerHealthSummary: {
+        state: string;
+        nextHealthEvaluationAt: string | null;
+      };
       range: { start: number; end: number; total: number };
     };
     expect(firstPage.rows.length).toBe(2);
     expect(firstPage.nextCursor).not.toBeNull();
     expect(firstPage.range).toEqual({ start: 1, end: 2, total: 4 });
-    const second = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    expect(firstPage.confidenceEvaluatedAt).toBe(
+      new Date(firstEvaluationTime).toISOString(),
+    );
+    expect(firstPage.providerHealthEvaluatedAt).toBe(
+      new Date(firstEvaluationTime).toISOString(),
+    );
+    expect(firstPage.providerHealthSummary).toMatchObject({
+      state: "healthy",
+      nextHealthEvaluationAt: V3_EXPIRES_AT,
+    });
+
+    // The stable query fingerprint identifies release + query, not a wall
+    // clock. A fresh first page gets a new response clock without URL churn.
+    const refreshedFirst = (await t.query(
+      internal.publicRepacksV3.listPublicRepacksV3AtTime,
+      {
+        filters: { availability: "all" },
+        sort: "packscout_confidence",
+        direction: "desc",
+        pageSize: 2,
+        currentTime: firstEvaluationTime + 20 * 60_000,
+      },
+    )) as AnyResult;
+    expect(refreshedFirst.ok).toBe(true);
+    expect(
+      (refreshedFirst.data as { queryFingerprint: string }).queryFingerprint,
+    ).toBe(firstPage.queryFingerprint);
+    expect(
+      (refreshedFirst.data as { confidenceEvaluatedAt: string })
+        .confidenceEvaluatedAt,
+    ).toBe(new Date(firstEvaluationTime + 20 * 60_000).toISOString());
+
+    const second = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       filters: { availability: "all" },
+      sort: "packscout_confidence",
+      direction: "desc",
       pageSize: 2,
       cursor: firstPage.nextCursor,
       queryFingerprint: firstPage.queryFingerprint,
-      currentTime: NOW,
+      currentTime: laterWallTime,
     })) as AnyResult;
     expect(second.ok).toBe(true);
     const secondPage = second.data as {
       rows: { publicRepackId: string }[];
       range: { start: number; end: number; total: number };
       hasPrevious: boolean;
+      confidenceEvaluatedAt: string;
+      providerHealthEvaluatedAt: string;
+      providerHealthSummary: {
+        state: string;
+        nextHealthEvaluationAt: string | null;
+      };
+      details: { providerHealth: { rankingEligible: boolean } }[];
     };
     expect(secondPage.rows.length).toBe(2);
     expect(secondPage.hasPrevious).toBe(true);
     expect(secondPage.range).toEqual({ start: 3, end: 4, total: 4 });
+    expect(secondPage.confidenceEvaluatedAt).toBe(
+      firstPage.confidenceEvaluatedAt,
+    );
+    expect(secondPage.providerHealthEvaluatedAt).toBe(
+      new Date(laterWallTime).toISOString(),
+    );
+    expect(secondPage.providerHealthSummary).toMatchObject({
+      state: "delayed",
+      nextHealthEvaluationAt: null,
+    });
+    expect(
+      secondPage.details.every(
+        ({ providerHealth }) => !providerHealth.rankingEligible,
+      ),
+    ).toBe(true);
+    const firstIds = new Set(
+      firstPage.rows.map(({ publicRepackId }) => publicRepackId),
+    );
+    const secondIds = new Set(
+      secondPage.rows.map(({ publicRepackId }) => publicRepackId),
+    );
+    expect([...firstIds].filter((id) => secondIds.has(id))).toEqual([]);
+    expect([...firstIds, ...secondIds].sort()).toEqual(
+      [V3_REPACK_ID_A, V3_REPACK_ID_B, V3_REPACK_ID_C, V3_REPACK_ID_D].sort(),
+    );
+
+    for (const invalidClock of [
+      firstEvaluationTime - 1,
+      firstEvaluationTime + 15 * 60_000 + 1,
+    ]) {
+      const expired = (await t.query(
+        internal.publicRepacksV3.listPublicRepacksV3AtTime,
+        {
+          filters: { availability: "all" },
+          sort: "packscout_confidence",
+          direction: "desc",
+          pageSize: 2,
+          cursor: firstPage.nextCursor,
+          queryFingerprint: firstPage.queryFingerprint,
+          currentTime: invalidClock,
+        },
+      )) as AnyResult;
+      expect((expired as { code?: string }).code).toBe("CURSOR_EXPIRED");
+    }
+    // The cursor is well-formed JSON and retains its original signature, but
+    // changing the pinned clock invalidates the HMAC before any offset is used.
+    const forgedCursor = tamperCursorEvaluationTime(firstPage.nextCursor!);
+    const forged = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+      filters: { availability: "all" },
+      sort: "packscout_confidence",
+      direction: "desc",
+      pageSize: 2,
+      cursor: forgedCursor,
+      queryFingerprint: firstPage.queryFingerprint,
+      currentTime: laterWallTime,
+    })) as AnyResult;
+    expect((forged as { code?: string }).code).toBe("INVALID_QUERY");
     // A cursor from a foreign fingerprint is refused.
-    const mismatched = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const mismatched = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       pageSize: 2,
       cursor: firstPage.nextCursor,
       queryFingerprint: firstPage.queryFingerprint,
-      currentTime: NOW,
+      currentTime: laterWallTime,
     })) as AnyResult;
     expect((mismatched as { code?: string }).code).toBe("INVALID_QUERY");
+  });
+
+  test("beta-off reads stay available but pagination fails closed without a cursor key", async () => {
+    vi.stubEnv("PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY", "");
+    vi.stubEnv("PACKSCOUT_CATALOG_READ_TOKEN", "");
+    const t = convexTest(schema, modules);
+    await publishFixture(t);
+
+    const complete = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+      currentTime: NOW,
+    })) as AnyResult;
+    expect(complete.ok).toBe(true);
+    const requiresCursor = (await t.query(
+      internal.publicRepacksV3.listPublicRepacksV3AtTime,
+      { pageSize: 2, currentTime: NOW },
+    )) as AnyResult;
+    expect(requiresCursor).toMatchObject({
+      ok: false,
+      code: "RELEASE_UNAVAILABLE",
+    });
   });
 
   test("tampered stored details or search rows fail every dependent read closed", async () => {
@@ -650,12 +1263,12 @@ describe("data_release_v3 public reads", () => {
         },
       });
     });
-    const dashboard = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
+    const dashboard = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
       currentTime: NOW,
     })) as AnyResult;
     expect(dashboard.ok).toBe(false);
     expect((dashboard as { code?: string }).code).toBe("RELEASE_UNAVAILABLE");
-    const detail = (await t.query(api.publicRepacksV3.getPublicRepackV3, {
+    const detail = (await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
       publicRepackId: V3_REPACK_ID_B,
       publicReleaseId: RELEASE_ID_1,
       currentTime: NOW,
@@ -670,7 +1283,7 @@ describe("data_release_v3 public reads", () => {
       const shards = await ctx.db.query("dataReleaseV3SearchShards").collect();
       await ctx.db.delete("dataReleaseV3SearchShards", shards[0]!._id);
     });
-    const result = (await t.query(api.publicRepacksV3.listPublicRepacksV3, {
+    const result = (await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
       currentTime: NOW,
     })) as AnyResult;
     expect(result.ok).toBe(false);

@@ -1,10 +1,11 @@
-import type {
-  PublicCategory,
-  PublicCollectible,
-  PublicRepackChase,
-  PublicRepackDetailV3,
-  PublicBuybackSummaryV3,
-  VendorReportedEvV3,
+import {
+  PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
+  type PublicCategory,
+  type PublicCollectible,
+  type PublicRepackChase,
+  type PublicRepackDetailV3,
+  type PublicBuybackSummaryV3,
+  type VendorReportedEvV3,
 } from "@packscout/contracts";
 import type {
   PackScoutBuybackEvPublicationEligibilityV1,
@@ -76,6 +77,8 @@ export interface DataReleaseV3StartManifest {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly contentHash: string;
   readonly searchAlgorithmVersion:
@@ -150,6 +153,32 @@ export type DataReleaseV3RollbackRequest = DataReleaseV3OperationEnvelope &
     targetPublicReleaseId: string;
   }>;
 
+/**
+ * One independently refreshed provider-health observation for the active
+ * immutable catalog release. The publication boundary authenticates this
+ * envelope exactly like the release lifecycle; Convex then proves that the
+ * vendor belongs to the named active release and that every sequence moves
+ * monotonically.
+ */
+export type DataReleaseV3RefreshProviderObservationRequest =
+  DataReleaseV3OperationEnvelope &
+    Readonly<{
+      publicReleaseId: string;
+      releaseFingerprint: string;
+      publicVendorId: string;
+      vendorKey: string;
+      observationSequence: number;
+      observedAt: string;
+      freshThrough: string;
+      lastHeadReachedAt: string | null;
+      sourceHeadSequence: string;
+      settledSequence: string;
+      sourceLifecycle: "active" | "paused" | "disabled";
+      connectionState: "healthy" | "degraded" | "unhealthy" | "unknown";
+      qualityState: "healthy" | "degraded" | "unhealthy" | "unknown";
+      releaseAlignment: "aligned" | "behind";
+    }>;
+
 export interface DataReleaseV3Receipt {
   readonly schemaVersion: typeof DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION;
   readonly operationKind: string;
@@ -169,15 +198,38 @@ export interface DataReleaseV3Pointer {
   readonly methodVersion: "packscout-buyback-adjusted-ev-v1";
   readonly confidencePolicyVersion:
     "packscout-buyback-adjusted-ev-confidence-v1";
+  readonly publicEvPolicyVersion:
+    typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
   readonly dataAsOf: string;
   readonly completedAt: string;
   readonly counts: DataReleaseV3Counts;
 }
 
+/**
+ * A pointer read from retained active-state history. The only approved legacy
+ * shape omits `publicEvPolicyVersion`; every other pointer field remains
+ * required, and current release writers still produce `DataReleaseV3Pointer`.
+ * Policy-sensitive consumers compare the optional marker to the current
+ * literal and therefore fail closed when it is absent.
+ *
+ * Owner: PackScout data-release V3 promotion maintainers.
+ * Removal condition: after the audited retained-document migration described
+ * beside the Convex schema reports zero missing markers in release rows and
+ * active/previous pointer snapshots, remove this type and make active state
+ * use `DataReleaseV3Pointer` directly again.
+ */
+export type RetainedDataReleaseV3Pointer = Omit<
+  DataReleaseV3Pointer,
+  "publicEvPolicyVersion"
+> &
+  Readonly<{
+    publicEvPolicyVersion?: typeof PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3;
+  }>;
+
 export interface DataReleaseV3ActiveState {
   readonly generation: number;
-  readonly activeRelease: DataReleaseV3Pointer | null;
-  readonly previousRelease: DataReleaseV3Pointer | null;
+  readonly activeRelease: RetainedDataReleaseV3Pointer | null;
+  readonly previousRelease: RetainedDataReleaseV3Pointer | null;
 }
 
 export interface DataReleaseV3ReleaseStatus {
@@ -218,6 +270,13 @@ export interface DataReleaseV3PublicationPort {
   finalize(request: DataReleaseV3FinalizeRequest): Promise<DataReleaseV3Receipt>;
   activate(request: DataReleaseV3ActivateRequest): Promise<DataReleaseV3Receipt>;
   rollback(request: DataReleaseV3RollbackRequest): Promise<DataReleaseV3Receipt>;
+}
+
+/** Kept separate so immutable release publishers do not acquire a live-health write. */
+export interface DataReleaseV3ProviderObservationPort {
+  refreshProviderObservation(
+    request: DataReleaseV3RefreshProviderObservationRequest,
+  ): Promise<DataReleaseV3Receipt>;
 }
 
 export class DataReleaseV3PublicationPortError extends Error {

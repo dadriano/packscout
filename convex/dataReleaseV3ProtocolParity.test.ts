@@ -94,6 +94,7 @@ describe("data_release_v3 protocol parity", () => {
       "activeState",
       "applyBatch",
       "finalize",
+      "refreshProviderObservation",
       "rollback",
       "start",
       "status",
