@@ -551,7 +551,7 @@ export async function readConnectedClusterProof(input: {
              (pg_control_system()).system_identifier::text as system_identifier,
              pg_has_role(current_user, $1, 'MEMBER') as app_is_owner_member,
              array(
-               select database.datname
+               select database.datname::text
                from pg_catalog.pg_database database
                where has_database_privilege(current_user, database.datname, 'CONNECT')
                order by database.datname

@@ -405,6 +405,7 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /assertPostmasterBinding/u);
   assert.match(runtime, /pg_control_system\(\)/u);
   assert.match(runtime, /app_connect_databases/u);
+  assert.match(runtime, /database\.datname::text/u);
   assert.match(runtime, /state === "nonempty"/u);
   assert.match(executor, /grant select, insert, update on table/u);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
