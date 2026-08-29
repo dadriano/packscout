@@ -6,7 +6,7 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 11/22 tasks complete
+**Progress:** 11/23 tasks complete
 
 ## Current Build Checkpoint
 
@@ -14,8 +14,9 @@ Finish the work already in progress, then complete Task 022 by porting the
 authoritative `apps/admin` baseline at commit `225f9a1` to only the new
 central/provider topology. The simplified admin shell currently present on this
 branch is not parity evidence. After the full route shell and supporting admin
-workflows are preserved, complete Task 021's parallel ClutchPacks and Courtyard
-captured-feed import proof. Run now must return
+workflows are preserved, complete Task 023's standalone ClutchPacks ingestion
+proof before enabling Courtyard. Then complete Task 021's parallel ClutchPacks
+and Courtyard isolation proof. Run now must return
 `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without mutation for an uninstalled
 integration. After both installed providers can be triggered and ingest into
 separate databases concurrently, pause to realign priorities before starting
@@ -141,9 +142,10 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 021 | Prove two provider imports in parallel | large | 4–7 days | not started | 007, 008, 022 |
+| 023 | Run ClutchPacks end to end first | large | 2–4 days | in progress | 007, 008, 022 |
+| 021 | Prove two provider imports in parallel | large | 2–4 days | not started | 007, 008, 022, 023 |
 
-Total estimated builder effort is 77–120 days, including focused verification in every task. The dependency critical path is approximately 50–76 builder days; independent tasks reduce elapsed time when built in parallel.
+Total estimated builder effort is 77–121 days, including focused verification in every task. The dependency critical path is approximately 50–77 builder days; independent tasks reduce elapsed time when built in parallel.
 
 ## Build Order
 
@@ -151,7 +153,7 @@ Total estimated builder effort is 77–120 days, including focused verification 
 2. Complete task 003, then build provider runtime task 005 and shared catalog task 006 in parallel.
 3. Complete the mixed provider run in task 007 while tasks 010–012 use their satisfied boundaries; follow with admin run and recovery tasks 008–009.
 4. Assemble and publish provider releases through tasks 013–014, then join them with catalog publication task 012 at the per-provider manifest gate in task 015.
-5. Port the authoritative admin baseline in task 022, then prove ClutchPacks and Courtyard imports through that UI in task 021.
+5. Port the authoritative admin baseline in task 022, prove ClutchPacks alone in task 023, then add Courtyard and prove concurrent isolation in task 021.
 6. Complete frontend, reconciliation, security, and documentation tasks 016–019, then run certification task 020.
 
 ## Parallel Groups
@@ -186,7 +188,8 @@ Total estimated builder effort is 77–120 days, including focused verification 
 | M | 016 and 018 complete | 019 |
 | N | 008–019 complete | 020 |
 | O | 002, 003, 005, 007, 009, and 010 complete | 022 |
-| P | 007, 008, and 022 complete | 021 |
+| P | 007, 008, and 022 complete | 023 |
+| Q | 007, 008, 022, and 023 complete | 021 |
 
 ## Next Action
 

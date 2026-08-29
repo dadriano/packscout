@@ -1,21 +1,22 @@
 # Task: Prove Two Provider Imports in Parallel
 
 **ID:** distributed-canonical-warehouse/021
-**Depends on:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008, distributed-canonical-warehouse/022
+**Depends on:** distributed-canonical-warehouse/007, distributed-canonical-warehouse/008, distributed-canonical-warehouse/022, distributed-canonical-warehouse/023
 **Blocks:** none at the current checkpoint
 **Estimated scope:** large
-**Estimated effort:** 4–7 days for one builder, including source adaptation, local provisioning, admin triggering, parallel-run proof, and verification
+**Estimated effort:** 2–4 additional days after ClutchPacks, including Courtyard adaptation, local provisioning, parallel-run proof, and verification
 **Status:** not started
 
 ## Start Here
 
-Use the supplied, protected ClutchPacks and Courtyard captures to write the
+Begin from the completed ClutchPacks proof in Task 023. Write Courtyard's
 expected pack, collectible, pull, market-event, quarantine, cursor, and run
-counts for each provider before connecting either source to the worker.
+counts before enabling its source capability, then preserve the already-proven
+ClutchPacks path while testing the pair.
 
 ## Objective
 
-Trigger one ClutchPacks run and one Courtyard run from the authoritative current admin UI,
+Trigger the proven ClutchPacks integration and one Courtyard run from the authoritative current admin UI,
 ingest both through the source-neutral mixed-page boundary into separate
 provider databases, and prove that the runs execute concurrently without
 sharing leases, cursors, failures, or transactions.
@@ -28,7 +29,7 @@ first integration proof because reviewed mapping adapters and captured provider
 feeds already exist for both. Captures are untrusted source data: they are
 validated and mapped through the same boundary used by a future live fetcher.
 
-This checkpoint proves local ingestion and orchestration. It does not activate
+ClutchPacks is proven alone first. This checkpoint then proves local two-provider ingestion and orchestration. It does not activate
 a Convex manifest, publish frontend data, or claim that a captured-feed reader
 is a production live-source transport.
 
@@ -39,6 +40,9 @@ is a production live-source transport.
 - Register explicit ClutchPacks and Courtyard source integrations by their
   provider and mapping identities; an unrelated or unknown adapter remains
   unavailable.
+- Preserve the completed ClutchPacks counts, mappings, and replay behavior from
+  Task 023 while adding Courtyard; the two capabilities are independently
+  enabled and never share an all-or-nothing switch.
 - Read captured input only from a server-owned, explicitly configured local
   root. Never accept a browser-selected path or persist/log the raw capture.
 - Strictly validate each feed, use the existing reviewed ClutchPacks and
@@ -75,7 +79,8 @@ is a production live-source transport.
 
 ## User-Facing Behavior
 
-The ported current admin lists ClutchPacks and Courtyard as separate providers. An operator can
+After the standalone ClutchPacks milestone, the ported current admin lists
+ClutchPacks and Courtyard as separate providers. An operator can
 select Run now on each, open each provider-qualified run detail, and watch mixed
 catalog, pull, and market-event counters progress independently. A provider with
 no installed integration receives a clear unavailable error and no empty run.
