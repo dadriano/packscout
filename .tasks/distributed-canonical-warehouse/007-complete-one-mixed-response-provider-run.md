@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/013
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including page atomicity, replay, fencing, and fixture-driven verification
-**Status:** done
+**Status:** in progress
 
 ## Start Here
 
@@ -25,6 +25,11 @@ Provider-specific fetchers, parsers, and mappers are deferred. This task defines
 
 ### Run lifecycle
 
+- Require an explicitly installed provider integration before scheduled or manual
+  work can create or claim a run. With no integration installed, skip scheduled
+  work and fail a manual request with the stable
+  `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` code without moving a run, lease, cursor,
+  page, canonical row, or promotion-change record.
 - Create one provider-level run for `scheduled`, `manual`, or `recovery` trigger and pin its accepted provider configuration version.
 - Enforce one queued or running run per provider; a duplicate idempotent request returns the existing run with `deduplicated = true`.
 - Start from the provider runtime's one committed cursor and finish as `succeeded`, `incomplete`, or `failed` without rewriting the terminal outcome.
@@ -77,6 +82,9 @@ A committed page result contains page ID, record counts by kind and disposition,
 
 ### Independence acceptance
 
+- [ ] A production worker with no provider integration skips scheduled work and
+  cannot create, claim, or strand an empty run; the fixture-injected source seam
+  continues to execute the source-neutral pipeline.
 - [x] One provider has at most one queued or running run and one durable cursor.
 - [x] A duplicate manual request returns the active run instead of creating a second run.
 - [x] Incomplete recovery creates a new run and preserves the original outcome.

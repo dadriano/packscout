@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/009, distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including current route parity, direct provider control, partial failures, and accessibility
-**Status:** done
+**Status:** in progress
 
 ## Start Here
 
@@ -33,6 +33,10 @@ The UI keeps one Run now action per provider. Catalog, pulls, and market events 
 
 ### Run now and runtime control
 
+- Fail Run now before creating a provider-local command or run when the selected
+  provider has no installed integration. Return the stable
+  `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` response and keep the existing accessible
+  error presentation.
 - Expose one Run now action that submits provider ID, expected configuration version, expected runtime generation, and an idempotency key.
 - Return `{ run, deduplicated }` and navigate to the active run whether the request created or reused it.
 - Preserve provider-level pause, resume, and stop behavior through direct commands with explicit confirmation and bounded reasons.
@@ -72,6 +76,8 @@ Every run list row and local soft reference carries `providerId` with `runId`. T
 
 ### Operations acceptance
 
+- [ ] With no installed provider integration, Run now visibly fails with
+  `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` and creates no command or run.
 - [x] `/operations`, `/runs`, `/runs/:id`, and provider Run now preserve current behavior under provider terminology.
 - [x] One Run now request creates or reuses one provider-level run and exposes no per-data-kind controls.
 - [x] Run detail shows mixed record counters, pages, safe cursors, immutable outcomes, and related quarantine links.
