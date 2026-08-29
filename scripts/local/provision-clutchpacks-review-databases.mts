@@ -815,7 +815,8 @@ async function registerCentralMetadata(input: {
     await client.query(`
       update providers
       set lifecycle = 'active', active_config_version_id = $2::uuid,
-          row_version = row_version + 1, updated_at = $3
+          row_version = row_version + 1,
+          updated_at = greatest($3, updated_at + interval '1 microsecond')
       where id = $1::uuid
     `, [input.ids.providerId, input.ids.configVersionId, now]);
     await client.query(`

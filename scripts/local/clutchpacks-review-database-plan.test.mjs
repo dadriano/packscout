@@ -409,6 +409,7 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);
+  assert.match(executor, /updated_at = greatest\(\$3, updated_at \+ interval '1 microsecond'\)/u);
   assert.doesNotMatch(executor, /on all tables|alter default privileges/iu);
   assert.doesNotMatch(`${runtime}\n${executor}`, /drop database|drop role|rebuild|pg_dump/iu);
   assert.doesNotMatch(`${runtime}\n${executor}`, /packscout_dev/u);
