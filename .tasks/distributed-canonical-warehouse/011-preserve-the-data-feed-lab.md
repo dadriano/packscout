@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** small
 **Estimated effort:** 1–2 days for one builder, including safe proxy parity and failure-state verification
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -61,23 +61,32 @@ The lab does not emit provider runs, page commits, canonical writes, promotion c
 
 ### Diagnostic acceptance
 
-- [ ] Current All providers, single-provider, limit, cursor, send, record data, Raw JSON, and stage-next-cursor behavior remains available.
-- [ ] Missing credentials disable sending with explicit guidance and no upstream request.
-- [ ] The browser cannot select a URL, database host, credential, or authorization header.
-- [ ] Redirect, timeout, oversized, malformed, authentication, validation, and network failures return stable sanitized outcomes.
-- [ ] Provider ID maps server-side to the external diagnostic filter, while All providers omits that filter under the same environment-backed credential.
-- [ ] No new table, canonical write, run, quarantine, promotion change, or durable cursor is created.
+- [x] Current All providers, single-provider, limit, cursor, send, record data, Raw JSON, and stage-next-cursor behavior remains available.
+- [x] Missing credentials disable sending with explicit guidance and no upstream request.
+- [x] The browser cannot select a URL, database host, credential, or authorization header.
+- [x] Redirect, timeout, oversized, malformed, authentication, validation, and network failures return stable sanitized outcomes.
+- [x] Provider ID maps server-side to the external diagnostic filter, while All providers omits that filter under the same environment-backed credential.
+- [x] No new table, canonical write, run, quarantine, promotion change, or durable cursor is created.
 
 ### Safety acceptance
 
-- [ ] Provider ownership, permission, Origin, CSRF, destination, timeout, body, limit, and cursor bounds have direct tests.
-- [ ] Credentials, authorization values, and upstream error bodies never appear; authorized bounded raw results appear only in the transient Lab response and never in logs, audits, alerts, or persistence.
-- [ ] External `platform` vocabulary remains contained inside the diagnostic wire boundary.
-- [ ] Loading, disabled, success, and every failure state remain keyboard accessible and announced.
-- [ ] Data Feed Lab behavior remains independent of provider importer or mapper implementation.
+- [x] Provider ownership, permission, Origin, CSRF, destination, timeout, body, limit, and cursor bounds have direct tests.
+- [x] Credentials, authorization values, and upstream error bodies never appear; authorized bounded raw results appear only in the transient Lab response and never in logs, audits, alerts, or persistence.
+- [x] External `platform` vocabulary remains contained inside the diagnostic wire boundary.
+- [x] Loading, disabled, success, and every failure state remain keyboard accessible and announced.
+- [x] Data Feed Lab behavior remains independent of provider importer or mapper implementation.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - The Lab remains transient and adds no persistence table, canonical write, run, cursor, or quarantine record.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- The current Lab page, request builder, record view, inert Raw JSON view, cursor staging, responsive styling, route, and navigation entry were ported without adding a database model.
+- The browser contract now sends only optional `providerId`, limit `1..5000`, and an opaque cursor of at most 4,096 characters. It cannot provide a URL, host, database selector, credential, or authorization header.
+- The server obtains organization-visible providers from the central registry, excludes archived providers, translates the selected provider to the upstream filter, and omits that external wire field for All providers. Unknown, archived, unmapped, and registry-unavailable providers fail before an upstream request.
+- The fixed HTTPS destination, environment credential, manual redirects, 15-second default timeout, 16 MiB response ceiling, requested record-count ceiling, and record/response validation are server-owned.
+- Tests cover authentication, permission, Origin, CSRF, request bounds, provider ownership, mapping, missing credential, redirect, upstream auth rejection, timeout, oversize, invalid JSON/shape/records, network failure, raw-response preservation, cursor staging, announcements, and focus movement.
+- The full admin suite passes 124 tests. Admin lint, typecheck, production build, framework checks, framework ratchet, and `git diff --check` pass.
