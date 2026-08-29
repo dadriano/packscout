@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/015, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including deterministic versioning, receipt reconciliation, and protected-data checks
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -61,22 +61,31 @@ A provider release may reference only one complete catalog descriptor whose sche
 
 ### Version acceptance
 
-- [ ] The same stable catalog boundary produces identical ordering, IDs, counts, hashes, and version reuse behavior.
-- [ ] A complete version contains valid category paths, provisional identities, and acyclic aliases while excluding ambiguous suggestions and protected evidence.
-- [ ] Missing alias targets, alias cycles, invalid hierarchy, duplicate IDs, invalid types, and count or hash mismatches block completion.
-- [ ] Later mutable catalog changes do not alter an already complete version.
-- [ ] An unchanged public content hash reuses the complete version without duplicate public artifacts.
+- [x] The same stable catalog boundary produces identical ordering, IDs, counts, hashes, and version reuse behavior.
+- [x] A complete version contains valid category paths, provisional identities, and acyclic aliases while excluding ambiguous suggestions and protected evidence.
+- [x] Missing alias targets, alias cycles, invalid hierarchy, duplicate IDs, invalid types, and count or hash mismatches block completion.
+- [x] Later mutable catalog changes do not alter an already complete version.
+- [x] An unchanged public content hash reuses the complete version without duplicate public artifacts.
 
 ### Publication acceptance
 
-- [ ] Start, batch, finalize, status, block, and reuse operations are server-only, bounded, authenticated, and idempotent.
-- [ ] Timeout, duplicate delivery, lost acknowledgement, and restart reconcile the exact receipt before checkpoint advancement.
-- [ ] Failed or incomplete versions are never selectable by a provider manifest entry.
-- [ ] Public batches contain no provider evidence, credentials, exact instances, accounts, raw payloads, quarantine, or admin identity.
-- [ ] Catalog publisher and correlator checkpoints remain independent and retention protects both consumers.
+- [x] Start, batch, finalize, status, block, and reuse operations are server-only, bounded, authenticated, and idempotent.
+- [x] Timeout, duplicate delivery, lost acknowledgement, and restart reconcile the exact receipt before checkpoint advancement.
+- [x] Failed or incomplete versions are never selectable by a provider manifest entry.
+- [x] Public batches contain no provider evidence, credentials, exact instances, accounts, raw payloads, quarantine, or admin identity.
+- [x] Catalog publisher and correlator checkpoints remain independent and retention protects both consumers.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Catalog snapshots use the commit-ordered catalog boundary and exact canonical bytes and receipts before checkpoint advancement.
 - No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+
+## Completion Evidence
+
+- The central assembler captures a repeatable-read catalog boundary, flattens alias chains to their active survivor, validates the complete tree/reference graph, and persists immutable bounded category, collectible, and alias batches under a deterministic content hash and version ID.
+- Shared canonical JSON and SHA-256 utilities now define the exact bytes used by contracts, PostgreSQL operation intents, the service transport, and Convex receipt verification.
+- PostgreSQL guards require the exact accepted start, every exact accepted batch, and the exact accepted finalize before completion; checkpoint advancement requires the matching durable completion receipt. Reuse can advance a newer selected boundary only for an already-complete unchanged version.
+- The publisher records intents before network calls, reconciles timeout/lost acknowledgement through bounded status receipts, safely accepts an exact old-fence receipt under the current live lease, and uses stable logical operation keys across restarts.
+- Convex exposes only authenticated, canonical, bounded server operations and validates ordering, counts, hashes, category paths, references, aliases, duplicate delivery, and immutable completion. Browser calls, short/overlong tokens, noncanonical JSON, changed idempotency bytes, and incomplete finalization fail closed.
+- The implementation branch passed `npm run verify:framework`. After integration, contracts/database/services/Convex typechecks pass; contracts pass 64/64, services 158/158, Convex 32/32, focused catalog database tests 4/4, the migrated central receipt invariant test 1/1, and `git diff --check` pass.
