@@ -39,12 +39,12 @@ The active DataForrest observation mapper correctly preserves these as
 card-only pulls; the new provider canonical schema currently requires every
 pull to reference one pack.
 
-Until that design mismatch is resolved, the ClutchPacks integration must
-quarantine all 15 pulls as record-local evidence while continuing to commit the
-independent catalog and market-event records. It must not create a synthetic
-pack or choose one of the 14 candidates. The committed-pull acceptance
-criterion below remains open pending an explicit schema or source-evidence
-decision.
+The approved first-provider behavior is to quarantine all 15 pulls as
+record-local evidence while continuing to commit the independent catalog and
+market-event records. It must not create a synthetic pack, choose one of the 14
+candidates, or weaken the canonical `pulls.pack_id` relationship. A later
+source-evidence decision may retry those quarantines through the normal
+recovery path.
 
 ## Requirements
 
@@ -78,8 +78,9 @@ decision.
 
 - Verify terminal run/page/cursor evidence and committed canonical counts
   directly in `packscout_clutchpacks`.
-- Verify representative pack-to-pull-to-collectible and sale-event relationships
-  using public-safe identifiers.
+- Verify representative pack, collectible, and sale-event relationships using
+  public-safe identifiers, plus the 15 quarantined pull records and their valid
+  collectible-item evidence without asserting a pack relationship.
 - Replay the same capture deterministically without duplicating immutable facts
   or advancing a false cursor/checkpoint.
 - Prove raw payloads, source credentials, database URLs, and unpseudonymized
@@ -98,10 +99,13 @@ The UI remains unchanged from the authoritative admin baseline.
   reachable, and visibly healthy without a legacy combined database.
 - [ ] Admin Run now creates or reuses one ClutchPacks run only after its source
   capability is installed.
-- [ ] The validated capture commits deterministic packs, collectibles, pulls,
-  pull items, sale events, promotion changes, run pages, and cursor evidence.
-- [ ] Representative relationships and exact expected counts are verified in
-  the provider database.
+- [ ] The validated capture commits deterministic categories, packs,
+  collectibles, accounts, market events, promotion changes, run pages, and
+  cursor evidence while quarantining all 15 unresolved pulls with their valid
+  collectible-item evidence.
+- [ ] The provider database verifies five deterministic pages, 8 categories,
+  14 packs, 907 collectibles, 17 pseudonymized accounts, 15 market events, and
+  15 pull quarantines without any synthetic pack or raw actor identity.
 - [ ] Identical replay is idempotent and invalid record-local evidence is safely
   quarantined.
 - [ ] An uninstalled provider still fails before mutation with
