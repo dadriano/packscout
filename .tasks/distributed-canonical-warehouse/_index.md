@@ -91,7 +91,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 |---|---|---|---|---|---|
 | 006 | Maintain one shared global catalog | large | 4–6 days | in progress | 002, 003, 004 |
 | 007 | Complete one mixed-response provider run | large | 4–6 days | done | 005 |
-| 008 | Operate provider runs from admin | large | 3–5 days | not started | 002, 003, 005, 007 |
+| 008 | Operate provider runs from admin | large | 3–5 days | in progress | 002, 003, 005, 007 |
 | 009 | Diagnose and recover provider work | large | 3–5 days | not started | 005, 007, 008 |
 | 010 | Observe provider health and alerts | large | 3–5 days | not started | 002, 003, 005, 007 |
 
