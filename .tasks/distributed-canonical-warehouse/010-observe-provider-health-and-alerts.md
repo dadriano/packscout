@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including activity relay, grouped alert lifecycle, partial outages, and admin parity
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 
