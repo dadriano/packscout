@@ -84,6 +84,104 @@ async function createMigratedProviderDatabase(): Promise<{
   };
 }
 
+test("provider runtime accepts safe nested configuration and rejects protected keys", { concurrency: false }, async () => {
+  const harness = await createMigratedProviderDatabase();
+  const { db, providerKey } = harness;
+  const localProviderId = "91000000-0000-4000-8000-000000000001";
+  const localConfigVersionId = "91000000-0000-4000-8000-000000000002";
+  try {
+    await db.query(
+      "select initialize_provider_database_identity($1::uuid, $2::text)",
+      [localProviderId, providerKey],
+    );
+    const safeConfiguration = {
+      adapterKey: "local-capture-clutchpacks-v1",
+      settings: {
+        captureDirectory: "clutchpacks",
+        lanes: [{ name: "catalog", enabled: true }],
+      },
+    };
+    const updated = await db.query<{ cached_configuration: unknown }>(`
+      update provider_runtime
+      set cached_config_version_id = $1::uuid,
+          cached_config_version_number = 1,
+          cached_configuration = $2::jsonb,
+          last_control_sync_at = now(),
+          schedule_seconds = 300,
+          row_version = row_version + 1
+      where singleton_key = true
+      returning cached_configuration
+    `, [localConfigVersionId, JSON.stringify(safeConfiguration)]);
+    assert.deepEqual(updated.rows[0]?.cached_configuration, safeConfiguration);
+
+    await expectDatabaseError(
+      db.query(`
+        update provider_runtime
+        set cached_configuration = $1::jsonb,
+            row_version = row_version + 1
+        where singleton_key = true
+      `, [JSON.stringify({ settings: [{ token: "must-not-persist" }] })]),
+      /provider_runtime_config_group_check/,
+    );
+
+    const commandId = "91000000-0000-4000-8000-000000000003";
+    const localRunId = "91000000-0000-4000-8000-000000000004";
+    await db.query(`
+      begin;
+      insert into control_commands (
+        id, idempotency_key, command_type, expected_generation,
+        requested_by_operator_id, correlation_id, requested_at
+      ) values (
+        '${commandId}', 'migration-link-regression', 'run', 0,
+        '91000000-0000-4000-8000-000000000005',
+        '91000000-0000-4000-8000-000000000006', now()
+      );
+      insert into provider_runs (
+        id, control_command_id, idempotency_key, trigger, state,
+        requested_by_operator_id, config_version_id,
+        config_version_number, worker_fence, requested_at
+      ) values (
+        '${localRunId}', '${commandId}', 'command/${commandId}', 'manual',
+        'queued', '91000000-0000-4000-8000-000000000005',
+        '${localConfigVersionId}', 1, 0, now()
+      );
+      update control_commands
+      set state = 'accepted', result = '{"outcome":"accepted"}'::jsonb,
+          resulting_run_id = '${localRunId}', acknowledged_at = now(),
+          row_version = row_version + 1
+      where id = '${commandId}';
+      commit;
+    `);
+    assert.equal((await db.query<{ linked: boolean }>(`
+      select exists (
+        select 1
+        from control_commands command
+        join provider_runs run
+          on run.control_command_id = command.id
+         and command.resulting_run_id = run.id
+        where command.id = '${commandId}'
+      ) as linked
+    `)).rows[0]?.linked, true);
+    await db.query(`
+      update provider_runs
+      set state = 'running', worker_fence = 1, started_at = now(),
+          heartbeat_at = now(), last_progress_at = now(),
+          row_version = row_version + 1
+      where id = '${localRunId}'
+    `);
+    await expectDatabaseError(
+      db.query(`
+        update provider_runs
+        set worker_fence = 2, row_version = row_version + 1
+        where id = '${localRunId}'
+      `),
+      /provider_run_worker_fence_immutable/,
+    );
+  } finally {
+    await harness.stop();
+  }
+});
+
 test("provider writes are promotion-coupled, immutable, receipt-gated, and lease-fenced", { concurrency: false }, async () => {
   const harness = await createMigratedProviderDatabase();
   const { db, providerKey } = harness;

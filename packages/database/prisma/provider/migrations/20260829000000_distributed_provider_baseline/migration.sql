@@ -1100,7 +1100,7 @@ AS $$
      );
 $$;
 
-CREATE FUNCTION "packscout_json_has_protected_key"("value" jsonb)
+CREATE FUNCTION "packscout_json_has_protected_key"("document" jsonb)
 RETURNS boolean
 LANGUAGE plpgsql
 IMMUTABLE
@@ -1110,18 +1110,24 @@ AS $$
 DECLARE
   entry record;
 BEGIN
-  IF jsonb_typeof("value") = 'object' THEN
-    FOR entry IN SELECT key, value FROM jsonb_each("value") LOOP
+  IF jsonb_typeof("document") = 'object' THEN
+    FOR entry IN
+      SELECT object_entry.key, object_entry.child_value
+      FROM jsonb_each("document") AS object_entry(key, child_value)
+    LOOP
       IF lower(entry.key) IN (
         'credential', 'credentials', 'password', 'secret', 'token',
         'ciphertext', 'nonce', 'auth_tag', 'authorization'
-      ) OR "packscout_json_has_protected_key"(entry.value) THEN
+      ) OR "packscout_json_has_protected_key"(entry.child_value) THEN
         RETURN true;
       END IF;
     END LOOP;
-  ELSIF jsonb_typeof("value") = 'array' THEN
-    FOR entry IN SELECT value FROM jsonb_array_elements("value") LOOP
-      IF "packscout_json_has_protected_key"(entry.value) THEN
+  ELSIF jsonb_typeof("document") = 'array' THEN
+    FOR entry IN
+      SELECT array_entry.child_value
+      FROM jsonb_array_elements("document") AS array_entry(child_value)
+    LOOP
+      IF "packscout_json_has_protected_key"(entry.child_value) THEN
         RETURN true;
       END IF;
     END LOOP;
@@ -2255,15 +2261,24 @@ BEGIN
   IF ROW(
     NEW.id, NEW."control_command_id", NEW."recovery_of_run_id", NEW."idempotency_key",
     NEW."trigger", NEW."requested_by_operator_id", NEW."config_version_id",
-    NEW."config_version_number", NEW."worker_fence", NEW."attempt_number",
+    NEW."config_version_number", NEW."attempt_number",
     NEW."requested_cursor", NEW."requested_cursor_hash", NEW."requested_at", NEW."created_at"
   ) IS DISTINCT FROM ROW(
     OLD.id, OLD."control_command_id", OLD."recovery_of_run_id", OLD."idempotency_key",
     OLD."trigger", OLD."requested_by_operator_id", OLD."config_version_id",
-    OLD."config_version_number", OLD."worker_fence", OLD."attempt_number",
+    OLD."config_version_number", OLD."attempt_number",
     OLD."requested_cursor", OLD."requested_cursor_hash", OLD."requested_at", OLD."created_at"
   ) THEN
     RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'provider_run_request_immutable';
+  END IF;
+
+  IF NEW."worker_fence" IS DISTINCT FROM OLD."worker_fence" AND NOT (
+    OLD."state" = 'queued'
+    AND NEW."state" = 'running'
+    AND OLD."worker_fence" = 0
+    AND NEW."worker_fence" > 0
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'provider_run_worker_fence_immutable';
   END IF;
 
   IF OLD."state" IN ('succeeded', 'incomplete', 'failed')
@@ -2291,10 +2306,15 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'provider_run_counter_regression';
   END IF;
 
+  IF (NEW."state" = 'queued' AND NEW."reached_source_head")
+     OR (OLD."reached_source_head" AND NOT NEW."reached_source_head") THEN
+    RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'provider_run_head_regression';
+  END IF;
+
   IF NEW."state" NOT IN ('succeeded', 'incomplete', 'failed')
-     AND ROW(NEW."final_cursor", NEW."final_cursor_hash", NEW."reached_source_head", NEW."failure_code", NEW."failure_class", NEW."failure_summary", NEW."finished_at")
+     AND ROW(NEW."final_cursor", NEW."final_cursor_hash", NEW."failure_code", NEW."failure_class", NEW."failure_summary", NEW."finished_at")
            IS DISTINCT FROM
-         ROW(NULL::jsonb, NULL::character(64), false, NULL::text, NULL::text, NULL::text, NULL::timestamptz) THEN
+         ROW(NULL::jsonb, NULL::character(64), NULL::text, NULL::text, NULL::text, NULL::timestamptz) THEN
     RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'provider_run_terminal_fields_before_terminal';
   END IF;
   RETURN NEW;
@@ -2465,30 +2485,31 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  command_id uuid;
-  resulting_run_id uuid;
+  linked_command_identity uuid;
+  linked_run_identity uuid;
   linked_command_id uuid;
 BEGIN
   IF TG_TABLE_NAME = 'provider_runs' THEN
     IF NEW."control_command_id" IS NULL THEN
       RETURN NULL;
     END IF;
-    command_id := NEW."control_command_id";
-    resulting_run_id := NEW.id;
+    linked_command_identity := NEW."control_command_id";
+    linked_run_identity := NEW.id;
   ELSE
     IF NEW."resulting_run_id" IS NULL THEN
       RETURN NULL;
     END IF;
-    command_id := NEW.id;
-    resulting_run_id := NEW."resulting_run_id";
+    linked_command_identity := NEW.id;
+    linked_run_identity := NEW."resulting_run_id";
   END IF;
 
-  SELECT "control_command_id" INTO linked_command_id
-  FROM "provider_runs" WHERE id = resulting_run_id;
-  IF linked_command_id IS DISTINCT FROM command_id
+  SELECT run."control_command_id" INTO linked_command_id
+  FROM "provider_runs" AS run WHERE run.id = linked_run_identity;
+  IF linked_command_id IS DISTINCT FROM linked_command_identity
      OR NOT EXISTS (
-       SELECT 1 FROM "control_commands"
-       WHERE id = command_id AND "resulting_run_id" = resulting_run_id
+       SELECT 1 FROM "control_commands" AS command
+       WHERE command.id = linked_command_identity
+         AND command."resulting_run_id" = linked_run_identity
      ) THEN
     RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'command_resulting_run_mismatch';
   END IF;

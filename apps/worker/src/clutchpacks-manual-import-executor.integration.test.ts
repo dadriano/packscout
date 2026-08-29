@@ -12,7 +12,9 @@ import {
   createProviderDatabaseLifecycle,
   initializeProviderDatabaseIdentity,
   PrismaAdminProviderRuntimeRepository,
+  PrismaProviderCommandRepository,
   PrismaProviderRuntimeRepository,
+  PrismaProviderWorkerLeaseRepository,
   type ProviderPrismaClient,
 } from "@packscout/database";
 import {
@@ -227,6 +229,26 @@ test("admin queue executes five isolated Clutch pages and replay stays canonical
       leaseMilliseconds: 30_000,
     });
     const firstRunId = await enqueue(harness, configVersionId, 1);
+    assert.equal(
+      (await new PrismaProviderCommandRepository(harness.client)
+        .nextAccepted())?.resulting_run_id,
+      firstRunId,
+    );
+    const leaseProbe = await new PrismaProviderWorkerLeaseRepository(
+      harness.client,
+    ).acquire({
+      role: "import",
+      owner: "integration:lease-probe",
+      leaseMilliseconds: 30_000,
+    });
+    if (leaseProbe.kind === "held") throw new Error("Lease probe was held.");
+    assert.equal(leaseProbe.kind, "acquired");
+    assert.equal(await new PrismaProviderWorkerLeaseRepository(harness.client)
+      .release({
+        role: "import",
+        owner: "integration:lease-probe",
+        fence: leaseProbe.lease.fence,
+      }), true);
     const first = await executor.executeNext();
     assert.deepEqual(first, {
       kind: "completed",
