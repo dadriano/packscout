@@ -15,6 +15,7 @@ export * from "./canonical-inspection-repository.ts";
 export * from "./database.ts";
 export * from "./email-message-outbox-repository.ts";
 export * from "./database-topology.ts";
+export * from "./role-aware-database.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
 export * from "./first-admin-bootstrap-repository.ts";
 export * from "./active-catalog-heat-manifest.ts";
