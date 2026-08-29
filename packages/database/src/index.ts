@@ -21,6 +21,7 @@ export * from "./provider-database.ts";
 export * from "./provider-database-locator.ts";
 export * from "./provider-canonical-contract.ts";
 export * from "./provider-canonical-repository.ts";
+export * from "./provider-mixed-page-contract.ts";
 export * from "./estimated-ev-recomputation-repository.ts";
 export * from "./first-admin-bootstrap-repository.ts";
 export * from "./active-catalog-heat-manifest.ts";
