@@ -314,7 +314,9 @@ export function assertPackScoutBuybackEvProjectionLeaksNoProtectedFieldV1(
  * returned. Corrupted arithmetic or confidence fails validation here as well.
  */
 export function sanitizePackScoutBuybackEvRevisionForPublicationV1(
-  record: PackScoutBuybackEvRevisionRecordV1,
+  record: Pick<PackScoutBuybackEvRevisionRecordV1,
+    "status" | "metrics" | "confidence" | "dataAsOf" | "freshness" |
+    "methodVersion" | "confidencePolicyVersion" | "calculatedAt" | "publicPrimaryReason">,
 ): PackScoutBuybackEvRevisionPublicationProjectionV1 {
   let projection: PackScoutBuybackEvRevisionPublicationProjectionV1;
   if (record.status === "available") {

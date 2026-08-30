@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { publicRepackViewSummaryV3FromDetail } from "@packscout/contracts";
 import {
   buildV3ListPage,
+  buildV3LastKnownEv,
   buildV3PastDeadlineCurrentEv,
   buildV3ReleaseIdentity,
   buildV3SoldOutViewDetail,
@@ -15,6 +16,7 @@ import {
   PackScoutAuthContext,
   unavailableAuthValue,
 } from "@/components/auth/AuthContext.client";
+import { AllRepacksCards } from "./AllRepacksCards.client";
 import { AllRepacksTable } from "./AllRepacksTable.client";
 import { OpportunityTable } from "./OpportunityTable.client";
 import { RepackInspector } from "./PackInspector.client";
@@ -155,8 +157,8 @@ test("sold-out historical rows stay visible with no outbound action", () => {
 test("server render keeps a current estimate before hydration even past its deadline", () => {
   // This estimate's public deadline is firmly in the past relative to the
   // real test clock, yet the server snapshot must still render the served
-  // values so hydration never disagrees with the server HTML. The conversion
-  // happens only in the browser after hydration, through the deadline store.
+  // values so hydration never disagrees with the server HTML. Confidence
+  // ages in the browser after hydration through the shared clock.
   const detail = buildV3ViewDetail({
     evEstimates: {
       packScout: buildV3PastDeadlineCurrentEv(8_500),
@@ -208,4 +210,28 @@ test("the inspector names the release data-as-of time and keeps focusable close 
   assert.match(markup, /aria-label="Close repack details"/);
   assert.match(markup, /role="complementary"/);
   assert.ok(markup.includes("How this estimate works"));
+});
+
+
+test("all four catalog surfaces retain aged values and a visible zero-confidence state", () => {
+  const original = buildV3ViewDetail();
+  const detail = buildV3ViewDetail({
+    evEstimates: { ...original.evEstimates, packScout: buildV3LastKnownEv(8_500, {
+      referenceTimeIso: "2026-08-20T12:00:00.000Z",
+      latestUnavailableReason: "ODDS_UNAVAILABLE",
+    }) },
+  });
+  const surfaces = [
+    renderOpportunityTable(detail), renderAllRepacksTable([detail]), renderInspector(detail),
+    renderStatic(<AllRepacksCards controls={null} onSelect={noop}
+      page={buildV3ListPage([detail])} selectedPublicRepackId={null} />),
+  ];
+  for (const markup of surfaces) {
+    assert.ok(markup.includes("-$15.00"));
+    assert.ok(markup.includes("-15.00%"));
+    assert.ok(markup.includes("Low · 0%"));
+    assert.ok(markup.includes("Last known estimate"));
+    assert.ok(markup.includes("Fresh calculation unavailable"));
+    assert.equal(markup.includes("Expired"), false);
+  }
 });

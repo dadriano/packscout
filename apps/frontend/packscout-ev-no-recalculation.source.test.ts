@@ -94,7 +94,7 @@ test("components never format EV numbers or own break-even thresholds", () => {
   }
 });
 
-test("public surfaces resolve deadlines through the shared client store only", () => {
+test("public surfaces age confidence through the shared client store only", () => {
   for (const name of [
     "components/catalog/OpportunityTable.client.tsx",
     "components/catalog/AllRepacksTable.client.tsx",
@@ -102,20 +102,21 @@ test("public surfaces resolve deadlines through the shared client store only", (
     "components/catalog/PackInspector.client.tsx",
   ]) {
     const source = readFileSync(path.join(frontendRoot, name), "utf8");
-    assert.match(source, /useDeadlineBoundPackScoutEv/, name);
+    assert.match(source, /useClockBoundPackScoutEv/, name);
     assert.doesNotMatch(source, /Date\.now|setInterval/, name);
     // No passive clock-tick live regions around EV state.
     assert.doesNotMatch(source, /aria-live="assertive"/, name);
   }
 });
 
-test("the deadline hook is hydration-safe with a stable server snapshot", () => {
+test("the confidence clock is hydration-safe and delegates decay to the contract", () => {
   const source = readFileSync(
-    path.join(frontendRoot, "lib/packscout-ev-deadline.client.ts"),
+    path.join(frontendRoot, "lib/packscout-ev-clock.client.ts"),
     "utf8",
   );
   assert.match(source, /useSyncExternalStore/);
   assert.match(source, /getServerSnapshot/);
-  assert.match(source, /function serverDeadlineSnapshot\(\): false/);
+  assert.match(source, /getServerSnapshot: \(\) => referenceMillis/);
+  assert.match(source, /presentLastKnownPackScoutEvV3/);
   assert.doesNotMatch(source, /aria-live/);
 });

@@ -272,9 +272,10 @@ test("the EV article explains evidence rules and model non-goals", () => {
     );
   }
   assert.match(evCopy, /over 60 minutes old/);
-  assert.match(evCopy, /becomes Expired and leaves the EV rankings/);
-  assert.match(evCopy, /freezes its last valid estimate/);
-  assert.match(evCopy, /never a low-confidence estimate/);
+  assert.match(evCopy, /stay visible and eligible available packs remain in EV rankings regardless of age/);
+  assert.match(evCopy, /confidence continues to decay/);
+  assert.match(evCopy, /retains its last valid estimate/);
+  assert.match(evCopy, /previous supported estimate remains visible with zero confidence/);
   assert.match(evCopy, /An unavailable value is not zero/);
 
   // Pulls, vendor separation, and excluded economics.

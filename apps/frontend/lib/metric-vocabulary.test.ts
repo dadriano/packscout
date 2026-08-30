@@ -170,7 +170,7 @@ test("maps the bounded v3 reason vocabulary to stable public copy", () => {
   );
   assert.equal(
     getPublicReasonCopy("SOURCE_DATA_STALE"),
-    "Expired: source data is older than 60 minutes.",
+    "Source data is older than 60 minutes.",
   );
 
   const reasons = Object.keys(PUBLIC_REASON_COPY) as Array<
@@ -215,7 +215,7 @@ test("keeps the required source, advice, and bounded-summary language canonical"
     unavailable: "Unavailable",
   });
   assert.equal(ESTIMATE_STATUS_COPY.sold_out_historical, "Sold out · historical estimate");
-  assert.equal(ESTIMATE_STATUS_COPY.expired, "Expired");
+  assert.equal(ESTIMATE_STATUS_COPY.last_known, "Last known estimate");
   assert.equal(ESTIMATE_STATUS_COPY.simulated, "Simulated data");
 });
 

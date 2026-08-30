@@ -2,6 +2,7 @@ import {
   normalizePublicSearchText,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3Schema,
+  type PackScoutDisplayedEvV3,
   type PublicRepackDetailV3,
   type RepackEvSortRowV3,
 } from "@packscout/contracts";
@@ -227,4 +228,26 @@ export function isValidDataReleaseV3SearchRow(
   return repackEvSortRowV3Schema.safeParse(
     evSortRowFromDataReleaseV3SearchRow(row),
   ).success;
+}
+
+/** Derived read projection only; never persisted into the immutable search shards. */
+export function displayDataReleaseV3SearchRow(
+  row: DataReleaseV3SearchRow,
+  estimate: PackScoutDisplayedEvV3,
+): DataReleaseV3SearchRow {
+  const ranked = row.availability === "available" && estimate.status !== "unavailable"
+    ? estimate : null;
+  return {
+    ...row,
+    packScoutEvDollarsMinor: ranked?.metrics.evDollars.minorUnits ?? null,
+    packScoutEvDollarsNullRank: ranked === null ? 1 : 0,
+    packScoutGrossEvMinor: ranked?.metrics.grossEvMoney.minorUnits ?? null,
+    packScoutGrossEvNullRank: ranked === null ? 1 : 0,
+    packScoutEvPercentBasisPoints: ranked?.metrics.evPercentBasisPoints ?? null,
+    packScoutEvPercentNullRank: ranked === null ? 1 : 0,
+    packScoutConfidenceBasisPoints: ranked?.confidence.scoreBasisPoints ?? null,
+    packScoutConfidenceNullRank: ranked === null ? 1 : 0,
+    packScoutConfidenceBand: ranked?.confidence.band ?? null,
+    packScoutExpiresAtMillis: null,
+  };
 }

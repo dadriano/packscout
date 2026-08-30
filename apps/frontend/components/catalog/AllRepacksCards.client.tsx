@@ -13,7 +13,7 @@ import {
   presentRepackPrice,
   presentTopChaseValue,
 } from "@/lib/packscout-ev-presentation";
-import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
@@ -39,7 +39,7 @@ function RepackCard({
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
 }>) {
-  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const estimate = presentPackScoutEvV3({
     estimate: boundEstimate,
     price: repack.price,
@@ -97,8 +97,16 @@ function RepackCard({
       <dl className={styles.details}>
         <div>
           <dt>EV confidence</dt>
-          <dd>{estimate.confidence.displayValue}</dd>
+          <dd title={estimate.confidence.accessibleLabel}>{estimate.confidence.displayValue}</dd>
         </div>
+        {estimate.status !== "current" ? (
+          <div>
+            <dt>Estimate</dt>
+            <dd title={[
+              estimate.freshness.dataAsOfLabel, estimate.reasonCopy, estimate.calculationPriceNote,
+            ].filter(Boolean).join(" ")}>{estimate.statusLabel}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
           <dd>{displayedChase?.collectible.name ?? "Unavailable"}</dd>

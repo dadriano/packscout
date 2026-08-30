@@ -56,7 +56,7 @@ export const PACKSCOUT_EV_METHOD = Object.freeze({
     },
     {
       title: "Unavailable beats a guess",
-      body: `Incomplete or conflicting odds, missing stated values, unknown buyback eligibility, an unsupported currency, or source data older than 60 minutes produce Unavailable or Expired — never a partial estimate, a silent zero, or a low-confidence guess. ${METRIC_TRUST_COPY.unavailableExplanation}`,
+      body: `Incomplete or conflicting odds, missing stated values, unknown buyback eligibility, or an unsupported currency block a fresh calculation. Previous supported values remain visible with zero confidence and the reason for the missing update. Older source data reduces confidence without removing the last known EV or excluding an otherwise eligible pack from rankings. ${METRIC_TRUST_COPY.unavailableExplanation}`,
     },
     {
       title: "What EV is not",

@@ -20,6 +20,7 @@ import {
   buildV3CurrentEv,
   buildV3DelayedEv,
   buildV3ExpiredEv,
+  buildV3LastKnownEv,
   buildV3Price,
   buildV3ReleaseIdentity,
   buildV3SoldOutEv,
@@ -158,15 +159,15 @@ test("every bounded unavailable reason has stable public copy", () => {
   }
 });
 
-test("expired estimates present the distinct expired state with stale copy", () => {
+test("stale data without any retained value remains explicitly unavailable", () => {
   const presentation = presentPackScoutEvV3(input(buildV3ExpiredEv()));
 
-  assert.equal(presentation.status, "expired");
-  assert.equal(presentation.statusLabel, "Expired");
+  assert.equal(presentation.status, "unavailable");
+  assert.equal(presentation.statusLabel, "Unavailable");
   assert.equal(presentation.reason, "SOURCE_DATA_STALE");
   assert.equal(
     presentation.reasonCopy,
-    "Expired: source data is older than 60 minutes.",
+    "Source data is older than 60 minutes.",
   );
   assert.equal(presentation.availability, "unavailable");
 });
@@ -487,4 +488,56 @@ test("price and release timestamps present through the shared boundary", () => {
   const release = presentReleaseDataAsOf(buildV3ReleaseIdentity());
   assert.equal(release.dataAsOf, "2026-08-19T10:00:00.000Z");
   assert.match(release.label, /^Repack data as of /);
+});
+
+
+test("last known estimates retain numbers at zero confidence and original timestamps", () => {
+  const estimate = buildV3LastKnownEv(8_500, { referenceTimeIso: "2026-08-20T12:00:00.000Z" });
+  const presentation = presentPackScoutEvV3(input(estimate));
+  assert.equal(presentation.status, "last_known");
+  assert.equal(presentation.statusLabel, "Last known estimate");
+  assert.equal(presentation.availability, "available");
+  assert.equal(presentation.evDollars.displayValue, "-$15.00");
+  assert.equal(presentation.grossEvDollars.displayValue, "$85.00");
+  assert.equal(presentation.confidence.displayValue, "Low · 0%");
+  assert.equal(presentation.freshness.calculatedAt, "2026-08-19T10:00:00.000Z");
+  assert.equal(presentation.freshness.dataAsOf, "2026-08-19T10:00:00.000Z");
+  assert.match(presentation.freshness.sourceAgeLabel ?? "", /last known values retained/);
+});
+
+test("a failed fresh calculation shows its reason without hiding the last supported numbers", () => {
+  const presentation = presentPackScoutEvV3(input(buildV3LastKnownEv(8_500, {
+    latestUnavailableReason: "BUYBACK_UNAVAILABLE",
+  })));
+  assert.equal(presentation.grossEvDollars.displayValue, "$85.00");
+  assert.equal(presentation.confidence.displayValue, "Low · 0%");
+  assert.equal(presentation.reasonCopy,
+    "Fresh calculation unavailable: documented buyback terms are unavailable.");
+  assert.match(presentation.accessibleLabel, /Fresh calculation unavailable/);
+});
+
+test("retained EV validates against its calculation price while the current listing price stays separate", () => {
+  const estimate = buildV3LastKnownEv();
+  const presentation = presentPackScoutEvV3(input(estimate, { price: buildV3Price(20_000) }));
+  assert.equal(presentation.packPrice.displayValue, "$200.00");
+  assert.equal(presentation.evDollars.displayValue, "-$15.00");
+  assert.match(presentation.calculationPriceNote ?? "", /calculation-time Pack Price of \$100.00/);
+  assert.doesNotThrow(() => presentPackScoutEvV3(input(estimate, { price: buildV3Price(null) })));
+});
+
+test("retained sold-out history ages confidence without restoring purchase actions", () => {
+  const presentation = presentPackScoutEvV3(input(buildV3LastKnownEv(8_500, { soldOut: true }), {
+    availability: "sold_out",
+  }));
+  assert.equal(presentation.status, "sold_out_historical");
+  assert.equal(presentation.outboundActionAllowed, false);
+  assert.equal(presentation.confidence.displayValue, "Medium · 50%");
+  assert.equal(presentation.freshness.soldOutAt, "2026-08-19T10:05:00.000Z");
+});
+
+test("decayed confidence does not round across its published band boundary", () => {
+  const presentation = presentPackScoutEvV3(input(buildV3LastKnownEv(8_500, {
+    referenceTimeIso: "2026-08-19T12:00:01.440Z",
+  })));
+  assert.equal(presentation.confidence.displayValue, "Low · 49.99%");
 });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ProviderPackEvEvidenceV1 } from "@packscout/contracts";
 import type { CanonicalJsonObject } from "@packscout/database";
 import type {
   CanonicalCatalogAssetCandidate,
@@ -117,6 +118,7 @@ export function categoryDrafts(
 
 export function packDraft(
   candidate: CanonicalObservationPackCandidate,
+  evidence?: Readonly<{ evInputEvidence: ProviderPackEvEvidenceV1 }>,
 ): ProviderMixedPageRecordDraft {
   const price = money(candidate.price);
   const vendorEv = money(candidate.providerReportedEv);
@@ -167,7 +169,9 @@ export function packDraft(
       primaryImageUrl,
       primaryImageAlt: primaryImageUrl === null ? null : candidate.displayName,
       listingUrl: null,
-      attributes: {},
+      attributes: evidence === undefined ? {} : {
+        evInputEvidence: evidence.evInputEvidence,
+      },
       sourceUpdatedAt: candidate.effectiveAt,
       expectedRowVersion: null,
     },

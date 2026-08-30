@@ -25,7 +25,7 @@ import {
   presentRepackPrice,
   presentVendorReportedEvV3,
 } from "@/lib/packscout-ev-presentation";
-import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   DEFAULT_CATALOG_QUERY,
@@ -231,7 +231,7 @@ export function RepackInspector({
 }: RepackInspectorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const boundEstimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const price = presentRepackPrice(repack.price);
   const packScoutEv = presentPackScoutEvV3({
     estimate: boundEstimate,

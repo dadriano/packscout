@@ -27,7 +27,7 @@ import { readPublicConvexOrigin } from "./security-policy.server";
 /**
  * Server-side reads against the data_release_v3 public queries. Every read
  * carries the server clock so the backend can apply its authoritative
- * deadline conversion, presents the server-held catalog-read credential on
+ * confidence aging, presents the server-held catalog-read credential on
  * that same round trip, and re-validates every result against the strict v3
  * contracts before rendering.
  */

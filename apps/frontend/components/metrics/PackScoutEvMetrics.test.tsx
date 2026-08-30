@@ -9,6 +9,7 @@ import {
   buildV3CurrentEv,
   buildV3DelayedEv,
   buildV3ExpiredEv,
+  buildV3LastKnownEv,
   buildV3Price,
   buildV3SoldOutEv,
   buildV3UnavailableEv,
@@ -68,11 +69,11 @@ test("unavailable estimates show the stable reason and never a zero", () => {
   assert.ok(markup.includes("$100.00"));
 });
 
-test("expired estimates carry the Expired status and stale copy", () => {
+test("stale evidence without retained values is unavailable", () => {
   const markup = render(buildV3ExpiredEv());
-  assert.ok(markup.includes("Expired"));
-  assert.ok(markup.includes("Expired: source data is older than 60 minutes."));
-  assert.match(markup, /data-status="expired"/);
+  assert.ok(markup.includes("Unavailable"));
+  assert.ok(markup.includes("Source data is older than 60 minutes."));
+  assert.match(markup, /data-status="unavailable"/);
 });
 
 test("sold-out historical estimates keep values with sold-out wording", () => {
@@ -104,4 +105,16 @@ test("simulated listings render the simulated chip", () => {
     repackName: "[Simulated] Pokemon Grail Gacha",
   });
   assert.ok(markup.includes("Simulated data"));
+});
+
+
+test("last known values remain rendered with zero confidence, failure reason, and original price", () => {
+  const markup = render(buildV3LastKnownEv(8_500, { latestUnavailableReason: "BUYBACK_UNAVAILABLE" }), {
+    price: buildV3Price(20_000),
+  });
+  for (const text of ["Last known estimate", "$85.00", "-$15.00", "Low · 0%",
+    "Fresh calculation unavailable", "calculation-time Pack Price of $100.00", "$200.00"]) {
+    assert.ok(markup.includes(text), text);
+  }
+  assert.match(markup, /datetime="2026-08-19T10:00:00.000Z"/i);
 });

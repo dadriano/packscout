@@ -16,6 +16,7 @@ export * from "./provider-feed.ts";
 export * from "./provider-stream-contract-v2.ts";
 export * from "./provider-source-contract-v1.ts";
 export * from "./provider-source-facts-v1.ts";
+export * from "./provider-pack-ev-evidence-v1.ts";
 export * from "./provider-source-observation-v1.ts";
 export * from "./provider-source-admin.ts";
 export * from "./provider-source-import-v1.ts";

@@ -24,7 +24,7 @@ const { registerHooks } = nodeModule as unknown as {
  * stubbed with a proxy that returns the class name, so components render
  * under node:test exactly as the Next.js server would render them; effects
  * and subscriptions do not run, which is precisely the hydration-safe
- * server-snapshot path the deadline behavior must preserve.
+ * server-snapshot path the confidence clock must preserve.
  *
  * Import this module before any component import so the hook is registered
  * first (ES module evaluation is depth-first in declaration order).

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   approvedPublicCatalogConfigurationV1Schema,
   canonicalJson,
+  parsePackScoutBuybackEvTimestampMillisV1,
   packscoutPublicIdentityUuid,
   publicRepackDetailSchema,
   publicVendorSchema,
@@ -13,6 +14,8 @@ import {
 import {
   DataReleaseV3ReleaseAssembler,
   buildProviderCatalogReleasePublishPlan,
+  createPackScoutBuybackEvPromotionEligibilityV1,
+  normalizeClutchpacksPromotionEvEvidenceV1,
   type DataReleaseV3CanonicalProduct,
   type DataReleaseV3PublishPlan,
   type ProviderCatalogPublicProjection,
@@ -23,10 +26,10 @@ import {
 export const DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY = "clutchpacks" as const;
 export const LOCAL_PUBLIC_CONFIGURATION_KEY =
   "local-clutchpacks-distributed-v1" as const;
-export const LOCAL_PUBLIC_CONFIGURATION_REVISION = 1 as const;
-export const LOCAL_PUBLIC_CONFIGURATION_SEQUENCE = 1n as const;
+export const LOCAL_PUBLIC_CONFIGURATION_REVISION = 2 as const;
+export const LOCAL_PUBLIC_CONFIGURATION_SEQUENCE = 2n as const;
 export const LOCAL_CONFIDENCE_POLICY = Object.freeze({
-  version: "local-clutchpacks-no-packscout-ev-v1",
+  version: "local-clutchpacks-promotion-ev-v2",
   completeScoreBasisPoints: 8_500,
   partialScoreBasisPoints: 6_000,
   unknownScoreBasisPoints: 2_500,
@@ -104,6 +107,7 @@ function httpsOrigin(value: string): string {
 
 export interface DistributedClutchpacksPackRow {
   readonly id: string;
+  readonly rowVersion: bigint;
   readonly packKey: string;
   readonly displayName: string;
   readonly description: string | null;
@@ -126,6 +130,8 @@ export interface DistributedClutchpacksPackRow {
   readonly primaryImageAlt: string | null;
   readonly listingUrl: string | null;
   readonly sourceUpdatedAt: Date;
+  /** Absent only when the importer has not retained normalized odds yet. */
+  readonly evInputEvidence?: unknown;
 }
 
 export interface DistributedClutchpacksSnapshotFacts {
@@ -175,8 +181,12 @@ function stableSnapshotBody(input: DistributedClutchpacksSnapshotFacts) {
     organizationId: input.organizationId,
     providerId: input.providerId,
     providerKey: input.providerKey,
+    providerDisplayName: input.providerDisplayName,
+    providerLifecycle: input.providerLifecycle,
     activeConfigVersionId: input.activeConfigVersionId,
     activeConfigVersionNumber: input.activeConfigVersionNumber.toString(),
+    activeConfigCreatedAt: input.activeConfigCreatedAt.toISOString(),
+    staleAfterSeconds: input.staleAfterSeconds,
     runtimeState: input.runtimeState,
     runtimeConfigVersionId: input.runtimeConfigVersionId,
     runtimeConfigVersionNumber: input.runtimeConfigVersionNumber?.toString() ?? null,
@@ -192,9 +202,15 @@ function stableSnapshotBody(input: DistributedClutchpacksSnapshotFacts) {
     activePackContentCount: input.activePackContentCount,
     maximumPackSourceUpdatedAt: input.maximumPackSourceUpdatedAt.toISOString(),
     packs: input.packs.map((pack) => ({
-      id: pack.id,
-      packKey: pack.packKey,
+      ...pack,
+      rowVersion: pack.rowVersion.toString(),
       sourceUpdatedAt: pack.sourceUpdatedAt.toISOString(),
+      vendorEvObservedAt: pack.vendorEvObservedAt?.toISOString() ?? null,
+      packscoutEvDataAsOf: pack.packscoutEvDataAsOf?.toISOString() ?? null,
+      packscoutEvCalculatedAt: pack.packscoutEvCalculatedAt?.toISOString() ?? null,
+      evInputEvidence: pack.evInputEvidence === undefined
+        ? { state: "not_retained" }
+        : { state: "retained", value: pack.evInputEvidence },
     })),
   };
 }
@@ -477,8 +493,14 @@ export interface DistributedClutchpacksPublicationArtifacts {
 
 export async function buildDistributedClutchpacksPublicationArtifacts(
   snapshot: DistributedClutchpacksStableSnapshot,
+  promotionReadAt: string,
 ): Promise<DistributedClutchpacksPublicationArtifacts> {
   const facts = snapshot.facts;
+  const readAtMillis = parsePackScoutBuybackEvTimestampMillisV1(promotionReadAt);
+  if (
+    readAtMillis === null ||
+    readAtMillis < facts.latestSourceHeadFinishedAt.getTime()
+  ) return refuse("CLUTCHPACKS_PROMOTION_CLOCK_INVALID");
   const vendor = publicVendor(facts);
   const packs = [...facts.packs].sort((left, right) =>
     left.packKey < right.packKey ? -1 : left.packKey > right.packKey ? 1 : 0);
@@ -558,10 +580,40 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
   });
   const v3Products = packs.map((pack, index) =>
     v3Product(facts, vendor, pack, repacks[index]!));
+  const normalizedProducts = await Promise.all(packs
+      .filter((pack) => pack.evInputEvidence !== undefined)
+      .map(async (pack) => ({
+        availability: pack.availability,
+        platformKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
+        productKey: pack.packKey,
+        evidence: await normalizeClutchpacksPromotionEvEvidenceV1({
+          organizationId: facts.organizationId,
+          providerId: facts.providerId,
+          packId: pack.id,
+          packKey: pack.packKey,
+          rowVersion: pack.rowVersion.toString(),
+          priceUsdMinor: money(pack).usdComparison.value.minorUnits,
+          buybackRateBasisPoints: pack.buybackRate === null
+            ? null
+            : decimalTextToScaledInteger(pack.buybackRate, 4),
+          sourceUpdatedAt: pack.sourceUpdatedAt.toISOString(),
+          snapshotAt: facts.latestSourceHeadFinishedAt.toISOString(),
+          readAt: promotionReadAt,
+          evidence: pack.evInputEvidence,
+        }),
+      })));
+  const eligibility = createPackScoutBuybackEvPromotionEligibilityV1({
+    organizationId: facts.organizationId,
+    readAt: promotionReadAt,
+    // This provider database has no historical sellout clock or frozen
+    // estimate. Validate retained facts above, but never invent that history
+    // by presenting a new promotion calculation as a sold-out estimate.
+    products: normalizedProducts.filter(({ availability }) => availability !== "sold_out"),
+  });
   const v3 = await new DataReleaseV3ReleaseAssembler(
     {
       async loadCatalogSnapshot({ readAt }) {
-        if (readAt !== facts.latestSourceHeadFinishedAt.toISOString()) {
+        if (readAt !== promotionReadAt) {
           return refuse("CLUTCHPACKS_SNAPSHOT_CHANGED");
         }
         return {
@@ -573,8 +625,8 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
         };
       },
     },
-    { async getPublicationEligibleRevision() { return null; } },
-  ).assemble({ readAt: facts.latestSourceHeadFinishedAt.toISOString() });
+    eligibility,
+  ).assemble({ readAt: promotionReadAt });
   if (v3.classification !== "publish") {
     return refuse(`DATA_RELEASE_V3_${v3.reason}`);
   }

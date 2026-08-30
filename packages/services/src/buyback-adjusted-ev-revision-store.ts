@@ -181,8 +181,8 @@ export type PersistPackScoutBuybackEvRevisionResultV1 =
 type ParsedCalculation = PackScoutBuybackEvProtectedCalculationResultV1;
 type ParsedEvaluation = PackScoutBuybackEvConfidenceEvaluationV1;
 
-/** The composed completed outcome the immutable revision will persist. */
-interface ComposedCompletedRevision {
+/** A completed calculation, shared by persistence and promotion-time projection. */
+export interface PackScoutBuybackEvCompletedCalculationV1 {
   readonly status: "available" | "unavailable";
   readonly metrics: PackScoutBuybackEvRevisionRecordV1["metrics"];
   readonly confidence: PackScoutBuybackEvRevisionRecordV1["confidence"];
@@ -258,10 +258,10 @@ function evaluationFreshness(
  * whose known evidence is still current, which the confidence boundary
  * deliberately cannot express.
  */
-function composeCompletedRevision(
+export function composePackScoutBuybackEvCompletedCalculationV1(
   calculation: ParsedCalculation,
   evaluation: ParsedEvaluation | null,
-): ComposedCompletedRevision {
+): PackScoutBuybackEvCompletedCalculationV1 {
   if (evaluation !== null) {
     if (evaluation.calculatedAt !== calculation.calculatedAt) {
       throw violation(
@@ -277,7 +277,7 @@ function composeCompletedRevision(
       );
     }
   }
-  let composed: ComposedCompletedRevision;
+  let composed: PackScoutBuybackEvCompletedCalculationV1;
   if (calculation.status === "available") {
     if (evaluation === null) {
       throw violation(
@@ -508,7 +508,7 @@ export class PackScoutBuybackEvRevisionStore {
     }
     const provenance: PackScoutBuybackEvProtectedProvenanceV1 =
       calculation.provenance;
-    const composed = composeCompletedRevision(calculation, evaluation);
+    const composed = composePackScoutBuybackEvCompletedCalculationV1(calculation, evaluation);
     const identity: PackScoutBuybackEvCalculationIdentityV1 = {
       methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
       confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,

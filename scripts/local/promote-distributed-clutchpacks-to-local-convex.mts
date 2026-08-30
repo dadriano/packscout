@@ -54,6 +54,21 @@ import {
   runLocalConvexPublicationCommand,
   withVerifiedLocalConvexPublicationAuthorityCleanup,
 } from "./local-convex-publication-authorities.mts";
+import {
+  assertLocalClutchpacksV3Predecessor,
+  bindLocalClutchpacksV3Predecessor,
+  localClutchpacksManifestTransition,
+  localClutchpacksProviderTransition,
+} from "./distributed-clutchpacks-publication-transitions.mts";
+import {
+  localClutchpacksPlannedV3Rows,
+  verifyLocalClutchpacksPublicReadback,
+  type LocalClutchpacksEvReadbackRow,
+} from "./distributed-clutchpacks-public-readback.mts";
+import {
+  resolveLocalClutchpacksProviderTerminal,
+  type LocalClutchpacksProviderTerminal,
+} from "./distributed-clutchpacks-provider-terminal.mts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -321,6 +336,8 @@ export async function providerSnapshot(
         select: {
           id: true,
           pack_key: true,
+          row_version: true,
+          attributes: true,
           display_name: true,
           description: true,
           pack_format: true,
@@ -353,6 +370,7 @@ export async function providerSnapshot(
     ) return refuse("CLUTCHPACKS_SNAPSHOT_INELIGIBLE");
     const mappedPacks: DistributedClutchpacksPackRow[] = packs.map((pack) => ({
       id: pack.id,
+      rowVersion: pack.row_version,
       packKey: pack.pack_key,
       displayName: pack.display_name,
       description: pack.description,
@@ -376,6 +394,10 @@ export async function providerSnapshot(
       primaryImageAlt: pack.primary_image_alt,
       listingUrl: pack.listing_url,
       sourceUpdatedAt: pack.source_updated_at,
+      ...(typeof pack.attributes === "object" && pack.attributes !== null &&
+          !Array.isArray(pack.attributes) && Object.hasOwn(pack.attributes, "evInputEvidence")
+        ? { evInputEvidence: pack.attributes.evInputEvidence }
+        : {}),
     }));
     const maximumPackSourceUpdatedAt = mappedPacks.reduce(
       (latest, pack) =>
@@ -496,6 +518,7 @@ async function installPublicationAuthorities(input: {
 
 async function publishProvider(input: {
   readonly client: SignedConvexProviderReleasePublicationClient;
+  readonly manifestClient: SignedConvexCatalogManifestPublicationClient;
   readonly artifacts: Awaited<ReturnType<typeof buildDistributedClutchpacksPublicationArtifacts>>;
 }) {
   const headRequest = {
@@ -505,46 +528,65 @@ async function publishProvider(input: {
   } as const;
   const before = (await input.client.completedHead(headRequest)).receipt.details.head;
   const expectedProof = immutableProof(input.artifacts.providerPlan);
-  if (before.release !== null) {
-    if (
-      canonicalJson(before.release) !== canonicalJson(expectedProof) ||
-      canonicalJson(before.providerCheckpoint) !==
-        canonicalJson(input.artifacts.providerPlan.providerCheckpoint) ||
-      canonicalJson(before.observation) !==
-        canonicalJson(input.artifacts.providerPlan.observation)
-    ) return refuse("LOCAL_CONVEX_PROVIDER_HEAD_CONFLICT");
-    return before;
+  const transition = localClutchpacksProviderTransition({
+    before,
+    expectedProof,
+    providerCheckpoint: input.artifacts.providerPlan.providerCheckpoint,
+    observation: input.artifacts.providerPlan.observation,
+  });
+  if (transition === "replay") {
+    if (before.release === null) return refuse("LOCAL_CONVEX_PROVIDER_HEAD_NOT_OBSERVED");
+    const terminal = await resolveLocalClutchpacksProviderTerminal({
+      head: before,
+      plan: input.artifacts.providerPlan,
+      manifestState: (await input.manifestClient.activeState()).receipt.details.activeState,
+      client: input.client,
+    });
+    return { ...before, ...terminal };
   }
+  const plan = transition === "confirmReuse"
+    ? { ...input.artifacts.providerPlan, classification: "reuse" as const, batches: [],
+        reuseProof: { state: "complete" as const, ...expectedProof } }
+    : input.artifacts.providerPlan;
   const prepared = prepareProviderPromotion({
-    plan: input.artifacts.providerPlan,
+    plan,
     expectedCompletedHead: expectedHead(before),
     checkpointSha256: checkpointDigest({
       stabilityFingerprint: input.artifacts.stabilityFingerprint,
       providerCheckpoint: input.artifacts.providerPlan.providerCheckpoint,
     }),
   });
+  let terminal: LocalClutchpacksProviderTerminal | null = null;
   for (const operation of prepared.operations) {
     const publication = await input.client.sendExact({
       kind: operation.operationKind,
       canonicalRequestBody: operation.canonicalRequestBody,
     });
-    validateProviderPromotionReceipt({
+    const receipt = validateProviderPromotionReceipt({
       operation,
       receipt: publication.receipt,
       canonicalReceiptBody: publication.canonicalReceiptBody,
       receiptSha256: publication.receiptSha256,
     });
+    if (receipt.operationKind === "finalize" || receipt.operationKind === "confirmReuse") {
+      terminal = {
+        terminalOperationKind: receipt.operationKind,
+        terminalOperationId: receipt.operationId,
+        terminalReceiptSha256: publication.receiptSha256,
+      };
+    }
   }
   const after = (await input.client.completedHead(headRequest)).receipt.details.head;
   if (
-    after.release === null ||
+    after.release === null || terminal === null ||
+    after.terminalReceiptSha256 !== terminal.terminalReceiptSha256 ||
     canonicalJson(after.release) !== canonicalJson(expectedProof) ||
     canonicalJson(after.providerCheckpoint) !==
       canonicalJson(input.artifacts.providerPlan.providerCheckpoint) ||
     canonicalJson(after.observation) !==
       canonicalJson(input.artifacts.providerPlan.observation)
   ) return refuse("LOCAL_CONVEX_PROVIDER_HEAD_NOT_OBSERVED");
-  return after;
+  return { ...after, ...terminal };
 }
 
 async function activateManifest(input: {
@@ -575,9 +617,8 @@ async function activateManifest(input: {
     providerSelections: [{
       platformKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
       publicProviderReleaseId: input.providerHead.release.publicProviderReleaseId,
-      terminalOperationKind: "finalize",
-      terminalOperationId:
-        `finalize:${input.providerHead.release.publicProviderReleaseId}`,
+      terminalOperationKind: input.providerHead.terminalOperationKind,
+      terminalOperationId: input.providerHead.terminalOperationId,
       terminalReceiptSha256: input.providerHead.terminalReceiptSha256,
       selectedProviderCheckpoint: input.providerHead.providerCheckpoint,
       selectedDataAsOf: input.providerHead.release.dataAsOf,
@@ -596,17 +637,11 @@ async function activateManifest(input: {
     }],
   });
   const before = (await input.client.activeState()).receipt.details.activeState;
-  if (before.activeManifest !== null) {
-    if (
-      before.activeManifest.publicReleaseId !== manifest.publicReleaseId ||
-      before.activeManifest.manifestFingerprint !== manifest.manifestFingerprint ||
-      canonicalJson(before.observation) !== canonicalJson(observation)
-    ) return refuse("LOCAL_CONVEX_ACTIVE_MANIFEST_CONFLICT");
-    return { manifest, observation, state: before };
-  }
+  const transition = localClutchpacksManifestTransition({ before, manifest, observation });
+  if (transition === "replay") return { manifest, observation, state: before };
   const operationId =
-    `manifest:${input.artifacts.providerPlan.providerCheckpoint.settledSequence}:activateManifest`;
-  const operation = prepareManifestPromotionOperation("activateManifest", {
+    `manifest:${manifest.publicReleaseId}:${observation.observationSequence}:${transition}`;
+  const operation = prepareManifestPromotionOperation(transition, {
     schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
     operationId,
     idempotencyKey: operationId,
@@ -638,41 +673,39 @@ async function verifyPublicReads(input: {
   readonly expectedRepackIds: readonly string[];
   readonly manifestPublicReleaseId: string;
   readonly v3PublicReleaseId: string;
+  readonly v3Plan: Awaited<ReturnType<typeof buildDistributedClutchpacksPublicationArtifacts>>["v3Plan"];
+  readonly previousV3Rows: readonly LocalClutchpacksEvReadbackRow[];
 }) {
   const client = new ConvexHttpClient(input.convexUrl);
   const currentTime = Date.now();
-  const [manifestShell, manifestList, v3Shell, v3List] = await Promise.all([
+  const [manifestShell, manifestList, v3Shell, v3List, dashboard] = await Promise.all([
     client.query(api.publicRepacks.getPublicShellStatus, {}),
     client.query(api.publicRepacks.listPublicRepacks, {
       currentTime,
-      pageSize: 24,
+      pageSize: 50,
+      filters: { availability: "all" },
     }),
     client.query(api.publicRepacksV3.getPublicShellStatusV3, {}),
     client.query(api.publicRepacksV3.listPublicRepacksV3, {
       currentTime,
-      pageSize: 24,
+      pageSize: 50,
+      filters: { availability: "all" },
+    }),
+    client.query(api.publicRepacksV3.getDashboardBundleV3, {
+      currentTime,
+      filters: { availability: "all" },
     }),
   ]);
-  if (
-    !manifestShell.ok || !manifestList.ok || !v3Shell.ok || !v3List.ok ||
-    manifestShell.data.metadata.publicReleaseId !== input.manifestPublicReleaseId ||
-    v3Shell.data.release.publicReleaseId !== input.v3PublicReleaseId ||
-    manifestList.data.range.total !== input.expectedRepackIds.length ||
-    v3List.data.range.total !== input.expectedRepackIds.length
-  ) return refuse("LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
-  const expected = [...input.expectedRepackIds].sort();
-  const manifestIds = manifestList.data.rows
-    .map(({ publicRepackId }) => publicRepackId).sort();
-  const v3Ids = v3List.data.rows
-    .map(({ publicRepackId }) => publicRepackId).sort();
-  if (
-    canonicalJson(manifestIds) !== canonicalJson(expected) ||
-    canonicalJson(v3Ids) !== canonicalJson(expected)
-  ) return refuse("LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
-  return {
-    manifestRepackCount: manifestList.data.range.total,
-    v3RepackCount: v3List.data.range.total,
-  };
+  return verifyLocalClutchpacksPublicReadback({
+    ...input,
+    currentTime,
+    expectedV3Rows: localClutchpacksPlannedV3Rows(input.v3Plan),
+    manifestShell,
+    manifestList,
+    v3Shell,
+    v3List,
+    dashboard,
+  });
 }
 
 export async function promoteDistributedClutchpacksToLocalConvex(options: {
@@ -720,7 +753,9 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
     );
     const artifacts = await failClosedPhase(
       "CLUTCHPACKS_PUBLICATION_ARTIFACT_INVALID",
-      async () => await buildDistributedClutchpacksPublicationArtifacts(initial),
+      async () => await buildDistributedClutchpacksPublicationArtifacts(
+        initial, new Date().toISOString(),
+      ),
     );
     const confirmed = await failClosedPhase(
       "CLUTCHPACKS_SNAPSHOT_CONFIRMATION_FAILED",
@@ -751,6 +786,14 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
           providerCollectibleCount: artifacts.providerPlan.counts.collectibles,
           providerRepackChaseCount: artifacts.providerPlan.counts.repackChases,
           frontendRepackCount: artifacts.v3Plan.manifest.counts.repacks,
+          plannedCurrentEvCount: localClutchpacksPlannedV3Rows(artifacts.v3Plan)
+            .filter(({ evEstimates }) => evEstimates.packScout.status === "current").length,
+          plannedUnavailableReasons: localClutchpacksPlannedV3Rows(artifacts.v3Plan)
+            .reduce<Record<string, number>>((counts, { evEstimates }) => {
+              const ev = evEstimates.packScout;
+              if (ev.status === "unavailable") counts[ev.reason] = (counts[ev.reason] ?? 0) + 1;
+              return counts;
+            }, {}),
         },
       })}\n`);
       return;
@@ -781,6 +824,7 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
           "LOCAL_CONVEX_PROVIDER_PUBLICATION_FAILED",
           async () => await publishProvider({
             client: providerClient,
+            manifestClient,
             artifacts,
           }),
         );
@@ -809,15 +853,30 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
           secret: v3Secret,
         });
         const v3State = await v3Client.activeState();
-        if (
-          v3State.activeRelease !== null &&
-          (v3State.activeRelease.publicReleaseId !== artifacts.v3Plan.publicReleaseId ||
-            v3State.activeRelease.releaseFingerprint !==
-              artifacts.v3Plan.releaseFingerprint)
-        ) return refuse("LOCAL_CONVEX_DATA_RELEASE_V3_CONFLICT");
+        let previousV3Rows: readonly LocalClutchpacksEvReadbackRow[] = [];
+        if (v3State.activeRelease !== null) {
+          const prior = await new ConvexHttpClient(local.publicUrl).query(
+            api.publicRepacksV3.listPublicRepacksV3,
+            { currentTime: Date.now(), pageSize: 50, filters: { availability: "all" } },
+          );
+          if (!prior.ok) return refuse("LOCAL_CONVEX_DATA_RELEASE_V3_SCOPE_CONFLICT");
+          previousV3Rows = prior.data.rows;
+          assertLocalClutchpacksV3Predecessor({
+            state: v3State,
+            publicReleaseId: prior.data.release.publicReleaseId,
+            total: prior.data.range.total,
+            rows: prior.data.rows,
+            expectedPublicRepackIds: artifacts.projection.repacks.map(
+              ({ publicRepackId }) => publicRepackId,
+            ),
+            expectedPublicVendorId: artifacts.projection.vendors[0]!.publicVendorId,
+          });
+        }
         const v3Outcome = await failClosedPhase(
           "LOCAL_CONVEX_DATA_RELEASE_V3_PUBLICATION_FAILED",
-          async () => await new DataReleaseV3ReleasePublisher(v3Client)
+          async () => await new DataReleaseV3ReleasePublisher(
+            bindLocalClutchpacksV3Predecessor(v3Client, v3State),
+          )
             .publish(artifacts.v3Plan),
         );
         const finalSnapshot = await failClosedPhase(
@@ -838,6 +897,8 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
               .map(({ publicRepackId }) => publicRepackId),
             manifestPublicReleaseId: activeManifest.manifest.publicReleaseId,
             v3PublicReleaseId: artifacts.v3Plan.publicReleaseId,
+            v3Plan: artifacts.v3Plan,
+            previousV3Rows,
           }),
         );
         return {
@@ -862,6 +923,9 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
             frontendDataReleaseOutcome: v3Outcome.outcome,
             manifestRepackCount: readback.manifestRepackCount,
             frontendRepackCount: readback.v3RepackCount,
+            frontendKnownEvCount: readback.knownEstimateCount,
+            frontendAgedEvCount: readback.agedEstimateCount,
+            dashboardOpportunityCount: readback.dashboardOpportunityCount,
           },
         };
       },

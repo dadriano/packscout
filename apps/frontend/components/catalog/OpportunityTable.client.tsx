@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
-import { useDeadlineBoundPackScoutEv } from "@/lib/packscout-ev-deadline.client";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
 import { presentOpportunityRow } from "./overview-presentation";
@@ -78,7 +78,7 @@ function OpportunityRow({
   selected: boolean;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>) {
-  const estimate = useDeadlineBoundPackScoutEv(repack.evEstimates.packScout);
+  const estimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const row = presentOpportunityRow(repack, rank, estimate);
 
   return (
@@ -136,6 +136,15 @@ function OpportunityRow({
         <span className={styles.unavailableReason}>
           Confidence: {row.packScoutEv.confidence.displayValue}
         </span>
+        {row.packScoutEv.status !== "current" ? (
+          <span className={styles.unavailableReason} title={[
+            row.packScoutEv.freshness.dataAsOfLabel,
+            row.packScoutEv.reasonCopy,
+            row.packScoutEv.calculationPriceNote,
+          ].filter(Boolean).join(" ")}>
+            {row.packScoutEv.statusLabel}
+          </span>
+        ) : null}
       </td>
       <td>
         <MetricCell metric={row.buyback} />

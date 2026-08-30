@@ -9,7 +9,7 @@ import {
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
-import { resolvePackScoutEvV3AtTime } from "@/lib/packscout-ev-deadline.client";
+import { resolvePackScoutEvV3AtTime } from "@/lib/packscout-ev-clock.client";
 import {
   presentCatalogSummaries,
   presentDashboardKpis,
@@ -62,20 +62,20 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.simulated, false);
 });
 
-test("a deadline-resolved estimate flows into the row unchanged in shape", () => {
+test("a clock-resolved estimate retains its values in the server-ranked row", () => {
   const repack = buildV3ViewSummary();
   const current = buildV3CurrentEv(8_500);
   assert.equal(current.status, "current");
   const deadline =
     current.status === "current" ? Date.parse(current.expiresAt) : 0;
-  const expired = resolvePackScoutEvV3AtTime(current, deadline + 1);
+  const expired = resolvePackScoutEvV3AtTime(current, repack.price, deadline + 1);
 
   const row = presentOpportunityRow(repack, 1, expired);
-  assert.equal(row.packScoutEv.status, "expired");
-  assert.equal(row.packScoutEv.evDollars.displayValue, "Unavailable");
+  assert.equal(row.packScoutEv.status, "last_known");
+  assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
   assert.equal(
-    row.packScoutEv.reasonCopy,
-    "Expired: source data is older than 60 minutes.",
+    row.packScoutEv.freshness.sourceAgeLabel,
+    "Source data over 60 minutes old; last known values retained",
   );
 });
 

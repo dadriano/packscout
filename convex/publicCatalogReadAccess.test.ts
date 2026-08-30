@@ -92,10 +92,19 @@ function configureCredential(value: string) {
  * server time.
  */
 async function publishActiveDataReleaseV3(t: CatalogAccessTest): Promise<void> {
+  const detail = buildV3Detail({ publicRepackId: V3_REPACK_ID_A });
+  const estimate = detail.evEstimates.packScout;
+  if (estimate.status !== "current") throw new Error("Expected a valid EV fixture.");
+  // This suite freezes its request clock independently of the shared fixture
+  // module clock. Keep the calculation in that same timeline so the access
+  // matrix tests authorization, not rejection of future-dated calculations.
+  detail.evEstimates.packScout = { ...estimate, calculatedAt: SEED_TIME,
+    dataAsOf: { state: "known", observedAt: SEED_TIME },
+    expiresAt: new Date(Date.parse(SEED_TIME) + 60 * 60_000).toISOString() };
   const plan = await buildV3FixturePlan({
     publicReleaseId: V3_PUBLIC_RELEASE_ID,
     dataAsOf: SEED_TIME,
-    details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+    details: [detail],
   });
   await t.mutation(
     internal.dataReleaseV3Lifecycle.start,

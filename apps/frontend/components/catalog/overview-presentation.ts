@@ -1,6 +1,6 @@
 import type {
   DashboardKpis,
-  PackScoutPublicEvV3,
+  PackScoutDisplayedEvV3,
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
@@ -119,13 +119,13 @@ export function presentDashboardKpis(
 
 /**
  * Presents one server-ranked opportunity row. The rank comes from the
- * server's signed-EV-dollar ordering, and `estimate` is the deadline-resolved
+ * server's signed-EV-dollar ordering, and `estimate` is the clock-resolved
  * PackScout estimate for the row (defaults to the served projection).
  */
 export function presentOpportunityRow(
   repack: PublicRepackViewSummaryV3,
   rank: number,
-  estimate: PackScoutPublicEvV3 = repack.evEstimates.packScout,
+  estimate: PackScoutDisplayedEvV3 = repack.evEstimates.packScout,
 ): OpportunityPresentation {
   return Object.freeze({
     rank,

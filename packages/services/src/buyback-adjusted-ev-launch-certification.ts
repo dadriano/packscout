@@ -689,7 +689,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     {
       claim:
         "Positive raw EV fails closed at publication, while neutral, negative, " +
-        "zero, unavailable, delayed, expired, simulated, and sold-out states " +
+        "zero, unavailable, delayed, last-known, simulated, and sold-out states " +
         "present through the shared boundary.",
       evidence: [
         {
@@ -720,7 +720,12 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
           testName:
-            "expired estimates present the distinct expired state with stale copy",
+            "stale data without any retained value remains explicitly unavailable",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
+          testName:
+            "last known estimates retain numbers at zero confidence and original timestamps",
         },
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
@@ -958,7 +963,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/confidence-limitations.test.ts",
           testName:
-            "maps the exact confidence-policy V1 limitation vocabulary to copy",
+            "maps the complete displayed-confidence limitation vocabulary to copy",
         },
         {
           file: "apps/frontend/lib/packscout-ev-examples.test.ts",
@@ -990,23 +995,50 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     },
     {
       claim:
-        "Deadline expiry converts client-side exactly like the server and " +
-        "never invents a live state.",
+        "Last supported EV values and original timestamps remain visible as " +
+        "confidence decays to zero. Client clocks cannot increase confidence, " +
+        "and later unavailable publications retain those values without " +
+        "turning sold-out history into a live opportunity.",
       evidence: [
         {
-          file: "apps/frontend/lib/packscout-ev-deadline.client.test.ts",
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
           testName:
-            "strictly after the deadline the estimate converts to the stale state",
+            "crossing the old expiry keeps every EV value and its original times",
         },
         {
-          file: "apps/frontend/lib/packscout-ev-deadline.client.test.ts",
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
           testName:
-            "historical and unavailable estimates never expire into a live state",
+            "confidence continues decaying to zero without disappearing or compounding",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "sold-out history keeps its sale time while confidence ages; absent values stay absent",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "an open page updates confidence every minute without changing the server snapshot",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "a browser clock rollback cannot increase confidence after it has aged",
         },
         {
           file: "convex/publicRepacksV3.test.ts",
           testName:
-            "a current estimate past its deadline fails closed at read time without any new transition",
+            "last valid values remain after the source deadline while confidence decays without new publication",
+        },
+        {
+          file: "convex/dataReleaseV3RetainedEv.test.ts",
+          testName:
+            "unavailable publications retain exact values, timestamps, price basis and rank at zero confidence",
+        },
+        {
+          file: "convex/dataReleaseV3RetainedEv.test.ts",
+          testName:
+            "sold-out history remains visible after expiry without becoming an opportunity",
         },
       ],
     },
