@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { QuarantineEntryDetail, QuarantineRetryOutcome } from "@packscout/contracts";
+import { importRunDetailPath, type QuarantineEntryDetail, type QuarantineRetryOutcome } from "@packscout/contracts";
 import { Link, useParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import { getQuarantineEntry, retryQuarantine } from "../api/import-operations";
@@ -81,7 +81,7 @@ export function QuarantineDetailPage() {
         eyebrow={`Quarantine / ${entry.platformKey}`}
         title={entry.externalId ?? `${humanize(entry.recordKind)} record ${entry.recordIndex + 1}`}
         description={`${entry.reasonCode} · ${entry.fieldPath ?? "Record-level failure"}`}
-        actions={<><Link className="admin-button admin-button-secondary" to={`/runs/${entry.runId}`}>Origin run</Link>{retryable && canRetry ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retry()}>Retry record</button> : null}</>}
+        actions={<><Link className="admin-button admin-button-secondary" to={importRunDetailPath({ providerId: entry.providerId, runId: entry.runId })}>Origin run</Link>{retryable && canRetry ? <button type="button" className="admin-button admin-button-primary" onClick={() => void retry()}>Retry record</button> : null}</>}
       />
       {!canRetry ? <aside className="source-operator-boundary"><strong>Read-only quarantine evidence</strong><p>Your role cannot retry this selected record.</p></aside> : null}
       {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRefreshIndex((value) => value + 1); }}>Try again</button></div> : null}
@@ -112,7 +112,7 @@ export function QuarantineDetailPage() {
             <div><dt>Retry artifact</dt><dd>{retryable ? `Retained until ${dateTime(entry.rawExpiresAt)}` : "Unavailable"}</dd></div>
             <div><dt>Attempts</dt><dd>{entry.attemptCount}</dd></div>
             <div><dt>Resolved</dt><dd>{dateTime(entry.resolvedAt)}</dd></div>
-            <div><dt>Origin run</dt><dd><Link to={`/runs/${entry.runId}`}>{entry.runId.slice(0, 12)}</Link></dd></div>
+            <div><dt>Origin run</dt><dd><Link to={importRunDetailPath({ providerId: entry.providerId, runId: entry.runId })}>{entry.runId.slice(0, 12)}</Link></dd></div>
           </dl>
         </section>
       </div>

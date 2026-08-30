@@ -181,6 +181,26 @@ test("split-profile migration renders an intentional transition instead of missi
   assert.doesNotMatch(html, /Not configured|before activating/u);
 });
 
+test("source ledger names an unavailable insert/update breakdown without inventing counts", () => {
+  Object.assign(globalThis, { React });
+  const source = {
+    ...baseSource,
+    progress: {
+      ...baseSource.progress,
+      dispositions: { inserted: null, revised: null, duplicate: 10, quarantined: 2 },
+    },
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <ProviderSourceOperationsLedger sources={[source]} canOperate={false}
+        pendingKey={null} onCommand={() => undefined} />
+    </MemoryRouter>,
+  );
+  assert.match(html, /Insert\/update breakdown unavailable/);
+  assert.match(html, /10 duplicate · 2 quarantined/);
+  assert.doesNotMatch(html, /\d+ inserted|\d+ revised/);
+});
+
 test("bounded operational labels cover worker, capacity, recovery, retry, pause, failure, and head states", () => {
   const cases: Array<[string, ProviderSourceOperationsSource]> = [
     ["Not configured", { ...baseSource, configured: false, source: null, schedule: null, processor: null, cursor: null }],
@@ -261,7 +281,7 @@ test("diagnostic feed labels shared context, run-filter hiding, expiry gaps, and
       continuation: null,
       cursorFingerprint: null,
       counters: { attempts: 2 },
-      references: [{ kind: "run", label: "Open run", href: `/runs/${ids.run}` }],
+      references: [{ kind: "run", label: "Open run", href: `/runs/${ids.run}?providerId=${baseSource.providerId}` }],
     }],
     nextCursor: null,
     history: {
@@ -287,6 +307,6 @@ test("diagnostic feed labels shared context, run-filter hiding, expiry gaps, and
   assert.match(html, /only matching run and page events/);
   assert.match(html, /History gap/);
   assert.match(html, /Older diagnostic history has expired/);
-  assert.match(html, new RegExp(`/runs/${ids.run}`));
+  assert.ok(html.includes(`href="/runs/${ids.run}?providerId=${baseSource.providerId}"`));
   assert.doesNotMatch(html, /eventId|connectionTestJobId|commandCorrelationKey|authorization/i);
 });

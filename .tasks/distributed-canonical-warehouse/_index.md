@@ -6,22 +6,70 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 8/23 tasks complete
+**Progress:** 9/23 tasks complete; the live provider/publication checkpoint is in progress
 
 ## Current Build Checkpoint
 
-Finish the work already in progress, then complete Task 022 by porting the
-authoritative `apps/admin` baseline at commit `225f9a1` to only the new
-central/provider topology. The simplified admin shell currently present on this
-branch is not parity evidence. After the full route shell and supporting admin
-workflows are preserved, complete Task 023's standalone ClutchPacks ingestion
-proof before enabling Courtyard. Then complete Task 021's parallel ClutchPacks
-and Courtyard isolation proof. Run now must return
-`PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without mutation for an uninstalled
-integration. After both installed providers can be triggered and ingest into
-separate databases concurrently, pause to realign priorities before starting
-Tasks 015–020. No Convex manifest activation or frontend gate work proceeds at
-this checkpoint.
+Complete the live checkpoint already in progress. The authoritative admin is
+running on the central/provider topology; Canonical Data now routes directly to
+each isolated provider database. Task 023's ClutchPacks dataset is the frozen
+publication input. Task 021 is importing Courtyard to source head with one
+provider-local run, lease, cursor, and database while preserving the independent
+queued ClutchPacks command.
+
+The operator subsequently approved two explicit extensions to the earlier
+checkpoint: publish the stable ClutchPacks snapshot to local Convex and prove the
+frontend reads it, and activate/import Collector Crypt and Phygitals after each
+passes its own live source-admission check. These lanes run in parallel. An
+uninstalled or unproven integration must still return
+`PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` without mutation. Heat remains deferred.
+
+### Local ClutchPacks publication proof
+
+The local review snapshot at provider promotion sequence `78502` contains 17
+active packs, 6,655 active collectibles, and no pack-content or central identity
+correlations. The one-shot local publisher therefore exposes exactly 17 repacks
+and no fabricated categories, collectibles, or chases. Signed provider release
+`c24e324f-397c-57af-8ecf-f8c3f8316909` is selected by active manifest
+`bcc99f7e-13ce-5f09-9298-fbc9c4c240fb`; the current frontend's V3 release is
+`9acfbde2-3aaf-8b7e-8564-4570f998d997`. Both public query paths return the same 17
+pack IDs, and the live `/packs` UI shows `1–17 of 17` for ClutchPacks.
+
+The dedicated publication agent also hardened temporary signing-authority
+cleanup: all owned keys are attempted, absence is verified before reporting
+ready, and secret values use stdin rather than command-line arguments. The
+26 focused publication tests pass, including partial installation, failed or
+uncertain cleanup, changed ownership, pipe-drain readback, and missing snapshot
+configuration/worker rows.
+
+This is a local proof utility, not completion of Tasks 015–016 or a production
+dual-publication design. The exact compatibility shape is the existing
+frontend `publicRepacksV3` read model, assembled from the same frozen provider
+snapshot only after the signed provider manifest is read back as active. The
+integration task owns this temporary local bridge. Remove it when Task 016
+serves the frontend directly from the manifest-native contract; reset the local
+derived Convex data at that transition rather than carrying both paths into
+production. It introduces no PostgreSQL compatibility schema, dual canonical
+writes, fake correlations, or auth bypass.
+
+### Remaining checkpoint boundaries
+
+Courtyard and Collector Crypt are importing concurrently with zero quarantines
+at their latest audited milestones; neither is claimed to have reached source
+head. Phygitals config v4 passed its immutable native-card adapter/replay gate
+and is also importing independently: its 47,400-record checkpoint stored
+45,530 new cards while preserving the previous 741 cards and all historical
+quarantines. Sampled remaining rejects lack a reviewed card name. See Task 021
+for the exact evidence and the distinction between repeated-quarantine
+duplicates and canonical duplicates. Current admin Canonical Data and
+provider-qualified run detail are wired; Background Work, Compare, and
+quarantine detail/retry remain uncompleted Task 022 parity work.
+
+The 2026-08-29 integrated checkpoint passed `npm run verify:framework`, including
+schema checks, standards ratchet, workspace lint/typechecks/tests, tooling, and
+frontend/admin production builds. The local previews remained healthy after
+the builds. This is not a claim of source-head completion or full feature
+acceptance; Tasks 021 and 022 remain in progress.
 
 ## Context
 
@@ -77,10 +125,10 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 ### Deferred data features
 
-- Provider-specific fetchers, adapters, parsers, and mappings beyond the
-  approved ClutchPacks DataForrest checkpoint. Raw payload storage, replay
-  archives, and unresolved source-record staging remain deferred for every
-  provider.
+- Provider-specific integrations beyond the four approved DataForrest launch
+  providers: ClutchPacks, Courtyard, Collector Crypt, and Phygitals. Raw payload
+  storage, replay archives, and unresolved source-record staging remain
+  deferred.
 - Product normalization, a global pack identity layer, and global catalog governance screens in the admin application.
 - Heat storage, calculation, publication, or frontend redesign. Catalog availability must not depend on Heat.
 - Publication of exact collectible instances, provider accounts, credentials, raw pulls, raw market-event histories, quarantine evidence, or runtime state to Convex.
@@ -145,8 +193,8 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 
 | ID | Task | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|
-| 023 | Run ClutchPacks end to end first | large | 2–4 days | in progress | 007, 008, 022 |
-| 021 | Prove two provider imports in parallel | large | 2–4 days | not started | 007, 008, 022, 023 |
+| 023 | Run ClutchPacks end to end first | large | 2–4 days | done | 007, 008, 022 |
+| 021 | Prove two provider imports in parallel | large | 2–4 days | in progress | 007, 008, 022, 023 |
 
 Total estimated builder effort is 77–121 days, including focused verification in every task. The dependency critical path is approximately 50–77 builder days; independent tasks reduce elapsed time when built in parallel.
 
@@ -196,6 +244,8 @@ Total estimated builder effort is 77–121 days, including focused verification 
 
 ## Next Action
 
-Open `022-port-authoritative-admin-baseline.md` and inventory every route,
-runtime, repository, and supporting table in the commit-`225f9a1` admin before
-changing the current UI or wiring either provider integration.
+Keep the independently running Courtyard, Collector Crypt, and Phygitals
+imports monitored to source head, then freeze terminal counts and verify replay
+and isolated failure evidence. The local ClutchPacks Convex/frontend proof is
+complete; do not consume its independent queued command. Complete the remaining
+Task 022 admin parity before claiming the full admin port or feature is done.

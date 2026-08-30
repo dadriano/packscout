@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { StalledRunView } from "@packscout/contracts";
+import { importRunDetailPath, type StalledRunView } from "@packscout/contracts";
 import { age, dateTime, humanize } from "../operations/OperationStatus";
 
 function attribution(run: StalledRunView): string {
@@ -27,7 +27,7 @@ export function StalledRunLedger({ runs }: { runs: StalledRunView[] }) {
         {runs.map((run) => (
           <article key={run.runId}>
             <div className="ops-ledger__identity">
-              <Link to={`/runs/${run.runId}`}>{run.providerName}</Link>
+              <Link to={importRunDetailPath({ providerId: run.providerId, runId: run.runId })}>{run.providerName}</Link>
               <span>
                 {run.platformKey} · {humanize(run.trigger)} ·{" "}
                 {run.runId.slice(0, 8)}
@@ -64,7 +64,7 @@ export function StalledRunLedger({ runs }: { runs: StalledRunView[] }) {
               </div>
             </dl>
             <p className="ops-ledger__links">
-              <Link to={`/runs/${run.runId}`}>Open run detail</Link>
+              <Link to={importRunDetailPath({ providerId: run.providerId, runId: run.runId })}>Open run detail</Link>
               <Link to={`/providers/${run.providerId}`}>Open provider</Link>
             </p>
             <p className="ops-ledger__diagnostic">

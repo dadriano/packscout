@@ -157,6 +157,26 @@ database connection was used.
 
 ## Acceptance Criteria
 
+### Current live checkpoint — 2026-08-29
+
+- The authoritative preview runs at `http://127.0.0.1:5111` with all four
+  centrally registered provider databases. Canonical Data is now backed by
+  real routed canonical repositories, including row expansion and isolated
+  unavailable-provider results.
+- Run detail carries `providerId` alongside the existing run path. Central
+  organization authorization selects the exact provider database; newly queued
+  or running records do not depend on an activity relay to discover ownership.
+  The live Collector Crypt run detail was opened from the Runs ledger and
+  displayed 330,600 committed records while its import continued.
+- The new run schema measures accepted, duplicate, quarantined, and combined
+  material changes, not separate inserted/revised counts. The existing admin
+  projections now use explicit unavailable insert/update counts and render
+  that limitation instead of mislabeling all material changes as revisions.
+- Full admin parity is **not complete**. Background Work/recomputation,
+  Compare/parity, and provider-local quarantine detail/retry still need their
+  distributed implementations. These remain explicit Task 022 work; route
+  presence or a safe unavailable response is not acceptance evidence.
+
 ### Baseline parity
 
 - [x] The authoritative route catalog and protected shell are present with no
@@ -194,7 +214,7 @@ database connection was used.
   `PROVIDER_SOURCE_ADAPTER_UNAVAILABLE` in an accessible error state.
 - [ ] ClutchPacks and Courtyard can be configured through the current admin
   workflow without per-data-type management controls.
-- [ ] Focused tests, admin production build, distributed schema checks, and
+- [x] Focused tests, admin production build, distributed schema checks, and
   `npm run verify:framework` pass.
 
 ## Spec Compliance
@@ -207,7 +227,13 @@ database connection was used.
 - Any current admin workflow that cannot map cleanly to those boundaries must be
   recorded as a design blocker instead of being silently dropped or backed by a
   compatibility shim.
-- Verification so far: authoritative admin route/API guards pass 5/5; active
-  Convex surface guards pass 6/6; current admin Run-now admission and stable
-  fail-closed behavior pass focused tests. Distributed runtime ownership and
-  full framework verification remain open.
+- Verification on 2026-08-29: `npm run verify:framework` passed end to end,
+  including distributed schema validation, the unchanged standards ratchet,
+  workspace lint/typechecks/tests, tooling tests, and frontend/admin production
+  builds. The admin suite passed 491/491; Convex passed 336/336. Independent
+  focused runs also passed 64 provider-qualified run-detail cases and 15
+  counter-contract/projection/rendering cases. The live Collector Crypt detail
+  continued polling committed progress after the production builds, and the
+  frontend still showed all 17 locally published ClutchPacks repacks.
+- A passing verifier certifies this checkpoint, not the unimplemented
+  Background Work, Compare, and quarantine detail/retry parity described above.

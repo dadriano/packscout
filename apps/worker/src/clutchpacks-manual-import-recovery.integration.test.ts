@@ -19,9 +19,9 @@ import {
   type ProviderPrismaClient,
 } from "@packscout/database";
 import {
-  ClutchpacksManualImportExecutor,
+  ProviderManualImportExecutor,
   type ProviderManualImportPageSource,
-} from "./clutchpacks-manual-import-executor.ts";
+} from "./provider-manual-import-executor.ts";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -272,6 +272,199 @@ function emptyHeadSource(input: Readonly<{
     },
   };
 }
+
+async function commitCleanupContinuation(
+  harness: ProviderHarness,
+  input: Readonly<{ runId: string; workerId: string; fence: bigint }>,
+): Promise<Readonly<{ checkpoint: { cursor: string }; checkpointHash: string }>> {
+  const checkpoint = { cursor: "cleanup-checkpoint" };
+  const checkpointHash = "c".repeat(64);
+  const committed = await new PrismaProviderRunRepository(
+    harness.client,
+  ).commitPage({
+    pageId: randomUUID(),
+    runId: input.runId,
+    workerId: input.workerId,
+    workerFence: input.fence,
+    contractVersion: PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+    requestedCursor: null,
+    requestedCursorHash: null,
+    nextCursor: checkpoint,
+    nextCursorHash: checkpointHash,
+    continuation: "more",
+    responseDigest: "d".repeat(64),
+    counts: {
+      records: 0,
+      catalog: 0,
+      pulls: 0,
+      marketEvents: 0,
+      accepted: 0,
+      duplicate: 0,
+      quarantined: 0,
+      materialChanges: 0,
+    },
+    committedAt: new Date(),
+  });
+  assert.equal(committed.kind, "committed");
+  return { checkpoint, checkpointHash };
+}
+
+for (const failureCode of [
+  "PROVIDER_IMPORT_AUTHORITY_EXPIRED",
+  "PROVIDER_CAPTURE_ABORTED",
+  "PROVIDER_IMPORT_STEP_LIMIT_EXCEEDED",
+] as const) {
+  test(`owned progress cleanup preserves the checkpoint for ${failureCode}`, async (context) => {
+    if (!integrationEnabled()) {
+      context.skip("Set PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION=1 to run the disposable database proof.");
+      return;
+    }
+    const harness = await createHarness();
+    try {
+      const configuration = await synchronizeConfiguration(harness);
+      const workerId = "integration:owned-progress-cleanup";
+      const active = await startAttempt(harness, configuration, workerId);
+      const { checkpoint, checkpointHash } = await commitCleanupContinuation(
+        harness,
+        { ...active, workerId },
+      );
+      let sourceRequests = 0;
+      const executor = new ProviderManualImportExecutor({
+        database: harness.client,
+        source: emptyHeadSource({
+          onNextPage: () => { sourceRequests += 1; },
+        }),
+        workerId,
+        leaseMilliseconds: 30_000,
+      });
+      assert.deepEqual(await executor.terminalizeProgress({
+        progress: { kind: "progress", runId: active.runId, pageCount: 1 },
+        failureCode,
+      }), { kind: "failed", runId: active.runId, failureCode });
+      assert.equal(sourceRequests, 0);
+      assert.equal(await harness.client.provider_runs.count(), 1);
+      assert.equal(await harness.client.provider_run_pages.count(), 1);
+      assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({
+        where: { id: active.runId },
+        select: {
+          state: true,
+          worker_fence: true,
+          page_count: true,
+          final_cursor: true,
+          final_cursor_hash: true,
+          failure_code: true,
+        },
+      }), {
+        state: "failed",
+        worker_fence: active.fence,
+        page_count: 1,
+        final_cursor: checkpoint,
+        final_cursor_hash: checkpointHash,
+        failure_code: failureCode,
+      });
+      assert.deepEqual(await harness.client.provider_runtime.findUniqueOrThrow({
+        where: { singleton_key: true },
+        select: {
+          operating_state: true,
+          source_cursor: true,
+          source_cursor_hash: true,
+        },
+      }), {
+        operating_state: "error",
+        source_cursor: checkpoint,
+        source_cursor_hash: checkpointHash,
+      });
+      assert.deepEqual(await harness.client.provider_worker_states
+        .findUniqueOrThrow({
+          where: { worker_role: "import" },
+          select: { lease_owner: true, lease_fence: true },
+        }), { lease_owner: null, lease_fence: active.fence });
+    } finally {
+      await harness.close();
+    }
+  });
+}
+
+test("progress cleanup cannot release a contended successor or terminalize an old run", async (context) => {
+  if (!integrationEnabled()) {
+    context.skip("Set PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION=1 to run the disposable database proof.");
+    return;
+  }
+  const harness = await createHarness();
+  try {
+    const configuration = await synchronizeConfiguration(harness);
+    const workerId = "integration:stale-progress-cleanup";
+    const successorWorkerId = "integration:successor-progress-cleanup";
+    const active = await startAttempt(harness, configuration, workerId);
+    await commitCleanupContinuation(harness, { ...active, workerId });
+    let sourceRequests = 0;
+    const executor = new ProviderManualImportExecutor({
+      database: harness.client,
+      source: emptyHeadSource({
+        onNextPage: () => { sourceRequests += 1; },
+      }),
+      workerId,
+      leaseMilliseconds: 30_000,
+    });
+    const progress = { kind: "progress", runId: active.runId, pageCount: 1 } as const;
+    const successorFence = await takeOverLease(
+      harness,
+      { workerId, fence: active.fence },
+      successorWorkerId,
+    );
+    assert.deepEqual(await executor.terminalizeProgress({
+      progress,
+      failureCode: "PROVIDER_CAPTURE_ABORTED",
+    }), {
+      kind: "blocked",
+      runId: active.runId,
+      failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+    });
+    assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: active.runId },
+      select: { state: true, failure_code: true },
+    }), { state: "running", failure_code: null });
+    const recoveryRunId = randomUUID();
+    assert.equal((await new PrismaProviderRunRepository(harness.client)
+      .recoverActive({
+        recoveryRunId,
+        workerId: successorWorkerId,
+        workerFence: successorFence,
+        correlationId: randomUUID(),
+      })).kind, "recovered");
+    const oldRunBefore = await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: active.runId },
+    });
+    const successorBefore = await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: recoveryRunId },
+    });
+    const leaseBefore = await harness.client.provider_worker_states.findUniqueOrThrow({
+      where: { worker_role: "import" },
+    });
+    assert.deepEqual(await executor.terminalizeProgress({
+      progress,
+      failureCode: "PROVIDER_IMPORT_AUTHORITY_EXPIRED",
+    }), {
+      kind: "blocked",
+      runId: active.runId,
+      failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+    });
+    assert.equal(sourceRequests, 0);
+    assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: active.runId },
+    }), oldRunBefore);
+    assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: recoveryRunId },
+    }), successorBefore);
+    assert.deepEqual(await harness.client.provider_worker_states.findUniqueOrThrow({
+      where: { worker_role: "import" },
+    }), leaseBefore);
+    assert.equal(leaseBefore.lease_owner, successorWorkerId);
+    assert.equal(leaseBefore.lease_fence, successorFence);
+  } finally {
+    await harness.close();
+  }
+});
 
 test(
   "the current import fence resumes the same run from the runtime checkpoint",
@@ -553,7 +746,7 @@ test(
         fence: prior.fence,
       }), true);
       let pageCalls = 0;
-      const result = await new ClutchpacksManualImportExecutor({
+      const result = await new ProviderManualImportExecutor({
         database: harness.client,
         source: {
           supports: () => false,
@@ -640,7 +833,7 @@ test(
           },
         });
       let pageCalls = 0;
-      const result = await new ClutchpacksManualImportExecutor({
+      const result = await new ProviderManualImportExecutor({
         database: harness.client,
         source: {
           supports: () => false,
@@ -730,7 +923,7 @@ test(
         FOR EACH STATEMENT
         EXECUTE FUNCTION packscout_test_steal_import_lease_after_reconciliation()
       `);
-      const result = await new ClutchpacksManualImportExecutor({
+      const result = await new ProviderManualImportExecutor({
         database: harness.client,
         source: emptyHeadSource(),
         workerId,

@@ -1,12 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
-  DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
-  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-  dataforrestClutchpacksDistributedSourceAdapterManifest,
-  dataforrestEventRecordV1Schema,
   opaqueCursorEnvelopeSchema,
-  type DataforrestEventRecordV1,
   type OpaqueCursorEnvelope,
   type SourceAdapterFailure,
 } from "@packscout/contracts";
@@ -36,7 +30,7 @@ import {
   type SourceAdapterRequestTerminalizer,
 } from "@packscout/services";
 import type { ProviderManualImportPageSource } from
-  "./clutchpacks-manual-import-executor.ts";
+  "./provider-manual-import-executor.ts";
 import type {
   ProviderCaptureAuthority,
   ProviderCapturePageSourceInput,
@@ -47,10 +41,10 @@ import type {
   DataforrestSourceAuthorityRequest,
   ResolvedDataforrestSourceAuthority,
 } from "./dataforrest-source-authority-resolver.ts";
-import { translateClutchpacksDataforrestRecords } from
-  "./providers/clutchpacks-capture-integration.ts";
-
-const CLUTCHPACKS_PROVIDER_KEY = "clutchpacks" as const;
+import type { ProviderDataforrestLiveIntegration } from
+  "./provider-dataforrest-live-integration.ts";
+import { translateProviderNormalizedObservations } from
+  "./provider-normalized-mixed-page-translation.ts";
 
 export type ProviderDataforrestSourceFailureCode =
   | `PROVIDER_DATAFORREST_${Uppercase<SourceAdapterFailure["code"]>}`
@@ -138,19 +132,18 @@ function validateResolvedAuthority(
   input: ProviderCapturePageSourceInput,
   adapterKey: string,
   resolved: ResolvedDataforrestSourceAuthority,
+  integration: ProviderDataforrestLiveIntegration,
 ): void {
   if (
     resolved.providerId !== input.authority.providerId
-    || resolved.providerKey !== CLUTCHPACKS_PROVIDER_KEY
+    || resolved.providerKey !== integration.providerKey
     || resolved.providerKey !== input.authority.providerKey
     || resolved.configVersionId !== input.authority.configVersionId
     || resolved.configVersionNumber !== input.authority.configVersionNumber
     || resolved.adapterKey !== adapterKey
-    || resolved.adapterKey !==
-      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
-    || resolved.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY
-    || resolved.sourceAdapterVersion !==
-      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    || resolved.adapterKey !== integration.manifest.adapterVersion
+    || resolved.sourceTypeKey !== integration.manifest.sourceTypeKey
+    || resolved.sourceAdapterVersion !== integration.manifest.adapterVersion
     || resolved.sourceCredentialVersionNumber < 1n
     || resolved.organizationId.trim().length === 0
     || resolved.sourceCredentialVersionId.trim().length === 0
@@ -169,12 +162,13 @@ interface DataforrestOperationIdentity {
 
 function operationIdentity(
   resolved: ResolvedDataforrestSourceAuthority,
+  integration: ProviderDataforrestLiveIntegration,
 ): DataforrestOperationIdentity {
-  const declaration = dataforrestClutchpacksDistributedSourceAdapterManifest
-    .supportedProviders.find(
-      ({ provider }) => provider === CLUTCHPACKS_PROVIDER_KEY,
-    );
-  if (declaration === undefined) {
+  if (
+    integration.declaration.provider !== resolved.providerKey
+    || integration.declaration.identityNamespaceKey !==
+      integration.mapper.identityNamespaceKey
+  ) {
     failure("PROVIDER_DATAFORREST_AUTHORITY_INVALID");
   }
   return Object.freeze({
@@ -182,7 +176,7 @@ function operationIdentity(
     sourceRevisionId: resolved.configVersionId,
     connectionProfileId: resolved.sourceCredentialVersionId,
     connectionProfileRevisionId: resolved.sourceCredentialVersionId,
-    identityNamespaceKey: declaration.identityNamespaceKey,
+    identityNamespaceKey: integration.declaration.identityNamespaceKey,
   });
 }
 
@@ -190,6 +184,7 @@ function requestedCursor(input: Readonly<{
   checkpoint: CanonicalJsonValue | null;
   checkpointFingerprint: string | null;
   identity: DataforrestOperationIdentity;
+  integration: ProviderDataforrestLiveIntegration;
 }>): OpaqueCursorEnvelope {
   if (
     providerMixedCursorFingerprint(input.checkpoint)
@@ -201,9 +196,9 @@ function requestedCursor(input: Readonly<{
     return Object.freeze({
       sourceInstanceId: input.identity.sourceInstanceId,
       sourceRevisionId: input.identity.sourceRevisionId,
-      sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
-      adapterVersion: DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
-      cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
+      sourceTypeKey: input.integration.manifest.sourceTypeKey,
+      adapterVersion: input.integration.manifest.adapterVersion,
+      cursorCodecKey: input.integration.manifest.cursorCodecKey,
       cursorGeneration: 1,
       value: null,
     });
@@ -213,10 +208,9 @@ function requestedCursor(input: Readonly<{
     !parsed.success
     || parsed.data.sourceInstanceId !== input.identity.sourceInstanceId
     || parsed.data.sourceRevisionId !== input.identity.sourceRevisionId
-    || parsed.data.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY
-    || parsed.data.adapterVersion !==
-      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
-    || parsed.data.cursorCodecKey !== DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY
+    || parsed.data.sourceTypeKey !== input.integration.manifest.sourceTypeKey
+    || parsed.data.adapterVersion !== input.integration.manifest.adapterVersion
+    || parsed.data.cursorCodecKey !== input.integration.manifest.cursorCodecKey
     || parsed.data.cursorGeneration !== 1
   ) {
     failure("PROVIDER_DATAFORREST_CURSOR_INVALID");
@@ -225,7 +219,6 @@ function requestedCursor(input: Readonly<{
 }
 
 interface PartitionedDataforrestRecords {
-  readonly records: readonly DataforrestEventRecordV1[];
   readonly quarantines: readonly ProviderMixedPageQuarantineRecordDraft[];
 }
 
@@ -318,7 +311,6 @@ function partitionValidatedDataforrestRecords(
   ) {
     failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
   }
-  const records: DataforrestEventRecordV1[] = [];
   const quarantines: ProviderMixedPageQuarantineRecordDraft[] = [];
   for (const [index, outcome] of outcomes.entries()) {
     const expectedReference = `page_record:${index}`;
@@ -331,9 +323,6 @@ function partitionValidatedDataforrestRecords(
       failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
     }
     if (outcome.status === "valid") {
-      const parsed = dataforrestEventRecordV1Schema.safeParse(evidence);
-      if (!parsed.success) failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
-      records.push(parsed.data);
       continue;
     }
     quarantines.push(Object.freeze({
@@ -351,7 +340,6 @@ function partitionValidatedDataforrestRecords(
     }));
   }
   return Object.freeze({
-    records: Object.freeze(records),
     quarantines: Object.freeze(quarantines),
   });
 }
@@ -423,7 +411,31 @@ function safeUnexpectedFailure(error: unknown): never {
   return failure("PROVIDER_DATAFORREST_RESPONSE_INVALID");
 }
 
-/** Live, bounded ClutchPacks DataForrest-to-provider mixed-page bridge. */
+function adapterMatchesIntegration(
+  adapter: SourceAdapter,
+  integration: ProviderDataforrestLiveIntegration,
+): boolean {
+  return adapter.manifest.sourceTypeKey === integration.manifest.sourceTypeKey
+    && adapter.manifest.adapterVersion === integration.manifest.adapterVersion
+    && adapter.manifest.normalizedContractVersion ===
+      integration.manifest.normalizedContractVersion
+    && adapter.manifest.cursorCodecKey === integration.manifest.cursorCodecKey
+    && adapter.manifest.requestBounds.pageLimit ===
+      integration.manifest.requestBounds.pageLimit
+    && adapter.manifest.requestBounds.maximumResponseBytes ===
+      integration.manifest.requestBounds.maximumResponseBytes
+    && adapter.manifest.requestBounds.timeoutMilliseconds ===
+      integration.manifest.requestBounds.timeoutMilliseconds
+    && adapter.manifest.maximumPlatformRequestCap ===
+      integration.manifest.maximumPlatformRequestCap
+    && adapter.manifest.supportedProviders.some((declaration) =>
+      declaration.provider === integration.providerKey
+      && declaration.identityNamespaceKey ===
+        integration.declaration.identityNamespaceKey
+    );
+}
+
+/** Live, bounded DataForrest-to-provider mixed-page bridge. */
 export class ProviderDataforrestMixedPageSource
   implements ProviderManualImportPageSource {
   readonly #adapter: SourceAdapter;
@@ -433,29 +445,34 @@ export class ProviderDataforrestMixedPageSource
   readonly #terminalizeRequest: SourceAdapterRequestTerminalizer;
   readonly #translationRecorder: ProviderDataforrestPageTranslationRecorder;
   readonly #workerId: string;
+  readonly #integration: ProviderDataforrestLiveIntegration;
 
   constructor(input: Readonly<{
     authorityResolver: DataforrestSourceAuthorityResolver;
     terminalizeRequest: SourceAdapterRequestTerminalizer;
     translationRecorder: ProviderDataforrestPageTranslationRecorder;
     workerId: string;
+    integration: ProviderDataforrestLiveIntegration;
     adapter?: SourceAdapter;
   }>) {
     this.#authorityResolver = input.authorityResolver;
     this.#terminalizeRequest = input.terminalizeRequest;
     this.#translationRecorder = input.translationRecorder;
     this.#workerId = input.workerId;
+    this.#integration = input.integration;
     this.#adapter = input.adapter ?? new DataforrestEventsSourceAdapter(
       {},
-      dataforrestClutchpacksDistributedSourceAdapterManifest,
+      input.integration.manifest,
     );
+    if (!adapterMatchesIntegration(this.#adapter, input.integration)) {
+      throw new TypeError("DataForrest adapter does not match live integration.");
+    }
   }
 
   supports(adapterKey: string, providerKey: string): boolean {
-    return adapterKey ===
-      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
-      && providerKey === CLUTCHPACKS_PROVIDER_KEY
-      && this.#adapter.manifest.adapterVersion === adapterKey;
+    return adapterKey === this.#integration.manifest.adapterVersion
+      && providerKey === this.#integration.providerKey
+      && adapterMatchesIntegration(this.#adapter, this.#integration);
   }
 
   async nextPage(input: ProviderCapturePageSourceInput): Promise<unknown> {
@@ -463,7 +480,7 @@ export class ProviderDataforrestMixedPageSource
       failure("PROVIDER_DATAFORREST_ABORTED");
     }
     if (
-      input.authority.providerKey !== CLUTCHPACKS_PROVIDER_KEY
+      input.authority.providerKey !== this.#integration.providerKey
       || !Number.isSafeInteger(input.pageNumber)
       || input.pageNumber < 1
     ) {
@@ -485,23 +502,21 @@ export class ProviderDataforrestMixedPageSource
     } catch {
       failure("PROVIDER_DATAFORREST_AUTHORITY_UNAVAILABLE");
     }
-    validateResolvedAuthority(input, adapterKey, resolved);
-    const identity = operationIdentity(resolved);
+    validateResolvedAuthority(input, adapterKey, resolved, this.#integration);
+    const identity = operationIdentity(resolved, this.#integration);
     const cursor = requestedCursor({
       checkpoint: input.sourceCheckpoint,
       checkpointFingerprint: input.sourceCheckpointFingerprint,
       identity,
+      integration: this.#integration,
     });
     const manifest = this.#adapter.manifest;
     const declaration = manifest.supportedProviders.find(
-      ({ provider }) => provider === CLUTCHPACKS_PROVIDER_KEY,
+      ({ provider }) => provider === this.#integration.providerKey,
     );
     if (
       declaration === undefined
-      || manifest.sourceTypeKey !== DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY
-      || manifest.adapterVersion !==
-        DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
-      || manifest.cursorCodecKey !== DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY
+      || !adapterMatchesIntegration(this.#adapter, this.#integration)
     ) {
       failure("PROVIDER_DATAFORREST_AUTHORITY_INVALID");
     }
@@ -526,7 +541,7 @@ export class ProviderDataforrestMixedPageSource
       connectionProfileId: identity.connectionProfileId,
       connectionProfileRevisionId: identity.connectionProfileRevisionId,
       connectionHealthGeneration: 0,
-      provider: CLUTCHPACKS_PROVIDER_KEY,
+      provider: this.#integration.providerKey,
       providerId: resolved.providerId,
       sourceInstanceId: identity.sourceInstanceId,
       sourceRevisionId: identity.sourceRevisionId,
@@ -563,7 +578,7 @@ export class ProviderDataforrestMixedPageSource
         requestLease,
         bounds: manifest.requestBounds,
         operationKind: "page_read",
-        provider: CLUTCHPACKS_PROVIDER_KEY,
+        provider: this.#integration.providerKey,
         providerId: resolved.providerId,
         sourceInstanceId: identity.sourceInstanceId,
         sourceRevisionId: identity.sourceRevisionId,
@@ -619,11 +634,11 @@ export class ProviderDataforrestMixedPageSource
           completed.value,
           resolved.providerId,
         );
-        const translated = translateClutchpacksDataforrestRecords({
-          records: partition.records,
+        const translated = translateProviderNormalizedObservations({
+          organizationId: resolved.organizationId,
           providerId: resolved.providerId,
-          adapterVersion:
-            DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+          integration: this.#integration,
+          page: completed.value.normalizedPage,
         });
         translation = Object.freeze({
           records: Object.freeze([

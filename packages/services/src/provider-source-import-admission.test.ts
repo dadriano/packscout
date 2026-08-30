@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+  providerSourceIntegrationCapability,
   ProviderSourceIntegrationCapabilityRegistry,
 } from
   "./provider-source-integration-capability.ts";
@@ -64,10 +65,10 @@ function service(input: Readonly<{
     sourceIntegrations: new ProviderSourceIntegrationCapabilityRegistry(
       input.installed === false
         ? []
-        : [{
-            adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
-            sourceNeutralPageExecution: true,
-          }],
+        : [providerSourceIntegrationCapability(
+            "clutchpacks",
+            CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
+          )],
     ),
     delegate: {
       async requestManual(received) {

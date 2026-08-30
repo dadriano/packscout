@@ -153,7 +153,7 @@ function runtime() {
 }
 
 test("provider-backed run detail preserves all related quarantine summaries", async () => {
-  const detail = await runtime().reads.getRun({ organizationId, runId });
+  const detail = await runtime().reads.getRun({ organizationId, providerId, runId });
   assert.ok(detail);
   assert.equal(detail.counters.quarantined, 15);
   assert.equal(detail.relatedQuarantines.length, 15);

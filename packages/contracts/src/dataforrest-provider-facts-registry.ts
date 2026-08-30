@@ -2,11 +2,18 @@ import { clutchpacksCardProviderFacts } from
   "./dataforrest-clutchpacks-card-v2.ts";
 import { clutchpacksPackProviderFacts } from
   "./dataforrest-clutchpacks-pack-v3.ts";
+import { phygitalsCardProviderFactsV1 } from
+  "./dataforrest-phygitals-card-v1.ts";
+import { phygitalsCardProviderFactsV2 } from
+  "./dataforrest-phygitals-card-v2.ts";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import type { LaunchProviderKey } from "./provider-source-contract-v1.ts";
 import type { NormalizedProviderFacts } from "./provider-source-facts-v1.ts";
@@ -54,6 +61,18 @@ const providerFactsAdapters = Object.freeze([
     kind: "pack",
     read: clutchpacksPackProviderFacts,
   },
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+    provider: "phygitals",
+    kind: "card",
+    read: phygitalsCardProviderFactsV1,
+  },
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+    provider: "phygitals",
+    kind: "card",
+    read: phygitalsCardProviderFactsV2,
+  },
 ] as const satisfies readonly ProviderFactsAdapter[]);
 
 const supportedAdapterVersions: ReadonlySet<string> = new Set([
@@ -61,6 +80,9 @@ const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 ]);
 
 export function readDataforrestProviderFacts(

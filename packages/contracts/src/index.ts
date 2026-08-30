@@ -34,6 +34,7 @@ export * from "./provider-runtime.ts";
 export * from "./public-identities.ts";
 export * from "./quarantine.ts";
 export * from "./operations.ts";
+export * from "./import-run-detail.ts";
 export * from "./worker-fleet.ts";
 export * from "./worker-presence.ts";
 export * from "./email-delivery.ts";

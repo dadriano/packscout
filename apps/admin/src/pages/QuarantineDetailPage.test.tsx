@@ -109,6 +109,7 @@ test("quarantine detail loads safe evidence and retries one open record with con
   await settlePage();
   assert.match(pageText(renderer), /safe-source-42/);
   assert.match(pageText(renderer), /The item could not be mapped/);
+  assert.equal(renderer.container.querySelectorAll(`a[href="/runs/${entry.runId}?providerId=${entry.providerId}"]`).length, 2);
 
   await act(async () => findButton(renderer, "Retry record").click());
   assert.match(pageText(renderer), /does not rewind the provider cursor/);

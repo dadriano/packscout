@@ -4,7 +4,14 @@ import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  providerSourceLaunchBounds,
   type DataforrestEventRecordV1,
   type DataforrestEventsPageV1,
 } from "@packscout/contracts";
@@ -29,6 +36,11 @@ import {
   ProviderDataforrestMixedPageSource,
   ProviderDataforrestSourceError,
 } from "./provider-dataforrest-mixed-page-source.ts";
+import {
+  createProviderDataforrestLiveIntegration,
+  type ProviderDataforrestLiveIntegration,
+} from
+  "./provider-dataforrest-live-integration.ts";
 import type { ProviderCapturePageSourceInput } from
   "./provider-capture-source-contract.ts";
 
@@ -64,12 +76,33 @@ const resolvedAuthority: ResolvedDataforrestSourceAuthority = Object.freeze({
   sourceAdapterVersion: DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   sourceCredentialVersionId,
   sourceCredentialVersionNumber: 3n,
+  expiresAt: null,
   connectionConfiguration: Object.freeze({
     endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
     bearerToken,
   }),
   sourceConfiguration: Object.freeze({ platform: "clutchpacks" }),
 });
+
+const courtyardAuthority = Object.freeze({
+  providerId,
+  providerKey: "courtyard",
+  configVersionId,
+  configVersionNumber: 7n,
+  configuration: Object.freeze({
+    adapterKey: DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    settings: Object.freeze({}),
+  }),
+});
+
+const courtyardResolvedAuthority: ResolvedDataforrestSourceAuthority =
+  Object.freeze({
+    ...resolvedAuthority,
+    providerKey: "courtyard",
+    adapterKey: DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    sourceAdapterVersion: DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    sourceConfiguration: Object.freeze({ platform: "courtyard" }),
+  });
 
 function packRecord(recordId: string): DataforrestEventRecordV1 {
   return {
@@ -236,6 +269,77 @@ function nullTransactionTradeRecord(recordId: string): DataforrestEventRecordV1 
   };
 }
 
+function courtyardRecords(): readonly DataforrestEventRecordV1[] {
+  return [
+    {
+      stream: "catalog",
+      platform: "courtyard",
+      record_id: "courtyard-pack-001",
+      occurred_at: "2026-08-29T13:00:00.000Z",
+      collected_at: "2026-08-29T13:00:01.000Z",
+      entity: "pack",
+      first_seen_at: "2026-08-29T13:00:00.000Z",
+      available: true,
+      data: {
+        provider_label: "Courtyard Fixture Pack",
+        raw_marker: rawMarker,
+      },
+    },
+    {
+      stream: "catalog",
+      platform: "courtyard",
+      record_id: "courtyard-card-001",
+      occurred_at: "2026-08-29T13:01:00.000Z",
+      collected_at: "2026-08-29T13:01:01.000Z",
+      entity: "card",
+      first_seen_at: "2026-08-29T13:01:00.000Z",
+      available: null,
+      data: {
+        provider_label: "Courtyard Fixture Card",
+        actor: actorMarker,
+      },
+    },
+    {
+      stream: "pulls",
+      platform: "courtyard",
+      record_id: "courtyard-pull-001",
+      occurred_at: "2026-08-29T13:02:00.000Z",
+      collected_at: "2026-08-29T13:02:01.000Z",
+      pack_id: "courtyard-pack-001",
+      card_id: "courtyard-card-001",
+      data: { raw_marker: rawMarker },
+    },
+    {
+      stream: "trades",
+      platform: "courtyard",
+      record_id: "courtyard-trade-001",
+      occurred_at: "2026-08-29T13:03:00.000Z",
+      collected_at: "2026-08-29T13:03:01.000Z",
+      card_id: "courtyard-card-001",
+      event_type: "sale",
+      amount: 12.5,
+      currency: "USD",
+      payment_method: "stripe",
+      tx_hash: "courtyard-transaction-must-not-escape",
+      data: { raw_marker: rawMarker },
+    },
+  ];
+}
+
+function courtyardUnlabeledCard(): DataforrestEventRecordV1 {
+  return {
+    stream: "catalog",
+    platform: "courtyard",
+    record_id: "courtyard-card-unlabeled",
+    occurred_at: "2026-08-29T13:04:00.000Z",
+    collected_at: "2026-08-29T13:04:01.000Z",
+    entity: "card",
+    first_seen_at: "2026-08-29T13:04:00.000Z",
+    available: null,
+    data: { raw_marker: rawMarker },
+  };
+}
+
 function adapterInvalidCatalogRecord(): DataforrestEventsPageV1["records"][number] {
   return {
     stream: "catalog",
@@ -284,9 +388,10 @@ function sourceInput(input: Readonly<{
   pageNumber?: number;
   checkpoint?: CanonicalJsonValue | null;
   checkpointFingerprint?: string | null;
+  authority?: ProviderCapturePageSourceInput["authority"];
 }> = {}): ProviderCapturePageSourceInput {
   return {
-    authority,
+    authority: input.authority ?? authority,
     runId,
     workerFence: 1n,
     pageNumber: input.pageNumber ?? 1,
@@ -306,6 +411,9 @@ function jsonResponse(value: unknown): Response {
 function sourceFixture(input: Readonly<{
   pages: readonly DataforrestEventsPageV1[];
   pageLimit?: number;
+  integration?: ProviderDataforrestLiveIntegration;
+  resolvedAuthority?: ResolvedDataforrestSourceAuthority;
+  workerId?: string;
   resolver?: (
     request: DataforrestSourceAuthorityRequest,
   ) => Promise<ResolvedDataforrestSourceAuthority>;
@@ -325,6 +433,26 @@ function sourceFixture(input: Readonly<{
     normalizedRecordCount: number;
   }>> = [];
   const pages = [...input.pages];
+  const baseIntegration = input.integration
+    ?? createProviderDataforrestLiveIntegration(
+      "clutchpacks",
+      dataforrestClutchpacksDistributedSourceAdapterManifest,
+    );
+  const manifest = input.pageLimit === undefined
+    ? baseIntegration.manifest
+    : {
+        ...baseIntegration.manifest,
+        requestBounds: {
+          ...baseIntegration.manifest.requestBounds,
+          pageLimit: input.pageLimit,
+        },
+      };
+  const integration = input.pageLimit === undefined
+    ? baseIntegration
+    : createProviderDataforrestLiveIntegration(
+      baseIntegration.providerKey,
+      manifest,
+    );
   const adapter = new DataforrestEventsSourceAdapter(
     {
       resolveHost: async () => ["198.204.245.26"],
@@ -338,16 +466,7 @@ function sourceFixture(input: Readonly<{
         return jsonResponse(page);
       },
     },
-    input.pageLimit === undefined
-      ? dataforrestClutchpacksDistributedSourceAdapterManifest
-      : {
-          ...dataforrestClutchpacksDistributedSourceAdapterManifest,
-          requestBounds: {
-            ...dataforrestClutchpacksDistributedSourceAdapterManifest
-              .requestBounds,
-            pageLimit: input.pageLimit,
-          },
-        },
+    manifest,
   );
   const terminalize = input.terminalize ?? (async (attempt) => {
     terminalizations.push(attempt);
@@ -359,7 +478,9 @@ function sourceFixture(input: Readonly<{
   });
   const source = new ProviderDataforrestMixedPageSource({
     authorityResolver: {
-      resolve: input.resolver ?? (() => Promise.resolve(resolvedAuthority)),
+      resolve: input.resolver ?? (() => Promise.resolve(
+        input.resolvedAuthority ?? resolvedAuthority,
+      )),
     },
     terminalizeRequest: async (attempt) => {
       if (input.terminalize !== undefined) terminalizations.push(attempt);
@@ -374,7 +495,8 @@ function sourceFixture(input: Readonly<{
         return Promise.resolve({ kind: "recorded" as const });
       },
     },
-    workerId: "fixture:clutchpacks",
+    workerId: input.workerId ?? "fixture:clutchpacks",
+    integration,
     adapter,
   });
   return {
@@ -385,6 +507,121 @@ function sourceFixture(input: Readonly<{
     translations,
   };
 }
+
+function phygitalsCardRecord(
+  recordId: string,
+  data: DataforrestEventRecordV1["data"],
+): DataforrestEventRecordV1 {
+  return {
+    stream: "catalog",
+    platform: "phygitals",
+    record_id: recordId,
+    occurred_at: "2026-08-30T01:00:00.000Z",
+    collected_at: "2026-08-30T01:00:01.000Z",
+    entity: "card",
+    first_seen_at: "2026-08-30T01:00:00.000Z",
+    available: true,
+    data,
+  };
+}
+
+async function phygitalsMixedPage(
+  records: readonly DataforrestEventRecordV1[],
+  manifest = dataforrestPhygitalsDistributedSourceAdapterManifest,
+) {
+  const integration = createProviderDataforrestLiveIntegration("phygitals", manifest);
+  const fixture = sourceFixture({
+    integration,
+    resolvedAuthority: {
+      ...resolvedAuthority,
+      providerKey: "phygitals",
+      adapterKey: manifest.adapterVersion,
+      sourceAdapterVersion: manifest.adapterVersion,
+      sourceConfiguration: { platform: "phygitals" },
+    },
+    pages: [sourcePage({ cursor: "phygitals-fixture-cursor", continuation: "continue", records })],
+  });
+  return validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: {
+      ...authority,
+      providerKey: "phygitals",
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  })));
+}
+
+test("versioned Phygitals native cards reach valid collectibles without mapping quarantine", async () => {
+  const page = await phygitalsMixedPage(["chase", "asset"].map((wrapper) =>
+    phygitalsCardRecord(`envelope-${wrapper}`, { [wrapper]: {
+      id: "nested-id-must-not-be-identity",
+      name: `Reviewed ${wrapper} card`,
+      image: "https://images.example.invalid/phygitals.png",
+      fmv: 500, altFmv: 500, price: 500, currency: null,
+      owner: actorMarker, address: rawMarker, metadata: { protected: rawMarker },
+    } }),
+  ));
+  assert.equal(DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+    dataforrestPhygitalsDistributedSourceAdapterManifest.adapterVersion);
+  assert.equal(page.records.length, 2);
+  assert.equal(page.records.filter(({ disposition }) => disposition === "quarantine").length, 0);
+  for (const wrapper of ["chase", "asset"]) {
+    const record = page.records.find(({ candidate }) =>
+      candidate.collectibleKey === `card:envelope-${wrapper}`);
+    assert.ok(record);
+    assert.equal(record.kind, "catalog");
+    assert.equal(record.entityType, "collectible");
+    assert.equal(record.candidate.collectibleKey, `card:envelope-${wrapper}`);
+    assert.equal(record.candidate.displayName, `Reviewed ${wrapper} card`);
+    assert.equal(record.candidate.valuationAmount, null);
+    assert.equal(record.candidate.valuationCurrency, null);
+    assert.equal(record.candidate.valuationType, null);
+  }
+  const serialized = JSON.stringify(page.records);
+  for (const forbidden of [rawMarker, actorMarker, "nested-id-must-not-be-identity"])
+    assert.equal(serialized.includes(forbidden), false);
+});
+
+test("Phygitals wrapper ambiguity and malformed names stay record-local quarantines", async () => {
+  const page = await phygitalsMixedPage([
+    phygitalsCardRecord("ambiguous", { chase: { name: "One" }, asset: { name: "Two" } }),
+    phygitalsCardRecord("malformed", { asset: { name: 7 } }),
+    phygitalsCardRecord("unknown", { name: "Do not infer", provider_label: "Do not fallback" }),
+    phygitalsCardRecord("valid", { asset: { name: "Valid" } }),
+  ]);
+  assert.equal(page.records.length, 4);
+  assert.equal(page.records.filter(({ disposition }) => disposition === "quarantine").length, 3);
+  assert.equal(page.records.filter(({ disposition }) => disposition !== "quarantine").length, 1);
+  assert.equal(page.records.filter(({ disposition }) => disposition === "quarantine")
+    .every(({ reasonCode }) => reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+});
+
+test("historical shared launch Phygitals normalization remains unchanged", async () => {
+  const page = await phygitalsMixedPage([
+    phygitalsCardRecord("old-chase", { chase: { name: "Nested chase" } }),
+    phygitalsCardRecord("old-asset", { asset: { name: "Nested asset" } }),
+  ], dataforrestLaunchDistributedSourceAdapterManifest);
+  assert.equal(page.records.length, 2);
+  assert.equal(page.records.every(({ disposition, reasonCode }) =>
+    disposition === "quarantine" && reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+});
+
+test("Phygitals V2 inventory and NFT wrappers preserve envelope identity with explicit label precedence", async () => {
+  const page = await phygitalsMixedPage([
+    phygitalsCardRecord("inventory-card", { inventory: { title: "Inventory Card", id: "native-id" },
+      nft: { name: "Different NFT Card", image: "https://example.test/not-selected.png" } }),
+    phygitalsCardRecord("nft-card", { nft: { name: "NFT Card", image: "https://example.test/selected.png" } }),
+    phygitalsCardRecord("existing-asset", { asset: { name: "Original Asset" }, nft: { name: "Different label" } }),
+  ], dataforrestPhygitalsDistributedV2SourceAdapterManifest);
+  assert.equal(page.records.length, 3);
+  assert.equal(page.records.some(({ disposition }) => disposition === "quarantine"), false);
+  const byKey = new Map(page.records.map(({ candidate }) => [candidate.collectibleKey, candidate]));
+  assert.equal(byKey.get("card:inventory-card")?.displayName, "Inventory Card");
+  assert.equal(byKey.get("card:inventory-card")?.primaryImageUrl, null);
+  assert.equal(byKey.get("card:nft-card")?.displayName, "NFT Card");
+  assert.equal(byKey.get("card:nft-card")?.primaryImageUrl, "https://example.test/selected.png");
+  assert.equal(byKey.get("card:existing-asset")?.displayName, "Original Asset");
+  assert.equal(page.records.every(({ candidate }) => candidate.valuationAmount === null), true);
+});
 
 test("live DataForrest records map directly without leaking native actors or protected evidence", async () => {
   const fixture = sourceFixture({
@@ -520,6 +757,221 @@ test("live DataForrest records map directly without leaking native actors or pro
   assert.equal(durableSurface.includes(bearerToken), false);
   assert.equal(durableSurface.includes(rawMarker), false);
   assert.equal(durableSurface.includes(actorMarker), false);
+});
+
+test("Courtyard maps with the live-census 100-record manifest and unchanged 8 MiB cap", async () => {
+  const integration = createProviderDataforrestLiveIntegration(
+    "courtyard",
+    dataforrestLaunchDistributedSourceAdapterManifest,
+  );
+  assert.equal(DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS, 100);
+  assert.equal(
+    integration.manifest.requestBounds.pageLimit,
+    DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  );
+  assert.equal(
+    integration.manifest.requestBounds.maximumResponseBytes,
+    providerSourceLaunchBounds.maximumResponseBytes,
+  );
+  assert.equal(
+    integration.manifest.requestBounds.maximumResponseBytes,
+    8 * 1024 * 1024,
+  );
+  const fixture = sourceFixture({
+    integration,
+    resolvedAuthority: courtyardResolvedAuthority,
+    workerId: "fixture:courtyard",
+    pages: [
+      sourcePage({
+        cursor: "courtyard-cursor-001",
+        continuation: "continue",
+        records: [...courtyardRecords(), courtyardUnlabeledCard()],
+      }),
+      sourcePage({
+        cursor: "courtyard-cursor-001",
+        continuation: "head",
+        records: [],
+      }),
+    ],
+  });
+
+  const first = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: courtyardAuthority }),
+  ));
+  assert.equal(first.continuation, "more");
+  assert.equal(first.records.length, 5);
+  assert.equal(first.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "category"
+  ), false);
+  assert.equal(first.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "pack"
+    && record.candidate.packKey === "pack:courtyard-pack-001"
+    && record.candidate.displayName === "Courtyard Fixture Pack"
+    && record.candidate.availability === "available"
+  ), true);
+  assert.equal(first.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "collectible"
+    && record.candidate.collectibleKey === "card:courtyard-card-001"
+    && record.candidate.displayName === "Courtyard Fixture Card"
+  ), true);
+  const pull = first.records.find((record) => record.kind === "pull");
+  assert.ok(pull);
+  assert.equal(pull.candidate.packKey, "pack:courtyard-pack-001");
+  assert.equal(
+    (pull.candidate.items as readonly Record<string, unknown>[])[0]
+      ?.collectibleKey,
+    "card:courtyard-card-001",
+  );
+  const event = first.records.find((record) => record.kind === "market_event");
+  assert.ok(event);
+  assert.equal(event.candidate.eventType, "sale");
+  assert.equal(event.candidate.collectibleKey, "card:courtyard-card-001");
+  assert.equal(event.candidate.amount, "12.5");
+  assert.equal(event.candidate.currency, "USD");
+  const quarantine = first.records.find(
+    (record) => record.disposition === "quarantine",
+  );
+  assert.ok(quarantine);
+  assert.equal(quarantine.kind, "catalog");
+  assert.equal(quarantine.reasonCode, "SOURCE_RECORD_MAPPING_INVALID");
+  assert.match(quarantine.sourceRecordKey ?? "", /^source:[a-f0-9]{64}$/u);
+  assert.equal(first.records.some((record) =>
+    record.kind === "catalog"
+    && (record.entityType === "provider_account"
+      || record.entityType === "pack_content")
+  ), false);
+
+  assert.deepEqual(first.nextCursor, {
+    sourceInstanceId: providerId,
+    sourceRevisionId: configVersionId,
+    sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+    adapterVersion: DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    cursorCodecKey:
+      dataforrestLaunchDistributedSourceAdapterManifest.cursorCodecKey,
+    cursorGeneration: 1,
+    value: "courtyard-cursor-001",
+  });
+  assert.equal(
+    first.nextCursorFingerprint,
+    providerMixedCursorFingerprint(first.nextCursor),
+  );
+  const second = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({
+      authority: courtyardAuthority,
+      pageNumber: 2,
+      checkpoint: first.nextCursor,
+      checkpointFingerprint: first.nextCursorFingerprint,
+    }),
+  ));
+  assert.equal(second.continuation, "head");
+  assert.equal(
+    fixture.requestedUrls[0]?.searchParams.get("limit"),
+    String(integration.manifest.requestBounds.pageLimit),
+  );
+  assert.equal(
+    fixture.requestedUrls[1]?.searchParams.get("cursor"),
+    "courtyard-cursor-001",
+  );
+  assert.deepEqual(fixture.translations, [
+    { sourceRecordCount: 5, normalizedRecordCount: 5 },
+    { sourceRecordCount: 0, normalizedRecordCount: 0 },
+  ]);
+  assert.deepEqual(
+    fixture.terminalizations.map(({ operationScope }) => {
+      assert.equal(operationScope.operationKind, "page_read");
+      if (operationScope.operationKind !== "page_read") {
+        assert.fail("expected page-read operation");
+      }
+      return operationScope.pageLimit;
+    }),
+    [
+      DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+    ],
+  );
+  assert.equal(fixture.terminalizations.every(({ operationScope }) =>
+    operationScope.operationKind === "page_read"
+    && operationScope.provider === "courtyard"
+    && operationScope.adapterVersion ===
+      DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
+    && operationScope.identityNamespaceKey === integration.mapper
+      .identityNamespaceKey
+    && operationScope.pageLimit === integration.manifest.requestBounds.pageLimit
+  ), true);
+
+  const foreignCursor = {
+    ...(first.nextCursor as Record<string, unknown>),
+    sourceRevisionId: "55555555-5555-4555-8555-555555555555",
+  };
+  await assert.rejects(
+    fixture.source.nextPage(sourceInput({
+      authority: courtyardAuthority,
+      pageNumber: 3,
+      checkpoint: foreignCursor,
+      checkpointFingerprint: providerMixedCursorFingerprint(foreignCursor),
+    })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError
+      && error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID",
+  );
+  assert.equal(fixture.requestedUrls.length, 2);
+  assert.equal(fixture.terminalizations.length, 2);
+  const durableSurface = JSON.stringify(
+    { first, second },
+    (_key, value: unknown) => typeof value === "bigint"
+      ? value.toString()
+      : value,
+  );
+  assert.equal(durableSurface.includes(rawMarker), false);
+  assert.equal(durableSurface.includes(actorMarker), false);
+  assert.equal(durableSurface.includes("courtyard-transaction-must-not-escape"), false);
+});
+
+test("Courtyard live source rejects every nonmatching provider-adapter pair before authority or transport", async () => {
+  const integration = createProviderDataforrestLiveIntegration(
+    "courtyard",
+    dataforrestLaunchDistributedSourceAdapterManifest,
+  );
+  let resolutions = 0;
+  const fixture = sourceFixture({
+    integration,
+    resolvedAuthority: courtyardResolvedAuthority,
+    resolver() {
+      resolutions += 1;
+      return Promise.resolve(courtyardResolvedAuthority);
+    },
+    pages: [sourcePage({
+      cursor: "unused",
+      continuation: "head",
+      records: [],
+    })],
+  });
+  const pairs = [
+    ["courtyard", DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION],
+    ["clutchpacks", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+    ["collector_crypt", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+    ["phygitals", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+  ] as const;
+  for (const [providerKey, adapterKey] of pairs) {
+    assert.equal(fixture.source.supports(adapterKey, providerKey), false);
+    await assert.rejects(
+      fixture.source.nextPage(sourceInput({
+        authority: {
+          ...courtyardAuthority,
+          providerKey,
+          configuration: { adapterKey },
+        },
+      })),
+      (error: unknown) => error instanceof ProviderDataforrestSourceError
+        && error.code === "PROVIDER_DATAFORREST_AUTHORITY_INVALID",
+    );
+  }
+  assert.equal(resolutions, 0);
+  assert.equal(fixture.requestedUrls.length, 0);
+  assert.equal(fixture.terminalizations.length, 0);
+  assert.equal(fixture.translations.length, 0);
 });
 
 test("every page keeps the run's immutable config pin when the central active pointer moves", async () => {

@@ -39,7 +39,7 @@ export interface AdminManualImportAdmissionRuntimeInput {
   readonly central: CentralQueryClient;
   readonly sourceIntegrations: Pick<
     ProviderSourceIntegrationCapabilityRegistry,
-    "has"
+    "resolve"
   >;
   readonly delegate: ProviderSourceManualImportDelegate;
   readonly now?: () => Date;
@@ -294,7 +294,7 @@ export function createAdminImportOperationsRuntime(
       },
       async getRun(request) {
         const run = await runReads.get(request);
-        if (!run) return null;
+        if (!run || run.providerId !== request.providerId) return null;
         const related = await quarantineRepository.listEntriesPage(
           request.organizationId,
           { runId: request.runId, limit: 100 },

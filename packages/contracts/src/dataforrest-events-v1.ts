@@ -23,6 +23,9 @@ import {
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
@@ -38,6 +41,9 @@ export {
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
@@ -47,6 +53,7 @@ export const DATAFORREST_EVENTS_V1_ENDPOINT =
   "https://198.204.245.26.sslip.io/v1/events" as const;
 export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
 export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
+export const DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS = 100;
 
 export const dataforrestIdentityNamespaceByProvider =
   providerIdentityNamespaceByLaunchProvider;
@@ -165,7 +172,10 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+    | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   options: Readonly<{
     pageLimit?: number;
     supportedProviders?: typeof dataforrestProviderDeclarations;
@@ -228,11 +238,56 @@ export const dataforrestClutchpacksDistributedSourceAdapterManifest =
     },
   );
 
+/**
+ * Immutable distributed profile for the three remaining launch providers.
+ * Provider-specific interpretation stays pinned by each mapper descriptor;
+ * this manifest owns only their shared DataForrest wire and the evidenced
+ * 100-record bound. Live Courtyard censuses proved that later 500-record and
+ * 250-record responses can breach the fixed 8 MiB response ceiling.
+ */
+export const dataforrestLaunchDistributedSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider !== "clutchpacks",
+      ),
+    },
+  );
+
+/** Phygitals-only native-card interpretation; shared launch-v1 stays immutable. */
+export const dataforrestPhygitalsDistributedSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "phygitals",
+      ),
+    },
+  );
+
+/** Adds reviewed inventory/NFT label precedence without redefining prior profiles. */
+export const dataforrestPhygitalsDistributedV2SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "phygitals",
+      ),
+    },
+  );
+
 export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1V2SourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 ]);
 
 export type DataforrestEventRecordV1 = z.infer<
@@ -316,7 +371,10 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
-    adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION
   ) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }

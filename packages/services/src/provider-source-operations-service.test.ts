@@ -551,6 +551,7 @@ test("provider detail and filtered diagnostics expose safe links without diagnos
     limit: 25,
   });
   assert.equal(diagnostics.response.filter.contextEventsHidden, true);
+  assert.equal(diagnostics.response.events[0]?.references.find(({ kind }) => kind === "run")?.href, `/runs/${runId}?providerId=${sourceIds(0).providerId}`);
   assert.deepEqual(
     diagnostics.response.events[0]?.references.map(({ kind }) => kind),
     ["run", "quarantine"],

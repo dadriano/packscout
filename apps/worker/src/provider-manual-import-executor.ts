@@ -22,13 +22,21 @@ import {
 } from "./provider-capture-source-contract.ts";
 import { ProviderDataforrestSourceError } from
   "./provider-dataforrest-mixed-page-source.ts";
+import {
+  PROVIDER_MANUAL_IMPORT_MAXIMUM_PAGES,
+  providerManualImportPageNumberWithinBound,
+} from "./provider-manual-import-bounds.ts";
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
-const MAXIMUM_IMPORT_PAGES = 10_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
 
-export type ClutchpacksManualImportExecutionResult =
+export type ProviderManualImportExecutionResult =
   | Readonly<{ kind: "idle" | "contended" }>
+  | Readonly<{
+      kind: "progress";
+      runId: string;
+      pageCount: number;
+    }>
   | Readonly<{
       kind: "completed";
       runId: string;
@@ -40,6 +48,11 @@ export type ClutchpacksManualImportExecutionResult =
       runId: string | null;
       failureCode: string;
     }>;
+
+export type ProviderManualImportInterruptionFailureCode =
+  | "PROVIDER_IMPORT_AUTHORITY_EXPIRED"
+  | "PROVIDER_CAPTURE_ABORTED"
+  | "PROVIDER_IMPORT_STEP_LIMIT_EXCEEDED";
 
 export interface ProviderManualImportPageSource {
   supports(adapterKey: string, providerKey: string): boolean;
@@ -96,11 +109,10 @@ implements ProviderManualImportPageSource {
 }
 
 /**
- * Bounded first-provider executor. It consumes one accepted local Run-now
- * command, claims the provider-local lease, and commits the deterministic
- * ClutchPacks capture through the generic mixed-page repository.
+ * Bounded provider executor. It consumes one accepted Run-now command, claims
+ * the provider-local lease, and commits deterministic mixed pages.
  */
-export class ClutchpacksManualImportExecutor {
+export class ProviderManualImportExecutor {
   readonly #leaseMilliseconds: number;
   readonly #workerId: string;
 
@@ -117,7 +129,7 @@ export class ClutchpacksManualImportExecutor {
       || leaseMilliseconds < 30_000
       || leaseMilliseconds > 15 * 60_000
     ) {
-      throw new TypeError("ClutchPacks import lease duration is invalid.");
+      throw new TypeError("Provider import lease duration is invalid.");
     }
     this.#leaseMilliseconds = leaseMilliseconds;
     this.#workerId = dependencies.workerId;
@@ -125,7 +137,79 @@ export class ClutchpacksManualImportExecutor {
 
   async executeNext(
     signal: AbortSignal = new AbortController().signal,
-  ): Promise<ClutchpacksManualImportExecutionResult> {
+  ): Promise<ProviderManualImportExecutionResult> {
+    return this.#execute(signal, PROVIDER_MANUAL_IMPORT_MAXIMUM_PAGES);
+  }
+
+  /** One resumable page step for centrally routed, bounded gateway calls. */
+  async executeNextPage(
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<ProviderManualImportExecutionResult> {
+    return this.#execute(signal, 1);
+  }
+
+  /** Stops only the exact still-owned page continuation, without source I/O. */
+  async terminalizeProgress(input: Readonly<{
+    progress: Extract<ProviderManualImportExecutionResult, { kind: "progress" }>;
+    failureCode: ProviderManualImportInterruptionFailureCode;
+  }>): Promise<ProviderManualImportExecutionResult> {
+    const runs = new PrismaProviderRunRepository(this.dependencies.database);
+    const active = await runs.active();
+    if (
+      active === null
+      || active.state !== "running"
+      || active.id !== input.progress.runId
+      || active.counters.pages !== input.progress.pageCount
+    ) {
+      return {
+        kind: "blocked",
+        runId: input.progress.runId,
+        failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+      };
+    }
+
+    // A running run's fence is immutable. finish() rechecks its exact fence
+    // and this worker's live ownership while holding the lease/run locks.
+    // Never acquire a replacement lease or recover a different attempt here.
+    const finished = await runs.finish({
+      runId: active.id,
+      workerId: this.#workerId,
+      workerFence: active.workerFence,
+      state: "failed",
+      failureCode: input.failureCode,
+      failureClass: input.failureCode === "PROVIDER_IMPORT_AUTHORITY_EXPIRED"
+        ? "configuration"
+        : "worker",
+      failureSummary:
+        "The provider import stopped before another source page was requested.",
+      correlationId: randomUUID(),
+      finishedAt: new Date(),
+    });
+    if (finished.kind !== "finished") {
+      return {
+        kind: "blocked",
+        runId: input.progress.runId,
+        failureCode: "PROVIDER_IMPORT_LEASE_LOST",
+      };
+    }
+    await new PrismaProviderWorkerLeaseRepository(
+      this.dependencies.database,
+    ).release({
+      role: "import",
+      owner: this.#workerId,
+      fence: active.workerFence,
+    });
+    return {
+      kind: "failed",
+      runId: finished.run.id,
+      failureCode: input.failureCode,
+    };
+  }
+
+  async #execute(
+    signal: AbortSignal,
+    maximumPagesThisExecution: number,
+  ): Promise<ProviderManualImportExecutionResult> {
     if (signal.aborted) {
       return { kind: "blocked", runId: null, failureCode: "PROVIDER_CAPTURE_ABORTED" };
     }
@@ -169,6 +253,7 @@ export class ClutchpacksManualImportExecutor {
     if (acquired.kind === "held") return { kind: "contended" };
     const fence = acquired.lease.fence;
     let runId: string | null = null;
+    let retainLeaseForNextPage = false;
     try {
       const recovery = await runs.recoverActive({
         recoveryRunId: randomUUID(),
@@ -278,9 +363,13 @@ export class ClutchpacksManualImportExecutor {
         new PrismaProviderFactQuarantineReconciliationRepository(
           this.dependencies.database,
         );
+      let pagesProcessed = 0;
       for (
         let index = 0;
-        startingPageNumber + index <= MAXIMUM_IMPORT_PAGES;
+        index < maximumPagesThisExecution
+          && providerManualImportPageNumberWithinBound(
+            startingPageNumber + index,
+          );
         index += 1
       ) {
         if (signal.aborted) {
@@ -327,6 +416,7 @@ export class ClutchpacksManualImportExecutor {
             "PROVIDER_MIXED_PAGE_" + committed.kind.toUpperCase(),
           );
         }
+        pagesProcessed = index + 1;
         checkpoint = validatedPage.nextCursor;
         checkpointFingerprint = committed.resultingCursorFingerprint;
         if (signal.aborted) {
@@ -495,6 +585,23 @@ export class ClutchpacksManualImportExecutor {
           counters: finished.run.counters,
         };
       }
+      if (
+        pagesProcessed === maximumPagesThisExecution
+        && providerManualImportPageNumberWithinBound(
+          startingPageNumber + pagesProcessed,
+        )
+      ) {
+        // Centrally routed executions re-enter through a fresh executor for
+        // every page. Retaining the live same-owner lease lets acquire()
+        // renew this exact fence on the next step, so recoverActive() resumes
+        // the same run instead of treating a deliberate release as a crash.
+        retainLeaseForNextPage = true;
+        return {
+          kind: "progress",
+          runId,
+          pageCount: startingPageNumber + pagesProcessed - 1,
+        };
+      }
       return await this.failRun(
         runs,
         runId,
@@ -507,11 +614,13 @@ export class ClutchpacksManualImportExecutor {
       }
       return await this.failRun(runs, runId, fence, safeFailureCode(error));
     } finally {
-      await leases.release({
-        role: "import",
-        owner: this.#workerId,
-        fence,
-      });
+      if (!retainLeaseForNextPage) {
+        await leases.release({
+          role: "import",
+          owner: this.#workerId,
+          fence,
+        });
+      }
     }
   }
 
@@ -520,7 +629,7 @@ export class ClutchpacksManualImportExecutor {
     runId: string,
     fence: bigint,
     failureCode: string,
-  ): Promise<ClutchpacksManualImportExecutionResult> {
+  ): Promise<ProviderManualImportExecutionResult> {
     const finished = await runs.finish({
       runId,
       workerId: this.#workerId,
@@ -557,14 +666,14 @@ export class ClutchpacksManualImportExecutor {
   }
 }
 
-export function createClutchpacksManualImportExecutor(input: Readonly<{
+export function createProviderManualImportExecutor(input: Readonly<{
   database: ProviderPrismaClient;
   captureRoot: string | null;
   actorHmacKey: Uint8Array | null;
   workerId: string;
   liveSource?: ProviderManualImportPageSource;
   leaseMilliseconds?: number;
-}>): ClutchpacksManualImportExecutor {
+}>): ProviderManualImportExecutor {
   const source = input.liveSource ?? (() => {
     if (input.captureRoot === null || input.actorHmacKey === null) {
       throw new TypeError(
@@ -576,7 +685,7 @@ export function createClutchpacksManualImportExecutor(input: Readonly<{
       actorHmacKey: input.actorHmacKey,
     });
   })();
-  return new ClutchpacksManualImportExecutor({
+  return new ProviderManualImportExecutor({
     database: input.database,
     source,
     workerId: input.workerId,

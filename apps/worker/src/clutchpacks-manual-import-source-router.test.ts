@@ -1,19 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+} from "@packscout/contracts";
 import type { ProviderPrismaClient } from "@packscout/database";
 import {
-  ClutchpacksManualImportExecutor,
+  ProviderManualImportExecutor,
   ProviderManualImportPageSourceRouter,
-  createClutchpacksManualImportExecutor,
+  createProviderManualImportExecutor,
   type ProviderManualImportPageSource,
-} from "./clutchpacks-manual-import-executor.ts";
+} from "./provider-manual-import-executor.ts";
 import { ProviderCaptureSourceError } from
   "./provider-capture-source-contract.ts";
 
-function source(adapterKey: string, marker: string): ProviderManualImportPageSource {
+function source(
+  adapterKey: string,
+  marker: string,
+  installedProviderKey = "clutchpacks",
+): ProviderManualImportPageSource {
   return {
     supports(candidate, providerKey) {
-      return candidate === adapterKey && providerKey === "clutchpacks";
+      return candidate === adapterKey && providerKey === installedProviderKey;
     },
     nextPage() {
       return Promise.resolve({ marker });
@@ -21,11 +29,11 @@ function source(adapterKey: string, marker: string): ProviderManualImportPageSou
   };
 }
 
-function request(adapterKey: unknown) {
+function request(adapterKey: unknown, providerKey = "clutchpacks") {
   return {
     authority: {
       providerId: "11111111-1111-4111-8111-111111111111",
-      providerKey: "clutchpacks",
+      providerKey,
       configVersionId: "22222222-2222-4222-8222-222222222222",
       configVersionNumber: 1n,
       configuration: { adapterKey },
@@ -50,6 +58,42 @@ test("manual import source router dispatches exactly one installed adapter", asy
   });
 });
 
+test("manual import source router keeps ClutchPacks and Courtyard on exact independent tuples", async () => {
+  const router = new ProviderManualImportPageSourceRouter([
+    source(
+      DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+      "clutchpacks",
+      "clutchpacks",
+    ),
+    source(
+      DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+      "courtyard",
+      "courtyard",
+    ),
+  ]);
+  assert.deepEqual(await router.nextPage(request(
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+    "clutchpacks",
+  )), { marker: "clutchpacks" });
+  assert.deepEqual(await router.nextPage(request(
+    DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    "courtyard",
+  )), { marker: "courtyard" });
+  for (const [providerKey, adapterKey] of [
+    ["courtyard", DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION],
+    ["clutchpacks", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+    ["collector_crypt", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+    ["phygitals", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION],
+  ] as const) {
+    assert.equal(router.supports(adapterKey, providerKey), false);
+    assert.throws(
+      () => router.nextPage(request(adapterKey, providerKey)),
+      (error: unknown) => error instanceof ProviderCaptureSourceError
+        && error.code === "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+    );
+  }
+});
+
 test("manual import source router fails closed for missing or duplicate authority", async () => {
   const duplicate = new ProviderManualImportPageSourceRouter([
     source("live-v3", "first"),
@@ -72,17 +116,17 @@ test("manual import source router fails closed for missing or duplicate authorit
 });
 
 test("live executor construction does not require capture-only configuration", () => {
-  const executor = createClutchpacksManualImportExecutor({
+  const executor = createProviderManualImportExecutor({
     database: {} as ProviderPrismaClient,
     captureRoot: null,
     actorHmacKey: null,
     workerId: "fixture:live-worker",
     liveSource: source("live-v3", "live"),
   });
-  assert.equal(executor instanceof ClutchpacksManualImportExecutor, true);
+  assert.equal(executor instanceof ProviderManualImportExecutor, true);
 
   assert.throws(
-    () => createClutchpacksManualImportExecutor({
+    () => createProviderManualImportExecutor({
       database: {} as ProviderPrismaClient,
       captureRoot: null,
       actorHmacKey: null,

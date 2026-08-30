@@ -135,7 +135,8 @@ export function providerRunSummary(
       trades: run.marketEventCount,
       accepted: run.acceptedCount,
       unchanged: run.duplicateCount,
-      revised: run.materialChangeCount,
+      // Material changes combine inserts and updates; revisions are not counted separately.
+      revised: null,
       quarantined: run.quarantinedCount,
       resolvedQuarantines: 0,
     },
@@ -253,7 +254,7 @@ function runDetail(
       trades: page.marketEventCount,
       accepted: page.acceptedCount,
       unchanged: page.duplicateCount,
-      revised: page.materialChangeCount,
+      revised: null,
       quarantined: page.quarantinedCount,
     })),
     timeline: runTimeline(run),
@@ -298,7 +299,7 @@ function unavailableQuarantine(): never {
 
 /**
  * Current-admin run reads over bounded, central-authorized provider routes.
- * Exact run ownership is resolved only from relayed central observation facts.
+ * Run details use explicit provider context, including before activity is relayed.
  */
 export function createDistributedImportOperationsRuntime(input: Readonly<{
   central: CentralPrismaClient;
@@ -422,16 +423,16 @@ export function createDistributedImportOperationsRuntime(input: Readonly<{
       },
 
       async getRun(request) {
-        const owner = await observations.resolveRunProvider({
-          organizationId: request.organizationId,
-          localRunId: request.runId,
-        });
-        if (owner.status !== "resolved") return null;
+        if (
+          !uuidPattern.test(request.organizationId)
+          || !uuidPattern.test(request.providerId)
+          || !uuidPattern.test(request.runId)
+        ) return null;
         const [provider] = await listProviders(
           request.organizationId,
-          owner.providerId,
+          request.providerId,
         );
-        if (!provider) return null;
+        if (!provider || provider.id !== request.providerId) return null;
         const result = await input.gateway.runWithAdminProviderDatabase(
           {
             organizationId: request.organizationId,

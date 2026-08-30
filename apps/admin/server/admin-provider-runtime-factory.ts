@@ -6,7 +6,7 @@ import {
 import {
   AesGcmProviderCredentialCipher,
   CipherProviderDatabaseCredentialResolver,
-  createClutchpacksSourceIntegrationCapabilities,
+  createLaunchSourceIntegrationCapabilities,
 } from "@packscout/services";
 import { createDistributedImportOperationsRuntime } from
   "./distributed-import-operations-runtime.ts";
@@ -25,6 +25,8 @@ import {
   readBase64Key,
   readPositiveInteger,
 } from "./runtime-config.ts";
+import { createDistributedCanonicalInspectionRuntime } from
+  "./distributed-canonical-inspection-runtime.ts";
 import type {
   AdminProviderRuntimeFactory,
   AdminProviderRuntimeFactoryContext,
@@ -32,6 +34,12 @@ import type {
 
 const PRODUCTION_HOST_VARIABLE =
   "PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS" as const;
+const LOCAL_REVIEW_PROVIDER_DATABASE_PORTS = Object.freeze([
+  55_432,
+  55_433,
+  55_434,
+  55_435,
+]);
 
 function productionHosts(value: string | undefined): readonly string[] {
   const hosts = value?.split(",").map((host) => host.trim()).filter(Boolean) ?? [];
@@ -51,7 +59,7 @@ export function readAdminProviderDestinationPolicy(
   return development
     ? new ProviderDatabaseDestinationPolicy({
         allowedHosts: ["127.0.0.1"],
-        allowedPorts: [55_432],
+        allowedPorts: LOCAL_REVIEW_PROVIDER_DATABASE_PORTS,
         allowedSslModes: ["disable"],
       })
     : new ProviderDatabaseDestinationPolicy({
@@ -100,7 +108,7 @@ export const createAdminProviderRuntimeFactory: AdminProviderRuntimeFactory =
       maximumCachedProviders: 16,
       operationTimeoutMs: 15_000,
     });
-    const sourceIntegrations = createClutchpacksSourceIntegrationCapabilities();
+    const sourceIntegrations = createLaunchSourceIntegrationCapabilities();
     const manualImports = createAdminManualImportAdmissionRuntime({
       central: context.central,
       sourceIntegrations,
@@ -112,6 +120,10 @@ export const createAdminProviderRuntimeFactory: AdminProviderRuntimeFactory =
     });
     return {
       app: {
+        canonical: createDistributedCanonicalInspectionRuntime({
+          central: context.central,
+          gateway,
+        }),
         importOperations: createDistributedImportOperationsRuntime({
           central: context.central,
           gateway,

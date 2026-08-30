@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Router, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import {
+  importRunDetailQuerySchema,
   quarantineIdSchema,
   quarantineRetryBulkRequestSchema,
   type QuarantineEntryDetail,
@@ -50,7 +51,7 @@ export interface ImportRunCountersView {
   readonly trades: number;
   readonly accepted: number;
   readonly unchanged: number;
-  readonly revised: number;
+  readonly revised: number | null;
   readonly quarantined: number;
   readonly resolvedQuarantines: number;
 }
@@ -93,7 +94,7 @@ export interface ImportRunDetailView extends ImportRunSummaryView {
     readonly trades: number;
     readonly accepted: number;
     readonly unchanged: number;
-    readonly revised: number;
+    readonly revised: number | null;
     readonly quarantined: number;
   }[];
   readonly timeline: readonly {
@@ -122,6 +123,7 @@ export interface ImportOperationsRouterDependencies {
     }): Promise<Paginated<ImportRunSummaryView>>;
     getRun(input: {
       organizationId: string;
+      providerId: string;
       runId: string;
     }): Promise<ImportRunDetailView | null>;
     listQuarantines(input: {
@@ -391,10 +393,13 @@ export function createImportOperationsRouter(dependencies: ImportOperationsRoute
   router.get("/import-runs/:runId", read, async (request, response) => {
     const runId = runIdSchema.safeParse(request.params.runId);
     if (!runId.success) return invalid(response, runId.error.issues);
+    const query = importRunDetailQuerySchema.safeParse(request.query);
+    if (!query.success) return invalid(response, query.error.flatten().fieldErrors);
     try {
       const session = getAuthenticatedActor(response);
       const detail = await dependencies.reads.getRun({
         organizationId: session.organizationId,
+        providerId: query.data.providerId,
         runId: runId.data,
       });
       if (!detail) {

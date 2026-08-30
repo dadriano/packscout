@@ -27,8 +27,11 @@ import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestLaunchDistributedSourceAdapterManifest,
 } from "./dataforrest-events-v1.ts";
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
@@ -355,5 +358,21 @@ test("ClutchPacks distributed requests use an isolated 2,000-record profile", ()
   assert.equal(
     dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit,
     500,
+  );
+});
+
+test("remaining launch providers share one immutable 100-record distributed profile", () => {
+  const manifest = sourceAdapterManifestV1Schema.parse(
+    dataforrestLaunchDistributedSourceAdapterManifest,
+  );
+  assert.equal(DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS, 100);
+  assert.equal(
+    manifest.adapterVersion,
+    DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.equal(manifest.requestBounds.pageLimit, 100);
+  assert.deepEqual(
+    manifest.supportedProviders.map(({ provider }) => provider),
+    ["courtyard", "collector_crypt", "phygitals"],
   );
 });

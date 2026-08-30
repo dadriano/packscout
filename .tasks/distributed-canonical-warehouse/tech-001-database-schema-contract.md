@@ -25,6 +25,7 @@ Freeze the database ownership, table inventory, relationships, types, and invari
 - `packscout` owns admin access, provider configuration and topology, central observations and alerts, the shared global catalog, and central publication coordination.
 - Each `packscout_<provider_key>` owns one provider's canonical catalog, immutable activity, runtime, mixed runs, quarantine, local audit, retention, and promotion state.
 - `provider`, `provider_id`, and `provider_key` are canonical new terms. Cross-database IDs are soft references; no foreign key or transaction crosses database authorities.
+- Import execution is one independent lane per provider. Each lane resolves its own provider database and owns its command, run, lease, cursor, transaction, and failure state locally; central `packscout` routes and observes lanes but never holds a global execution lease that serializes them.
 - The schema is a clean pre-launch replacement. It has no migration, dual read, dual write, legacy compatibility table, source adapter, raw staging model, product normalization, or Heat storage.
 
 The approved publication gate is one immutable manifest entry per provider. Each entry selects that provider's complete release and the compatible complete catalog version used to assemble it; advancing one provider preserves every unrelated entry byte-for-byte.
@@ -438,6 +439,7 @@ Raw database, upstream, credential, cursor, candidate, and protected-evidence co
 - Assert every PK, FK, soft-reference column, UK, partial index, check, trigger, append-only permission, and delete restriction described here.
 - Assert forbidden legacy, stream, product-normalization, raw-staging, and Heat tables are absent.
 - Run two provider database schemas on independently addressable PostgreSQL instances in integration tests.
+- Drive at least two provider runners through a shared barrier and prove both are simultaneously inside separate provider-database operations; then fail one lane and prove the other can commit and reach head without cancellation or serialization.
 
 ### Invariant verification
 

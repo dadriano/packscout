@@ -1,4 +1,9 @@
-export type ClusterKey = "control" | "clutchpacks";
+export type ClusterKey =
+  | "control"
+  | "clutchpacks"
+  | "courtyard"
+  | "collector_crypt"
+  | "phygitals";
 export type ClusterTarget = "all" | ClusterKey;
 export type ClusterAction = "inspect" | "provision" | "start" | "stop";
 export type ClusterMarkerState = "initialized" | "provisioned";

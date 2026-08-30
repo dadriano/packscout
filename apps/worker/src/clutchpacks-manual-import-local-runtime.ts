@@ -4,9 +4,9 @@ import type {
   ProviderPrismaClient,
 } from "@packscout/database";
 import type {
-  ClutchpacksManualImportExecutionResult,
-  ClutchpacksManualImportExecutor,
-} from "./clutchpacks-manual-import-executor.ts";
+  ProviderManualImportExecutionResult,
+  ProviderManualImportExecutor,
+} from "./provider-manual-import-executor.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -117,7 +117,7 @@ export interface ClutchpacksManualImportLocalDependencies {
     captureRoot: string | null;
     actorHmacKey: Uint8Array | null;
     workerId: string;
-  }>): Pick<ClutchpacksManualImportExecutor, "executeNext">;
+  }>): Pick<ProviderManualImportExecutor, "executeNext">;
   relayProviderActivity?(): Promise<void>;
   observeRelayFailure?(failureCode: "CENTRAL_ACTIVITY_UNAVAILABLE"): void;
 }
@@ -133,7 +133,7 @@ export async function runClutchpacksManualImportOnce(input: Readonly<{
   sourceMode?: "capture" | "live";
   signal?: AbortSignal;
   dependencies: ClutchpacksManualImportLocalDependencies;
-}>): Promise<ClutchpacksManualImportExecutionResult> {
+}>): Promise<ProviderManualImportExecutionResult> {
   const configuration = readClutchpacksManualImportLocalConfiguration(
     input.environment,
     input.fallbackWorkerId,
@@ -154,7 +154,7 @@ export async function runClutchpacksManualImportOnce(input: Readonly<{
       "CLUTCHPACKS_IMPORT_DATABASE_UNAVAILABLE",
     );
   }
-  let result: ClutchpacksManualImportExecutionResult;
+  let result: ProviderManualImportExecutionResult;
   try {
     try {
       await lifecycle.start();

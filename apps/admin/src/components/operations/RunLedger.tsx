@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
+import { importRunDetailPath } from "@packscout/contracts";
 import type { ImportRunSummary } from "../../api/import-operations";
-import { RunStatus, dateTime, duration, humanize } from "./OperationStatus";
+import { RunStatus, dateTime, duration, humanize, revisionCount } from "./OperationStatus";
 
 export function RunLedger({ runs }: { runs: ImportRunSummary[] }) {
   return (
@@ -13,14 +14,14 @@ export function RunLedger({ runs }: { runs: ImportRunSummary[] }) {
         {runs.map((run) => (
           <article key={run.id}>
             <div className="ops-ledger__identity">
-              <Link to={`/runs/${run.id}`}>{run.providerName}</Link>
+              <Link to={importRunDetailPath({ providerId: run.providerId, runId: run.id })}>{run.providerName}</Link>
               <span>{run.platformKey} · Revision {run.configurationVersion} · {humanize(run.trigger)}</span>
             </div>
             <RunStatus state={run.state} />
             <dl className="ops-ledger__facts">
               <div><dt>Started</dt><dd>{dateTime(run.startedAt ?? run.requestedAt)}</dd></div>
               <div><dt>Progress</dt><dd>{run.counters.pages} pages · {run.counters.catalog + run.counters.pulls + run.counters.trades} records</dd></div>
-              <div><dt>Outcomes</dt><dd>{run.counters.accepted} accepted · {run.counters.unchanged} unchanged · {run.counters.revised} revised</dd></div>
+              <div><dt>Outcomes</dt><dd>{run.counters.accepted} accepted · {run.counters.unchanged} unchanged · {revisionCount(run.counters.revised)}</dd></div>
               <div><dt>Quarantine</dt><dd>{run.counters.quarantined} created · {run.counters.resolvedQuarantines} now resolved</dd></div>
               <div><dt>Duration</dt><dd>{duration(run.startedAt, run.finishedAt)}</dd></div>
               <div><dt>Provider head</dt><dd>{run.reachedProviderHead ? "Reached" : "Not reached"}</dd></div>

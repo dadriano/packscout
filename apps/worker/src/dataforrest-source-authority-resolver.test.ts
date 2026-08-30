@@ -3,12 +3,15 @@ import { describe, test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import type { CentralQueryClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher } from "@packscout/services";
 import {
   CentralDataforrestSourceAuthorityResolver,
   DataforrestSourceAuthorityError,
+  StaticDataforrestSourceAuthorityResolver,
   type DataforrestSourceAuthorityFailureCode,
   type DataforrestSourceAuthorityRequest,
 } from "./dataforrest-source-authority-resolver.ts";
@@ -171,6 +174,7 @@ describe("central DataForrest source authority", () => {
       sourceAdapterVersion: adapterKey,
       sourceCredentialVersionId,
       sourceCredentialVersionNumber: 3n,
+      expiresAt: null,
       connectionConfiguration: {
         endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
         bearerToken,
@@ -197,6 +201,98 @@ describe("central DataForrest source authority", () => {
 
     assert.equal(authority.sourceCredentialVersionId, sourceCredentialVersionId);
     assert.equal(authority.connectionConfiguration.bearerToken, bearerToken);
+  });
+
+  for (const [providerKey, manifest] of [
+    ["courtyard", dataforrestLaunchDistributedSourceAdapterManifest],
+    ["collector_crypt", dataforrestLaunchDistributedSourceAdapterManifest],
+    ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
+  ] as const) {
+  test(`resolves ${providerKey} only through its exact distributed tuple`, async () => {
+    const row = validConfiguration();
+    row.adapter_key =
+      manifest.adapterVersion;
+    row.configuration = { platform: providerKey };
+    row.provider.provider_key = providerKey;
+    const courtyardRequest: DataforrestSourceAuthorityRequest = {
+      ...request,
+      providerKey,
+      adapterKey:
+        manifest.adapterVersion,
+    };
+
+    const authority = await resolverFor(row).resolver.resolve(
+      courtyardRequest,
+    );
+    assert.deepEqual(authority, {
+      organizationId,
+      providerId,
+      providerKey,
+      configVersionId,
+      configVersionNumber: 2n,
+      adapterKey:
+        manifest.adapterVersion,
+      sourceTypeKey:
+        manifest.sourceTypeKey,
+      sourceAdapterVersion:
+        manifest.adapterVersion,
+      sourceCredentialVersionId,
+      sourceCredentialVersionNumber: 3n,
+      expiresAt: null,
+      connectionConfiguration: {
+        endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+        bearerToken,
+      },
+      sourceConfiguration: { platform: providerKey },
+    });
+    assert.equal("ciphertext" in authority, false);
+  });
+  }
+
+  test("rejects crossed installed provider-adapter tuples before querying central", async () => {
+    const crossed = [
+      {
+        ...request,
+        providerKey: "courtyard",
+      },
+      {
+        ...request,
+        adapterKey:
+          dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+      },
+      {
+        ...request,
+        providerKey: "phygitals",
+      },
+      {
+        ...request,
+        providerKey: "phygitals",
+        adapterKey: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "courtyard",
+        adapterKey: dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "unknown_provider",
+        adapterKey:
+          dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+    ];
+    for (const candidate of crossed) {
+      const harness = resolverFor(validConfiguration());
+      await rejectsWith(
+        harness.resolver.resolve(candidate),
+        "PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID",
+      );
+      assert.equal(harness.query(), undefined);
+    }
   });
 
   test("rejects malformed server pins before querying central", async () => {
@@ -327,6 +423,51 @@ describe("central DataForrest source authority", () => {
     await rejectsWith(
       resolverFor(row).resolver.resolve(request),
       "PROVIDER_SOURCE_CREDENTIAL_INVALID",
+    );
+  });
+});
+
+describe("static DataForrest source authority", () => {
+  test("retains one exact decrypted authority and rechecks tuple and expiry locally", async () => {
+    const row = validConfiguration();
+    row.expires_at = new Date("2026-08-29T18:05:00.000Z");
+    const authority = await resolverFor(row).resolver.resolve(request);
+    assert.deepEqual(authority.expiresAt, row.expires_at);
+
+    let observedAt = new Date("2026-08-29T18:01:00.000Z");
+    const resolver = new StaticDataforrestSourceAuthorityResolver({
+      authority,
+      now: () => observedAt,
+    });
+    const localRequest = { ...request, now: undefined };
+    assert.equal(await resolver.resolve(localRequest), authority);
+
+    for (const crossed of [
+      { ...localRequest, providerKey: "courtyard" },
+      { ...localRequest, configVersionNumber: 3n },
+      {
+        ...localRequest,
+        adapterKey:
+          dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+    ]) {
+      await rejectsWith(
+        resolver.resolve(crossed),
+        "PROVIDER_SOURCE_CONFIGURATION_CONFLICT",
+      );
+    }
+
+    const exactExpiresAt = new Date(row.expires_at);
+    authority.expiresAt?.setTime(
+      new Date("2026-08-29T19:00:00.000Z").getTime(),
+    );
+    observedAt = exactExpiresAt;
+    await rejectsWith(
+      resolver.resolve({
+        ...localRequest,
+        now: new Date("2026-08-29T18:01:00.000Z"),
+      }),
+      "PROVIDER_SOURCE_CONFIGURATION_EXPIRED",
     );
   });
 });

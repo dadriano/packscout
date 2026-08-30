@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AdminAlertDetail, AdminAlertSummary } from "@packscout/contracts";
+import { importRunDetailPath, type AdminAlertDetail, type AdminAlertSummary } from "@packscout/contracts";
 import { Link, useParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import {
@@ -49,7 +49,9 @@ function alertTarget(alert: AdminAlertSummary): AlertTarget | null {
   if (alert.quarantineId) {
     return { href: `/quarantine/${alert.quarantineId}`, label: "Review quarantine" };
   }
-  if (alert.runId) return { href: `/runs/${alert.runId}`, label: "Review import run" };
+  if (alert.runId && alert.providerId) {
+    return { href: importRunDetailPath({ providerId: alert.providerId, runId: alert.runId }), label: "Review import run" };
+  }
   if (alert.providerId) {
     return { href: `/providers/${alert.providerId}`, label: "Review provider" };
   }

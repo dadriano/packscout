@@ -1,6 +1,5 @@
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
-  dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestEventsSourceConfigurationV1Schema,
   type LaunchProviderKey,
@@ -10,10 +9,15 @@ import {
   AesGcmProviderCredentialCipher,
   type EncryptedProviderCredential,
 } from "@packscout/services";
+import {
+  providerDataforrestLiveIntegrationRegistry,
+  type ProviderDataforrestLiveIntegrationRegistry,
+} from "./provider-dataforrest-live-integration.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const providerKeyPattern = /^[a-z][a-z0-9_]{0,52}$/u;
+const adapterKeyPattern = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
 
 export type DataforrestSourceAuthorityFailureCode =
   | "PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID"
@@ -51,6 +55,7 @@ export interface ResolvedDataforrestSourceAuthority {
   readonly sourceAdapterVersion: string;
   readonly sourceCredentialVersionId: string;
   readonly sourceCredentialVersionNumber: bigint;
+  readonly expiresAt: Date | null;
   /** Ephemeral only. Callers must never persist or log this object. */
   readonly connectionConfiguration: Readonly<{
     endpoint: typeof DATAFORREST_EVENTS_V1_ENDPOINT;
@@ -108,8 +113,7 @@ function validRequest(input: DataforrestSourceAuthorityRequest): boolean {
     && typeof input.configVersionNumber === "bigint"
     && input.configVersionNumber > 0n
     && typeof input.adapterKey === "string"
-    && input.adapterKey ===
-      dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion
+    && adapterKeyPattern.test(input.adapterKey)
     && (input.now === undefined || (
       input.now instanceof Date && Number.isFinite(input.now.getTime())
     ));
@@ -152,12 +156,19 @@ export class CentralDataforrestSourceAuthorityResolver {
   constructor(private readonly dependencies: Readonly<{
     central: CentralQueryClient;
     credentialCipher: AesGcmProviderCredentialCipher;
+    integrations?: Pick<ProviderDataforrestLiveIntegrationRegistry, "resolve">;
   }>) {}
 
   async resolve(
     input: DataforrestSourceAuthorityRequest,
   ): Promise<ResolvedDataforrestSourceAuthority> {
     if (!validRequest(input)) {
+      return failure("PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID");
+    }
+    const integration = (
+      this.dependencies.integrations ?? providerDataforrestLiveIntegrationRegistry
+    ).resolve(input.providerKey, input.adapterKey);
+    if (integration === null) {
       return failure("PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID");
     }
     const now = input.now ?? new Date();
@@ -219,8 +230,7 @@ export class CentralDataforrestSourceAuthorityResolver {
       || config.provider_id !== input.providerId
       || config.version_number !== input.configVersionNumber
       || config.adapter_key !== input.adapterKey
-      || config.adapter_key !==
-        dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion
+      || config.adapter_key !== integration.manifest.adapterVersion
     ) {
       return failure("PROVIDER_SOURCE_CONFIGURATION_CONFLICT");
     }
@@ -288,14 +298,75 @@ export class CentralDataforrestSourceAuthorityResolver {
       configVersionId: config.id,
       configVersionNumber: config.version_number,
       adapterKey: config.adapter_key,
-      sourceTypeKey:
-        dataforrestClutchpacksDistributedSourceAdapterManifest.sourceTypeKey,
-      sourceAdapterVersion:
-        dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion,
+      sourceTypeKey: integration.manifest.sourceTypeKey,
+      sourceAdapterVersion: integration.manifest.adapterVersion,
       sourceCredentialVersionId: credential.id,
       sourceCredentialVersionNumber: credential.version_number,
+      expiresAt: config.expires_at === null
+        ? null
+        : new Date(config.expires_at.getTime()),
       connectionConfiguration: Object.freeze({ ...connection.data }),
       sourceConfiguration: Object.freeze({ ...source.data }),
     });
+  }
+}
+
+/** Exact process-local authority. It never queries central or refreshes pins. */
+export class StaticDataforrestSourceAuthorityResolver {
+  readonly #authority: ResolvedDataforrestSourceAuthority;
+  readonly #expiresAtMilliseconds: number | null;
+  readonly #now: () => Date;
+
+  constructor(input: Readonly<{
+    authority: ResolvedDataforrestSourceAuthority;
+    now?: () => Date;
+  }>) {
+    this.#authority = input.authority;
+    this.#expiresAtMilliseconds = input.authority.expiresAt === null
+      ? null
+      : input.authority.expiresAt instanceof Date
+        ? input.authority.expiresAt.getTime()
+        : Number.NaN;
+    this.#now = input.now ?? (() => new Date());
+  }
+
+  resolve(
+    input: DataforrestSourceAuthorityRequest,
+  ): Promise<ResolvedDataforrestSourceAuthority> {
+    if (!validRequest(input)) {
+      return Promise.reject(new DataforrestSourceAuthorityError(
+        "PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID",
+      ));
+    }
+    const authority = this.#authority;
+    if (
+      authority.providerId !== input.providerId
+      || authority.providerKey !== input.providerKey
+      || authority.configVersionId !== input.configVersionId
+      || authority.configVersionNumber !== input.configVersionNumber
+      || authority.adapterKey !== input.adapterKey
+      || authority.sourceAdapterVersion !== input.adapterKey
+      || authority.sourceConfiguration.platform !== input.providerKey
+    ) {
+      return Promise.reject(new DataforrestSourceAuthorityError(
+        "PROVIDER_SOURCE_CONFIGURATION_CONFLICT",
+      ));
+    }
+    const observedAt = this.#now();
+    if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime())) {
+      return Promise.reject(new DataforrestSourceAuthorityError(
+        "PROVIDER_SOURCE_AUTHORITY_INPUT_INVALID",
+      ));
+    }
+    if (
+      this.#expiresAtMilliseconds !== null
+      && (!Number.isFinite(this.#expiresAtMilliseconds)
+        || this.#expiresAtMilliseconds <= observedAt.getTime())
+    ) {
+      return Promise.reject(new DataforrestSourceAuthorityError(
+        "PROVIDER_SOURCE_CONFIGURATION_EXPIRED",
+      ));
+    }
+    return Promise.resolve(authority);
   }
 }

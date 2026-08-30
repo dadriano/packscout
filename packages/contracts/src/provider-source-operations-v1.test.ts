@@ -5,7 +5,17 @@ import {
   providerSourceDiagnosticEventSchema,
   providerSourceOperationsConnectionModeSchema,
   providerSourceOperationsOverviewSchema,
+  providerSourceOperationsSourceSchema,
 } from "./provider-source-operations-v1.ts";
+
+test("unmeasured insert and revision counts stay explicitly unavailable", () => {
+  const schema = providerSourceOperationsSourceSchema.shape.progress.shape.dispositions;
+  const dispositions = { inserted: null, revised: null, duplicate: 3, quarantined: 2 };
+  assert.equal(schema.safeParse(dispositions).success, true);
+  assert.equal(schema.safeParse({ ...dispositions, inserted: 0, revised: 0 }).success, true);
+  assert.equal(schema.safeParse({ ...dispositions, inserted: 0 }).success, false);
+  assert.equal(schema.safeParse({ ...dispositions, revised: 0 }).success, false);
+});
 
 test("operations overview requires exactly four registered source rows", () => {
   const parsed = providerSourceOperationsOverviewSchema.safeParse({

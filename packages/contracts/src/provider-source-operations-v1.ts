@@ -126,11 +126,14 @@ const countSummarySchema = z.object({
 }).strict();
 
 const dispositionSummarySchema = z.object({
-  inserted: boundedCountSchema,
-  revised: boundedCountSchema,
+  inserted: boundedCountSchema.nullable(),
+  revised: boundedCountSchema.nullable(),
   duplicate: boundedCountSchema,
   quarantined: boundedCountSchema,
-}).strict();
+}).strict().refine(
+  ({ inserted, revised }) => (inserted === null) === (revised === null),
+  { message: "Insert/update counts must be measured together or both unavailable." },
+);
 
 export const providerSourceOperationsSourceSchema = z.object({
   providerId: uuidSchema,

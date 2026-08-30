@@ -24,9 +24,13 @@ import {
   assertCreateClusterInventory,
   buildClusterMarker,
   type ClutchpacksReviewDatabaseTarget,
+  type ClusterKey,
   type ClusterMarker,
   type ClusterMarkerState,
 } from "./clutchpacks-review-database-plan.mjs";
+import {
+  ADDITIONAL_PROVIDER_REVIEW_DATABASES,
+} from "./provider-review-database-plan.mts";
 
 export const POSTGRES_16_BINARIES = Object.freeze({
   initdb: "/opt/homebrew/opt/postgresql@16/bin/initdb",
@@ -39,7 +43,7 @@ const MANAGED_CONFIG_INCLUDE = `include = '${MANAGED_CONFIG_FILE}'`;
 const POSTGRES_LOG_FILE = "packscout-postgres.log";
 
 export interface ClusterFilesystemProof {
-  readonly clusterKey: "control" | "clutchpacks";
+  readonly clusterKey: ClusterKey;
   readonly dataDirectory: string;
   readonly databaseName: string;
   readonly directoryState: "absent" | "empty" | ClusterMarkerState;
@@ -50,7 +54,7 @@ export interface ClusterFilesystemProof {
 }
 
 export interface ConnectedClusterProof {
-  readonly clusterKey: "control" | "clutchpacks";
+  readonly clusterKey: ClusterKey;
   readonly dataDirectory: string;
   readonly databaseName: string;
   readonly databaseRole: "central" | "provider";
@@ -176,7 +180,11 @@ export async function assertProvisionClusterLayout(): Promise<void> {
     if (!await privateDirectory(CLUTCHPACKS_REVIEW_CLUSTER_ROOT)) {
       refuse("CLUSTER_PRIVATE_ROOT_REQUIRED");
     }
-    const allowed = new Set(["control", "clutchpacks"]);
+    const allowed = new Set([
+      "control",
+      "clutchpacks",
+      ...ADDITIONAL_PROVIDER_REVIEW_DATABASES.map(({ clusterKey }) => clusterKey),
+    ]);
     const entries = await readdir(CLUTCHPACKS_REVIEW_CLUSTER_ROOT);
     if (entries.some((entry) => !allowed.has(entry))) {
       refuse("CLUSTER_CREATE_TARGET_UNSAFE");
@@ -200,6 +208,50 @@ export async function assertProvisionClusterLayout(): Promise<void> {
         directoryState: state,
       });
     }
+  }
+}
+
+export async function assertAdditiveProviderClusterLayout(input: {
+  readonly existing: readonly Readonly<ClutchpacksReviewDatabaseTarget>[];
+  readonly additions: readonly Readonly<ClutchpacksReviewDatabaseTarget>[];
+}): Promise<void> {
+  const fixedParent = path.dirname(CLUTCHPACKS_REVIEW_CLUSTER_ROOT);
+  if (
+    !await privateDirectory(fixedParent) ||
+    !await privateDirectory(CLUTCHPACKS_REVIEW_CLUSTER_ROOT)
+  ) {
+    refuse("CLUSTER_PRIVATE_ROOT_REQUIRED");
+  }
+  const allowed = new Set(
+    [...input.existing, ...input.additions].map(({ clusterKey }) => clusterKey),
+  );
+  const entries = await readdir(CLUTCHPACKS_REVIEW_CLUSTER_ROOT);
+  if (entries.some((entry) => !allowed.has(entry as ClusterKey))) {
+    refuse("CLUSTER_CREATE_TARGET_UNSAFE");
+  }
+  for (const cluster of input.existing) {
+    const proof = await inspectFixedCluster(cluster);
+    if (proof.marker?.state !== "provisioned") {
+      refuse("BASE_REVIEW_CLUSTER_NOT_READY");
+    }
+    if (!proof.running && await isFixedPortOccupied(cluster.port)) {
+      refuse("CLUSTER_PORT_OCCUPIED_BY_OTHER_PROCESS");
+    }
+  }
+  for (const cluster of input.additions) {
+    const state = await dataDirectoryState(cluster);
+    if (state === "nonempty") {
+      const owned = await inspectFixedCluster(cluster);
+      if (!owned.running && await isFixedPortOccupied(cluster.port)) {
+        refuse("CLUSTER_PORT_OCCUPIED_BY_OTHER_PROCESS");
+      }
+      continue;
+    }
+    assertCreateClusterInventory({
+      parentPrivate: true,
+      portOccupied: await isFixedPortOccupied(cluster.port),
+      directoryState: state,
+    });
   }
 }
 
@@ -518,14 +570,30 @@ export function clusterMigrationUrl(input: {
   return url.toString();
 }
 
-export async function readConnectedClusterProof(input: {
+export type ConnectedClusterProofAdmission = "runtime" | "provisioning";
+
+export function assertConnectedClusterProofAdmission(input: {
+  readonly admission: ConnectedClusterProofAdmission;
+  readonly markerState: ClusterMarkerState | null;
+  readonly running: boolean;
+}): void {
+  const markerAdmitted = input.markerState === "provisioned" ||
+    (input.admission === "provisioning" &&
+      input.markerState === "initialized");
+  if (!input.running || !markerAdmitted) refuse("CLUSTER_NOT_READY");
+}
+
+async function readConnectedClusterProofWithAdmission(input: {
   readonly cluster: ClutchpacksReviewDatabaseTarget;
   readonly appPassword: string;
+  readonly admission: ConnectedClusterProofAdmission;
 }): Promise<Readonly<ConnectedClusterProof>> {
   const filesystem = await inspectFixedCluster(input.cluster);
-  if (!filesystem.running || filesystem.marker?.state !== "provisioned") {
-    refuse("CLUSTER_NOT_READY");
-  }
+  assertConnectedClusterProofAdmission({
+    admission: input.admission,
+    markerState: filesystem.marker?.state ?? null,
+    running: filesystem.running,
+  });
   const pool = new Pool({
     connectionString: clusterDatabaseUrl({
       cluster: input.cluster,
@@ -587,12 +655,10 @@ export async function readConnectedClusterProof(input: {
     `);
     const row = connection.rows[0];
     const identityRow = identity.rows[0];
-    const expectedDatabaseRole = input.cluster.clusterKey === "control"
+    const expectedProviderKey = input.cluster.providerKey ?? null;
+    const expectedDatabaseRole = expectedProviderKey === null
       ? "central"
       : "provider";
-    const expectedProviderKey = input.cluster.clusterKey === "control"
-      ? null
-      : "clutchpacks";
     const expectedRoles = [
       {
         rolname: input.cluster.appRoleName,
@@ -672,6 +738,26 @@ export async function readConnectedClusterProof(input: {
   } finally {
     await pool.end().catch(() => undefined);
   }
+}
+
+export async function readConnectedClusterProof(input: {
+  readonly cluster: ClutchpacksReviewDatabaseTarget;
+  readonly appPassword: string;
+}): Promise<Readonly<ConnectedClusterProof>> {
+  return readConnectedClusterProofWithAdmission({
+    ...input,
+    admission: "runtime",
+  });
+}
+
+export async function readProvisioningConnectedClusterProof(input: {
+  readonly cluster: ClutchpacksReviewDatabaseTarget;
+  readonly appPassword: string;
+}): Promise<Readonly<ConnectedClusterProof>> {
+  return readConnectedClusterProofWithAdmission({
+    ...input,
+    admission: "provisioning",
+  });
 }
 
 export async function markFixedClusterProvisioned(

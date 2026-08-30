@@ -1,4 +1,4 @@
-import type { QuarantineEntrySummary } from "@packscout/contracts";
+import { importRunDetailPath, type QuarantineEntrySummary } from "@packscout/contracts";
 import { Link } from "react-router-dom";
 import { QuarantineStatus, dateTime, humanize } from "./OperationStatus";
 
@@ -38,7 +38,7 @@ export function QuarantineLedger({ entries, selectable, selected, onSelectionCha
                 <div><dt>First failure</dt><dd>{dateTime(entry.firstFailureAt)}</dd></div>
                 <div><dt>Latest failure</dt><dd>{dateTime(entry.latestFailureAt)}</dd></div>
                 <div><dt>Evidence</dt><dd>{retryable ? `Retained until ${dateTime(entry.rawExpiresAt)}` : "Unavailable for retry"}</dd></div>
-                <div><dt>Origin run</dt><dd><Link to={`/runs/${entry.runId}`}>Open run</Link></dd></div>
+                <div><dt>Origin run</dt><dd><Link to={importRunDetailPath({ providerId: entry.providerId, runId: entry.runId })}>Open run</Link></dd></div>
               </dl>
               <p className="ops-ledger__diagnostic">{entry.sanitizedSummary}</p>
             </article>

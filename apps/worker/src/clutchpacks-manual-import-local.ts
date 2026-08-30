@@ -14,8 +14,8 @@ import {
   AesGcmProviderCredentialCipher,
   CipherProviderDatabaseCredentialResolver,
 } from "@packscout/services";
-import { createClutchpacksManualImportExecutor } from
-  "./clutchpacks-manual-import-executor.ts";
+import { createProviderManualImportExecutor } from
+  "./provider-manual-import-executor.ts";
 import {
   ClutchpacksManualImportLocalError,
   runClutchpacksManualImportOnce,
@@ -26,6 +26,8 @@ import { CentralDataforrestSourceAuthorityResolver } from
   "./dataforrest-source-authority-resolver.ts";
 import { ProviderDataforrestMixedPageSource } from
   "./provider-dataforrest-mixed-page-source.ts";
+import { providerDataforrestLiveIntegrationRegistry } from
+  "./provider-dataforrest-live-integration.ts";
 import { createProviderDataforrestRequestTerminalizer } from
   "./provider-dataforrest-request-terminalizer.ts";
 
@@ -70,7 +72,7 @@ async function runWithoutCentralAuthority(): Promise<Awaited<ReturnType<
     fallbackWorkerId,
     dependencies: {
       createDatabaseLifecycle: createProviderDatabaseLifecycle,
-      createExecutor: createClutchpacksManualImportExecutor,
+      createExecutor: createProviderManualImportExecutor,
     },
   });
 }
@@ -128,6 +130,12 @@ async function runWithCentralAuthority(): Promise<Awaited<ReturnType<
           );
           const liveSource = new ProviderDataforrestMixedPageSource({
             authorityResolver,
+            integration:
+              providerDataforrestLiveIntegrationRegistry.resolveProvider(
+                "clutchpacks",
+              ) ?? (() => {
+                throw new Error("ClutchPacks live integration is unavailable.");
+              })(),
             workerId: input.workerId,
             translationRecorder: audit,
             terminalizeRequest:
@@ -136,7 +144,7 @@ async function runWithCentralAuthority(): Promise<Awaited<ReturnType<
                 workerId: input.workerId,
               }),
           });
-          return createClutchpacksManualImportExecutor({
+          return createProviderManualImportExecutor({
             ...input,
             liveSource,
           });

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import { DATAFORREST_EVENTS_V1_ENDPOINT } from "@packscout/contracts";
 import {
   createProviderDatabaseLifecycle,
   initializeProviderDatabaseIdentity,
@@ -19,18 +20,29 @@ import {
   PrismaProviderCommandRepository,
   PrismaProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
+  providerDatabaseTarget,
+  type ProviderDatabaseRoute,
   type ProviderPrismaClient,
 } from "@packscout/database";
+import type { ResolvedDataforrestSourceAuthority } from
+  "./dataforrest-source-authority-resolver.ts";
 import {
-  ClutchpacksManualImportExecutor,
+  providerDataforrestLiveIntegrationRegistry,
+  type ProviderDataforrestLiveIntegration,
+} from "./provider-dataforrest-live-integration.ts";
+import {
+  ProviderManualImportExecutor,
   type ProviderManualImportPageSource,
-} from "./clutchpacks-manual-import-executor.ts";
+} from "./provider-manual-import-executor.ts";
 import { ProviderCaptureMixedPageSource } from
   "./provider-capture-mixed-page-source.ts";
 import {
   CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
   CLUTCHPACKS_CAPTURE_FILE_NAME,
+  ProviderCaptureSourceError,
 } from "./provider-capture-source-contract.ts";
+import { runProviderManualImportOnce } from
+  "./provider-manual-import-local-runtime.ts";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -44,7 +56,7 @@ const prismaExecutable = path.join(
   "node_modules/prisma/build/index.js",
 );
 const disposableDatabasePattern =
-  /^packscout_clutch_test_[0-9]+_[a-f0-9]{10}$/u;
+  /^packscout_(?:clutch|courtyard)_test_[0-9]+_[a-f0-9]{10}$/u;
 
 interface ProviderHarness {
   readonly client: ProviderPrismaClient;
@@ -71,12 +83,20 @@ function databaseUrl(source: URL, databaseName: string): string {
   return result.toString();
 }
 
-async function createHarness(): Promise<ProviderHarness> {
+async function createHarness(
+  providerLabel: "clutch" | "courtyard" = "clutch",
+  exactProviderKey?: "clutchpacks" | "courtyard",
+): Promise<ProviderHarness> {
   const rootUrl = adminUrl();
-  const providerKey =
-    `clutch_test_${process.pid}_${randomBytes(5).toString("hex")}`;
+  const databaseKey =
+    `${providerLabel}_test_${process.pid}_${randomBytes(5).toString("hex")}`;
+  const providerKey = exactProviderKey ?? databaseKey;
   const databaseName = `packscout_${providerKey}`;
-  if (!disposableDatabasePattern.test(databaseName)) {
+  if (
+    exactProviderKey === undefined
+      ? !disposableDatabasePattern.test(databaseName)
+      : process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL === undefined
+  ) {
     throw new Error("Refusing to create an unscoped provider test database.");
   }
   const administrator = new Pool({ connectionString: rootUrl.toString(), max: 1 });
@@ -424,6 +444,489 @@ async function enqueue(
   return result.run.id;
 }
 
+const parallelCourtyardCursor = Object.freeze({
+  after: "courtyard-page-1",
+});
+
+interface ParallelProviderBarrier {
+  readonly arrivals: ReadonlySet<string>;
+  readonly releaseArrivalCount: number | null;
+  readonly maximumInFlight: number;
+  enter(providerKey: "clutchpacks" | "courtyard"): Promise<void>;
+}
+
+function createParallelProviderBarrier(): ParallelProviderBarrier {
+  const arrivals = new Set<string>();
+  let currentInFlight = 0;
+  let maximumInFlight = 0;
+  let releaseArrivalCount: number | null = null;
+  let release!: () => void;
+  const crossed = new Promise<void>((resolve) => { release = resolve; });
+  return {
+    arrivals,
+    get releaseArrivalCount() {
+      return releaseArrivalCount;
+    },
+    get maximumInFlight() {
+      return maximumInFlight;
+    },
+    async enter(providerKey) {
+      currentInFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, currentInFlight);
+      arrivals.add(providerKey);
+      if (arrivals.size === 2) {
+        releaseArrivalCount = arrivals.size;
+        release();
+      }
+      try {
+        await crossed;
+      } finally {
+        currentInFlight -= 1;
+      }
+    },
+  };
+}
+
+function parallelProviderSource(
+  providerKey: "clutchpacks" | "courtyard",
+  expectedAdapterKey: string,
+  barrier: ParallelProviderBarrier,
+  state: { calls: number },
+): ProviderManualImportPageSource {
+  return {
+    supports(adapterKey, requestedProviderKey) {
+      return adapterKey === expectedAdapterKey
+        && requestedProviderKey === providerKey;
+    },
+    async nextPage(input) {
+      state.calls += 1;
+      assert.equal(input.authority.providerKey, providerKey);
+      assert.equal(input.authority.configuration.adapterKey, expectedAdapterKey);
+      assert.equal(input.pageNumber, state.calls);
+      if (state.calls === 1) {
+        assert.equal(input.sourceCheckpoint, null);
+        assert.equal(input.sourceCheckpointFingerprint, null);
+        await barrier.enter(providerKey);
+        if (providerKey === "clutchpacks") {
+          throw new ProviderCaptureSourceError(
+            "PROVIDER_CAPTURE_RECORD_INVALID",
+          );
+        }
+      } else {
+        assert.equal(providerKey, "courtyard");
+        assert.equal(state.calls, 2);
+        assert.deepEqual(input.sourceCheckpoint, parallelCourtyardCursor);
+        assert.equal(
+          input.sourceCheckpointFingerprint,
+          providerMixedCursorFingerprint(parallelCourtyardCursor),
+        );
+      }
+      const nextCursor = state.calls === 1
+        ? parallelCourtyardCursor
+        : null;
+      const body = {
+        contractVersion: PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
+        providerId: input.authority.providerId,
+        runId: input.runId,
+        configVersionId: input.authority.configVersionId,
+        configVersionNumber: input.authority.configVersionNumber.toString(),
+        leaseFence: input.workerFence.toString(),
+        pageId: randomUUID(),
+        pageNumber: input.pageNumber,
+        inputCursor: input.sourceCheckpoint,
+        inputCursorFingerprint: input.sourceCheckpointFingerprint,
+        nextCursor,
+        nextCursorFingerprint: providerMixedCursorFingerprint(nextCursor),
+        continuation: nextCursor === null ? "head" : "more",
+        records: [],
+      };
+      return { ...body, responseDigest: providerMixedPageDigest(body) };
+    },
+  };
+}
+
+function requiredLiveIntegration(
+  providerKey: "clutchpacks" | "courtyard",
+): ProviderDataforrestLiveIntegration {
+  const integration = providerDataforrestLiveIntegrationRegistry
+    .resolveProvider(providerKey);
+  if (integration === null) {
+    throw new TypeError(`Missing ${providerKey} live integration fixture.`);
+  }
+  return integration;
+}
+
+test("two disposable provider databases overlap while one source failure remains lane-local", {
+  timeout: 180_000,
+}, async (context) => {
+  if (
+    process.env.PACKSCOUT_PROVIDER_PARALLEL_EXECUTION_INTEGRATION !== "1"
+    || process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL === undefined
+  ) {
+    context.skip(
+      "Set PACKSCOUT_PROVIDER_PARALLEL_EXECUTION_INTEGRATION=1 and an explicit disposable PACKSCOUT_TEST_ADMIN_DATABASE_URL to run the two-provider proof.",
+    );
+    return;
+  }
+
+  const clutch = await createHarness("clutch", "clutchpacks");
+  let courtyard: ProviderHarness | null = null;
+  try {
+    courtyard = await createHarness("courtyard", "courtyard");
+    assert.equal(clutch.providerKey, "clutchpacks");
+    assert.equal(courtyard.providerKey, "courtyard");
+    assert.notEqual(clutch.client, courtyard.client);
+
+    const definitions = [
+      {
+        harness: clutch,
+        providerKey: "clutchpacks" as const,
+        integration: requiredLiveIntegration("clutchpacks"),
+        workerId: "parallel:clutchpacks",
+      },
+      {
+        harness: courtyard,
+        providerKey: "courtyard" as const,
+        integration: requiredLiveIntegration("courtyard"),
+        workerId: "parallel:courtyard",
+      },
+    ];
+    const configVersionIds = new Map<string, string>();
+    for (const definition of definitions) {
+      const configVersionId = randomUUID();
+      configVersionIds.set(definition.providerKey, configVersionId);
+      const synchronized = await new PrismaProviderRuntimeRepository(
+        definition.harness.client,
+      ).synchronizeConfiguration({
+        centralProviderId: definition.harness.providerId,
+        providerKey: definition.providerKey,
+        configVersionId,
+        configVersionNumber: 1n,
+        configuration: {
+          adapterKey: definition.integration.manifest.adapterVersion,
+          settings: { platform: definition.providerKey },
+        },
+        expiresAt: null,
+        scheduleSeconds: 300,
+        nextDueAt: null,
+        synchronizedAt: new Date(),
+      });
+      assert.equal(synchronized.kind, "updated");
+    }
+    const runIds = new Map<string, string>();
+    for (const [index, definition] of definitions.entries()) {
+      const configVersionId = configVersionIds.get(definition.providerKey);
+      assert.ok(configVersionId);
+      runIds.set(
+        definition.providerKey,
+        await enqueue(definition.harness, configVersionId, index + 1),
+      );
+    }
+    const organizationId = "10000000-0000-4000-8000-000000000002";
+    const bootstrapPins = new Map(definitions.map((definition, index) => {
+      const configVersionId = configVersionIds.get(definition.providerKey);
+      assert.ok(configVersionId);
+      const databaseRoute: ProviderDatabaseRoute = Object.freeze({
+        target: providerDatabaseTarget({
+          providerId: definition.harness.providerId,
+          providerKey: definition.providerKey,
+        }),
+        organizationId,
+        configVersionId,
+        providerRowVersion: BigInt(index + 1),
+        topologyVersion: BigInt(index + 1),
+        node: Object.freeze({
+          nodeId: randomUUID(),
+          host: "127.0.0.1",
+          port: 55_432 + index,
+          sslMode: "disable",
+          credentialVersionId: randomUUID(),
+          encryptedCredential: Object.freeze({
+            ciphertext: new Uint8Array([index + 1]),
+            nonce: new Uint8Array(12),
+            authTag: new Uint8Array(16),
+            keyVersion: 1,
+          }),
+          rowVersion: BigInt(index + 1),
+        }),
+      });
+      const sourceAuthority: ResolvedDataforrestSourceAuthority =
+        Object.freeze({
+          organizationId: databaseRoute.organizationId,
+          providerId: definition.harness.providerId,
+          providerKey: definition.providerKey,
+          configVersionId,
+          configVersionNumber: 1n,
+          adapterKey: definition.integration.manifest.adapterVersion,
+          sourceTypeKey: definition.integration.manifest.sourceTypeKey,
+          sourceAdapterVersion:
+            definition.integration.manifest.adapterVersion,
+          sourceCredentialVersionId: randomUUID(),
+          sourceCredentialVersionNumber: 1n,
+          expiresAt: null,
+          connectionConfiguration: Object.freeze({
+            endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+            bearerToken: `fixture-token-${definition.providerKey}`,
+          }),
+          sourceConfiguration: Object.freeze({
+            platform: definition.providerKey,
+          }),
+        });
+      return [definition.providerKey, {
+        databaseRoute,
+        sourceAuthority,
+      }] as const;
+    }));
+
+    const barrier = createParallelProviderBarrier();
+    const sourceStates = new Map(definitions.map(({ providerKey }) => [
+      providerKey,
+      { calls: 0 },
+    ]));
+    const routedOperations = new Map(definitions.map(({ providerKey }) => [
+      providerKey,
+      0,
+    ]));
+    const activeGatewayProviders = new Set<string>();
+    const authorityResolvers = new Map<string, unknown>();
+    let maximumGatewayInFlight = 0;
+    const executions = definitions.map((definition) => {
+      const sourceState = sourceStates.get(definition.providerKey);
+      assert.ok(sourceState);
+      const source = parallelProviderSource(
+        definition.providerKey,
+        definition.integration.manifest.adapterVersion,
+        barrier,
+        sourceState,
+      );
+      const pins = bootstrapPins.get(definition.providerKey);
+      assert.ok(pins);
+      return runProviderManualImportOnce({
+        environment: {
+          PACKSCOUT_PROVIDER_ID: definition.harness.providerId,
+          PACKSCOUT_PROVIDER_KEY: definition.providerKey,
+        },
+        fallbackWorkerId: definition.workerId,
+        dependencies: {
+          bootstrapProvider: () => Promise.resolve({
+            organizationId,
+            providerId: definition.harness.providerId,
+            providerKey: definition.providerKey,
+            databaseRoute: pins.databaseRoute,
+            sourceAuthority: pins.sourceAuthority,
+            integration: definition.integration,
+          }),
+          async runWithCachedProviderDatabase(route, operation) {
+            assert.equal(route, pins.databaseRoute);
+            assert.deepEqual({
+              organizationId: route.organizationId,
+              providerId: route.target.providerId,
+            }, {
+              organizationId,
+              providerId: definition.harness.providerId,
+            });
+            assert.equal(
+              activeGatewayProviders.has(definition.providerKey),
+              false,
+            );
+            activeGatewayProviders.add(definition.providerKey);
+            maximumGatewayInFlight = Math.max(
+              maximumGatewayInFlight,
+              activeGatewayProviders.size,
+            );
+            routedOperations.set(
+              definition.providerKey,
+              (routedOperations.get(definition.providerKey) ?? 0) + 1,
+            );
+            try {
+              return {
+                state: "reachable" as const,
+                value: await operation(definition.harness.client),
+              };
+            } finally {
+              activeGatewayProviders.delete(definition.providerKey);
+            }
+          },
+          createExecutor(input) {
+            assert.equal(input.database, definition.harness.client);
+            assert.equal(input.providerId, definition.harness.providerId);
+            assert.equal(input.providerKey, definition.providerKey);
+            assert.equal(input.workerId, definition.workerId);
+            assert.equal(input.sourceAuthority, pins.sourceAuthority);
+            assert.equal(input.integration, definition.integration);
+            const retainedResolver = authorityResolvers.get(
+              definition.providerKey,
+            );
+            if (retainedResolver === undefined) {
+              authorityResolvers.set(
+                definition.providerKey,
+                input.sourceAuthorityResolver,
+              );
+            } else {
+              assert.equal(input.sourceAuthorityResolver, retainedResolver);
+            }
+            return new ProviderManualImportExecutor({
+              database: input.database,
+              source,
+              workerId: input.workerId,
+              leaseMilliseconds: 30_000,
+            });
+          },
+        },
+      });
+    });
+
+    const results = await Promise.all(executions);
+    const clutchRunId = runIds.get("clutchpacks");
+    const courtyardRunId = runIds.get("courtyard");
+    assert.ok(clutchRunId);
+    assert.ok(courtyardRunId);
+    assert.deepEqual(results, [
+      {
+        kind: "failed",
+        runId: clutchRunId,
+        failureCode: "PROVIDER_CAPTURE_RECORD_INVALID",
+      },
+      {
+        kind: "completed",
+        runId: courtyardRunId,
+        pageCount: 2,
+        counters: {
+          pages: 2,
+          catalog: 0,
+          pulls: 0,
+          marketEvents: 0,
+          accepted: 0,
+          duplicate: 0,
+          quarantined: 0,
+          materialChanges: 0,
+        },
+      },
+    ]);
+    assert.deepEqual(
+      barrier.arrivals,
+      new Set(["clutchpacks", "courtyard"]),
+    );
+    assert.equal(barrier.releaseArrivalCount, 2);
+    assert.equal(barrier.maximumInFlight, 2);
+    assert.equal(maximumGatewayInFlight, 2);
+    assert.deepEqual(routedOperations, new Map([
+      ["clutchpacks", 1],
+      ["courtyard", 2],
+    ]));
+    assert.equal(authorityResolvers.size, 2);
+    assert.notEqual(
+      authorityResolvers.get("clutchpacks"),
+      authorityResolvers.get("courtyard"),
+    );
+    assert.deepEqual(sourceStates, new Map([
+      ["clutchpacks", { calls: 1 }],
+      ["courtyard", { calls: 2 }],
+    ]));
+
+    const clutchRun = await clutch.client.provider_runs.findUniqueOrThrow({
+      where: { id: clutchRunId },
+      select: {
+        state: true,
+        failure_code: true,
+        page_count: true,
+        reached_source_head: true,
+        final_cursor: true,
+        worker_fence: true,
+      },
+    });
+    const courtyardRun = await courtyard.client.provider_runs.findUniqueOrThrow({
+      where: { id: courtyardRunId },
+      select: {
+        state: true,
+        failure_code: true,
+        page_count: true,
+        reached_source_head: true,
+        final_cursor: true,
+        worker_fence: true,
+      },
+    });
+    assert.deepEqual(clutchRun, {
+      state: "failed",
+      failure_code: "PROVIDER_CAPTURE_RECORD_INVALID",
+      page_count: 0,
+      reached_source_head: false,
+      final_cursor: null,
+      worker_fence: 1n,
+    });
+    assert.deepEqual(courtyardRun, {
+      state: "succeeded",
+      failure_code: null,
+      page_count: 2,
+      reached_source_head: true,
+      final_cursor: null,
+      worker_fence: 1n,
+    });
+    assert.equal(await clutch.client.provider_runs.count({
+      where: { id: courtyardRunId },
+    }), 0);
+    assert.equal(await courtyard.client.provider_runs.count({
+      where: { id: clutchRunId },
+    }), 0);
+
+    assert.deepEqual(await clutch.client.provider_run_pages.findMany({
+      where: { provider_run_id: clutchRunId },
+    }), []);
+    assert.deepEqual(await courtyard.client.provider_run_pages.findMany({
+      where: { provider_run_id: courtyardRunId },
+      orderBy: { page_number: "asc" },
+      select: {
+        page_number: true,
+        requested_cursor: true,
+        next_cursor: true,
+        continuation: true,
+      },
+    }), [
+      {
+        page_number: 1,
+        requested_cursor: null,
+        next_cursor: parallelCourtyardCursor,
+        continuation: "more",
+      },
+      {
+        page_number: 2,
+        requested_cursor: parallelCourtyardCursor,
+        next_cursor: null,
+        continuation: "head",
+      },
+    ]);
+    for (const [harness, runId] of [
+      [clutch, clutchRunId],
+      [courtyard, courtyardRunId],
+    ] as const) {
+      assert.deepEqual(await harness.client.control_commands.findMany({
+        select: { state: true, resulting_run_id: true },
+      }), [{ state: "completed", resulting_run_id: runId }]);
+      assert.equal(await harness.client.provider_runs.count(), 1);
+      const lease = await harness.client.provider_worker_states
+        .findUniqueOrThrow({
+          where: { worker_role: "import" },
+          select: { lease_owner: true, lease_fence: true },
+        });
+      assert.equal(lease.lease_owner, null);
+      assert.equal(lease.lease_fence, 1n);
+      assert.deepEqual(await harness.client.database_identity
+        .findUniqueOrThrow({
+          where: { singleton_key: true },
+          select: { provider_id: true, provider_key: true },
+        }), {
+          provider_id: harness.providerId,
+          provider_key: harness.providerKey,
+        });
+    }
+  } finally {
+    await Promise.all([
+      clutch.close(),
+      ...(courtyard === null ? [] : [courtyard.close()]),
+    ]);
+  }
+});
+
 test("executor retains facts before catalog and promotes monotonic reference reconciliation", async (context) => {
   if (process.env.PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION !== "1") {
     context.skip(
@@ -578,12 +1081,39 @@ test("executor retains facts before catalog and promotes monotonic reference rec
       };
     });
 
-    const result = await new ClutchpacksManualImportExecutor({
+    const executorInput = {
       database: harness.client,
       source,
       workerId: "integration:clutchpacks-deferred-catalog",
       leaseMilliseconds: 30_000,
-    }).executeNext();
+    } as const;
+    const firstStep = await new ProviderManualImportExecutor(
+      executorInput,
+    ).executeNextPage();
+    assert.deepEqual(firstStep, {
+      kind: "progress",
+      runId,
+      pageCount: 1,
+    });
+    const retainedLease = await harness.client.provider_worker_states
+      .findUniqueOrThrow({
+        where: { worker_role: "import" },
+        select: { lease_owner: true, lease_fence: true },
+      });
+    assert.equal(retainedLease.lease_owner, executorInput.workerId);
+    const firstPageRun = await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: runId },
+      select: { worker_fence: true, state: true },
+    });
+    assert.equal(firstPageRun.state, "running");
+    assert.equal(firstPageRun.worker_fence, retainedLease.lease_fence);
+    assert.deepEqual(await new ProviderManualImportExecutor({
+      ...executorInput,
+      workerId: "integration:clutchpacks-competing-worker",
+    }).executeNextPage(), { kind: "contended" });
+    const result = await new ProviderManualImportExecutor(
+      executorInput,
+    ).executeNextPage();
     assert.deepEqual(result, {
       kind: "completed",
       runId,
@@ -599,6 +1129,19 @@ test("executor retains facts before catalog and promotes monotonic reference rec
         materialChanges: 4,
       },
     });
+    assert.equal(await harness.client.provider_runs.count(), 1);
+    assert.deepEqual(await harness.client.provider_worker_states
+      .findUniqueOrThrow({
+        where: { worker_role: "import" },
+        select: { lease_owner: true, lease_fence: true },
+      }), {
+      lease_owner: null,
+      lease_fence: retainedLease.lease_fence,
+    });
+    assert.equal((await harness.client.provider_runs.findUniqueOrThrow({
+      where: { id: runId },
+      select: { worker_fence: true },
+    })).worker_fence, retainedLease.lease_fence);
     assert.ok(firstPageState);
     const retainedFacts = firstPageState;
     const pack = await harness.client.packs.findUniqueOrThrow({
@@ -782,7 +1325,7 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
     });
     assert.equal(unchanged.kind, "unchanged");
 
-    const executor = new ClutchpacksManualImportExecutor({
+    const executor = new ProviderManualImportExecutor({
       database: harness.client,
       source: isolatedClutchSource(captureRoot),
       workerId: "integration:clutchpacks",
@@ -918,7 +1461,7 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
     })).last_sequence, firstSequence);
 
     const quarantineRunId = await enqueue(harness, configVersionId, 3);
-    const quarantineResult = await new ClutchpacksManualImportExecutor({
+    const quarantineResult = await new ProviderManualImportExecutor({
       database: harness.client,
       source: mixedQuarantineSource(),
       workerId: "integration:clutchpacks-quarantine",
@@ -1027,7 +1570,7 @@ test("admin queue executes one isolated Clutch page and replay stays canonical-i
       configVersionId,
       4,
     );
-    const replayedQuarantine = await new ClutchpacksManualImportExecutor({
+    const replayedQuarantine = await new ProviderManualImportExecutor({
       database: harness.client,
       source: mixedQuarantineSource(false),
       workerId: "integration:clutchpacks-quarantine-replay",

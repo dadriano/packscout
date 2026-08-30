@@ -66,7 +66,7 @@ export class ProviderSourceImportAdmissionService {
     providers: ProviderSourceImportAdmissionRepository;
     sourceIntegrations: Pick<
       ProviderSourceIntegrationCapabilityRegistry,
-      "has"
+      "resolve"
     >;
     delegate: ProviderSourceManualImportDelegate;
     clock: ProviderClock;
@@ -95,7 +95,10 @@ export class ProviderSourceImportAdmissionService {
     if (admission.kind === "source_unavailable") {
       throw new ProviderSourceImportRequestError("SOURCE_NOT_IMPORTABLE", 409);
     }
-    if (!this.dependencies.sourceIntegrations.has(admission.adapterKey)) {
+    if (this.dependencies.sourceIntegrations.resolve(
+      admission.providerKey,
+      admission.adapterKey,
+    ) === null) {
       throw new ProviderSourceImportRequestError(
         "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
         503,

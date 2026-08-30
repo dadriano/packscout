@@ -302,7 +302,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
         headers: readHeaders,
       });
       assert.equal(runs.status, 200);
-      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       assert.equal(detailBefore.status, 200);
@@ -336,7 +336,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
         : null;
       assert.equal(retryBody.outcome.outcome, "not_found");
       assert.equal(attempt, null);
-      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       const historical = await detailAfter.json() as {

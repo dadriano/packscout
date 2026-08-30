@@ -91,6 +91,7 @@ test("alert detail loads bounded evidence, acknowledges directly, and confirms r
   assert.match(pageText(renderer), /Provider feed stopped early/);
   assert.match(pageText(renderer), /FailureCode IMPORT_INVALID_CONTRACT/);
   assert.match(pageText(renderer), /Review import run/);
+  assert.ok(renderer.container.querySelector(`a[href="/runs/${alert.runId}?providerId=${alert.providerId}"]`));
 
   await act(async () => findButton(renderer, "Acknowledge").click());
   await settlePage();

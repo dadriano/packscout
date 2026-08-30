@@ -77,15 +77,28 @@ provisioned or started.
 
 ## Runtime configuration
 
-- Central admin and control-plane processes receive
-  `PACKSCOUT_CENTRAL_DATABASE_URL`.
-- A provider runner or direct admin operation receives only the selected
-  provider URL as `PACKSCOUT_PROVIDER_DATABASE_URL`, resolved from central
-  topology and decrypted server-side.
+- The current `apps/admin` runtime receives its central `packscout` connection
+  as `PACKSCOUT_CONTROL_DATABASE_URL`. Worker and central Prisma utilities use
+  `PACKSCOUT_CENTRAL_DATABASE_URL` for that same database authority.
+- The generic provider runner and direct admin operations receive a validated
+  provider ID. The server-owned gateway resolves the provider database locator
+  and encrypted credential from central topology, then builds the connection
+  only in memory. These runtime paths do not accept a provider URL from the
+  environment.
+- Provider schema-generation and migration commands use the explicitly scoped
+  `PACKSCOUT_PROVIDER_DATABASE_URL`. The older Task 023 local entrypoint
+  `run:clutchpacks-import-once:local` also still consumes that variable; it is
+  retained for the completed standalone proof, not used by this parallel-run
+  checkpoint. Use `run:provider-import-once:local` for the centrally routed
+  runtime. Retire the older entrypoint after its proof coverage moves to the
+  generic runner; do not use it as evidence that all historical tooling has
+  already been ported.
 - Provider pools are bounded independently. Central and provider transactions
   use explicit time limits.
-- Connection URLs belong in the runtime environment or approved secret store.
-  Never commit, log, screenshot, or return them in an HTTP error.
+- Central connection URLs and the provider-credential encryption key belong in
+  the server environment or approved secret store; provider credentials remain
+  encrypted centrally. Never commit, log, screenshot, or return secrets in an
+  HTTP error.
 
 The PostgreSQL instance or cluster supplies the environment boundary, so
 database names do not receive development, preproduction, or production

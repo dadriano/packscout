@@ -85,6 +85,7 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   });
   await settlePage();
   assert.match(pageText(renderer), /manual run created and queued/iu);
+  assert.ok(renderer.container.querySelector(`a[href="/runs/${operationsFixtureIds.runs[0]}?providerId=${operationsFixtureIds.providers[0]}"]`));
 
   await act(async () => {
     findButton(renderer, "Pause").click();
@@ -202,6 +203,9 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /Safe fingerprint/);
   assert.match(pageText(routed), /Page committed/);
   assert.match(pageText(routed), /Shared connection/);
+  const runLinks = [...routed.container.querySelectorAll<HTMLAnchorElement>('a[href^="/runs/"]')];
+  assert.ok(runLinks.length >= 3, "active, history, and committed-page run links remain available");
+  assert.ok(runLinks.every((link) => new URL(link.href).searchParams.get("providerId") === detail.source.providerId));
 
   assert.equal(
     [...routed.container.querySelectorAll("button")]

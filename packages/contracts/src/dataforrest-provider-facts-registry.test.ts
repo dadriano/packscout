@@ -4,6 +4,7 @@ import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
@@ -67,6 +68,15 @@ test("supported generic facts tuples retain the documented fallback", () => {
   assert.equal(
     readDataforrestProviderFacts(
       DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+      "courtyard",
+      "pack",
+      {},
+    ),
+    null,
+  );
+  assert.equal(
+    readDataforrestProviderFacts(
+      DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
       "courtyard",
       "pack",
       {},

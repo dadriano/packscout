@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { ScheduleHealthView } from "@packscout/contracts";
+import { importRunDetailPath, type ScheduleHealthView } from "@packscout/contracts";
 import { age, dateTime, humanize } from "../operations/OperationStatus";
 import { ScheduleStatus } from "./WorkerFleetStatus";
 
@@ -92,7 +92,7 @@ export function ScheduleHealthLedger({
                 Open provider detail
               </Link>
               {schedule.lastRunId ? (
-                <Link to={`/runs/${schedule.lastRunId}`}>Open last run</Link>
+                <Link to={importRunDetailPath({ providerId: schedule.providerId, runId: schedule.lastRunId })}>Open last run</Link>
               ) : null}
             </p>
             <p className="ops-ledger__diagnostic">

@@ -165,7 +165,7 @@ function qualifiedTables(tables: readonly string[]): string {
   return tables.map((table) => `public.${quoteIdentifier(table)}`).join(", ");
 }
 
-function migrate(input: {
+export function migrateReviewDatabase(input: {
   readonly databaseUrl: string;
   readonly role: "central" | "provider";
 }): void {
@@ -190,7 +190,7 @@ function migrate(input: {
   if (result.error || result.status !== 0) refuse("PRISMA_MIGRATION_FAILED");
 }
 
-async function createClusterDatabase(input: {
+export async function createReviewClusterDatabase(input: {
   readonly cluster: ClutchpacksReviewDatabaseTarget;
   readonly clusterAdminPassword: string;
   readonly appPassword: string;
@@ -281,15 +281,16 @@ async function createClusterDatabase(input: {
   }
 }
 
-async function initializeProviderIdentity(input: {
+export async function initializeReviewProviderIdentity(input: {
   readonly databaseUrl: string;
   readonly providerId: string;
+  readonly providerKey: string;
 }): Promise<void> {
   const pool = new Pool({ connectionString: input.databaseUrl, max: 1 });
   try {
     await pool.query(
       "select public.initialize_provider_database_identity($1::uuid, $2::text)",
-      [input.providerId, CLUTCHPACKS_REVIEW_DATABASES.provider.providerKey],
+      [input.providerId, input.providerKey],
     );
   } catch {
     refuse("PROVIDER_IDENTITY_INITIALIZATION_FAILED");
@@ -298,7 +299,7 @@ async function initializeProviderIdentity(input: {
   }
 }
 
-async function grantExplicitRuntimeAccess(input: {
+export async function grantExplicitReviewRuntimeAccess(input: {
   readonly cluster: ClutchpacksReviewDatabaseTarget;
   readonly clusterAdminPassword: string;
   readonly provider: boolean;
@@ -350,10 +351,11 @@ async function grantExplicitRuntimeAccess(input: {
   }
 }
 
-async function expectProviderInitializerDenied(
-  providerUrl: string,
-): Promise<void> {
-  const pool = new Pool({ connectionString: providerUrl, max: 1 });
+export async function expectReviewProviderInitializerDenied(input: {
+  readonly providerUrl: string;
+  readonly providerKey: string;
+}): Promise<void> {
+  const pool = new Pool({ connectionString: input.providerUrl, max: 1 });
   try {
     const privilege = await pool.query<{ may_initialize: boolean }>(`
       select has_function_privilege(
@@ -367,7 +369,7 @@ async function expectProviderInitializerDenied(
     }
     await pool.query(
       "select public.initialize_provider_database_identity($1::uuid, $2::text)",
-      [randomUUID(), CLUTCHPACKS_REVIEW_DATABASES.provider.providerKey],
+      [randomUUID(), input.providerKey],
     );
   } catch (error) {
     if (
@@ -382,7 +384,9 @@ async function expectProviderInitializerDenied(
   refuse("PROVIDER_INITIALIZER_PERMISSION_PROOF_FAILED");
 }
 
-async function expectConnectionDenied(databaseUrl: string): Promise<void> {
+export async function expectReviewConnectionDenied(
+  databaseUrl: string,
+): Promise<void> {
   const pool = new Pool({
     connectionString: databaseUrl,
     connectionTimeoutMillis: 1_000,
@@ -1009,12 +1013,12 @@ async function provisionAction(
     const providerBeforeStart = await inspectFixedCluster(providerCluster);
     await startFixedCluster(providerCluster);
     if (!providerBeforeStart.running) started.push(providerCluster);
-    await createClusterDatabase({
+    await createReviewClusterDatabase({
       cluster: centralCluster,
       clusterAdminPassword: environment.centralClusterAdminPassword,
       appPassword: environment.centralAppPassword,
     });
-    await createClusterDatabase({
+    await createReviewClusterDatabase({
       cluster: providerCluster,
       clusterAdminPassword: environment.providerClusterAdminPassword,
       appPassword: environment.providerAppPassword,
@@ -1027,23 +1031,24 @@ async function provisionAction(
       cluster: providerCluster,
       clusterAdminPassword: environment.providerClusterAdminPassword,
     });
-    migrate({ databaseUrl: centralMigrationUrl, role: "central" });
-    migrate({ databaseUrl: providerMigrationUrl, role: "provider" });
+    migrateReviewDatabase({ databaseUrl: centralMigrationUrl, role: "central" });
+    migrateReviewDatabase({ databaseUrl: providerMigrationUrl, role: "provider" });
     const ids = createProvisionIds(
       centralMarker.systemIdentifier,
       providerMarker.systemIdentifier,
     );
     const plan = buildClutchpacksProvisionPlan(ids);
-    await initializeProviderIdentity({
+    await initializeReviewProviderIdentity({
       databaseUrl: providerMigrationUrl,
       providerId: ids.providerId,
+      providerKey: providerCluster.providerKey!,
     });
-    await grantExplicitRuntimeAccess({
+    await grantExplicitReviewRuntimeAccess({
       cluster: centralCluster,
       clusterAdminPassword: environment.centralClusterAdminPassword,
       provider: false,
     });
-    await grantExplicitRuntimeAccess({
+    await grantExplicitReviewRuntimeAccess({
       cluster: providerCluster,
       clusterAdminPassword: environment.providerClusterAdminPassword,
       provider: true,
@@ -1058,14 +1063,17 @@ async function provisionAction(
       username: providerCluster.appRoleName,
       password: environment.providerAppPassword,
     });
-    await expectProviderInitializerDenied(providerUrl);
+    await expectReviewProviderInitializerDenied({
+      providerUrl,
+      providerKey: providerCluster.providerKey!,
+    });
     await Promise.all([
-      expectConnectionDenied(clusterDatabaseUrl({
+      expectReviewConnectionDenied(clusterDatabaseUrl({
         cluster: providerCluster,
         username: centralCluster.appRoleName,
         password: environment.centralAppPassword,
       })),
-      expectConnectionDenied(clusterDatabaseUrl({
+      expectReviewConnectionDenied(clusterDatabaseUrl({
         cluster: centralCluster,
         username: providerCluster.appRoleName,
         password: environment.providerAppPassword,

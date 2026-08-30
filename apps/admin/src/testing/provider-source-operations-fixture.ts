@@ -309,7 +309,7 @@ export function diagnosticHistory(
       continuation: { kind: "continue" },
       cursorFingerprint: "a".repeat(64),
       counters: { records: 60 },
-      references: [{ kind: "run", label: "Open run", href: `/runs/${operationsFixtureIds.runs[index]}` }],
+      references: [{ kind: "run", label: "Open run", href: `/runs/${operationsFixtureIds.runs[index]}?providerId=${source.providerId}` }],
     },
     ...(!filter.runId ? [{
       scope: "connection" as const,

@@ -1,6 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
 import {
-  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   dataforrestEventRecordV1Schema,
   normalizeDataforrestEventRecordForAdapter,
@@ -10,18 +9,21 @@ import {
 import {
   createProviderObservationMapperRegistryFromManifest,
   type CanonicalCatalogAssetCandidate,
-  type CanonicalMarketEventCandidate,
   type CanonicalObservationPackCandidate,
   type CanonicalProviderCandidate,
-  type CanonicalPullCandidate,
-  type ProviderObservationMoney,
 } from "@packscout/services";
-import type { CanonicalJsonObject } from "@packscout/database";
 import {
   ProviderCaptureSourceError,
   type ProviderCaptureTranslation,
   type ProviderMixedPageRecordDraft,
 } from "../provider-capture-source-contract.ts";
+import {
+  categoryDrafts,
+  collectibleDraft,
+  marketEventDraft,
+  packDraft,
+  pullDraft,
+} from "../provider-observation-mixed-page-drafts.ts";
 
 const CLUTCHPACKS_PROVIDER_KEY = "clutchpacks" as const;
 const TRANSIENT_MAPPING_ORGANIZATION_ID =
@@ -98,10 +100,6 @@ function protectedEvidenceRef(record: DataforrestEventRecordV1): string {
 function mapDataforrestRecord(
   value: unknown,
   providerId: string,
-  adapterVersion:
-    | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
-    | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION =
-      DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ): CanonicalProviderCandidate {
   const parsed = dataforrestEventRecordV1Schema.safeParse(value);
   if (!parsed.success) invalidRecord();
@@ -109,7 +107,7 @@ function mapDataforrestRecord(
     parsed.data,
     CLUTCHPACKS_PROVIDER_KEY,
     protectedEvidenceRef(parsed.data),
-    adapterVersion,
+    DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   );
   const outcome = mapperRegistry.map({
     organizationId: TRANSIENT_MAPPING_ORGANIZATION_ID,
@@ -391,349 +389,6 @@ function actorAccountKey(
     .digest("hex");
 }
 
-function collectibleKey(providerRecordId: string): string {
-  return `card:${providerRecordId}`;
-}
-
-function packKey(providerRecordId: string): string {
-  return `pack:${providerRecordId}`;
-}
-
-function providerFactKey(
-  factKind: "pull" | "event",
-  providerId: string,
-  providerRecordId: string,
-): string {
-  return `${factKind}:${canonicalDigest(
-    `provider-${factKind}-identity`,
-    [providerId, providerRecordId],
-  )}`;
-}
-
-function sourceRecordKey(
-  providerId: string,
-  record: DataforrestEventRecordV1,
-): string {
-  const sourceScope = record.stream === "catalog"
-    ? `catalog:${record.entity}`
-    : record.stream;
-  return `source:${canonicalDigest(
-    "provider-source-record-identity",
-    [providerId, sourceScope, record.record_id],
-  )}`;
-}
-
-function sourceRecordKind(
-  record: DataforrestEventRecordV1,
-): ProviderMixedPageRecordDraft["kind"] {
-  return record.stream === "catalog"
-    ? "catalog"
-    : record.stream === "pulls"
-      ? "pull"
-      : "market_event";
-}
-
-function sourceMappingQuarantine(input: {
-  readonly providerId: string;
-  readonly record: DataforrestEventRecordV1;
-}): ProviderMixedPageRecordDraft {
-  return {
-    kind: sourceRecordKind(input.record),
-    disposition: "quarantine",
-    candidate: {},
-    sourceRecordKey: sourceRecordKey(input.providerId, input.record),
-    reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
-    fieldPath: null,
-    sanitizedSummary:
-      "The validated source record could not be mapped; no retry artifact is retained.",
-  };
-}
-
-function categoryName(value: string | null): string | null {
-  return value === null ? null : nonBlank(value);
-}
-
-function normalizedName(value: string): string {
-  return value.normalize("NFKC").trim().replaceAll(/\s+/gu, " ").toLocaleLowerCase("en-US");
-}
-
-function categoryKey(value: string | null): string | null {
-  const name = categoryName(value);
-  return name === null
-    ? null
-    : `category:${canonicalDigest("provider-category", normalizedName(name))}`;
-}
-
-function exactDecimal(value: number): string {
-  if (!Number.isFinite(value) || value < 0) invalidRecord();
-  const direct = value.toString();
-  if (!direct.includes("e") && !direct.includes("E")) return direct;
-  return value.toFixed(18).replace(/(?:\.0+|(?:(\.[0-9]*?)0+))$/u, "$1");
-}
-
-function money(value: ProviderObservationMoney | null): {
-  readonly amount: string | null;
-  readonly currency: string | null;
-  readonly usdAmount: string | null;
-} {
-  if (value === null) return { amount: null, currency: null, usdAmount: null };
-  const currency = value.currency.toUpperCase();
-  const amount = exactDecimal(value.amount);
-  return { amount, currency, usdAmount: currency === "USD" ? amount : null };
-}
-
-function categoryDrafts(
-  packs: readonly CanonicalObservationPackCandidate[],
-  cards: readonly CanonicalCatalogAssetCandidate[],
-): readonly ProviderMixedPageRecordDraft[] {
-  const names = new Map<string, string>();
-  for (const value of [
-    ...packs.map(({ category }) => category),
-    ...cards.map(({ category }) => category),
-  ]) {
-    const name = categoryName(value);
-    const key = categoryKey(name);
-    if (name !== null && key !== null) {
-      const current = names.get(key);
-      if (current === undefined || name.localeCompare(current) < 0) names.set(key, name);
-    }
-  }
-  return [...names.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, displayName]) => ({
-      kind: "catalog",
-      operation: "upsert",
-      entityType: "category",
-      candidate: {
-        categoryKey: key,
-        parentCategoryKey: null,
-        displayName,
-        expectedRowVersion: null,
-      },
-    }));
-}
-
-function packDraft(
-  candidate: CanonicalObservationPackCandidate,
-): ProviderMixedPageRecordDraft {
-  const price = money(candidate.price);
-  const vendorEv = money(candidate.providerReportedEv);
-  const primaryImageUrl = candidate.imageReferences[0] ?? null;
-  return {
-    kind: "catalog",
-    operation: "upsert",
-    entityType: "pack",
-    candidate: {
-      packKey: packKey(candidate.identity.providerRecordId),
-      categoryKey: categoryKey(candidate.category),
-      familyKey: null,
-      displayName: candidate.displayName,
-      description: candidate.description,
-      packFormat: "repack",
-      availability: candidate.availability === "available"
-        ? "available"
-        : candidate.availability === "sold_out"
-          ? "sold_out"
-          : "unavailable",
-      contentEvidence: "unknown",
-      totalInventory: null,
-      remainingInventory: null,
-      priceAmount: price.amount,
-      priceCurrency: price.currency,
-      priceUsdAmount: price.usdAmount,
-      priceUnavailableReason: price.amount === null ? "source_unavailable" : null,
-      buybackRate: candidate.buybackPercent === null
-        ? null
-        : exactDecimal(candidate.buybackPercent / 100),
-      buybackSourceKind: candidate.buybackPercent === null
-        ? null
-        : "provider_statement",
-      vendorEvAmount: vendorEv.amount,
-      vendorEvCurrency: vendorEv.currency,
-      vendorEvObservedAt: vendorEv.amount === null ? null : candidate.effectiveAt,
-      vendorEvUnavailableReason: vendorEv.amount === null
-        ? "source_unavailable"
-        : null,
-      packscoutEvAmount: null,
-      packscoutEvCurrency: null,
-      packscoutEvModelVersion: "not_calculated",
-      packscoutEvConfidencePolicyVersion: "not_calculated",
-      packscoutEvConfidence: null,
-      packscoutEvDataAsOf: null,
-      packscoutEvCalculatedAt: null,
-      packscoutEvUnavailableReason: "not_calculated",
-      primaryImageUrl,
-      primaryImageAlt: primaryImageUrl === null ? null : candidate.displayName,
-      listingUrl: null,
-      attributes: {},
-      sourceUpdatedAt: candidate.effectiveAt,
-      expectedRowVersion: null,
-    },
-  };
-}
-
-function collectibleDraft(
-  candidate: CanonicalCatalogAssetCandidate,
-): ProviderMixedPageRecordDraft {
-  const displayName = nonBlank(candidate.displayName) ?? invalidRecord();
-  const valuation = money(candidate.estimatedValue);
-  const primaryImageUrl = candidate.imageReferences[0] ?? null;
-  return {
-    kind: "catalog",
-    operation: "upsert",
-    entityType: "collectible",
-    candidate: {
-      collectibleKey: collectibleKey(candidate.identity.providerRecordId),
-      categoryKey: categoryKey(candidate.category),
-      collectibleType: "card",
-      displayName,
-      normalizedName: normalizedName(displayName),
-      year: null,
-      brand: null,
-      setOrSeries: null,
-      cardNumber: null,
-      referenceNumber: null,
-      subject: null,
-      grade: null,
-      grader: null,
-      primaryImageUrl,
-      primaryImageAlt: primaryImageUrl === null ? null : displayName,
-      valuationAmount: valuation.amount,
-      valuationCurrency: valuation.currency,
-      valuationUsdAmount: valuation.usdAmount,
-      valuationUnavailableReason: valuation.amount === null
-        ? "source_unavailable"
-        : null,
-      valuationType: valuation.amount === null ? null : candidate.valueSource,
-      valuationObservedAt: valuation.amount === null ? null : candidate.effectiveAt,
-      dataAsOf: candidate.effectiveAt,
-      attributes: {},
-      expectedRowVersion: null,
-    },
-  };
-}
-
-function relationshipRecordId(
-  candidate: CanonicalPullCandidate | CanonicalMarketEventCandidate,
-  relationship: "pack" | "card",
-): string | null {
-  return candidate.relationships.find(
-    (value) => value.relationship === relationship,
-  )?.targetProviderRecordId ?? null;
-}
-
-function pullDraft(input: {
-  readonly candidate: CanonicalPullCandidate;
-  readonly accountKey: string | null;
-  readonly providerId: string;
-}): ProviderMixedPageRecordDraft {
-  const packRecordId = relationshipRecordId(input.candidate, "pack");
-  const cardRecordId = relationshipRecordId(input.candidate, "card");
-  const value = money(input.candidate.value);
-  const body: CanonicalJsonObject = {
-    pullKey: providerFactKey(
-      "pull",
-      input.providerId,
-      input.candidate.identity.providerRecordId,
-    ),
-    packKey: packRecordId === null ? null : packKey(packRecordId),
-    providerAccountKey: input.accountKey,
-    occurredAt: input.candidate.effectiveAt,
-    paidAmount: null,
-    paidCurrency: null,
-    items: [{
-      collectibleKey: cardRecordId === null
-        ? null
-        : collectibleKey(cardRecordId),
-      collectibleInstanceKey: null,
-      quantity: "1",
-      statedValueAmount: value.amount,
-      statedValueCurrency: value.currency,
-    }],
-  };
-  return {
-    kind: "pull",
-    candidate: {
-      ...body,
-      factDigest: canonicalDigest("provider-pull-fact", body),
-    },
-  };
-}
-
-function normalizedEventType(value: string):
-  | "sale"
-  | "buyback"
-  | "mint"
-  | "burn"
-  | "transfer"
-  | "list"
-  | "unlist"
-  | "swap"
-  | "ship"
-  | "other" {
-  const normalized = value.trim().toLowerCase().replaceAll(/[^a-z0-9]+/gu, "_")
-    .replaceAll(/^_+|_+$/gu, "");
-  const aliases: Readonly<Record<string, string>> = {
-    minted: "mint",
-    shipped: "ship",
-    listed: "list",
-    unlisted: "unlist",
-    sold: "sale",
-  };
-  const canonical = aliases[normalized] ?? normalized;
-  return [
-    "sale",
-    "buyback",
-    "mint",
-    "burn",
-    "transfer",
-    "list",
-    "unlist",
-    "swap",
-    "ship",
-  ].includes(canonical)
-    ? canonical as Exclude<ReturnType<typeof normalizedEventType>, "other">
-    : "other";
-}
-
-function marketEventDraft(input: {
-  readonly candidate: CanonicalMarketEventCandidate;
-  readonly fromAccountKey: string | null;
-  readonly toAccountKey: string | null;
-  readonly providerId: string;
-}): ProviderMixedPageRecordDraft {
-  const cardRecordId = relationshipRecordId(input.candidate, "card");
-  const hasMoney = input.candidate.amount !== null && input.candidate.currency !== null;
-  const body: CanonicalJsonObject = {
-    eventKey: providerFactKey(
-      "event",
-      input.providerId,
-      input.candidate.identity.providerRecordId,
-    ),
-    eventGroupId: null,
-    eventType: normalizedEventType(input.candidate.eventType),
-    packKey: null,
-    collectibleKey: cardRecordId === null ? null : collectibleKey(cardRecordId),
-    collectibleInstanceKey: null,
-    fromProviderAccountKey: input.fromAccountKey,
-    toProviderAccountKey: input.toAccountKey,
-    quantity: null,
-    occurredAt: input.candidate.effectiveAt,
-    amount: hasMoney ? exactDecimal(input.candidate.amount as number) : null,
-    currency: hasMoney
-      ? (input.candidate.currency as string).toUpperCase()
-      : null,
-    details: {},
-  };
-  return {
-    kind: "market_event",
-    candidate: {
-      ...body,
-      factDigest: canonicalDigest("provider-market-event-fact", body),
-    },
-  };
-}
-
 export function translateClutchpacksCapture(input: {
   readonly page: ProviderFeedPageV1;
   readonly providerId: string;
@@ -846,125 +501,6 @@ export function translateClutchpacksCapture(input: {
         ({ candidate }) => candidate.packKey === null,
       ).length,
       marketEvents: events.length,
-      packContents: 0,
-    }),
-  });
-}
-
-/**
- * Translates records already validated by the live DataForrest adapter without
- * rebuilding the legacy provider-feed envelope. Native record data is only
- * interpreted by the versioned DataForrest normalizer and ClutchPacks mapper;
- * live-only callers must not infer provider accounts from unapproved actor
- * fields in the protected native payload.
- */
-export function translateClutchpacksDataforrestRecords(input: {
-  readonly records: readonly DataforrestEventRecordV1[];
-  readonly providerId: string;
-  readonly adapterVersion?:
-    typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION;
-}): ProviderCaptureTranslation {
-  const packs: CanonicalObservationPackCandidate[] = [];
-  const cards: CanonicalCatalogAssetCandidate[] = [];
-  const pulls: CanonicalPullCandidate[] = [];
-  const events: CanonicalMarketEventCandidate[] = [];
-  const quarantines: ProviderMixedPageRecordDraft[] = [];
-
-  const ordered = [...input.records].sort((left, right) => {
-    const streamOrder = { catalog: 0, pulls: 1, trades: 2 } as const;
-    const stream = streamOrder[left.stream] - streamOrder[right.stream];
-    if (stream !== 0) return stream;
-    if (left.stream === "catalog" && right.stream === "catalog") {
-      const entity = (left.entity === "pack" ? 0 : 1) -
-        (right.entity === "pack" ? 0 : 1);
-      if (entity !== 0) return entity;
-    }
-    return left.record_id.localeCompare(right.record_id);
-  });
-
-  for (const record of ordered) {
-    try {
-      const candidate: CanonicalProviderCandidate = mapDataforrestRecord(
-        record,
-        input.providerId,
-        input.adapterVersion,
-      );
-      if (record.stream === "catalog" && record.entity === "pack") {
-        if (candidate.candidateKind !== "pack") invalidRecord();
-        packDraft(candidate);
-        packs.push(candidate);
-        continue;
-      }
-      if (record.stream === "catalog" && record.entity === "card") {
-        if (candidate.candidateKind !== "catalog_asset") invalidRecord();
-        collectibleDraft(candidate);
-        cards.push(candidate);
-        continue;
-      }
-      if (record.stream === "pulls") {
-        if (candidate.candidateKind !== "pull") invalidRecord();
-        pullDraft({
-          candidate,
-          accountKey: null,
-          providerId: input.providerId,
-        });
-        pulls.push(candidate);
-        continue;
-      }
-      if (candidate.candidateKind !== "market_event") invalidRecord();
-      marketEventDraft({
-        candidate,
-        fromAccountKey: null,
-        toAccountKey: null,
-        providerId: input.providerId,
-      });
-      events.push(candidate);
-    } catch (error) {
-      if (
-        !(error instanceof ProviderCaptureSourceError)
-        || error.code !== "PROVIDER_CAPTURE_RECORD_INVALID"
-      ) {
-        throw error;
-      }
-      quarantines.push(sourceMappingQuarantine({
-        providerId: input.providerId,
-        record,
-      }));
-    }
-  }
-
-  const categories = categoryDrafts(packs, cards);
-  const pullRecords = pulls.map((candidate) => pullDraft({
-    candidate,
-    accountKey: null,
-    providerId: input.providerId,
-  }));
-  const marketEvents = events.map((candidate) => marketEventDraft({
-    candidate,
-    fromAccountKey: null,
-    toAccountKey: null,
-    providerId: input.providerId,
-  }));
-  const records = Object.freeze([
-    ...categories,
-    ...packs.map(packDraft),
-    ...cards.map(collectibleDraft),
-    ...pullRecords,
-    ...marketEvents,
-    ...quarantines,
-  ]);
-  return Object.freeze({
-    records,
-    counts: Object.freeze({
-      categories: categories.length,
-      packs: packs.length,
-      collectibles: cards.length,
-      providerAccounts: 0,
-      pulls: pullRecords.length,
-      pullsWithoutPackKey: pullRecords.filter(
-        ({ candidate }) => candidate.packKey === null,
-      ).length,
-      marketEvents: marketEvents.length,
       packContents: 0,
     }),
   });

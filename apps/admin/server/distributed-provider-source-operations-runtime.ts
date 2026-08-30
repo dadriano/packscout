@@ -1,6 +1,8 @@
 import {
+  DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
   PROVIDER_SOURCE_OPERATIONS_VERSION,
-  dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV1SourceAdapterManifests,
+  importRunDetailPath,
   launchProviderKeySchema,
   providerSourceDiagnosticHistorySchema,
   providerSourceOperationsDetailSchema,
@@ -18,7 +20,7 @@ import {
 } from "@packscout/database";
 import {
   ProviderSourceOperationsError,
-  launchSourceMapperDescriptors,
+  type ProviderSourceIntegrationCapability,
   type ProviderSourceIntegrationCapabilityRegistry,
 } from "@packscout/services";
 import type { ProviderSourceOperationsRouterDependencies } from
@@ -159,18 +161,21 @@ function processor(overview: AdminLocalProviderOverview | null) {
 function configuredSource(input: Readonly<{
   provider: CentralSourceProvider;
   evidence: LocalSourceEvidence | null;
-  capabilityInstalled: boolean;
+  capability: ProviderSourceIntegrationCapability | null;
   now: Date;
 }>): ProviderSourceOperationsSource {
   const config = input.provider.activeConfig;
-  const configured = config !== null && input.capabilityInstalled;
+  const configured = config !== null && input.capability !== null;
   const databaseUnreachable = configured && input.evidence === null;
-  const mapper = launchSourceMapperDescriptors.find(
+  const manifest = config === null
+    ? undefined
+    : dataforrestEventsV1SourceAdapterManifests.find(
+        (candidate) => candidate.adapterVersion === config.adapterKey,
+      );
+  const declaration = manifest?.supportedProviders.find(
     (candidate) => candidate.provider === input.provider.key,
   );
-  const declaration = dataforrestEventsV1SourceAdapterManifest.supportedProviders
-    .find((candidate) => candidate.provider === input.provider.key);
-  if (configured && (!mapper || !declaration)) {
+  if (configured && !declaration) {
     throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
   }
   const overview = input.evidence?.overview ?? null;
@@ -182,24 +187,22 @@ function configuredSource(input: Readonly<{
   const totalRecords = latest === null
     ? 0
     : latest.catalogCount + latest.pullCount + latest.marketEventCount;
-  const inserted = latest === null
-    ? 0
-    : Math.max(0, latest.acceptedCount - latest.materialChangeCount);
   return {
     providerId: input.provider.id,
     provider: launchProviderKeySchema.parse(input.provider.key),
     displayName: input.provider.displayName,
     configured,
-    source: configured && config && mapper && declaration
+    source: configured && config && input.capability && declaration
       ? {
           sourceInstanceId: input.provider.id,
           sourceRevisionId: config.id,
-          sourceTypeKey: "dataforrest-events-v1",
+          sourceTypeKey: DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
           sourceAdapterVersion: config.adapterKey,
-          normalizedContractVersion: mapper.normalizedContractVersion,
-          mapperKey: mapper.mapperKey,
-          mapperVersion: mapper.mapperVersion,
-          identityNamespaceKey: mapper.identityNamespaceKey,
+          normalizedContractVersion:
+            input.capability.normalizedContractVersion,
+          mapperKey: input.capability.mapperKey,
+          mapperVersion: input.capability.mapperVersion,
+          identityNamespaceKey: input.capability.identityNamespaceKey,
           recordIdScopes: declaration.recordIdScopes.map(
             ({ recordIdScopeKey }) => recordIdScopeKey,
           ),
@@ -261,8 +264,9 @@ function configuredSource(input: Readonly<{
         total: totalRecords,
       },
       dispositions: {
-        inserted,
-        revised: latest?.materialChangeCount ?? 0,
+        // The canonical run records combined material changes, not insert/update counts.
+        inserted: null,
+        revised: null,
         duplicate: latest?.duplicateCount ?? 0,
         quarantined: latest?.quarantinedCount ?? 0,
       },
@@ -303,7 +307,10 @@ export function createDistributedProviderSourceOperationsRuntime(
       BoundedProviderDatabaseGateway,
       "runWithAdminProviderDatabase"
     >;
-    sourceIntegrations: Pick<ProviderSourceIntegrationCapabilityRegistry, "has">;
+    sourceIntegrations: Pick<
+      ProviderSourceIntegrationCapabilityRegistry,
+      "resolve"
+    >;
     diagnosticCursorKey: Uint8Array;
     now?: () => Date;
   }>,
@@ -384,16 +391,20 @@ export function createDistributedProviderSourceOperationsRuntime(
     if (!launchProviderKeySchema.safeParse(provider.key).success) {
       throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
     }
-    const capabilityInstalled = provider.activeConfig !== null &&
-      input.sourceIntegrations.has(provider.activeConfig.adapterKey);
-    const evidence = capabilityInstalled
+    const capability = provider.activeConfig === null
+      ? null
+      : input.sourceIntegrations.resolve(
+        provider.key,
+        provider.activeConfig.adapterKey,
+      );
+    const evidence = capability !== null
       ? await localEvidence(organizationId, provider, includeDetails)
       : null;
     return {
       source: configuredSource({
         provider,
         evidence,
-        capabilityInstalled,
+        capability,
         now: now(),
       }),
       evidence,
@@ -437,8 +448,8 @@ export function createDistributedProviderSourceOperationsRuntime(
           total: page.catalogCount + page.pullCount + page.marketEventCount,
         },
         dispositions: {
-          inserted: Math.max(0, page.acceptedCount - page.materialChangeCount),
-          revised: page.materialChangeCount,
+          inserted: null,
+          revised: null,
           duplicate: page.duplicateCount,
           quarantined: page.quarantinedCount,
         },
@@ -532,7 +543,7 @@ export function createDistributedProviderSourceOperationsRuntime(
                 ? [{
                     kind: "run" as const,
                     label: "Open run",
-                    href: `/runs/${event.local_run_id}`,
+                    href: importRunDetailPath({ providerId: request.providerId, runId: event.local_run_id }),
                   }]
                 : []),
               ...(event.local_quarantine_id
