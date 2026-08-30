@@ -117,6 +117,9 @@ export function PackScoutEvMetrics({
       {presentation.reasonCopy ? (
         <p className={styles.reason}>{presentation.reasonCopy}</p>
       ) : null}
+      {presentation.calculationPriceNote ? (
+        <p className={styles.note}>{presentation.calculationPriceNote}</p>
+      ) : null}
 
       {showFreshness ? (
         <div className={styles.freshness}>

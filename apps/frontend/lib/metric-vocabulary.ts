@@ -32,7 +32,7 @@ export const METRIC_TRUST_COPY = Object.freeze({
   confidenceExplanation:
     "Confidence describes how reliable and fresh PackScout's supporting evidence is, not profit likelihood or whether EV is positive.",
   unavailableExplanation:
-    "Unavailable means PackScout does not have complete supported evidence. PackScout never assumes missing buyback terms.",
+    "Unavailable means PackScout has no supported prior estimate to display. When a fresh calculation is blocked, the last supported values remain visible with reduced confidence. PackScout never assumes missing buyback terms.",
 });
 
 export const PUBLIC_REASON_COPY = Object.freeze({
@@ -45,7 +45,7 @@ export const PUBLIC_REASON_COPY = Object.freeze({
     "Unavailable: supported outcome values are unavailable.",
   BUYBACK_UNAVAILABLE:
     "Unavailable: documented buyback terms are unavailable.",
-  SOURCE_DATA_STALE: "Expired: source data is older than 60 minutes.",
+  SOURCE_DATA_STALE: "Source data is older than 60 minutes.",
   CALCULATION_UNAVAILABLE:
     "Unavailable: the calculation could not be completed.",
   ESTIMATE_UNAVAILABLE: "Estimate unavailable.",
@@ -67,13 +67,15 @@ export const SOURCE_AGE_COPY = Object.freeze({
     "Source data delayed (15–30 minutes old)",
   delayed_over_30_through_60_minutes:
     "Source data delayed (30–60 minutes old)",
+  delayed_over_60_minutes:
+    "Source data over 60 minutes old; last known values retained",
 } as const);
 
 export const ESTIMATE_STATUS_COPY = Object.freeze({
   current: "Current estimate",
   sold_out_historical: "Sold out · historical estimate",
   unavailable: "Unavailable",
-  expired: "Expired",
+  last_known: "Last known estimate",
   simulated: "Simulated data",
   unknownSourceTime: "Source observation time unknown",
 } as const);

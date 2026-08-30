@@ -14,15 +14,15 @@ import type {
 } from "../../buyback-adjusted-ev-recomputation-contracts.ts";
 import {
   finalizePackScoutBuybackEvEvidenceV1,
-  packScoutBuybackEvMoneyClaimFromNumberV1,
-  packScoutBuybackEvOutcomeKeyFromLabelV1,
   type PackScoutBuybackEvEvidenceDraftV1,
-  type PackScoutBuybackEvOutcomeClaimV1,
-  type PackScoutBuybackEvUniformRateClaimV1,
 } from "../buyback-ev-evidence.ts";
 import { fingerprintCanonicalProviderCandidate } from
   "../../provider-observation-mapper.ts";
 import { clutchpacksProviderObservationMapper } from "./mapper.ts";
+import {
+  clutchpacksNormalizedBuybackEvDraftV1,
+  clutchpacksProbabilityMatchesCountV1,
+} from "./normalized-buyback-ev-evidence.ts";
 
 export const CLUTCHPACKS_CANONICAL_V3_PLATFORM_KEY = "clutchpacks" as const;
 export const CLUTCHPACKS_CANONICAL_V3_SOURCE_TYPE_KEY =
@@ -39,8 +39,6 @@ export const CLUTCHPACKS_CANONICAL_V3_CURSOR_CODEC_VERSION =
 
 const COLLECTION_GUARD_HASH_DOMAIN =
   "packscout.clutchpacks.canonical-v3.collection-guard.v1";
-const BUCKET_HOMOGENEITY_HASH_DOMAIN =
-  "packscout.clutchpacks.canonical-v3.bucket-homogeneity.v1";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HEX_64_PATTERN = /^[0-9a-f]{64}$/u;
@@ -249,7 +247,7 @@ function contentWithCanonicalDerivedProbabilities(
         bucket.quantity === null ||
         !Number.isSafeInteger(bucket.quantity) ||
         bucket.quantity <= 0 ||
-        !probabilityMatchesCount(
+        !clutchpacksProbabilityMatchesCountV1(
           bucket.probability,
           bucket.quantity,
           totalQuantity,
@@ -339,55 +337,11 @@ function validateCanonicalProjection(
   }
 }
 
-function productUniformRate(
-  content: ClutchpacksPackSemanticContentV1,
-): PackScoutBuybackEvUniformRateClaimV1 {
-  const facts = content.providerFacts;
-  const evInput = facts.evInput.state === "present"
-    ? facts.evInput.value
-    : null;
-  const rootAbsent = facts.buybackPercent.state === "absent";
-  const inputAbsent = evInput !== null && evInput.buybackPercent === null;
-  if (rootAbsent && inputAbsent) return { kind: "none_documented" };
-  if (
-    facts.buybackPercent.state === "present" &&
-    facts.buybackPercent.value === 90 &&
-    evInput?.buybackPercent === 90
-  ) {
-    return {
-      kind: "documented",
-      scope: "every_eligible_outcome",
-      terms: {
-        rateBasisPoints: 9_000,
-        percentageFeeBasisPoints: 0,
-        fixedFee: null,
-        floor: null,
-        cap: null,
-      },
-    };
-  }
-  return { kind: "unsupported_terms" };
-}
-
-function probabilityMatchesCount(
-  probability: number | null,
-  quantity: number,
-  totalQuantity: number,
-): boolean {
-  return probability !== null &&
-    Number.isFinite(probability) &&
-    Math.abs(probability - quantity / totalQuantity) <= Number.EPSILON * 8;
-}
-
 async function evidenceDraft(
   product: ClutchpacksCanonicalV3BuybackEvProductObservationV1,
   observation: ClutchpacksCanonicalV3BuybackEvObservationV1,
   content: ClutchpacksPackSemanticContentV1,
 ): Promise<PackScoutBuybackEvEvidenceDraftV1> {
-  const facts = content.providerFacts;
-  const evInput = facts.evInput.state === "present"
-    ? facts.evInput.value
-    : null;
   const guard = await sha256CanonicalJson(COLLECTION_GUARD_HASH_DOMAIN, {
     productKey: product.productKey,
     productRevisionId: product.productRevisionId,
@@ -403,148 +357,19 @@ async function evidenceDraft(
     collectedAt: observation.collectedAt,
     pins: observation.pins,
   });
-  const totalQuantity = evInput?.totalQuantity ?? null;
-  const usableCounts =
-    evInput !== null &&
-    evInput.approved === true &&
-    totalQuantity !== null &&
-    Number.isSafeInteger(totalQuantity) &&
-    totalQuantity > 0 &&
-    evInput.buckets.length > 0 &&
-    evInput.buckets.every((bucket) =>
-      bucket.quantity !== null &&
-      Number.isSafeInteger(bucket.quantity) &&
-      bucket.quantity > 0 &&
-      probabilityMatchesCount(
-        bucket.probability,
-        bucket.quantity,
-        totalQuantity,
-      )
-    ) &&
-    evInput.buckets.reduce((sum, bucket) => sum + (bucket.quantity ?? 0), 0) ===
-      totalQuantity;
-  const outcomes: PackScoutBuybackEvOutcomeClaimV1[] = await Promise.all(
-    (evInput?.buckets ?? []).map(async (bucket, index) => {
-      const outcomeKey = packScoutBuybackEvOutcomeKeyFromLabelV1(
-        bucket.bucketId,
-        `bucket-${index + 1}`,
-      );
-      const quantity =
-        bucket.quantity !== null &&
-          Number.isSafeInteger(bucket.quantity) &&
-          bucket.quantity > 0
-          ? bucket.quantity
-          : null;
-      const homogeneityEvidenceSha256 = quantity === null
-        ? null
-        : await sha256CanonicalJson(BUCKET_HOMOGENEITY_HASH_DOMAIN, {
-            normalizedContentHash: observation.normalizedContentHash,
-            semanticObservationId: observation.semanticObservationId,
-            productKey: product.productKey,
-            bucket: {
-              bucketId: bucket.bucketId,
-              quantity,
-              lowerValue: bucket.lowerValue,
-              upperValue: bucket.upperValue,
-            },
-            productBuyback: {
-              root: facts.buybackPercent,
-              evInput: evInput?.buybackPercent ?? null,
-            },
-          });
-      const lower = packScoutBuybackEvMoneyClaimFromNumberV1(
-        bucket.lowerValue,
-        evInput?.currency ?? "",
-        2,
-      );
-      const upper = packScoutBuybackEvMoneyClaimFromNumberV1(
-        bucket.upperValue,
-        evInput?.currency ?? "",
-        2,
-      );
-      return {
-        outcomeKey,
-        representation: {
-          kind: "aggregate_bucket",
-          memberCount: quantity,
-          eligibilityHomogeneity:
-            homogeneityEvidenceSha256 === null ? "unverified" : "verified_same",
-          payoutFunctionHomogeneity:
-            homogeneityEvidenceSha256 === null ? "unverified" : "verified_same",
-          homogeneityEvidenceSha256,
-        },
-        valueBasis: "stated_collectible_value",
-        statedValue:
-          lower !== null && upper !== null
-            ? { kind: "closed_range", lower, upper }
-            : lower === null && upper === null
-              ? { kind: "missing" }
-              : { kind: "open_ended_range" },
-        buyback: { kind: "defer_to_product_terms" },
-      };
-    }),
-  );
-  const unitBasis =
-    evInput?.unitBasis === "per_pack" &&
-      evInput.drawCount === 1 &&
-      facts.drawCount.state === "present" &&
-      facts.drawCount.value === 1
-      ? { kind: "per_pack" as const }
-      : { kind: "ambiguous" as const };
-  return {
+  return clutchpacksNormalizedBuybackEvDraftV1({
+    facts: content.providerFacts,
+    product: { productKey: product.productKey, productRevisionId: product.productRevisionId },
+    normalizedContentHash: observation.normalizedContentHash,
+    observationId: observation.semanticObservationId,
     observation: {
       providerKey: CLUTCHPACKS_CANONICAL_V3_PLATFORM_KEY,
-      // Freshness and the guarded collection proof belong to this exact
-      // delivery. A later delivery of the same semantic observation must not
-      // reuse the immutable calculation identity of the earlier collection.
       sourceRevisionId: `delivery:${observation.deliveryOccurrenceId}`,
       sourceManifestSha256: observation.normalizedContentHash,
       observedAt: observation.collectedAt,
       coherence: { kind: "guarded_collection", collectionGuardSha256: guard },
     },
-    product: {
-      productKey: product.productKey,
-      productRevisionId: product.productRevisionId,
-    },
-    packPrice:
-      facts.price.state === "present"
-        ? packScoutBuybackEvMoneyClaimFromNumberV1(
-            facts.price.value.amount,
-            facts.price.value.currency,
-            2,
-          )
-        : null,
-    unitBasis,
-    odds: {
-      poolKind: "finite",
-      currentPool:
-        evInput === null
-          ? null
-          : {
-              completeness: usableCounts ? "complete" : "partial",
-              snapshotAtomicity: usableCounts
-                ? "atomic"
-                : "assembled_without_proof",
-              countsStability: usableCounts
-                ? "stable"
-                : "changed_during_collection",
-              remainingUnits: evInput.buckets.flatMap((bucket, index) =>
-                bucket.quantity === null
-                  ? []
-                  : [{
-                      outcomeKey: packScoutBuybackEvOutcomeKeyFromLabelV1(
-                        bucket.bucketId,
-                        `bucket-${index + 1}`,
-                      ),
-                      units: bucket.quantity,
-                    }]
-              ),
-            },
-      published: null,
-    },
-    uniformBuybackRate: productUniformRate(content),
-    outcomes,
-  };
+  });
 }
 
 /**

@@ -40,7 +40,7 @@
   white-space: nowrap;
 }
 
-.statusChip[data-status="expired"],
+.statusChip[data-status="last_known"],
 .statusChip[data-status="unavailable"],
 .statusChip[data-status="sold_out_historical"] {
   color: var(--color-text);

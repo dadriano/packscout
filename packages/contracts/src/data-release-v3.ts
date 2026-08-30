@@ -20,16 +20,16 @@ import {
 import {
   packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
-  publicRepackDetailV3Schema,
-  publicRepackSummaryV3FromDetail,
-  publicRepackSummaryV3Schema,
-  type PublicRepackDetailV3,
-  type PublicRepackSummaryV3,
+  publicRepackDetailDisplayedV3Schema,
+  publicRepackSummaryDisplayedV3Schema,
+  type PublicRepackDetailDisplayedV3,
+  type PublicRepackSummaryDisplayedV3,
 } from "./data-release-v3-entities.ts";
 
 export * from "./data-release-v3-ev-estimates.ts";
 export * from "./data-release-v3-entities.ts";
 export * from "./data-release-v3-search.ts";
+export * from "./data-release-v3-last-known-ev.ts";
 
 /**
  * The active release identity carried by every data_release_v3 result
@@ -56,9 +56,9 @@ export const dataReleaseV3IdentitySchema = z
 
 export type DataReleaseV3Identity = z.infer<typeof dataReleaseV3IdentitySchema>;
 
-export type PublicRepackViewSummaryV3 = PublicRepackSummaryV3 &
+export type PublicRepackViewSummaryV3 = PublicRepackSummaryDisplayedV3 &
   Readonly<{ heat: PublicRepackHeat }>;
-export type PublicRepackViewDetailV3 = PublicRepackDetailV3 &
+export type PublicRepackViewDetailV3 = PublicRepackDetailDisplayedV3 &
   Readonly<{ heat: PublicRepackHeat }>;
 
 /**
@@ -66,18 +66,16 @@ export type PublicRepackViewDetailV3 = PublicRepackDetailV3 &
  * state may pair with any PackScout EV state.
  */
 export const publicRepackViewSummaryV3Schema: z.ZodType<PublicRepackViewSummaryV3> =
-  publicRepackSummaryV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+  publicRepackSummaryDisplayedV3Schema.safeExtend({ heat: publicRepackHeatSchema });
 export const publicRepackViewDetailV3Schema: z.ZodType<PublicRepackViewDetailV3> =
-  publicRepackDetailV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+  publicRepackDetailDisplayedV3Schema.safeExtend({ heat: publicRepackHeatSchema });
 
 export function publicRepackViewSummaryV3FromDetail(
   detail: PublicRepackViewDetailV3,
 ): PublicRepackViewSummaryV3 {
-  const { heat, ...baseDetail } = detail;
-  return publicRepackViewSummaryV3Schema.parse({
-    ...publicRepackSummaryV3FromDetail(baseDetail),
-    heat,
-  });
+  return publicRepackViewSummaryV3Schema.parse(Object.fromEntries(
+    Object.entries(detail).filter(([key]) => key !== "description" && key !== "actions"),
+  ));
 }
 
 function summaryMatchesDetailV3(
@@ -134,7 +132,7 @@ function validateSelectedRepackV3(
 /**
  * The dashboard opportunity projection. Opportunities carry the byte-
  * equivalent PackScout projection of their details, admit only purchasable
- * repacks with a current estimate, and rank by signed EV dollars.
+ * repacks with a last validated estimate, and rank by signed EV dollars.
  */
 export const publicDashboardBundleV3Schema = z
   .object({
@@ -147,13 +145,12 @@ export const publicDashboardBundleV3Schema = z
   .superRefine((bundle, context) => {
     validateSummaryDetailPairsV3(bundle.opportunities, bundle.details, context);
     bundle.opportunities.forEach((repack, index) => {
-      // Eligibility keeps its exact original intent under the wider enum:
-      // both axes must hold. The pack must be purchasable (`available`
-      // alone, so `unavailable` and `unknown` are excluded beside
-      // `sold_out`) and its PackScout estimate must be current.
+      // The listing must still be purchasable. A validated last-known
+      // estimate remains eligible even after its confidence reaches zero.
       if (
         !packAvailabilityIsPurchasableV3(repack.availability) ||
-        repack.evEstimates.packScout.status !== "current"
+        (repack.evEstimates.packScout.status !== "current" &&
+          repack.evEstimates.packScout.status !== "last_known")
       ) {
         context.addIssue({
           code: "custom",
@@ -164,8 +161,8 @@ export const publicDashboardBundleV3Schema = z
       const previous = bundle.opportunities[index - 1];
       if (
         previous !== undefined &&
-        previous.evEstimates.packScout.status === "current" &&
-        repack.evEstimates.packScout.status === "current" &&
+        previous.evEstimates.packScout.status !== "unavailable" &&
+        repack.evEstimates.packScout.status !== "unavailable" &&
         (previous.evEstimates.packScout.metrics.evDollars.minorUnits <
           repack.evEstimates.packScout.metrics.evDollars.minorUnits ||
           (previous.evEstimates.packScout.metrics.evDollars.minorUnits ===

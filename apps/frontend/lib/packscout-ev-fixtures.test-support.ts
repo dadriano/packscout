@@ -5,6 +5,8 @@ import {
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   packScoutPublicEvV3Schema,
+  presentLastKnownPackScoutEvV3,
+  type PackScoutDisplayedEvV3,
   unavailableRepackHeat,
   type PackScoutPublicEvV3,
   type PublicRepackChase,
@@ -84,8 +86,8 @@ export function buildV3CurrentEv(
 /**
  * A structurally valid current estimate whose public deadline is firmly in
  * the past relative to any real test clock — for proving that server
- * rendering keeps the served values and only the post-hydration deadline
- * store converts them.
+ * rendering keeps the served values and the post-hydration clock
+ * ages confidence without removing those values.
  */
 export function buildV3PastDeadlineCurrentEv(gross = 8_500): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
@@ -136,6 +138,26 @@ export function buildV3SoldOutEv(gross = 8_500): PackScoutPublicEvV3 {
     sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
     soldOutAt: FIXTURE_SOLD_OUT_AT,
     expiresAt: null,
+  });
+}
+
+
+/** A retained supported estimate evaluated at an explicit display clock. */
+export function buildV3LastKnownEv(
+  gross = 8_500,
+  options: Readonly<{
+    price?: number;
+    referenceTimeIso?: string;
+    latestUnavailableReason?: "BUYBACK_UNAVAILABLE" | "ODDS_UNAVAILABLE";
+    soldOut?: boolean;
+  }> = {},
+): PackScoutDisplayedEvV3 {
+  return presentLastKnownPackScoutEvV3({
+    estimate: options.soldOut ? buildV3SoldOutEv(gross)
+      : buildV3CurrentEv(gross, { price: options.price }),
+    calculationPriceUsdMinor: options.price ?? FIXTURE_PACK_PRICE_MINOR,
+    referenceTimeIso: options.referenceTimeIso ?? "2026-08-19T12:00:00.000Z",
+    ...(options.latestUnavailableReason ? { latestUnavailableReason: options.latestUnavailableReason } : {}),
   });
 }
 

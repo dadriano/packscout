@@ -355,11 +355,11 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "The supported odds must cover every outcome completely and come from one atomic observation. Partial probability coverage, a material conflict between odds sources, or a non-atomic observation makes the estimate Unavailable instead of a blended guess.",
+          text: "The supported odds must cover every outcome completely and come from one atomic observation. Partial probability coverage, a material conflict between odds sources, or a non-atomic observation blocks a fresh calculation instead of producing a blended guess. Any supported previous estimate stays visible.",
         },
         {
           type: "paragraph",
-          text: "Exact stated values are preferred. A closed platform range uses its midpoint and adds a confidence limitation; a missing, inverted, or open-ended range makes the estimate Unavailable.",
+          text: "Exact stated values are preferred. A closed platform range uses its midpoint and adds a confidence limitation; a missing, inverted, or open-ended range blocks a fresh calculation. Previous supported values remain visible when available.",
         },
       ],
     },
@@ -377,7 +377,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Evidence age uses the oldest essential source observation. Data at most 15 minutes old carries no penalty, older data is progressively penalized, and once the oldest essential evidence is over 60 minutes old an active estimate becomes Expired and leaves the EV rankings. A sold-out repack instead freezes its last valid estimate as an explicit historical state.",
+          text: "Evidence age uses the oldest essential source observation. Data at most 15 minutes old carries no age penalty. Confidence loses 10 percentage points after 15 minutes and 25 points after 30 minutes. Once evidence is over 60 minutes old, confidence continues to decay by 25 percentage points per additional hour, down to zero. The last supported EV values stay visible and eligible available packs remain in EV rankings regardless of age. Original calculation and source times never change just because the page refreshes. A sold-out repack retains its last valid estimate as an explicit historical state, with aged confidence, and stays out of opportunities.",
         },
         {
           type: "paragraph",
@@ -385,7 +385,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Missing essential evidence is never a low-confidence estimate: price, currency, probabilities, stated values, eligibility, buyback terms, draw count, provenance, and observation times must all be complete, or the estimate is Unavailable. An unavailable value is not zero.",
+          text: "A fresh calculation requires complete price, currency, probabilities, stated values, eligibility, buyback terms, draw count, provenance, and observation times. When that evidence is missing, a previous supported estimate remains visible with zero confidence and the reason a fresh calculation is unavailable. If the listing price changed, the old EV keeps its original calculation-time price rather than being recalculated against today’s price. Only a pack with no supported prior value shows Unavailable. An unavailable value is not zero.",
         },
       ],
       callout: {
@@ -395,6 +395,8 @@ export const EXPECTED_VALUE_GUIDE = {
           PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
           PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_15_through_30_minutes,
           PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_30_through_60_minutes,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_60_minutes,
+          PUBLIC_CONFIDENCE_LIMITATION_COPY.latest_calculation_unavailable,
         ],
       },
     },

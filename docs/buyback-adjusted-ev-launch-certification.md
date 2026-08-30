@@ -24,7 +24,7 @@ The frontend presentation boundary is loaded through a runtime-resolved file URL
 
 ## Product-experience evidence manifest
 
-`PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1` maps every launch claim — metric states, simulation coverage, rankings, KPIs, sorts, filters, pagination, desired collectibles, saves, Heat unavailability, selected details, outbound actions, glossary and Learn content, responsible-play contact, deadline expiry, degraded anonymous browsing, and operational recovery — to the existing test files and exact test names that prove it. `buyback-adjusted-ev-launch-certification.test.ts` fails whenever a referenced file disappears or a named test is renamed, so the manifest cannot rot silently, and the generator re-verifies it at composition time.
+`PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1` maps every launch claim — metric states, simulation coverage, rankings, KPIs, sorts, filters, pagination, desired collectibles, saves, Heat unavailability, selected details, outbound actions, glossary and Learn content, responsible-play contact, last-known EV retention and confidence decay, degraded anonymous browsing, and operational recovery — to the existing test files and exact test names that prove it. `buyback-adjusted-ev-launch-certification.test.ts` fails whenever a referenced file disappears or a named test is renamed, so the manifest cannot rot silently, and the generator re-verifies it at composition time.
 
 ## Certification criteria
 

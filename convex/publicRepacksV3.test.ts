@@ -316,7 +316,8 @@ describe("data_release_v3 public reads", () => {
       ({ publicRepackId }) => publicRepackId === V3_REPACK_ID_C,
     )!;
     expect(soldOut.availability).toBe("sold_out");
-    expect(soldOut.evEstimates.packScout.status).toBe("sold_out_historical");
+    expect(soldOut.evEstimates.packScout.status).toBe("last_known");
+    expect(soldOut.evEstimates.packScout.historicalSoldOutAt).toBeDefined();
     expect(soldOut.evEstimates.packScout.metrics).toBeDefined();
     expect(soldOut.actions?.repackLink).toBeUndefined();
     const unavailable = data.details.find(
@@ -453,7 +454,7 @@ describe("data_release_v3 public reads", () => {
     );
   });
 
-  test("a current estimate past its deadline fails closed at read time without any new transition", async () => {
+  test("last valid values remain after the source deadline while confidence decays without new publication", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
     const result = (await t.query(api.publicRepacksV3.getDashboardBundleV3, {
@@ -467,8 +468,8 @@ describe("data_release_v3 public reads", () => {
         medianPackScoutEvPercent: { status: string };
       };
     };
-    expect(data.opportunities).toEqual([]);
-    expect(data.kpis.medianPackScoutEvPercent.status).toBe("unavailable");
+    expect(data.opportunities).toHaveLength(2);
+    expect(data.kpis.medianPackScoutEvPercent.status).toBe("available");
 
     const detail = (await t.query(api.publicRepacksV3.getPublicRepackV3, {
       publicRepackId: V3_REPACK_ID_A,
@@ -478,11 +479,15 @@ describe("data_release_v3 public reads", () => {
     expect(detail.ok).toBe(true);
     const packScout = (detail.data as {
       evEstimates: {
-        packScout: { status: string; reason?: string; dataAsOf?: unknown };
+        packScout: { status: string; reason?: string; dataAsOf?: unknown; calculatedAt: string;
+          confidence: { scoreBasisPoints: number }; expiresAt: string | null };
       };
     }).evEstimates.packScout;
-    expect(packScout.status).toBe("unavailable");
-    expect(packScout.reason).toBe("SOURCE_DATA_STALE");
+    expect(packScout.status).toBe("last_known");
+    expect(packScout.reason).toBeUndefined();
+    expect(packScout.confidence.scoreBasisPoints).toBe(7_500);
+    expect(packScout.expiresAt).toBeNull();
+    expect(packScout.calculatedAt).toBe(new Date(NOW - 5 * 60_000).toISOString());
     expect(packScout.dataAsOf).toEqual({
       state: "known",
       observedAt: new Date(NOW - 5 * 60_000).toISOString(),
@@ -496,7 +501,7 @@ describe("data_release_v3 public reads", () => {
     expect(
       (atDeadline.data as { evEstimates: { packScout: { status: string } } })
         .evEstimates.packScout.status,
-    ).toBe("current");
+    ).toBe("last_known");
   });
 
   test("desired-collectible matching binds rows to chases and search stays bounded", async () => {

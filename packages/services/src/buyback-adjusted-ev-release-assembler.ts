@@ -13,7 +13,6 @@ import {
   type PackScoutPublicEvV3,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
-import type { PackScoutBuybackEvPublicationEligibilityV1 } from "./buyback-adjusted-ev-recomputation-contracts.ts";
 import {
   DATA_RELEASE_V3_BATCH_HASH_DOMAIN,
   DATA_RELEASE_V3_BATCH_CHAIN_HASH_DOMAIN,
@@ -102,7 +101,7 @@ function requireTimestamp(value: string, productKey: string | null): number {
  */
 function composePackScoutPublicEv(
   product: DataReleaseV3CanonicalProduct,
-  eligibility: PackScoutBuybackEvPublicationEligibilityV1 | null,
+  eligibility: Awaited<ReturnType<DataReleaseV3EligibilityPort["getPublicationEligibleRevision"]>>,
   readAt: string,
 ): PackScoutPublicEvV3 {
   const versions = {
@@ -111,9 +110,11 @@ function composePackScoutPublicEv(
   } as const;
   if (
     eligibility !== null &&
-    (eligibility.revision.methodVersion !== versions.methodVersion ||
-      eligibility.revision.confidencePolicyVersion !==
-        versions.confidencePolicyVersion)
+    (eligibility.projection.methodVersion !== versions.methodVersion ||
+      eligibility.projection.confidencePolicyVersion !== versions.confidencePolicyVersion ||
+      ("revision" in eligibility &&
+        (eligibility.revision.methodVersion !== versions.methodVersion ||
+          eligibility.revision.confidencePolicyVersion !== versions.confidencePolicyVersion)))
   ) {
     block("MIXED_CALCULATION_VERSIONS", product.productKey);
   }
@@ -129,6 +130,10 @@ function composePackScoutPublicEv(
     };
   }
   const projection = eligibility.projection;
+  if (
+    "calculationSource" in eligibility &&
+    (eligibility.evaluatedAt !== readAt || projection.calculatedAt !== readAt)
+  ) block("CANONICAL_SNAPSHOT_INVALID", product.productKey);
   if (projection.status === "unavailable") {
     return {
       status: "unavailable",

@@ -39,6 +39,8 @@ import {
   refuseProductionDataRelease,
   type ProductionDataReleaseErrorCode,
 } from "./productionDataReleaseErrors";
+import { stageReleaseEvFacts, completeReleaseEvFacts } from "./dataReleaseV3EvFacts";
+import { activateRetainedEv, rollbackRetainedEv } from "./dataReleaseV3RetainedEv";
 
 /**
  * data_release_v3 publication lifecycle (task buyback-adjusted-ev/008).
@@ -547,6 +549,7 @@ export const start = internalMutation({
     await ctx.db.insert("dataReleaseV3Releases", {
       publicReleaseId: request.publicReleaseId,
       releaseFingerprint: request.releaseFingerprint,
+      evFactsRequired: true,
       lifecycle: "staging",
       methodVersion: request.manifest.methodVersion,
       confidencePolicyVersion: request.manifest.confidencePolicyVersion,
@@ -811,6 +814,7 @@ async function insertBatchRecords(
         detail: record,
       });
     }
+    await stageReleaseEvFacts(ctx, release, request.records);
     const contentHash = await sha256CanonicalJson(
       DATA_RELEASE_V3_SEARCH_ROW_SET_HASH_DOMAIN,
       rows,
@@ -1086,6 +1090,7 @@ export const finalize = internalMutation({
     if (Date.parse(release.dataAsOf) > Date.parse(serverTime)) {
       refuse("PUBLICATION_RECONCILIATION_FAILED");
     }
+    await completeReleaseEvFacts(ctx, release);
     await ctx.db.patch("dataReleaseV3Releases", release._id, {
       lifecycle: "complete",
       completedAt: serverTime,
@@ -1164,6 +1169,22 @@ export const activate = internalMutation({
     }
     const serverTime = new Date().toISOString();
     const pointer = releasePointer(release);
+    const previousRelease = state?.activeReleaseId
+      ? await ctx.db.get("dataReleaseV3Releases", state.activeReleaseId) : null;
+    if (state?.activeReleaseId && previousRelease === null) refuse("PUBLICATION_STATE_CONFLICT");
+    const retainedEv = await activateRetainedEv(ctx, {
+      previousRelease,
+      nextRelease: release,
+      seedPrevious: state?.retainedEvTransitionId === undefined,
+      operationId: request.operationId,
+    });
+    // Seeding legacy history is also a one-way reader cutover. Rollback must
+    // not make this predecessor eligible for snapshot reads again.
+    if (state?.retainedEvTransitionId === undefined && previousRelease !== null &&
+        previousRelease.publicEvPolicyVersion === PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 &&
+        previousRelease.evFactsRequired === undefined) {
+      await ctx.db.patch("dataReleaseV3Releases", previousRelease._id, { evFactsRequired: true });
+    }
     const core = {
       generation: (state?.generation ?? 0) + 1,
       activeReleaseId: release._id,
@@ -1171,6 +1192,7 @@ export const activate = internalMutation({
       activeRelease: pointer,
       previousRelease: state?.activeRelease ?? null,
       terminalOperationId: request.operationId,
+      ...retainedEv,
       updatedAt: serverTime,
     };
     if (state === null) {
@@ -1248,6 +1270,7 @@ export const rollback = internalMutation({
       refuse("PUBLICATION_ROLLBACK_UNSAFE");
     }
     const serverTime = new Date().toISOString();
+    const retainedEv = await rollbackRetainedEv(ctx, state);
     const core = {
       generation: state.generation + 1,
       activeReleaseId: state.previousReleaseId,
@@ -1255,6 +1278,7 @@ export const rollback = internalMutation({
       activeRelease: state.previousRelease,
       previousRelease: state.activeRelease,
       terminalOperationId: request.operationId,
+      ...retainedEv,
       updatedAt: serverTime,
     };
     await ctx.db.patch("activeDataReleaseV3State", state._id, core);

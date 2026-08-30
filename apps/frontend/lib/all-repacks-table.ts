@@ -66,7 +66,7 @@ export function catalogHeaderAriaSort(
  * `unavailable`, `unknown`, or `sold_out` stays discoverable, keeps its promo,
  * and only loses the way to buy it.
  */
-export function publicRowActions(repack: PublicRepackSummaryV3): Readonly<{
+export function publicRowActions(repack: Pick<PublicRepackSummaryV3, "availability" | "actionAvailability">): Readonly<{
   promo: boolean;
   repackLink: boolean;
 }> {

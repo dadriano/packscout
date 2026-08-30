@@ -9,20 +9,20 @@ import {
   publicDashboardBundleV3Schema,
   publicReadError,
   publicRepackListPageV3Schema,
+  publicRepackDetailV3Schema,
   publicRepackViewDetailV3Schema,
+  unavailableRepackHeat,
+  type PackScoutDisplayedEvV3,
   publicRepackViewSummaryV3FromDetail,
   searchPublicCollectiblesInputSchema,
-  unavailableRepackHeat,
   type DashboardKpis,
   type DataReleaseV3Identity,
   type ListPublicRepacksInput,
   type PublicCollectible,
   type PublicReadError,
   type PublicRepackChase,
-  type PublicRepackDetailV3,
   type PublicRepackFilters,
   type PublicRepackViewDetailV3,
-  type PackScoutPublicEvV3,
   type PublicPackAvailability,
 } from "@packscout/contracts";
 import { v } from "convex/values";
@@ -41,6 +41,10 @@ import {
   dataReleaseV3SearchRowMatchesDetail,
   type DataReleaseV3SearchRow,
 } from "./dataReleaseV3Search";
+import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
+import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
+import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
   createQueryFingerprint,
   decodeRepackCursor,
@@ -53,11 +57,10 @@ import {
  *
  * Every read resolves exactly one atomically activated release, re-proves its
  * internal consistency, and fails closed with a bounded error instead of ever
- * serving a partial, mixed, or tampered projection. Deadline safety is
- * server-clock based: a stored current estimate whose 60-minute deadline has
- * passed the caller-supplied request clock is presented as unavailable with
- * the stable `SOURCE_DATA_STALE` reason and excluded from every ranking, KPI,
- * median, and summary — even when no expiry transition has materialized yet.
+ * serving a partial, mixed, or tampered projection. Valid published values
+ * remain visible as last-known EV, with confidence evaluated at the request
+ * clock. The activation-owned retained projection also survives later
+ * unavailable releases; all rankings and details use that same projection.
  *
  * Heat republication against v3 releases belongs to task 009; until a heat
  * frame targets a v3 release, every view carries the explicit unavailable
@@ -104,6 +107,10 @@ export type ActiveDataReleaseV3 = Readonly<{
   releaseDocument: Doc<"dataReleaseV3Releases">;
   rows: readonly DataReleaseV3SearchRow[];
   rowByPublicId: ReadonlyMap<string, DataReleaseV3SearchRow>;
+  storedRowByPublicId: ReadonlyMap<string, DataReleaseV3SearchRow>;
+  evByPublicId: ReadonlyMap<string, PackScoutDisplayedEvV3>;
+  factsByPublicId: ReadonlyMap<string, DataReleaseV3EvFacts>;
+  legacyEvSnapshot: boolean;
   categoryByPublicId: ReadonlyMap<
     string,
     Readonly<{ parentPublicCategoryId: string | null; depth: number }>
@@ -112,6 +119,7 @@ export type ActiveDataReleaseV3 = Readonly<{
 
 async function loadActiveDataReleaseV3(
   ctx: QueryCtx,
+  currentTime?: number,
 ): Promise<ActiveDataReleaseV3 | null> {
   try {
     const state = await loadActiveDataReleaseV3State(ctx);
@@ -197,11 +205,21 @@ async function loadActiveDataReleaseV3(
         },
       ]),
     );
+    const legacyEvSnapshot = await usesLegacyEvSnapshot(ctx, release, state);
+    if (currentTime !== undefined && !legacyEvSnapshot) await loadRetainedEvPointer(ctx, state);
+    const displayed = currentTime === undefined || legacyEvSnapshot ? null
+      : await loadDataReleaseV3DisplayedRepacks(ctx, release, rows, currentTime);
+    if (currentTime !== undefined && !legacyEvSnapshot && displayed === null) return null;
+    const publicRows = displayed?.rows ?? rows;
     return {
       identity: identityParse.data,
       releaseDocument: release,
-      rows,
-      rowByPublicId: new Map(rows.map((row) => [row.publicRepackId, row])),
+      rows: publicRows,
+      rowByPublicId: new Map(publicRows.map((row) => [row.publicRepackId, row])),
+      storedRowByPublicId: new Map(rows.map((row) => [row.publicRepackId, row])),
+      evByPublicId: displayed?.evByPublicId ?? new Map(),
+      factsByPublicId: displayed?.factsByPublicId ?? new Map(),
+      legacyEvSnapshot,
       categoryByPublicId,
     };
   } catch {
@@ -209,99 +227,29 @@ async function loadActiveDataReleaseV3(
   }
 }
 
-/**
- * Server-clock deadline safety: a stored current estimate whose exact expiry
- * deadline has passed converts to the deterministic stale public state. The
- * conversion is applied identically to rows and details so no projection can
- * disagree with another.
- */
-function presentPackScoutEvV3(
-  estimate: PackScoutPublicEvV3,
-  currentTime: number,
-): PackScoutPublicEvV3 {
-  if (
-    estimate.status !== "current" ||
-    currentTime <= Date.parse(estimate.expiresAt)
-  ) {
-    return estimate;
-  }
-  return {
-    status: "unavailable",
-    methodVersion: estimate.methodVersion,
-    confidencePolicyVersion: estimate.confidencePolicyVersion,
-    metrics: null,
-    confidence: null,
-    calculatedAt: new Date(currentTime).toISOString(),
-    dataAsOf: estimate.dataAsOf,
-    reason: "SOURCE_DATA_STALE",
-  };
-}
-
-function presentSearchRow(
-  row: DataReleaseV3SearchRow,
-  currentTime: number,
-): DataReleaseV3SearchRow {
-  if (
-    row.packScoutExpiresAtMillis === null ||
-    currentTime <= row.packScoutExpiresAtMillis
-  ) {
-    return row;
-  }
-  return {
-    ...row,
-    packScoutEvDollarsMinor: null,
-    packScoutEvDollarsNullRank: 1,
-    packScoutGrossEvMinor: null,
-    packScoutGrossEvNullRank: 1,
-    packScoutEvPercentBasisPoints: null,
-    packScoutEvPercentNullRank: 1,
-    packScoutConfidenceBasisPoints: null,
-    packScoutConfidenceNullRank: 1,
-    packScoutConfidenceBand: null,
-    packScoutExpiresAtMillis: null,
-  };
-}
-
-function presentDetail(
-  detail: PublicRepackDetailV3,
-  currentTime: number,
-): PublicRepackDetailV3 {
-  const packScout = presentPackScoutEvV3(
-    detail.evEstimates.packScout,
-    currentTime,
-  );
-  return packScout === detail.evEstimates.packScout
-    ? detail
-    : { ...detail, evEstimates: { ...detail.evEstimates, packScout } };
-}
-
 async function hydrateRepackViews(
   ctx: QueryCtx,
   release: ActiveDataReleaseV3,
   rows: readonly DataReleaseV3SearchRow[],
-  currentTime: number,
 ): Promise<PublicRepackViewDetailV3[] | null> {
   const views: PublicRepackViewDetailV3[] = [];
   for (const row of rows) {
-    const storedRow = release.rowByPublicId.get(row.publicRepackId);
-    if (storedRow === undefined) return null;
-    const stored = await ctx.db
-      .query("dataReleaseV3Repacks")
-      .withIndex("by_release_id_and_public_repack_id", (index) =>
-        index
-          .eq("releaseId", release.releaseDocument._id)
-          .eq("publicRepackId", row.publicRepackId),
-      )
-      .unique();
-    if (stored === null) return null;
-    const detail = stored.detail as PublicRepackDetailV3;
-    // The staged search projection must byte-match the deterministic
-    // derivation of its staged detail before either is presented.
-    if (!dataReleaseV3SearchRowMatchesDetail(storedRow, detail)) return null;
-    const view = publicRepackViewDetailV3Schema.safeParse({
-      ...presentDetail(detail, currentTime),
-      heat: unavailableRepackHeat(),
-    });
+    const stored = await ctx.db.query("dataReleaseV3Repacks")
+      .withIndex("by_release_id_and_public_repack_id", (index) => index.eq("releaseId", release.releaseDocument._id)
+        .eq("publicRepackId", row.publicRepackId)).unique();
+    const rawRow = release.storedRowByPublicId.get(row.publicRepackId);
+    const displayedEstimate = release.evByPublicId.get(row.publicRepackId);
+    const facts = release.factsByPublicId.get(row.publicRepackId);
+    if (stored === null || rawRow === undefined) return null;
+    const parsed = publicRepackDetailV3Schema.safeParse(stored.detail);
+    if (!parsed.success || !dataReleaseV3SearchRowMatchesDetail(rawRow, parsed.data)) return null;
+    if (!release.legacyEvSnapshot && (displayedEstimate === undefined || facts === undefined ||
+        canonicalJson(evFactsFromDetail(parsed.data)) !== canonicalJson(facts))) return null;
+    // During the explicit one-time cutover only, keep the published snapshot
+    // unchanged. Never expire its values or switch merely because facts seal.
+    const estimate = release.legacyEvSnapshot ? parsed.data.evEstimates.packScout : displayedEstimate!;
+    const view = publicRepackViewDetailV3Schema.safeParse({ ...parsed.data,
+      evEstimates: { ...parsed.data.evEstimates, packScout: estimate }, heat: unavailableRepackHeat() });
     if (!view.success) return null;
     views.push(view.data);
   }
@@ -791,9 +739,9 @@ export const getDashboardBundleV3 = query({
     } catch {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
-    const allRows = active.rows.map((row) => presentSearchRow(row, currentTime));
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -801,7 +749,7 @@ export const getDashboardBundleV3 = query({
       rowMatchesFilters(row, request.filters),
     );
     // Opportunities are actionable buys: only available repacks with a
-    // current, unexpired PackScout estimate rank, by signed EV dollars
+    // last-known PackScout estimate rank, by signed EV dollars
     // descending. Sold-out, unavailable, and unknown packs stay visible in the
     // catalog and never rank here.
     const opportunityRows = [...matchingRows]
@@ -818,12 +766,7 @@ export const getDashboardBundleV3 = query({
         }),
       )
       .slice(0, 6);
-    const details = await hydrateRepackViews(
-      ctx,
-      active,
-      opportunityRows,
-      currentTime,
-    );
+    const details = await hydrateRepackViews(ctx, active, opportunityRows);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -950,9 +893,9 @@ export const listPublicRepacksV3 = query({
     if (!sortIsSupported(request.sort)) {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
-    const allRows = active.rows.map((row) => presentSearchRow(row, currentTime));
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -1011,7 +954,7 @@ export const listPublicRepacksV3 = query({
       pagination.offset,
       pagination.offset + request.pageSize,
     );
-    const details = await hydrateRepackViews(ctx, active, pageRows, currentTime);
+    const details = await hydrateRepackViews(ctx, active, pageRows);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -1097,14 +1040,14 @@ export const getPublicRepackV3 = query({
     ) {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, args.currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     if (args.publicReleaseId !== active.identity.publicReleaseId) {
       return publicReadError("REPACK_NOT_FOUND");
     }
     const row = active.rowByPublicId.get(args.publicRepackId);
     if (row === undefined) return publicReadError("REPACK_NOT_FOUND");
-    const views = await hydrateRepackViews(ctx, active, [row], args.currentTime);
+    const views = await hydrateRepackViews(ctx, active, [row]);
     if (views === null || views[0] === undefined) {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
@@ -1195,7 +1138,7 @@ export const findRepacksByDesiredCollectibleV3 = query({
       directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const lookup = await loadReleaseCollectible(
       ctx,
@@ -1208,7 +1151,7 @@ export const findRepacksByDesiredCollectibleV3 = query({
     if (lookup.status === "invalid") {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
-    const allRows = active.rows.map((row) => presentSearchRow(row, currentTime));
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.data.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -1253,7 +1196,7 @@ export const findRepacksByDesiredCollectibleV3 = query({
         return compareText(left.publicRepackId, right.publicRepackId);
       });
     const visibleRows = matchingRows.slice(0, request.data.limit);
-    const details = await hydrateRepackViews(ctx, active, visibleRows, currentTime);
+    const details = await hydrateRepackViews(ctx, active, visibleRows);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const result = desiredCollectibleRepackResultsV3Schema.safeParse({
       release: active.identity,

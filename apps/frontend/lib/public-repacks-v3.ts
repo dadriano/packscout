@@ -36,7 +36,7 @@ import {
  * Every public read is validated against the exact v3 contracts before any
  * component sees it. Parsing the contract schemas is itself the arithmetic
  * validation: publicRepackSummaryV3Schema re-proves the four public metrics
- * against the comparable Pack Price with the versioned calculation invariant
+ * against their calculation-time Pack Price with the versioned calculation invariant
  * in every environment, so no browser code ever recomputes a metric to trust
  * it. Any malformed, mixed, protected-field, or inconsistent payload
  * collapses to the bounded RELEASE_UNAVAILABLE error.

@@ -281,6 +281,29 @@ test("mixed calculation versions block the release", async () => {
   });
 });
 
+test("promotion eligibility must be calculated and evaluated at the exact assembly clock", async () => {
+  const snapshot = buildReleaseSnapshot([buildReleaseProduct({ publicRepackId: REPACK_A })]);
+  const { projection } = buildUnavailableEligibility("BUYBACK_UNAVAILABLE");
+  const mismatchedAt = new Date(Date.parse(RELEASE_READ_AT) - 1).toISOString();
+  for (const clock of ["evaluatedAt", "calculatedAt"] as const) {
+    const assembler = new DataReleaseV3ReleaseAssembler(catalogPort(snapshot), {
+      async getPublicationEligibleRevision() {
+        return {
+          calculationSource: "promotion",
+          projection: { ...projection, calculatedAt: clock === "calculatedAt" ? mismatchedAt : RELEASE_READ_AT },
+          evaluatedAt: clock === "evaluatedAt" ? mismatchedAt : RELEASE_READ_AT,
+          readState: { state: "publishable", availability: "UNAVAILABLE" },
+        };
+      },
+    });
+    assert.deepEqual(await assembler.assemble({ readAt: RELEASE_READ_AT }), {
+      classification: "blocked",
+      reason: "CANONICAL_SNAPSHOT_INVALID",
+      blockedProductKey: snapshot.products[0]!.productKey,
+    });
+  }
+});
+
 test("an undocumented buyback can never carry a current estimate", async () => {
   const snapshot = buildReleaseSnapshot([
     buildReleaseProduct({
