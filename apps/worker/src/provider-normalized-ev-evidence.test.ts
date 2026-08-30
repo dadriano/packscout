@@ -207,3 +207,64 @@ test("stored EV evidence rejects raw extensions, conflicting namespaces and inva
     assert.equal(providerPackEvEvidenceV1Schema.safeParse(changed).success, false);
   }
 });
+
+function membershipSourceRecord(): DataforrestEventRecordV1 {
+  const record = sourceRecord();
+  record.data.price_bucket_odds = [{
+    bucket_id: "22222222-2222-4222-8222-222222222222", name: "Chases",
+    drawable_count: 1, min_price: "$100", max_price: "$500", has_more: false,
+    preview_cards: [{ id: "33333333-3333-4333-8333-333333333333", title: "Current preview",
+      front_image_url: "https://d18ez2bunk7yz0.cloudfront.net/cards/example.png" }],
+    pool_cards: [{ id: "44444444-4444-4444-8444-444444444444" }],
+  }];
+  record.data.series_hits = [{ id: "55555555-5555-4555-8555-555555555555", current_price: "65000" }];
+  return record;
+}
+
+test("current source preview becomes a bounded snapshot without item odds or series-wide hits", () => {
+  const record = membershipSourceRecord();
+  const result = translate([record]);
+  const snapshotIndex = result.records.findIndex(row => "entityType" in row && row.entityType === "pack_content_snapshot");
+  const packIndex = result.records.findIndex(row => "entityType" in row && row.entityType === "pack");
+  assert.ok(snapshotIndex > packIndex);
+  const snapshot = result.records[snapshotIndex]!.candidate;
+  assert.equal(snapshot.packKey, "pack:ascent-source-pack");
+  assert.equal(snapshot.sourceKey, "clutchpacks:price_bucket_odds:v1");
+  assert.equal(snapshot.effectiveAt, record.occurred_at);
+  assert.equal(snapshot.effectiveAtBasis, "provider_updated_at");
+  assert.equal(snapshot.collectedAt, record.collected_at);
+  assert.equal(snapshot.completeness, "complete");
+  assert.equal(result.counts.packContents, 1);
+  assert.deepEqual(snapshot.items, [{
+    collectibleKey: "card:33333333-3333-4333-8333-333333333333", collectibleInstanceKey: null,
+    status: "present", totalQuantity: null, availableQuantity: null, contentRole: "featured_chase",
+    probability: null, statedValueAmount: null, statedValueCurrency: null,
+    evidenceKinds: ["vendor_featured_chase"], matchConfidenceBasisPoints: 10000, displayOrder: 0,
+  }]);
+  assert.equal(JSON.stringify(snapshot).includes("65000"), false);
+  assert.equal(evidence(result.records[packIndex]!.candidate).effectiveAt, record.occurred_at);
+});
+
+test("missing or malformed membership cannot emit an empty replacement or discard EV evidence", () => {
+  for (const native of [{}, { price_bucket_odds: [{ broken: true }] }]) {
+    const record = sourceRecord();
+    delete record.data.price_bucket_odds;
+    Object.assign(record.data, native);
+    const result = translate([record]);
+    assert.equal(result.counts.packs, 1);
+    assert.equal(result.counts.packContents, 0);
+    assert.equal(result.records.some(row => "entityType" in row && row.entityType === "pack_content_snapshot"), false);
+    const pack = result.records.find(row => "entityType" in row && row.entityType === "pack");
+    assert.ok(pack);
+    assert.equal(evidence(pack.candidate).price.state, "present");
+  }
+});
+
+test("membership with a different native pack identity cannot attach to the source envelope pack", () => {
+  const record = membershipSourceRecord();
+  record.data.collection_id = "66666666-6666-4666-8666-666666666666";
+  const result = translate([record]);
+  assert.equal(result.counts.packs, 0);
+  assert.equal(result.counts.packContents, 0);
+  assert.equal(result.records.some(row => "entityType" in row && row.entityType === "pack_content_snapshot"), false);
+});

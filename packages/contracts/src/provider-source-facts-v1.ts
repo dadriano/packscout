@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizedPackMembershipV1Schema } from "./provider-pack-membership-v1.ts";
 
 const boundedTextSchema = z.string().trim().min(1).max(10_000);
 const finiteNumberSchema = z.custom<number>(
@@ -95,6 +96,9 @@ export const normalizedPackProviderFactsSchema = z
     buybackPercent: normalizedNumberFactSchema,
     drawCount: normalizedNumberFactSchema,
     evInput: normalizedEvInputFactSchema,
+    // Versioned optional capability. Absent historical observations carry no
+    // membership instruction and cannot clear a previously accepted snapshot.
+    packMembership: normalizedFactSchema(normalizedPackMembershipV1Schema).optional(),
     authoritativeAvailability: normalizedAuthoritativeAvailabilityFactSchema,
   })
   .strict();

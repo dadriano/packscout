@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
+const { verifyLocalClutchpacksContentReadback } = await tsImport("./distributed-clutchpacks-public-readback.mts", import.meta.url);
+
+test("content readback detects missing chases and altered source clocks or counts on either public surface", () => {
+  const expectedRows = [{ publicRepackId: "pack-one", topChase: { publicCollectibleId: "card-one", observedAt: "2026-08-30T12:00:00.000Z" },
+    contentSummary: { knownCollectibleCount: 1, chaseCount: 1 }, collectibleTypes: ["card"] }];
+  verifyLocalClutchpacksContentReadback({ expectedRows, manifestRows: expectedRows, v3Rows: expectedRows });
+  for (const field of ["manifestRows", "v3Rows"]) for (const mutate of [
+    (row) => { row.topChase = null; }, (row) => { row.topChase.observedAt = "2026-08-30T13:00:00.000Z"; },
+    (row) => { row.contentSummary.knownCollectibleCount = 0; },
+  ]) {
+    const actual = structuredClone(expectedRows); mutate(actual[0]);
+    assert.throws(() => verifyLocalClutchpacksContentReadback({ expectedRows, manifestRows: expectedRows, v3Rows: expectedRows, [field]: actual }),
+      (error) => error.code === "LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
+  }
+});
 
 const { verifyLocalClutchpacksPublicReadback } = await tsImport(
   "./distributed-clutchpacks-public-readback.mts", import.meta.url,

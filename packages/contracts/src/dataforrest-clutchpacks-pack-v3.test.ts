@@ -84,6 +84,7 @@ test("ClutchPacks pack v3 maps only exact evidenced facts", () => {
     },
     buybackPercent: { state: "present", value: 90 },
     drawCount: { state: "present", value: 1 },
+    packMembership: { state: "malformed" },
     evInput: {
       state: "present",
       value: {

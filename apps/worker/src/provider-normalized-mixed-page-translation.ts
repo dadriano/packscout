@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PROVIDER_PACK_EV_EVIDENCE_SCHEMA_VERSION,
   providerPackEvEvidenceV1Schema,
+  packMembershipSnapshotV1,
   type ProviderPackEvEvidenceV1,
   type LaunchRecordIdScopeKey,
   type NormalizedProviderObservation,
@@ -130,6 +131,7 @@ export function translateProviderNormalizedObservations(input: Readonly<{
     identityNamespaceKey: input.integration.mapper.identityNamespaceKey,
   });
   const packs: CanonicalObservationPackCandidate[] = [];
+  const membershipRecords: ProviderMixedPageRecordDraft[] = [];
   const packEvidence = new Map<
     CanonicalObservationPackCandidate,
     ProviderPackEvEvidenceV1
@@ -192,6 +194,18 @@ export function translateProviderNormalizedObservations(input: Readonly<{
               drawCount: observation.providerFacts.drawCount,
               evInput: observation.providerFacts.evInput,
             }));
+          if (observation.providerFacts.packMembership?.state === "present") {
+            membershipRecords.push({
+              kind: "catalog", entityType: "pack_content_snapshot", operation: "upsert",
+              candidate: packMembershipSnapshotV1({
+                providerId: input.providerId, providerRecordId: candidate.identity.providerRecordId,
+                sourceAdapterVersion: input.integration.manifest.adapterVersion,
+                mapperVersion: input.integration.mapper.mapperVersion,
+                effectiveAt: observation.effectiveAt, effectiveAtBasis: "provider_updated_at",
+                collectedAt: observation.collectedAt, membership: observation.providerFacts.packMembership.value,
+              }),
+            });
+          }
           packs.push(candidate);
           break;
         case "catalog_asset":
@@ -240,6 +254,7 @@ export function translateProviderNormalizedObservations(input: Readonly<{
         evInputEvidence: packEvidence.get(candidate)!,
       })),
       ...cards.map(collectibleDraft),
+      ...membershipRecords,
       ...pullRecords,
       ...marketEvents,
       ...quarantines,
@@ -254,7 +269,7 @@ export function translateProviderNormalizedObservations(input: Readonly<{
         ({ candidate }) => candidate.packKey === null,
       ).length,
       marketEvents: marketEvents.length,
-      packContents: 0,
+      packContents: membershipRecords.length,
     }),
   });
 }

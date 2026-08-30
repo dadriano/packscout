@@ -7,6 +7,7 @@ export type ProviderMixedCatalogEntityType =
   | "collectible_name_alias"
   | "collectible_instance"
   | "pack_content"
+  | "pack_content_snapshot"
   | "provider_account";
 
 const UPSERT_FIELDS: Readonly<Record<ProviderMixedCatalogEntityType, readonly string[]>> = {
@@ -42,6 +43,10 @@ const UPSERT_FIELDS: Readonly<Record<ProviderMixedCatalogEntityType, readonly st
     "availableQuantity", "contentRole", "probability", "statedValueAmount",
     "statedValueCurrency", "evidenceKinds", "matchConfidenceBasisPoints", "observedAt",
     "displayOrder", "expectedRowVersion",
+  ],
+  pack_content_snapshot: [
+    "schemaVersion", "providerId", "packKey", "sourceKey", "sourceAdapterVersion",
+    "mapperVersion", "effectiveAt", "effectiveAtBasis", "collectedAt", "completeness", "items",
   ],
   provider_account: ["accountKey", "displayName", "attributes", "expectedRowVersion"],
 };
@@ -124,6 +129,9 @@ export function assertRecordShape(value: CanonicalJsonObject, index: number): vo
       path,
     );
     const entityType = requireEntityType(value.entityType);
+    if (entityType === "pack_content_snapshot" && value.operation !== "upsert") {
+      throw new TypeError(`${path}.operation cannot retire an immutable membership snapshot.`);
+    }
     if (value.operation !== "upsert" && value.operation !== "retire") {
       throw new TypeError(`${path}.operation is unsupported.`);
     }

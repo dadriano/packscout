@@ -3,6 +3,16 @@ import {
   type NormalizedEvBucket,
   type NormalizedPackProviderFacts,
 } from "./provider-source-facts-v1.ts";
+import { parseClutchpacksPackMembershipV1 } from "./clutchpacks-pack-membership-v1.ts";
+
+function packMembershipFact(nativeData: NativeJsonObject): NormalizedPackProviderFacts["packMembership"] {
+  try {
+    const parsed = parseClutchpacksPackMembershipV1(nativeData);
+    return parsed === null ? undefined : { state: "present", value: parsed.membership };
+  } catch {
+    return { state: "malformed" };
+  }
+}
 
 type NativeJsonObject = Readonly<Record<string, unknown>>;
 
@@ -247,6 +257,7 @@ export function clutchpacksPackProviderFacts(
     "pack",
   ) as NormalizedPackProviderFacts;
   const buybackPercent = buybackPercentFact(nativeData.series);
+  const packMembership = packMembershipFact(nativeData);
   return {
     ...empty,
     displayName: normalizedTextFact(nativeData.name),
@@ -259,6 +270,7 @@ export function clutchpacksPackProviderFacts(
     buybackPercent,
     drawCount: { state: "present", value: 1 },
     evInput: evInputFact(nativeData.price_bucket_odds, buybackPercent),
+    ...(packMembership === undefined ? {} : { packMembership }),
     authoritativeAvailability: authoritativeAvailabilityFact(
       nativeData.sold_out,
     ),

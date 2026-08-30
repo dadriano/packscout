@@ -1,3 +1,5 @@
+import type { ProviderPackContentSnapshotV1 } from "@packscout/contracts";
+import { applyProviderPackContentSnapshot } from "./provider-pack-content-snapshot-repository.ts";
 import type {
   CanonicalJsonObject,
   CanonicalJsonValue,
@@ -402,6 +404,13 @@ async function applyCatalog(
   record: ProviderMixedPageRecord,
 ): Promise<ProviderMixedRecordWriteOutcome> {
   const type = record.entityType as ProviderMixedCatalogEntityType;
+  if (type === "pack_content_snapshot") {
+    if (record.operation !== "upsert") candidateError("operation");
+    const result = await applyProviderPackContentSnapshot(
+      transaction, record.candidate as unknown as ProviderPackContentSnapshotV1,
+    );
+    return { duplicate: !result.materialChange, materialChange: result.materialChange };
+  }
   if (record.operation === "retire") {
     const candidate = retireCandidate(record.candidate);
     const result = type === "category" ? await canonical.retireCategory(candidate)

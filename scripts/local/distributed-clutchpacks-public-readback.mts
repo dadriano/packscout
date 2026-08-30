@@ -17,6 +17,8 @@ export type LocalClutchpacksEvReadbackRow = Pick<PublicRepackViewSummaryV3,
   "publicRepackId" | "availability" | "evEstimates">;
 type PlannedRow = Pick<PublicRepackSummaryV3,
   "publicRepackId" | "availability" | "evEstimates" | "price">;
+type ContentRow = Pick<PublicRepackSummaryV3,
+  "publicRepackId" | "topChase" | "contentSummary" | "collectibleTypes">;
 
 function refuse(): never {
   throw new DistributedClutchpacksPublicationError("LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
@@ -24,9 +26,23 @@ function refuse(): never {
 
 export function localClutchpacksPlannedV3Rows(
   plan: DataReleaseV3PublishPlan,
-): readonly PlannedRow[] {
+): readonly (PlannedRow & ContentRow)[] {
   return plan.batches.filter(({ kind }) => kind === "repacks")
     .flatMap(({ records }) => records.map((record) => publicRepackDetailV3Schema.parse(record)));
+}
+
+/** Both public list projections must expose the exact staged current contents. */
+export function verifyLocalClutchpacksContentReadback(input: {
+  readonly expectedRows: readonly ContentRow[];
+  readonly manifestRows: readonly ContentRow[];
+  readonly v3Rows: readonly ContentRow[];
+}): void {
+  const normalize = (rows: readonly ContentRow[]) => rows.map((row) => ({
+    publicRepackId: row.publicRepackId, topChase: row.topChase,
+    contentSummary: row.contentSummary, collectibleTypes: row.collectibleTypes,
+  })).sort((left, right) => left.publicRepackId < right.publicRepackId ? -1 : left.publicRepackId > right.publicRepackId ? 1 : 0);
+  const expected = canonicalJson(normalize(input.expectedRows));
+  if (canonicalJson(normalize(input.manifestRows)) !== expected || canonicalJson(normalize(input.v3Rows)) !== expected) return refuse();
 }
 
 /** Model display confidence without changing the immutable planned EV. */
