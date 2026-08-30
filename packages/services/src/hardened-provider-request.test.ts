@@ -75,6 +75,10 @@ test("declared and streamed overflow cancel the provider body", async () => {
     },
   ));
   assert.equal(declared.code, "response_too_large");
+  assert.deepEqual(declared.responseLimitDiagnostic, {
+    trigger: "declared_content_length", maximumResponseBytes: 4, reportedResponseBytes: 5,
+  });
+  assert.equal(declared.responseBytes, 0);
   assert.equal(declaredCancelled, true);
 
   let streamedCancelled = false;
@@ -94,7 +98,21 @@ test("declared and streamed overflow cancel the provider body", async () => {
     },
   ));
   assert.equal(streamed.code, "response_too_large");
+  assert.deepEqual(streamed.responseLimitDiagnostic, {
+    trigger: "streamed_body", maximumResponseBytes: 4, reportedResponseBytes: 6,
+  });
+  assert.equal(streamed.responseBytes, 0);
   assert.equal(streamedCancelled, true);
+});
+
+test("unsafe declared lengths never become imprecise byte diagnostics", async () => {
+  const error = await captureError(captureHardenedProviderResponse(input({ maximumResponseBytes: 4 }), {
+    resolveHost: async () => [publicAddress],
+    httpClient: async () => new Response("protected-body-marker", { headers: { "content-length": "9007199254740993" } }),
+  }));
+  assert.equal(error.code, "response_too_large");
+  assert.deepEqual(error.responseLimitDiagnostic, { trigger: "declared_content_length", maximumResponseBytes: 4 });
+  assert.equal(JSON.stringify(error).includes("protected-body-marker"), false);
 });
 
 test("one lifetime covers a stalled response body and preserves parent cancellation", async () => {

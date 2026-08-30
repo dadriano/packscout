@@ -31,7 +31,7 @@ export function backfillDelayMilliseconds(consecutiveFailures: number, jitter: n
 
 export const backfillPinsSchema = z.object({
   organizationId: z.string().uuid(), providerId: z.string().uuid(),
-  providerKey: z.enum(["courtyard", "collector_crypt", "phygitals"]),
+  providerKey: z.enum(["clutchpacks", "courtyard", "collector_crypt", "phygitals"]),
   configId: z.string().uuid(), initialRunId: z.string().uuid(), operationId: z.string().uuid(),
   operatorId: z.string().uuid(),
 }).strict();

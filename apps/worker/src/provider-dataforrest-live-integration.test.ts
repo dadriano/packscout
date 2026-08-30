@@ -5,6 +5,8 @@ import {
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "@packscout/contracts";
@@ -48,13 +50,13 @@ test("the worker installs only the exact Collector Crypt 1,000-record tuple", ()
   );
 });
 
-test("the worker installs only the immutable Courtyard native-card tuple", () => {
+test("the worker installs only the immutable larger-budget Courtyard tuple", () => {
   const integration = providerDataforrestLiveIntegrationRegistry.resolve(
-    "courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+    "courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   );
   assert.ok(integration);
   assert.equal(integration.manifest.requestBounds.pageLimit, 100);
-  assert.equal(integration.manifest.requestBounds.maximumResponseBytes, 8_388_608);
+  assert.equal(integration.manifest.requestBounds.maximumResponseBytes, DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES);
   assert.equal(integration.mapper.mapperKey, "courtyard-provider-observation");
   assert.equal(integration.mapper.mapperVersion, "1");
   assert.equal(integration.mapper.identityNamespaceKey, "dataforrest-courtyard-records-v1");
@@ -62,9 +64,12 @@ test("the worker installs only the immutable Courtyard native-card tuple", () =>
   assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
     "courtyard", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   ), null);
+  assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
+    "courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+  ), null);
   for (const provider of ["clutchpacks", "collector_crypt", "phygitals"]) {
     assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
-      provider, DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+      provider, DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
     ), null);
   }
 });

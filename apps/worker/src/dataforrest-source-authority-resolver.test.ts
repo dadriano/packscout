@@ -5,7 +5,7 @@ import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
-  dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import type { CentralQueryClient } from "@packscout/database";
@@ -206,7 +206,7 @@ describe("central DataForrest source authority", () => {
   });
 
   for (const [providerKey, manifest] of [
-    ["courtyard", dataforrestCourtyardDistributedSourceAdapterManifest],
+    ["courtyard", dataforrestCourtyardDistributedV2SourceAdapterManifest],
     ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
   ] as const) {
@@ -261,7 +261,7 @@ describe("central DataForrest source authority", () => {
       {
         ...request,
         providerKey: "collector_crypt",
-        adapterKey: dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion,
+        adapterKey: dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion,
       },
       {
         ...request,

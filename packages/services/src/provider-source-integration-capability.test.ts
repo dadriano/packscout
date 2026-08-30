@@ -4,6 +4,7 @@ import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -92,10 +93,12 @@ test("launch registry installs exact tuples for all four providers and refuses u
     dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion;
   assert.equal(installed.has("courtyard", adapterKey), false);
   assert.equal(installed.has("courtyard",
-    dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), true);
+    dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), false);
+  assert.equal(installed.has("courtyard",
+    dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion), true);
   for (const providerKey of ["clutchpacks", "collector_crypt", "phygitals"]) {
     assert.equal(installed.has(providerKey,
-      dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), false);
+      dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion), false);
   }
   assert.equal(installed.has("collector_crypt", adapterKey), false);
   assert.equal(installed.has("collector_crypt",

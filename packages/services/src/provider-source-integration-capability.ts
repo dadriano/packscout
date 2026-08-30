@@ -1,7 +1,7 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
-  dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
@@ -137,7 +137,7 @@ ProviderSourceIntegrationCapabilityRegistry {
     ),
     providerSourceIntegrationCapability(
       "courtyard",
-      dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion,
+      dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion,
     ),
     providerSourceIntegrationCapability(
       "collector_crypt",

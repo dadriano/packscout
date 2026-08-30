@@ -50,7 +50,9 @@ function adminUrl(): URL {
 function databaseUrl(source: URL, databaseName: string): string {
   const result = new URL(source);
   result.pathname = `/${databaseName}`;
+  const socketHost = result.searchParams.get("host");
   result.search = "";
+  if (socketHost?.startsWith("/")) result.searchParams.set("host", socketHost);
   result.hash = "";
   return result.toString();
 }

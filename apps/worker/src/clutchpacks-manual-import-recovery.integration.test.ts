@@ -64,7 +64,9 @@ function adminUrl(): URL {
 function databaseUrl(source: URL, databaseName: string): string {
   const result = new URL(source);
   result.pathname = `/${databaseName}`;
+  const socketHost = result.searchParams.get("host");
   result.search = "";
+  if (socketHost?.startsWith("/")) result.searchParams.set("host", socketHost);
   result.hash = "";
   return result.toString();
 }
@@ -895,40 +897,36 @@ test(
       const configuration = await synchronizeConfiguration(harness);
       const workerId = "integration:finish-loss";
       const active = await startAttempt(harness, configuration, workerId);
-      await harness.client.$executeRawUnsafe(`
-        CREATE FUNCTION packscout_test_steal_import_lease_after_reconciliation()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        AS $test$
-        BEGIN
-          IF current_setting('packscout.test_market_update_seen', true) = 'yes' THEN
-            UPDATE provider_worker_states
-            SET lease_owner = 'integration:finish-thief',
-                lease_fence = lease_fence + 1,
-                heartbeat_at = clock_timestamp(),
-                lease_expires_at = clock_timestamp() + interval '1 minute',
-                row_version = row_version + 1,
-                updated_at = clock_timestamp()
-            WHERE worker_role = 'import';
-          ELSE
-            PERFORM set_config('packscout.test_market_update_seen', 'yes', true);
-          END IF;
-          RETURN NULL;
-        END;
-        $test$
-      `);
-      await harness.client.$executeRawUnsafe(`
-        CREATE TRIGGER packscout_test_finish_lease_loss
-        AFTER UPDATE ON market_events
-        FOR EACH STATEMENT
-        EXECUTE FUNCTION packscout_test_steal_import_lease_after_reconciliation()
-      `);
+      const originalFinish = PrismaProviderRunRepository.prototype.finish;
+      let finishCalls = 0;
+      // Inject at the operation boundary, not at a reconciliation SQL count:
+      // an empty catalog legitimately skips all unresolved-fact updates. The
+      // lease takeover and the original finish transaction both use the real DB.
+      context.mock.method(PrismaProviderRunRepository.prototype, "finish", async function (
+        this: PrismaProviderRunRepository,
+        input: Parameters<PrismaProviderRunRepository["finish"]>[0],
+      ) {
+        finishCalls += 1;
+        assert.equal(input.runId, active.runId);
+        assert.equal(input.state, "succeeded");
+        assert.equal(await takeOverLease(
+          harness,
+          { workerId, fence: active.fence },
+          "integration:finish-thief",
+        ), active.fence + 1n);
+        const finished = await originalFinish.call(this, input);
+        assert.equal(finished.kind, "lease_lost");
+        return finished;
+      });
+      let pageCalls = 0;
       const result = await new ProviderManualImportExecutor({
         database: harness.client,
-        source: emptyHeadSource(),
+        source: emptyHeadSource({ onNextPage: () => { pageCalls += 1; } }),
         workerId,
         leaseMilliseconds: 30_000,
       }).executeNext();
+      assert.equal(finishCalls, 1);
+      assert.equal(pageCalls, 1);
       assert.deepEqual(result, {
         kind: "blocked",
         runId: active.runId,

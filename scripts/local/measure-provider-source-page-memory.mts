@@ -2,9 +2,7 @@ import { createHash } from "node:crypto";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
-  dataforrestEventsV1SourceAdapterManifest,
   providerIdentityNamespaceByLaunchProvider,
-  providerSourceLaunchBounds,
   type ProviderSourcePageCommitPins,
 } from "@packscout/contracts";
 import {
@@ -21,17 +19,15 @@ import {
 } from "@packscout/services";
 import { completeAuthenticPageReadForTest } from
   "../../packages/services/src/source-adapter-page-result.test-support.ts";
+import { providerSourceMemoryProfile } from "./provider-source-page-memory-profile.mts";
 
 const benchmarkVersion = "provider-source-page-memory-v2";
-const concurrentPages = 4;
-const warmupPageCount = 12;
-const trialCount = 5;
-const pagesPerTrial = 20;
+const benchmark = providerSourceMemoryProfile(process.argv.slice(2));
+const dataforrestEventsV1SourceAdapterManifest = benchmark.manifest;
+const { concurrentPages, warmupPageCount, trialCount, pagesPerTrial, recordsPerPage, emptyObjectFactsPerRecord } = benchmark;
 const pageCount = trialCount * pagesPerTrial;
-const recordsPerPage = providerSourceLaunchBounds.pageTargetRecords;
 const maximumResponseBytes =
   dataforrestEventsV1SourceAdapterManifest.requestBounds.maximumResponseBytes;
-const emptyObjectFactsPerRecord = 945;
 const mebibyte = 1024 * 1024;
 const peakDeltaLimitBytes = concurrentPages * 64 * mebibyte;
 const retainedGrowthLimitBytes = concurrentPages * 8 * mebibyte;
@@ -101,6 +97,14 @@ function maximumSizeSanitizedPage(): Readonly<{
     next_cursor: "capacity-cursor-001",
     poll_after_seconds: 60,
   };
+  if (benchmark.nativeNodeTarget !== null) {
+    const remainingNodes = benchmark.nativeNodeTarget - countJsonNodes(page);
+    if (remainingNodes < 0) throw new Error("capacity page fixture exceeds node bound");
+    for (const [index, record] of records.entries()) {
+      record.data.native_facts = Array.from({ length: Math.floor(remainingNodes / records.length) +
+        (index < remainingNodes % records.length ? 1 : 0) }, () => ({}));
+    }
+  }
   let serialized = JSON.stringify(page);
   const remainingBytes = maximumResponseBytes - Buffer.byteLength(serialized);
   if (remainingBytes < 0) throw new Error("capacity page fixture exceeds bound");
@@ -363,6 +367,7 @@ const retainedGrowthBytes = Math.max(
 const peakDeltaBytes = Math.max(0, peakRssBytes - idleRssBytes);
 const result = {
   version: benchmarkVersion,
+  profile: benchmark.name,
   measuredAt: new Date().toISOString(),
   environment: {
     node: process.version,
@@ -379,7 +384,8 @@ const result = {
   recordsPerPage,
   responseBytesPerPage: maximumResponseBytes,
   jsonNodesPerPage: maximumPage.jsonNodeCount,
-  emptyObjectFactsPerRecord,
+  emptyObjectFactsPerRecord: benchmark.nativeNodeTarget === null ? emptyObjectFactsPerRecord : null,
+  nativeNodeTarget: benchmark.nativeNodeTarget,
   totalRecordsProcessed: checksum,
   elapsedMilliseconds: Number((performance.now() - startedAt).toFixed(3)),
   idleRssBytes,
@@ -395,6 +401,7 @@ const result = {
   },
   passes:
     checksum === pageCount * recordsPerPage &&
+    (benchmark.nativeNodeTarget === null || maximumPage.jsonNodeCount === benchmark.nativeNodeTarget) &&
     peakDeltaBytes <= peakDeltaLimitBytes &&
     retainedGrowthBytes <= retainedGrowthLimitBytes,
 };

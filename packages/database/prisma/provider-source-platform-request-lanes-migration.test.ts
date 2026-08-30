@@ -51,7 +51,9 @@ async function createPreMigrationDatabase(): Promise<{
   await admin.query(`create database "${databaseName}"`);
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
+  const socketHost = databaseUrl.searchParams.get("host");
   databaseUrl.search = "";
+  if (socketHost?.startsWith("/")) databaseUrl.searchParams.set("host", socketHost);
   databaseUrl.hash = "";
   const database = new Pool({ connectionString: databaseUrl.toString(), max: 2 });
   const prisma = new PrismaClient({

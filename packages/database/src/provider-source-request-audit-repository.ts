@@ -1,4 +1,8 @@
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
+import {
+  providerSourceResponseLimitDiagnosticSchema,
+  type ProviderSourceResponseLimitDiagnostic,
+} from "@packscout/contracts";
 import type {
   ProviderPrismaClient,
   ProviderTransactionClient,
@@ -108,6 +112,7 @@ export class PrismaProviderSourceRequestAuditRepository {
     resultCode: string;
     durationMilliseconds: number;
     responseBytes: number;
+    responseLimitDiagnostic?: ProviderSourceResponseLimitDiagnostic;
   }>): Promise<ProviderSourceRequestAuditResult> {
     requireUuid(input.runId, "runId");
     requireUuid(input.requestAttemptId, "requestAttemptId");
@@ -123,6 +128,13 @@ export class PrismaProviderSourceRequestAuditRepository {
     }
     requireMeasurement(input.durationMilliseconds, "durationMilliseconds");
     requireMeasurement(input.responseBytes, "responseBytes");
+    const parsedLimit = input.responseLimitDiagnostic === undefined ? undefined
+      : providerSourceResponseLimitDiagnosticSchema.safeParse(input.responseLimitDiagnostic);
+    if (parsedLimit !== undefined && (!parsedLimit.success || input.outcome !== "failure" ||
+      input.resultCode !== "SOURCE_REQUEST_RESPONSE_TOO_LARGE" || input.responseBytes !== 0)) {
+      throw new TypeError("Source response limit diagnostic is invalid.");
+    }
+    const limitDiagnostic = parsedLimit?.success ? parsedLimit.data : undefined;
 
     return this.#recordWithLiveImportAuthority(
       input,
@@ -141,6 +153,13 @@ export class PrismaProviderSourceRequestAuditRepository {
             responseBytes: input.responseBytes,
             resultCode: input.resultCode,
             runId: input.runId,
+            ...(limitDiagnostic === undefined ? {} : {
+              responseLimitTrigger: limitDiagnostic.trigger,
+              maximumResponseBytes: limitDiagnostic.maximumResponseBytes,
+              ...(limitDiagnostic.reportedResponseBytes === undefined ? {} : {
+                reportedResponseBytes: limitDiagnostic.reportedResponseBytes,
+              }),
+            }),
           },
           occurredAt,
         });
