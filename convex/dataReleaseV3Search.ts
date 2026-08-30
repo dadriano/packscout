@@ -235,7 +235,10 @@ export function displayDataReleaseV3SearchRow(
   row: DataReleaseV3SearchRow,
   estimate: PackScoutDisplayedEvV3,
 ): DataReleaseV3SearchRow {
-  const ranked = row.availability === "available" && estimate.status !== "unavailable"
+  // Restocking alone cannot make an estimate frozen at sellout actionable.
+  const ranked = row.availability === "available" &&
+    (estimate.status === "current" ||
+      (estimate.status === "last_known" && estimate.historicalSoldOutAt === null))
     ? estimate : null;
   return {
     ...row,
