@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { providerSourceMemoryProfile } = await tsImport("./provider-source-page-memory-profile.mts", import.meta.url);
-test("memory benchmark default remains historical four-lane8MiB and only fixed Courtyard capacity variants are selectable", () => {
+test("memory benchmark covers configurable maximum at four-lane8MiB and preserves fixed Courtyard capacity variants", () => {
   const baseline = providerSourceMemoryProfile([]);
   assert.deepEqual({ ...baseline, manifest: baseline.manifest.adapterVersion }, {
-    name: "historical", manifest: "dataforrest-events-adapter-v3", concurrentPages: 4, warmupPageCount: 12,
-    trialCount: 5, pagesPerTrial: 20, recordsPerPage: 500, emptyObjectFactsPerRecord: 945, nativeNodeTarget: null });
+    name: "maximum-request", manifest: "dataforrest-events-adapter-v3", concurrentPages: 4, warmupPageCount: 12,
+    trialCount: 5, pagesPerTrial: 20, recordsPerPage: 5000, emptyObjectFactsPerRecord: 82, nativeNodeTarget: null });
+  assert.equal(baseline.manifest.requestBounds.pageLimit, 5000);
   assert.equal(baseline.manifest.requestBounds.maximumResponseBytes, 8388608);
   for (const name of ["courtyard-v2-wide", "courtyard-v2-distributed"]) {
     const profile = providerSourceMemoryProfile(["--profile", name]);

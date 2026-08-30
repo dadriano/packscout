@@ -546,6 +546,24 @@ const publicEvPolicyVersionV3Validator = v.literal(
   "packscout-public-ev-nonpositive-v1",
 );
 
+const dataReleaseV3ProviderSourceLifecycleValidator = v.union(
+  v.literal("active"),
+  v.literal("paused"),
+  v.literal("disabled"),
+);
+
+const dataReleaseV3ProviderHealthStateValidator = v.union(
+  v.literal("healthy"),
+  v.literal("degraded"),
+  v.literal("unhealthy"),
+  v.literal("unknown"),
+);
+
+const dataReleaseV3ProviderReleaseAlignmentValidator = v.union(
+  v.literal("aligned"),
+  v.literal("behind"),
+);
+
 /**
  * Temporary retained-document compatibility for the public-EV-policy marker.
  *
@@ -1802,6 +1820,29 @@ export default defineSchema({
     after: v.union(retainedEvValueValidator, v.null()),
   }).index("by_transition_id", ["transitionId"]),
 
+  // Provider operations change independently of an immutable catalog release.
+  // Keep their high-churn observation state in a dedicated table so freshness
+  // updates never rewrite stable release documents or their active pointer.
+  dataReleaseV3ProviderObservations: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicReleaseId: v.string(),
+    releaseFingerprint: sha256Validator,
+    publicVendorId: v.string(),
+    vendorKey: v.string(),
+    observationSequence: v.number(),
+    observedAt: timestampValidator,
+    freshThrough: timestampValidator,
+    lastHeadReachedAt: nullableTimestampValidator,
+    sourceHeadSequence: v.string(),
+    settledSequence: v.string(),
+    sourceLifecycle: dataReleaseV3ProviderSourceLifecycleValidator,
+    connectionState: dataReleaseV3ProviderHealthStateValidator,
+    qualityState: dataReleaseV3ProviderHealthStateValidator,
+    releaseAlignment: dataReleaseV3ProviderReleaseAlignmentValidator,
+  }).index("by_release_id_and_public_vendor_id", [
+    "releaseId",
+    "publicVendorId",
+  ]),
   activeDataReleaseV3State: defineTable({
     key: v.literal("singleton"),
     generation: v.number(),

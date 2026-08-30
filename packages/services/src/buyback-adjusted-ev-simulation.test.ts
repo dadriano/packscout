@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   publicRepackViewDetailV3Schema,
+  presentLastKnownPackScoutEvV3,
   unavailableRepackHeat,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -242,10 +243,22 @@ test("every approved public state appears and passes the production contracts", 
       assert.ok(isPackScoutBuybackEvSimulatedPublicIdV1(detail.publicRepackId));
       assert.ok(detail.vendorKey.startsWith("simulated-"));
       assert.ok(detail.name.startsWith("[Simulated]"));
+      const presented = presentLastKnownPackScoutEvV3({
+        estimate: detail.evEstimates.packScout,
+        calculationPriceUsdMinor: detail.price.usdComparison.status === "available"
+          ? detail.price.usdComparison.value.minorUnits : 0,
+        referenceTimeIso: result.readAt,
+      });
       // Heat stays explicitly unavailable on v3 views (documented divergence).
       const view = publicRepackViewDetailV3Schema.safeParse({
         ...detail,
         heat: unavailableRepackHeat(),
+        evEstimates: { ...detail.evEstimates, packScout: presented },
+        providerHealth: {
+          state: "healthy",
+          observedAt: result.readAt,
+          statusReason: null,
+        },
       });
       assert.ok(view.success);
       assert.ok(!JSON.stringify(detail).includes('"heat"'));
@@ -317,20 +330,21 @@ test("every approved public state appears and passes the production contracts", 
     "unavailable:VALUE_UNAVAILABLE",
   );
 
-  // The fixed observation expires purely by advancing the calculation clock.
+  // The fixed observation becomes last-known purely by advancing the read
+  // clock; its immutable release metrics remain present.
   assert.deepEqual(states.get("courtyard-source-age-expiry"), [
-    "current",
-    "current",
-    "unavailable:SOURCE_DATA_STALE",
-    "unavailable:SOURCE_DATA_STALE",
+    "last_known",
+    "last_known",
+    "last_known",
+    "last_known",
   ]);
 
-  // Sold-out history stays frozen with its original confidence.
+  // Sold-out economics remain retained while display confidence keeps aging.
   assert.deepEqual(states.get("trove-sold-out-historical"), [
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
-    "sold_out_historical",
+    "last_known",
+    "last_known",
+    "last_known",
+    "last_known",
   ]);
 
   // Per-pack and per-draw unit bases both traverse the path.

@@ -29,6 +29,9 @@ import {
   ProviderSourceLedger,
   SourceConnectionLedger,
 } from "../components/source-configuration/SourceConfigurationLedgers";
+import {
+  RECORDS_PER_REQUEST_SAVED,
+} from "../components/source-configuration/records-per-request";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useConfirm } from "../providers/confirm";
 import { useSession } from "../providers/session";
@@ -353,7 +356,7 @@ export function SourceConfigurationPage() {
               onCreate={(request: CreateProviderSourceRequest) => mutate(
                 "source:create",
                 () => createProviderSource(request),
-                "Inactive source created with its approved mapper and a null cursor.",
+                RECORDS_PER_REQUEST_SAVED,
               )}
               onCommand={sourceCommand}
               onInterval={(source, intervalSeconds) => mutate(

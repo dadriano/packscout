@@ -11,6 +11,7 @@ import {
   buildProviderSourceCapacityForecast,
   evaluateProviderSourceCapacityPreflight,
   launchSourceMapperDescriptors,
+  providerSourceCapacityModelMatchesLaunchBounds,
   type ProviderSourceCapacityForecast,
   type ProviderSourceCapacityModelInput,
 } from "@packscout/services";
@@ -45,7 +46,7 @@ export interface Task010Environment {
   readonly administratorPassword?: string;
 }
 
-interface CapacityArtifact {
+export interface CapacityArtifact {
   readonly version: string;
   readonly forecastInput: ProviderSourceCapacityModelInput;
   readonly forecast: ProviderSourceCapacityForecast;
@@ -98,10 +99,39 @@ function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-async function loadCapacityArtifact(): Promise<CapacityArtifact> {
-  let artifact: CapacityArtifact;
+export function parseTask010CapacityArtifact(value: unknown): CapacityArtifact {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Task010SafetyError("CAPACITY_ARTIFACT_INVALID");
+  }
+  const artifact = value as CapacityArtifact;
+  if (
+    typeof artifact.forecastInput !== "object" ||
+    artifact.forecastInput === null ||
+    typeof artifact.forecast !== "object" ||
+    artifact.forecast === null
+  ) {
+    throw new Task010SafetyError("CAPACITY_ARTIFACT_INVALID");
+  }
+  let forecast: ProviderSourceCapacityForecast;
   try {
-    artifact = JSON.parse(
+    forecast = buildProviderSourceCapacityForecast(artifact.forecastInput);
+  } catch {
+    throw new Task010SafetyError("CAPACITY_ARTIFACT_INVALID");
+  }
+  if (
+    artifact.version !== "provider-source-capacity-measurement-v1" ||
+    !providerSourceCapacityModelMatchesLaunchBounds(artifact.forecastInput) ||
+    JSON.stringify(forecast) !== JSON.stringify(artifact.forecast)
+  ) {
+    throw new Task010SafetyError("CAPACITY_ARTIFACT_INVALID");
+  }
+  return artifact;
+}
+
+async function loadCapacityArtifact(): Promise<CapacityArtifact> {
+  let value: unknown;
+  try {
+    value = JSON.parse(
       await readFile(
         new URL(
           "../../docs/provider-source-capacity-measurement-v1.json",
@@ -109,18 +139,11 @@ async function loadCapacityArtifact(): Promise<CapacityArtifact> {
         ),
         "utf8",
       ),
-    ) as CapacityArtifact;
+    );
   } catch {
     throw new Task010SafetyError("CAPACITY_ARTIFACT_UNREADABLE");
   }
-  const forecast = buildProviderSourceCapacityForecast(artifact.forecastInput);
-  if (
-    artifact.version !== "provider-source-capacity-measurement-v1" ||
-    JSON.stringify(forecast) !== JSON.stringify(artifact.forecast)
-  ) {
-    throw new Task010SafetyError("CAPACITY_ARTIFACT_INVALID");
-  }
-  return artifact;
+  return parseTask010CapacityArtifact(value);
 }
 
 export async function openTask010Database(
@@ -829,9 +852,13 @@ export async function verifyTask010SourceTopology(
   }
   if (options.requireBackfillReady) {
     const [readySources, providerRoots] = await Promise.all([
-      client.query<{ count: string }>(
+      client.query<{
+        sourceInstanceId: string;
+        recordsPerRequest: number;
+      }>(
         `
-      select count(*)::text as count
+      select source.id::text as "sourceInstanceId",
+             schedule_revision.records_per_request as "recordsPerRequest"
       from public.provider_source_instances as source
       join public.provider_source_revisions as revision
         on revision.id = source.active_revision_id
@@ -860,6 +887,7 @@ export async function verifyTask010SourceTopology(
         and schedule_revision.interval_seconds between 60 and 86400
         and schedule_revision.freshness_grace_seconds = 900
         and source_cursor.cursor_generation >= 1
+      order by source.id
     `,
         [environment.organizationId, profile?.id],
       ),
@@ -889,12 +917,16 @@ export async function verifyTask010SourceTopology(
       profileCount: profiles.rows.length,
       activeProfileCount: 1,
       sourceCount: sources.rows.length,
-      readySourceCount: Number(readySources.rows[0]?.count),
+      readySourceCount: readySources.rows.length,
       providerRoots: providerRoots.rows,
       sources: sources.rows.map((source) => ({
         state: source.state,
         activeRevisionId: source.activeRevisionId,
         connectionProfileMatches: source.connectionProfileId === profile?.id,
+        recordsPerRequest: readySources.rows.find(
+          ({ sourceInstanceId }) =>
+            sourceInstanceId === source.sourceInstanceId,
+        )?.recordsPerRequest ?? null,
       })),
     });
   }

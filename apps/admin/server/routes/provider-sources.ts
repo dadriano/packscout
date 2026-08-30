@@ -10,6 +10,7 @@ import {
   providerSourceRevisionCommandSchema,
   requestSourceConnectionRecoveryTestSchema,
   reviseProviderSourceIntervalRequestSchema,
+  reviseProviderSourceRecordsPerRequestRequestSchema,
   revokeSourceConnectionRevisionRequestSchema,
   rotateSourceConnectionCredentialRequestSchema,
   sourceConnectionRevisionCommandSchema,
@@ -77,6 +78,7 @@ export interface ProviderSourcesRouterDependencies {
     | "requestTest"
     | "activatePaused"
     | "reviseInterval"
+    | "reviseRecordsPerRequest"
     | "pause"
     | "resume"
     | "disable"
@@ -509,6 +511,7 @@ export function createProviderSourcesRouter(
       | "test"
       | "activate"
       | "interval"
+      | "records-per-request"
       | "pause"
       | "resume"
       | "disable"
@@ -523,6 +526,8 @@ export function createProviderSourcesRouter(
     if (!params || !("sourceInstanceId" in params)) return;
     const schema = action === "interval"
       ? reviseProviderSourceIntervalRequestSchema
+      : action === "records-per-request"
+        ? reviseProviderSourceRecordsPerRequestRequestSchema
       : action === "cursor-reset-preview"
         ? previewProviderSourceCursorResetRequestSchema
         : action === "cursor-reset"
@@ -542,6 +547,8 @@ export function createProviderSourcesRouter(
         audit: await dependencies.sources.activatePaused(...args),
       };
       case "interval": return dependencies.sources.reviseInterval(...args);
+      case "records-per-request":
+        return dependencies.sources.reviseRecordsPerRequest(...args);
       case "pause": return dependencies.sources.pause(...args);
       case "resume": return {
         state: "resumed" as const,
@@ -561,6 +568,8 @@ export function createProviderSourcesRouter(
           ? "source_activated_paused"
           : action === "interval"
             ? "source_interval_revised"
+            : action === "records-per-request"
+              ? "source_records_per_request_revised"
             : action === "pause"
               ? "source_pause_requested"
               : action === "resume"
@@ -577,6 +586,7 @@ export function createProviderSourcesRouter(
     "test",
     "activate",
     "interval",
+    "records-per-request",
     "pause",
     "resume",
     "disable",

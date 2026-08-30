@@ -47,15 +47,21 @@ describe("activation-owned last valid EV", () => {
         calculatedAt: new Date(Date.parse(V3_OBSERVED_AT) + number * 60_000).toISOString() });
       await activateRetentionRelease(t, await stageRetentionRelease(t, number, [failed]), number - 1);
       const detail = await readRetentionDetail(t, number, muchLater);
+      expect(detail.providerHealth).toMatchObject({ state: "unavailable",
+        statusReason: "PROVIDER_HEALTH_UNAVAILABLE" });
       expect(detail.price).toEqual(changedPrice);
       expect(detail.evEstimates.packScout).toMatchObject({ status: "last_known",
         metrics: original.evEstimates.packScout.metrics, calculatedAt: V3_OBSERVED_AT,
         dataAsOf: original.evEstimates.packScout.dataAsOf, calculationPriceUsdMinor: 10_000,
         confidence: { scoreBasisPoints: 0 }, latestUnavailableReason: "SOURCE_EVIDENCE_UNAVAILABLE" });
-      const dashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3,
-        { currentTime: muchLater }) as { ok: boolean; data: { opportunities: unknown[]; kpis: Record<string, unknown> } };
+      const dashboard = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
+        { currentTime: muchLater }) as { ok: boolean; data: { opportunities: PublicRepackViewSummaryV3[]; kpis: Record<string, unknown> } };
       expect(dashboard.ok).toBe(true);
       expect(dashboard.data.opportunities).toHaveLength(1);
+      // Missing provider health cannot hide retained economics after a newer
+      // unavailable publication, even when the approved confidence reaches zero.
+      expect(dashboard.data.opportunities[0]!.evEstimates).toEqual(detail.evEstimates);
+      expect(dashboard.data.opportunities[0]!.providerHealth).toEqual(detail.providerHealth);
       expect(dashboard.data.kpis).toMatchObject({ highConfidenceRepacks: 0,
         medianPackScoutEvPercent: { status: "available", basisPoints: -1_500 } });
     }
@@ -204,10 +210,10 @@ describe("activation-owned last valid EV", () => {
         { retainedEvTransitionId: undefined, retainedEvTransitionDirection: undefined });
     });
     for (const response of await Promise.all([
-      t.query(api.publicRepacksV3.getPublicRepackV3, { publicReleaseId: retentionReleaseId(1),
+      t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, { publicReleaseId: retentionReleaseId(1),
         publicRepackId: V3_REPACK_ID_A, currentTime: muchLater }),
-      t.query(api.publicRepacksV3.listPublicRepacksV3, { currentTime: muchLater }),
-      t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: muchLater }),
+      t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, { currentTime: muchLater }),
+      t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, { currentTime: muchLater }),
     ])) expect(response).toMatchObject({ ok: false, code: "RELEASE_UNAVAILABLE" });
     await expect(t.query(internal.dataReleaseV3EvMigrationState.migrationState, {})).rejects.toThrow();
   });
@@ -219,7 +225,7 @@ describe("activation-owned last valid EV", () => {
     expect(ev).toMatchObject({ status: "last_known", confidence: { scoreBasisPoints: 0 } });
     if (ev.status !== "last_known") throw new Error("expected retained history");
     expect(ev.historicalSoldOutAt).not.toBeNull();
-    const dashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const dashboard = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: muchLater, filters: { availability: "all" } }) as { data: { opportunities: unknown[] } };
     expect(dashboard.data.opportunities).toEqual([]);
   });
@@ -248,7 +254,7 @@ describe("activation-owned last valid EV", () => {
       calculatedAt: V3_OBSERVED_AT, historicalSoldOutAt: V3_SOLD_OUT_AT, expiresAt: null,
     });
 
-    const dashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const dashboard = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW }) as { ok: boolean; data: {
         opportunities: PublicRepackViewSummaryV3[]; kpis: Record<string, unknown>;
         vendorSummaries: { medianPackScoutEvPercent: unknown }[];
@@ -263,7 +269,7 @@ describe("activation-owned last valid EV", () => {
     }
     for (const sort of ["packscout_ev_dollars", "packscout_ev_percent", "packscout_gross_ev", "packscout_confidence"]) {
       for (const direction of ["asc", "desc"]) {
-        const list = await t.query(api.publicRepacksV3.listPublicRepacksV3,
+        const list = await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime,
           { currentTime: V3_FIXTURE_NOW, sort, direction }) as { ok: boolean; data: {
             rows: PublicRepackViewSummaryV3[]; details: PublicRepackViewDetailV3[];
           } };
@@ -286,7 +292,7 @@ describe("activation-owned last valid EV", () => {
       calculatedAt: recovered.evEstimates.packScout.calculatedAt,
       historicalSoldOutAt: null, latestUnavailableReason: null, confidence: { scoreBasisPoints: 10_000 },
     });
-    const restoredDashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const restoredDashboard = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW }) as typeof dashboard;
     expect(restoredDashboard.ok).toBe(true);
     expect(restoredDashboard.data.opportunities.map(({ publicRepackId }) => publicRepackId))

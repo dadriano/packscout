@@ -34,14 +34,20 @@ inspect, migrate, and bootstrap below with a new one-time administrator
 password. Cursor reset, adapter upgrade, source replacement, and selective
 table deletion are not clean-slate substitutes.
 
-**Historical Task 010 admission state (2026-08-22): BLOCKED.** That isolated
-bootstrap procedure used an 8,759,332,238,475-byte maximum-throughput stress
-ceiling and an 80%-used volume fence. The stress ceiling is not the operational
-estimate for the current `packscout_dev` import. For early local development,
-use the normal ingestion guide's explicit free-space floor and the
+**Current Task 010 admission state (artifact measured
+2026-08-28T14:20:28.505Z): BLOCKED.** The artifact projects
+158,428,176,709,145 bytes of retained growth and requires
+211,237,568,945,527 available bytes with headroom. The measured host had a
+994,662,584,320-byte volume with 818,673,340,416 bytes used (about 82.31%) and
+175,989,243,904 bytes available, so the preflight rejected it for both the
+211,061,579,701,623-byte free-space deficit and the independently enforced 80%
+fence. The stress model pins the initial backfill to 500 records per page and
+reserves the configurable 5,000-record maximum for every ongoing poll attempt;
+it is not the operational estimate for the current `packscout_dev` import. For
+early local development, use the normal ingestion guide's explicit free-space floor and the
 [2026-08-24 live capacity observation](provider-source-live-capacity-observation-2026-08-24.md).
 This runbook still must not be used to bypass the isolated Task 010 target's
-own historical receipt checks.
+own receipt checks.
 
 ## 1. Install and create the private configuration file
 
@@ -147,7 +153,8 @@ In Source configuration:
    supervisor shown below. Wait for the test result, reload Source
    configuration, then select **Activate revision**.
 3. For each stable provider root, save one inactive source with its matching
-   provider/mapper choice, the shared profile, and interval `60`. Select
+   provider/mapper choice, the shared profile, interval `60`, and **Maximum
+   records per request** `500` to match the committed Task 010 capacity model. Select
    **Test**, wait for success, reload Source configuration, then **Activate
    paused**.
 
@@ -182,13 +189,14 @@ The empty-target inspect command belongs only before migration. It intentionally
 rejects this migrated, bootstrapped database. Immediately before opening the
 worker, the backfill starter itself rechecks the exact database identity,
 migrated schema, current capacity with application relations present, bootstrap
-receipt, and four-source backfill topology. Any failed recheck stops before the
-supervisor can claim work.
+receipt, and four-source backfill topology. The topology gate requires every
+active source schedule revision to remain pinned to exactly 500 records per
+request. Any failed recheck stops before the supervisor can claim work.
 
 The backfill start requires exactly one active tested profile whose approved
 per-platform hard cap is no greater than two. PackScout's runtime operates each
-platform lane at one request. Every connection revision must use DataForrest
-adapter v3, and exactly four tested,
+platform lane at exactly one request beneath that hard cap. Every connection
+revision must use DataForrest adapter v3, and exactly four tested,
 paused-or-active sources must have only the adapter-v3, observation-v1,
 mapper-v1 tuple across every revision. Any v1, v2, unknown, or mixed tuple
 fails closed before the supervisor starts. In Operations, select **Resume** for
@@ -196,8 +204,8 @@ all four sources; Resume makes each lane due immediately.
 The dedicated Task 010 runner forces `PACKSCOUT_SOURCE_EXECUTION_SLOTS=4`, even
 if its private environment file omits or attempts to change that value. These
 are four fair source lanes beneath exactly one singleton supervisor process and
-epoch, not four worker processes. Each platform has an independent
-request-permit lane operated at one request, and connection tests use a separate
+epoch, not four worker processes. Each platform has an independent one-request
+lane beneath the provider maximum of two, and connection tests use a separate
 one-request lane. One
 source still owns one sequential page cursor, so useful page-read concurrency is at
 most four, one request for each provider; one platform never waits for another

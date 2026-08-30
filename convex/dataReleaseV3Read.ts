@@ -1,4 +1,6 @@
-import { DATA_RELEASE_V3_SCHEMA_VERSION } from "@packscout/contracts";
+import { DATA_RELEASE_V3_SCHEMA_VERSION, dataReleaseV3RetainedEvWitnessRequestSchema,
+  dataReleaseV3RetainedEvWitnessReadinessRequestSchema,
+  dataReleaseV3RetainedEvWitnessWithinByteLimit } from "@packscout/contracts";
 import { v } from "convex/values";
 import { z } from "zod";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -10,6 +12,7 @@ import {
   loadDataReleaseV3ByPublicReleaseId,
 } from "./dataReleaseV3Lifecycle";
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
+import { readRetainedEvWitness, readRetainedEvWitnessReadiness } from "./dataReleaseV3RetainedEvWitness";
 
 /**
  * Authenticated read endpoints for the data_release_v3 publication transport
@@ -74,7 +77,7 @@ function assertReadRequestDigest(requestDigest: string): void {
 }
 
 async function buildReadReceipt(input: {
-  readonly operationKind: "activeState" | "status";
+  readonly operationKind: "activeState" | "status" | "retainedEvWitness" | "retainedEvWitnessReadiness";
   readonly operationId: string;
   readonly publicReleaseId: string | null;
   readonly result: string;
@@ -136,6 +139,31 @@ const EXECUTION_ARGS = {
   bodyJson: v.string(),
   requestDigest: v.string(),
 } as const;
+
+export const retainedEvWitness = internalMutation({
+  args: EXECUTION_ARGS,
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    assertReadRequestDigest(args.requestDigest);
+    const request = parseReadRequest(args.bodyJson, z.union([dataReleaseV3RetainedEvWitnessRequestSchema.extend({
+      schemaVersion: z.literal(DATA_RELEASE_V3_SCHEMA_VERSION), operationId: operationIdSchema,
+    }).strict(), dataReleaseV3RetainedEvWitnessReadinessRequestSchema.safeExtend({
+      schemaVersion: z.literal(DATA_RELEASE_V3_SCHEMA_VERSION), operationId: operationIdSchema,
+      mode: z.literal("readiness"),
+    })]));
+    if ("mode" in request) {
+      return buildReadReceipt({ operationKind: "retainedEvWitnessReadiness", operationId: request.operationId,
+        publicReleaseId: request.expectedActivePublicReleaseId, result: "retained_ev_witness_ready",
+        requestDigest: args.requestDigest, details: await readRetainedEvWitnessReadiness(ctx, request) });
+    }
+    const witness = await readRetainedEvWitness(ctx, request);
+    const receipt = await buildReadReceipt({ operationKind: "retainedEvWitness", operationId: request.operationId,
+      publicReleaseId: request.expectedActivePublicReleaseId, result: "retained_ev_witness",
+      requestDigest: args.requestDigest, details: witness });
+    if (!dataReleaseV3RetainedEvWitnessWithinByteLimit(receipt)) refuseProductionDataRelease("PUBLICATION_BODY_TOO_LARGE");
+    return receipt;
+  },
+});
 
 export const activeState = internalMutation({
   args: EXECUTION_ARGS,

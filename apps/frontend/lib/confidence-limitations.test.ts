@@ -41,4 +41,8 @@ test("limitation copy describes evidence, never profit or predicted outcomes", (
     PUBLIC_CONFIDENCE_LIMITATION_COPY.closed_range_midpoint,
     /Midpoint value ranges/,
   );
+  assert.match(
+    PUBLIC_CONFIDENCE_LIMITATION_COPY.source_age_over_60_minutes,
+    /last-known estimate remains visible/,
+  );
 });

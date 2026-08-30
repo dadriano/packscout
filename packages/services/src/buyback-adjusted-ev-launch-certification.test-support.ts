@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
   ApprovedPublicCatalogConfigurationV1,
   PackScoutBuybackEvEvidenceOutcomeV1,
+  PackScoutDisplayedEvV3,
   PublicRepackDetailV3,
   PublicRepackSummaryV3,
 } from "@packscout/contracts";
@@ -12,6 +13,7 @@ import {
   packScoutEvProjectionsAreByteEquivalentV3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
+  presentLastKnownPackScoutEvV3,
 } from "@packscout/contracts";
 import {
   BuybackEvRevisionRepository,
@@ -312,6 +314,7 @@ export async function seedBuybackEvCertificationCatalog(
         mapper_key: mapperKey,
         mapper_version: mapperVersion,
         identity_namespace_key: `dataforrest-${fixture.providerKey}-v1`,
+        records_per_request: 500,
         connection_profile_id: connection.profileId,
         connection_revision_id: connection.revisionId,
         cursor_codec_version: cursorCodecVersion,
@@ -484,7 +487,7 @@ export async function seedBuybackEvCertificationCatalog(
 /** The narrow structural surface of the task-010 presentation boundary. */
 export interface PackScoutEvPresentationBoundary {
   presentPackScoutEvV3(input: {
-    estimate: PublicRepackDetailV3["evEstimates"]["packScout"];
+    estimate: PackScoutDisplayedEvV3;
     price: PublicRepackSummaryV3["price"];
     availability: PublicRepackSummaryV3["availability"];
     repackName?: string;
@@ -937,8 +940,13 @@ export async function runBuybackEvLaunchCertificationHarness(
       );
 
       // Hop 6: rendered presentation output.
-      const rendered = input.presentation.presentPackScoutEvV3({
+      const publicPresentation = presentLastKnownPackScoutEvV3({
         estimate,
+        calculationPriceUsdMinor: fixture.packPriceMinorUnits,
+        referenceTimeIso: CERTIFICATION_TIMELINE.readAt,
+      });
+      const rendered = input.presentation.presentPackScoutEvV3({
+        estimate: publicPresentation,
         price: detail.price,
         availability: detail.availability,
         repackName: detail.name,

@@ -5,6 +5,7 @@ import {
   dataforrestIdentityNamespaceByProvider,
   emptyNormalizedProviderFacts,
   launchRecordIdScopeDeclarations,
+  providerSourceRecordsPerRequest,
   sourceAdapterManifestV1Schema,
   type LaunchProviderKey,
 } from "@packscout/contracts";
@@ -32,7 +33,7 @@ export const alternateBookmarkSourceManifest = sourceAdapterManifestV1Schema.par
   cursorCodecKey: "alternate-bookmark-codec-v1",
   operatorLabel: "Alternate bookmark fixture",
   requestBounds: {
-    pageLimit: 250,
+    pageLimit: providerSourceRecordsPerRequest.maximum,
     maximumResponseBytes: 2_097_152,
     timeoutMilliseconds: 10_000,
   },

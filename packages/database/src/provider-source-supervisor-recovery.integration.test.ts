@@ -177,6 +177,7 @@ test("takeover fences a terminal source-test/result gap without another claim", 
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         state: "running",
         requested_by_actor_key: "operator-admin",
         claim_owner: ownerKey,
@@ -487,6 +488,7 @@ test("an exact terminal request proof acknowledges a late claim renewal", async 
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         requested_by_actor_key: "operator-admin",
         queued_at: now,
       },
@@ -598,6 +600,7 @@ test("claim renewal loss atomically records one exact diagnostic before fencing"
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         requested_by_actor_key: "operator-admin",
         queued_at: now,
       },
@@ -678,6 +681,7 @@ test("a blocked claim renewal does not block supervisor heartbeat writes", async
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 500,
         requested_by_actor_key: "operator-admin",
         queued_at: now,
       },
@@ -792,6 +796,7 @@ test("a terminal source-test capture/result gap is fenced once after lease expir
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         state: "running",
         requested_by_actor_key: "operator-admin",
         claim_owner: ownerKey,
@@ -1350,6 +1355,7 @@ test("a shared episode terminalizes a permit waiter and preserves a fenced test 
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         requested_by_actor_key: "operator-admin",
         queued_at: new Date(now.getTime() - 1_000),
       },
@@ -1871,6 +1877,25 @@ test("same-revision profile recovery preserves a retained nonrevoked connection 
     });
     assert.equal(blockedRun.state, "incomplete");
     assert.equal(blockedRun.connection_revision_id, fixture.connectionRevisionId);
+    assert.equal(blockedRun.records_per_request, 500);
+
+    const admin = new ProviderSourceAdminLifecycleRepository(fixture.database);
+    const currentSource = await admin.loadSource({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+    });
+    assert.ok(currentSource);
+    await admin.reviseRecordsPerRequest({
+      organizationId: fixture.organizationId,
+      providerId: source.providerId,
+      sourceInstanceId: source.sourceInstanceId,
+      expectedSourceRevisionId: source.sourceRevisionId,
+      expectedScheduleRevisionId: currentSource.scheduleRevisionId,
+      recordsPerRequest: 875,
+      actorKey: "operator-admin",
+      effectiveAt: new Date(now.getTime() + 1),
+    });
 
     const recoveryToken = randomUUID();
     const recoveryJob = await fixture.database.source_connection_test_jobs.create({
@@ -1943,6 +1968,7 @@ test("same-revision profile recovery preserves a retained nonrevoked connection 
     assert.equal(resumed.trigger, "recovery");
     assert.equal(resumed.state, "queued");
     assert.equal(resumed.connection_revision_id, fixture.connectionRevisionId);
+    assert.equal(resumed.records_per_request, 875);
     assert.equal(resumed.requested_cursor_key, blockedRun.current_cursor_key);
     assert.equal(
       await fixture.database.import_runs.count({
@@ -1973,6 +1999,7 @@ test("a profile episode fences a terminal source-test capture before result publ
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         expected_health_generation: 0n,
+        records_per_request: 250,
         requested_by_actor_key: "operator-admin",
         queued_at: new Date(now.getTime() - 1_000),
       },

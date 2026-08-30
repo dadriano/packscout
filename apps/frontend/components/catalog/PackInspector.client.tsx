@@ -27,6 +27,7 @@ import {
 } from "@/lib/packscout-ev-presentation";
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
+import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
 import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
@@ -244,6 +245,7 @@ export function RepackInspector({
   const releaseDataAsOf = presentReleaseDataAsOf(release);
   const coverage = presentEstimateCoverage(repack.contentSummary);
   const availability = presentPackAvailability(repack.availability);
+  const providerHealth = presentProviderHealthV3(repack.providerHealth);
   const showsDesiredChase = highlightedChase !== undefined;
   const chaseValueLabel = showsDesiredChase
     ? "Desired Chase Value"
@@ -265,6 +267,8 @@ export function RepackInspector({
   const estimatedEvHint = [
     METRIC_TRUST_COPY.longRunExplanation,
     packScoutEv.freshness.calculatedLabel,
+    packScoutEv.freshness.dataAsOfLabel,
+    packScoutEv.freshness.confidenceEvaluatedLabel,
     releaseDataAsOf.label,
     ...estimateLimitations,
   ].join(" ");
@@ -418,6 +422,21 @@ export function RepackInspector({
             showProvenance={false}
             showRepackPrice={false}
           />
+          {providerHealth.state !== "healthy" ? (
+            <div
+              aria-label={providerHealth.accessibleLabel}
+              className={styles.providerHealth}
+              data-state={providerHealth.state}
+            >
+              <strong>{providerHealth.statusLabel}</strong>
+              <span>{providerHealth.statusCopy}</span>
+              {providerHealth.observedAt && providerHealth.observedLabel ? (
+                <time dateTime={providerHealth.observedAt}>
+                  {providerHealth.observedLabel}
+                </time>
+              ) : null}
+            </div>
+          ) : null}
           <div className={styles.vendorEstimate}>
             <div className={styles.sectionHeading}>
               <h3>

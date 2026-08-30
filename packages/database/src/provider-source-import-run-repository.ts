@@ -16,6 +16,7 @@ export interface ProviderSourceImportRunRecord {
   readonly trigger: "scheduled" | "manual" | "continuation" | "recovery";
   readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
   readonly requestedCursorFingerprint: string | null;
+  readonly recordsPerRequest: number;
   readonly createdAt: Date;
 }
 
@@ -66,9 +67,14 @@ function runRecord(row: Readonly<{
   trigger: "scheduled" | "manual" | "continuation" | "recovery";
   state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
   requested_cursor_fingerprint: string | null;
+  records_per_request: number | null;
   created_at: Date;
 }>): ProviderSourceImportRunRecord {
-  if (!row.source_instance_id || !row.source_revision_id) {
+  if (
+    !row.source_instance_id ||
+    !row.source_revision_id ||
+    row.records_per_request === null
+  ) {
     throw new TypeError("Source import run is missing immutable source pins.");
   }
   return {
@@ -80,6 +86,7 @@ function runRecord(row: Readonly<{
     trigger: row.trigger,
     state: row.state,
     requestedCursorFingerprint: row.requested_cursor_fingerprint,
+    recordsPerRequest: row.records_per_request,
     createdAt: row.created_at,
   };
 }
@@ -330,6 +337,27 @@ export class ProviderSourceImportRunRepository {
         return { kind: "active", run: runRecord(active) };
       }
 
+      const schedule = await transaction.provider_source_schedules.findFirst({
+        where: {
+          source_instance_id: source.id,
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+        },
+        select: { active_schedule_revision_id: true },
+      });
+      const scheduleRevision = schedule
+        ? await transaction.provider_source_schedule_revisions.findFirst({
+            where: {
+              id: schedule.active_schedule_revision_id,
+              organization_id: input.organizationId,
+              provider_id: input.providerId,
+              source_instance_id: source.id,
+            },
+            select: { records_per_request: true },
+          })
+        : null;
+      if (!scheduleRevision) return { kind: "source_unavailable" };
+
       const created = await transaction.import_runs.create({
         data: {
           id: input.runId,
@@ -360,6 +388,7 @@ export class ProviderSourceImportRunRepository {
           current_cursor_key:
             cursor.cursor_fingerprint ?? "initial",
           next_page_number: 1,
+          records_per_request: scheduleRevision.records_per_request,
           counters_json: {
             pages: 0,
             records: 0,
@@ -391,6 +420,7 @@ export class ProviderSourceImportRunRepository {
             sourceInstanceId: source.id,
             sourceRevisionId: revision.id,
             trigger: input.trigger,
+            recordsPerRequest: scheduleRevision.records_per_request,
           },
           occurred_at: transitionAt,
         },

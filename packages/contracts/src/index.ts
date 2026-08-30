@@ -48,3 +48,4 @@ export * from "./message-delivery.ts";
 export * from "./buyback-adjusted-ev-v1.ts";
 export * from "./data-release-v3.ts";
 export * from "./data-release-v3-publication-paths.ts";
+export * from "./data-release-v3-retained-ev-witness.ts";

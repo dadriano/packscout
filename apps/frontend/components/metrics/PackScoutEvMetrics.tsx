@@ -138,6 +138,11 @@ export function PackScoutEvMetrics({
           {freshness.sourceAgeLabel ? (
             <p data-delayed={freshness.delayed}>{freshness.sourceAgeLabel}</p>
           ) : null}
+          <p>
+            <time dateTime={freshness.confidenceEvaluatedAt}>
+              {freshness.confidenceEvaluatedLabel}
+            </time>
+          </p>
           {freshness.soldOutLabel && freshness.soldOutAt ? (
             <p>
               <time dateTime={freshness.soldOutAt}>{freshness.soldOutLabel}</time>

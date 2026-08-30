@@ -122,9 +122,15 @@ export const sourceKindByLaunchScope = Object.freeze({
   "trade-v1": "trade",
 } as const satisfies Readonly<Record<LaunchRecordIdScopeKey, ProviderSourceKind>>);
 
+export const providerSourceRecordsPerRequest = Object.freeze({
+  minimum: 1,
+  default: 500,
+  maximum: 5_000,
+});
+
 export const providerSourceLaunchBounds = Object.freeze({
-  pageTargetRecords: 500,
-  fallbackPageTargetRecords: 250,
+  pageTargetRecords: providerSourceRecordsPerRequest.default,
+  recordsPerRequest: providerSourceRecordsPerRequest,
   maximumResponseBytes: 8 * 1024 * 1024,
   requestTimeoutMilliseconds: 10_000,
   requestConcurrencyPerLane: 1,
@@ -204,11 +210,17 @@ export const providerSourceDiagnosticCommandCorrelationKeySchema = z
 
 export const providerSourceRequestBoundsSchema = z
   .object({
-    pageLimit: z.number().int().min(1).max(5_000),
+    pageLimit: z.number().int()
+      .min(providerSourceRecordsPerRequest.minimum)
+      .max(providerSourceRecordsPerRequest.maximum),
     maximumResponseBytes: z.number().int().min(1),
     timeoutMilliseconds: z.number().int().min(1).max(60_000),
   })
   .strict();
+
+export const providerSourceRecordsPerRequestSchema = z.number().int()
+  .min(providerSourceRecordsPerRequest.minimum)
+  .max(providerSourceRecordsPerRequest.maximum);
 
 export const normalizedContinuationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("continue") }).strict(),
@@ -521,4 +533,8 @@ export function validateSourceIntervalSeconds(value: unknown): number {
     .min(providerSourceLaunchBounds.sourceIntervalSeconds.minimum)
     .max(providerSourceLaunchBounds.sourceIntervalSeconds.maximum)
     .parse(value);
+}
+
+export function validateProviderSourceRecordsPerRequest(value: unknown): number {
+  return providerSourceRecordsPerRequestSchema.parse(value);
 }

@@ -2,9 +2,12 @@ import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
+  containsProtectedEvPublicationKeyV3,
   parsePackScoutBuybackEvTimestampMillisV1,
-  safeParsePublicRepackDetailV3,
+  publicRepackDetailV3Schema,
+  presentLastKnownPackScoutEvV3,
   type PackScoutBuybackEvPublicReasonCodeV1,
+  type PackScoutDisplayedEvV3,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import type { PackScoutBuybackEvRecomputationCommandV1 } from "./buyback-adjusted-ev-recomputation-contracts.ts";
@@ -359,7 +362,7 @@ export interface PackScoutBuybackEvSimulationScenarioResultV1 {
   readonly recomputationOutcome: "created" | "unchanged";
   readonly revisionId: string;
   readonly publicRepackId: string;
-  readonly publicState: "current" | "sold_out_historical" | "unavailable";
+  readonly publicState: PackScoutDisplayedEvV3["status"];
   readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
 }
 
@@ -640,15 +643,21 @@ export class PackScoutBuybackEvSimulator {
           scenario.scenarioKey,
         );
       }
-      const parsed = safeParsePublicRepackDetailV3(detail, frame.readAt);
-      if (!parsed.success) {
+      const containsProtectedField = containsProtectedEvPublicationKeyV3(detail);
+      const parsed = publicRepackDetailV3Schema.safeParse(detail);
+      if (containsProtectedField || !parsed.success) {
         runFailure(
           "READ_BACK_DIVERGENT",
-          `The published simulated detail failed the public contract: ${parsed.reason}.`,
+          "The published simulated detail failed the immutable V3 contract.",
           scenario.scenarioKey,
         );
       }
-      const packScout = detail.evEstimates.packScout;
+      const packScout = presentLastKnownPackScoutEvV3({
+        estimate: parsed.data.evEstimates.packScout,
+        calculationPriceUsdMinor: parsed.data.price.usdComparison.status === "available"
+          ? parsed.data.price.usdComparison.value.minorUnits : 0,
+        referenceTimeIso: frame.readAt,
+      });
       const expectation = scenario.expectation;
       const limitationCodes =
         packScout.status === "unavailable"

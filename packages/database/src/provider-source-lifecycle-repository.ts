@@ -5,6 +5,7 @@ import {
 } from "./database.ts";
 import { PersistenceError } from "./persistence-error.ts";
 import {
+  PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS,
   PROVIDER_SOURCE_SCHEDULE_BOUNDS,
   type ProviderSourceRevisionPins,
 } from "./provider-source-persistence-types.ts";
@@ -227,6 +228,7 @@ export class ProviderSourceLifecycleRepository {
     revisionNumber: number;
     scheduleRevisionNumber?: number;
     intervalSeconds?: number;
+    recordsPerRequest?: number;
     configuration: Readonly<Record<string, unknown>>;
     configurationHash: string;
     recordIdScopes: readonly string[];
@@ -235,12 +237,23 @@ export class ProviderSourceLifecycleRepository {
   }>): Promise<{ sourceInstanceId: string; sourceRevisionId: string }> {
     const intervalSeconds = input.intervalSeconds
       ?? PROVIDER_SOURCE_SCHEDULE_BOUNDS.defaultIntervalSeconds;
+    const recordsPerRequest = input.recordsPerRequest
+      ?? PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.default;
     if (
       !Number.isInteger(intervalSeconds)
       || intervalSeconds < PROVIDER_SOURCE_SCHEDULE_BOUNDS.minimumIntervalSeconds
       || intervalSeconds > PROVIDER_SOURCE_SCHEDULE_BOUNDS.maximumIntervalSeconds
     ) {
       throw new TypeError("Source interval must be an integer from 60 through 86400 seconds.");
+    }
+    if (
+      !Number.isInteger(recordsPerRequest)
+      || recordsPerRequest < PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.minimum
+      || recordsPerRequest > PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS.maximum
+    ) {
+      throw new TypeError(
+        "Source records per request must be an integer from 1 through 5000.",
+      );
     }
     if (
       input.recordIdScopes.length === 0
@@ -369,6 +382,7 @@ export class ProviderSourceLifecycleRepository {
           revision_number: input.scheduleRevisionNumber ?? 1,
           interval_seconds: intervalSeconds,
           freshness_grace_seconds: PROVIDER_SOURCE_SCHEDULE_BOUNDS.freshnessGraceSeconds,
+          records_per_request: recordsPerRequest,
           created_by_actor_key: input.actorKey,
           effective_at: input.createdAt,
           created_at: input.createdAt,
@@ -690,6 +704,27 @@ export class ProviderSourceLifecycleRepository {
           "Source activation pins changed after compatibility validation.",
         );
       }
+      const activeSchedules = await transaction.$queryRaw<
+        Array<{ recordsPerRequest: number }>
+      >(Prisma.sql`
+        select revision.records_per_request as "recordsPerRequest"
+        from public.provider_source_schedules as schedule
+        join public.provider_source_schedule_revisions as revision
+          on revision.id = schedule.active_schedule_revision_id
+         and revision.organization_id = schedule.organization_id
+         and revision.provider_id = schedule.provider_id
+         and revision.source_instance_id = schedule.source_instance_id
+        where schedule.source_instance_id = cast(${input.sourceInstanceId} as uuid)
+          and schedule.organization_id = cast(${input.organizationId} as uuid)
+          and schedule.provider_id = cast(${input.providerId} as uuid)
+      `);
+      const recordsPerRequest = activeSchedules[0]?.recordsPerRequest;
+      if (recordsPerRequest === undefined) {
+        throw new PersistenceError(
+          "SOURCE_FENCED",
+          "Source schedule changed after compatibility validation.",
+        );
+      }
 
       const profile = await transaction.source_connection_profiles.findFirst({
         where: {
@@ -709,6 +744,7 @@ export class ProviderSourceLifecycleRepository {
             source_revision_id: input.sourceRevisionId,
             connection_revision_id: input.connectionRevisionId,
             expected_health_generation: connectionRevision.health_generation,
+            records_per_request: recordsPerRequest,
           },
           orderBy: [{ created_at: "desc" }, { id: "desc" }],
           select: { id: true, state: true, created_at: true },

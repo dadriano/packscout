@@ -103,8 +103,8 @@ test("legacy policy-marker omissions deploy safely, fail closed, and can be supe
   });
 
   const unavailable = await t.query(
-    api.publicRepacksV3.getPublicShellStatusV3,
-    {},
+    internal.publicRepacksV3.getPublicShellStatusV3AtTime,
+    { currentTime: Date.now() },
   );
   expect(unavailable).toMatchObject({
     ok: false,
@@ -129,8 +129,8 @@ test("legacy policy-marker omissions deploy safely, fail closed, and can be supe
   expect(state.previousRelease?.publicReleaseId).toBe(LEGACY_RELEASE_ID);
   expect(state.previousRelease?.publicEvPolicyVersion).toBeUndefined();
   const publicStatus = await t.query(
-    api.publicRepacksV3.getPublicShellStatusV3,
-    {},
+    internal.publicRepacksV3.getPublicShellStatusV3AtTime,
+    { currentTime: Date.now() },
   );
   expect(publicStatus).toMatchObject({
     ok: true,

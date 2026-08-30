@@ -7,6 +7,7 @@ import type {
   ProviderSourceAdminCatalog,
   ProviderSourceCursorResetPreview,
   ReviseProviderSourceIntervalRequest,
+  ReviseProviderSourceRecordsPerRequestRequest,
   RotateSourceConnectionCredentialRequest,
 } from "@packscout/contracts";
 import { requestJson } from "./client";
@@ -175,6 +176,20 @@ export function reviseProviderSourceInterval(
     scheduleRevisionId: string;
     audit: ProviderSourceAdminAuditReceipt;
   }>(sourcePath(providerId, sourceInstanceId, "interval"), {
+    method: "POST",
+    json: input,
+  });
+}
+
+export function reviseProviderSourceRecordsPerRequest(
+  providerId: string,
+  sourceInstanceId: string,
+  input: ReviseProviderSourceRecordsPerRequestRequest,
+) {
+  return requestJson<{
+    scheduleRevisionId: string;
+    audit: ProviderSourceAdminAuditReceipt;
+  }>(sourcePath(providerId, sourceInstanceId, "records-per-request"), {
     method: "POST",
     json: input,
   });

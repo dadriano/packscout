@@ -19,6 +19,7 @@ import {
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
+import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -105,6 +106,7 @@ function RepackRow({
     : null;
   const actions = publicRowActions(repack);
   const availability = presentPackAvailability(repack.availability);
+  const providerHealth = presentProviderHealthV3(repack.providerHealth);
   const showStatusNote = estimate.status !== "current";
 
   return (
@@ -158,9 +160,31 @@ function RepackRow({
         <MetricValue compact metric={estimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <span title={estimate.confidence.accessibleLabel}>
+        <span
+          aria-label={estimate.confidence.accessibleLabel}
+          title={estimate.confidence.accessibleLabel}
+        >
           {estimate.confidence.displayValue}
         </span>
+        {estimate.status === "last_known" &&
+        estimate.freshness.sourceAgeLabel ? (
+          <span className={styles.evidenceNote}>
+            {estimate.freshness.sourceAgeLabel}
+          </span>
+        ) : null}
+        {estimate.status === "last_known" && estimate.freshness.dataAsOf ? (
+          <time
+            className={styles.evidenceNote}
+            dateTime={estimate.freshness.dataAsOf}
+          >
+            {estimate.freshness.dataAsOfLabel}
+          </time>
+        ) : null}
+        {providerHealth.state !== "healthy" ? (
+          <span className={styles.providerWarning}>
+            {providerHealth.statusCopy}
+          </span>
+        ) : null}
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
@@ -258,7 +282,7 @@ export function AllRepacksTable({
           <p className={styles.eyebrow} id={contextId}>
             {desiredCollectibleIdentity
               ? `Exact chase matches · ${desiredCollectibleIdentity}`
-              : "Current repack data"}
+              : "Published repack data"}
           </p>
           <h2 className={styles.title} id="all-repacks-table-title">All repacks</h2>
         </div>

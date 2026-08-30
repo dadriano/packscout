@@ -18,7 +18,7 @@ export const PUBLIC_CONFIDENCE_LIMITATION_COPY = Object.freeze({
   source_age_over_30_through_60_minutes:
     "Source data delayed (30–60 minutes old).",
   source_age_over_60_minutes:
-    "Source data is over 60 minutes old; confidence continues to decay.",
+    "Source evidence is over 60 minutes old; confidence continues to decay while the last-known estimate remains visible.",
   latest_calculation_unavailable:
     "A fresh supported calculation is unavailable; previous values are retained.",
 } satisfies Readonly<Record<PackScoutConfidenceLimitationCode, string>>);

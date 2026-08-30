@@ -14,7 +14,7 @@ test("overview keeps a truthful inspector shell while selection loads", () => {
   );
   assert.match(
     source,
-    /Select an opportunity to inspect its current evidence\./,
+    /Select an opportunity to inspect its published evidence\./,
   );
 });
 

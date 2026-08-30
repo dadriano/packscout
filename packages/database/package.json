@@ -11,7 +11,7 @@
   "scripts": {
     "lint": "eslint src prisma",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "test": "node ../../scripts/run-tests.mjs database",
     "prisma:validate": "npm run prisma:validate:central && npm run prisma:validate:provider",
     "prisma:validate:central": "PACKSCOUT_CENTRAL_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma validate --schema prisma/central/schema.prisma",
     "prisma:validate:provider": "PACKSCOUT_PROVIDER_DATABASE_URL=postgresql://packscout:packscout@127.0.0.1:1/packscout_schema_tooling prisma validate --schema prisma/provider/schema.prisma",

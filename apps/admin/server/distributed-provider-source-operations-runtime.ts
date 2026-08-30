@@ -54,7 +54,10 @@ function safeCode(value: string | null, fallback: string): string | null {
   return safeCodePattern.test(value) ? value : fallback;
 }
 
-function runSummary(run: AdminLocalRunRecord | null) {
+function runSummary(
+  run: AdminLocalRunRecord | null,
+  currentProfile: Readonly<{ configId: string; pageLimit: number }> | null,
+) {
   if (run === null) return null;
   return {
     id: run.id,
@@ -66,6 +69,11 @@ function runSummary(run: AdminLocalRunRecord | null) {
     lastProgressAt: (run.lastProgressAt ?? run.requestedAt).toISOString(),
     reachedHead: run.reachedSourceHead,
     failureCode: safeCode(run.failureCode, "IMPORT_FAILURE_UNAVAILABLE"),
+    // Historical configurations may have different immutable profiles. Do not
+    // report the current limit as the limit used by an older run.
+    recordsPerRequest: run.configVersionId === currentProfile?.configId
+      ? currentProfile.pageLimit
+      : null,
   };
 }
 
@@ -184,6 +192,9 @@ function configuredSource(input: Readonly<{
     ? input.evidence?.runs.find((run) => run.id === overview.activeRun?.id) ?? null
     : null;
   const elapsed = elapsedMilliseconds(latest, input.now);
+  const currentProfile = config && manifest
+    ? { configId: config.id, pageLimit: manifest.requestBounds.pageLimit }
+    : null;
   const totalRecords = latest === null
     ? 0
     : latest.catalogCount + latest.pullCount + latest.marketEventCount;
@@ -208,6 +219,8 @@ function configuredSource(input: Readonly<{
           ),
           lifecycle: sourceLifecycle(input.provider),
           pauseRequested: false,
+          recordsPerRequest: manifest!.requestBounds.pageLimit,
+          requestSizePolicy: "adapter_profile",
           configuration: {
             validated: true,
             fields: [
@@ -277,8 +290,8 @@ function configuredSource(input: Readonly<{
       openQuarantine: overview?.openQuarantineCount ?? 0,
       total: { kind: "unknown", label: "Total unknown" },
     },
-    activeRun: runSummary(active),
-    latestRun: runSummary(latest),
+    activeRun: runSummary(active, currentProfile),
+    latestRun: runSummary(latest, currentProfile),
     connectionImpact: {
       state: "none",
       safeCode: null,
@@ -463,7 +476,10 @@ export function createDistributedProviderSourceOperationsRuntime(
         refreshedAt: now().toISOString(),
         connection: null,
         source: view.source,
-        runHistory: (view.evidence?.runs ?? []).map(runSummary),
+        runHistory: (view.evidence?.runs ?? []).map((run) => runSummary(run, {
+          configId: view.source.source!.sourceRevisionId,
+          pageLimit: view.source.source!.recordsPerRequest,
+        })),
         pageProgress: pages,
         sourceTest: null,
       });

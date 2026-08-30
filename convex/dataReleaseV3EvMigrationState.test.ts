@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { buildV3Detail, V3_FIXTURE_NOW } from "./dataReleaseV3Fixture.test-support";
 import { activateRetentionRelease, removeDerivedRetentionForLegacyTest, retentionReleaseId,
@@ -8,6 +8,8 @@ import { activateRetentionRelease, removeDerivedRetentionForLegacyTest, retentio
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+beforeEach(() => vi.stubEnv("PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY", "packscout-ev-migration-cursor-test-key-000001"));
+afterEach(() => vi.unstubAllEnvs());
 const migration = (t: RetentionTest) => t.query(internal.dataReleaseV3EvMigrationState.migrationState, {});
 
 async function clearFacts(t: RetentionTest) {
@@ -44,10 +46,10 @@ async function initialize(t: RetentionTest, number: number) {
 
 async function publicViews(t: RetentionTest, number: number, currentTime = V3_FIXTURE_NOW + 86_400_000) {
   return Promise.all([
-    t.query(api.publicRepacksV3.listPublicRepacksV3, { currentTime }),
-    t.query(api.publicRepacksV3.getPublicRepackV3, { publicReleaseId: retentionReleaseId(number),
+    t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, { currentTime }),
+    t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, { publicReleaseId: retentionReleaseId(number),
       publicRepackId: buildV3Detail().publicRepackId, currentTime }),
-    t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime }),
+    t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, { currentTime }),
   ]);
 }
 

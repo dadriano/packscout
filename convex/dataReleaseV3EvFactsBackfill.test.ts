@@ -50,7 +50,7 @@ describe("one-time bounded compact EV migration", () => {
     await activateRetentionRelease(t, plan, null);
     await simulateLegacyFacts(t);
     const before = await immutableReleases(t);
-    const legacy = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const legacy = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 });
     expect(legacy.ok).toBe(true);
     const initial = await progress(t);
@@ -58,12 +58,12 @@ describe("one-time bounded compact EV migration", () => {
     const first = await page(t, initial);
     expect(first).toMatchObject({ complete: false, count: 32 });
     expect(await page(t, initial)).toEqual(first);
-    expect(await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    expect(await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 })).toEqual(legacy);
     const second = await page(t, await progress(t));
     expect(second).toMatchObject({ complete: false, count: 64 });
     expect(await page(t, await progress(t))).toMatchObject({ complete: true, count: 65 });
-    const ready = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const ready = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 }) as {
         ok: boolean; data: { opportunities: { evEstimates: { packScout: { status: string } } }[] } };
     expect(ready.ok).toBe(true);
@@ -78,7 +78,7 @@ describe("one-time bounded compact EV migration", () => {
       expectedActivePublicReleaseId: status.expectedActivePublicReleaseId,
       expectedPreviousPublicReleaseId: status.expectedPreviousPublicReleaseId,
     });
-    const migrated = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+    const migrated = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime,
       { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 });
     expect(migrated).toMatchObject({ ok: true, data: { opportunities: [
       { evEstimates: { packScout: { status: "last_known" } } },
@@ -143,12 +143,12 @@ describe("one-time bounded compact EV migration", () => {
     expect(await t.mutation(internal.dataReleaseV3EvFactsBackfill.initializeActiveRetention, args)).toEqual(first);
     expect(await t.query(internal.dataReleaseV3Lifecycle.activeState, {})).toEqual(pointerBefore);
     expect(await immutableReleases(t)).toEqual(immutableBefore);
-    const dashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: V3_FIXTURE_NOW }) as {
+    const dashboard = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, { currentTime: V3_FIXTURE_NOW }) as {
       data: { opportunities: { evEstimates: { packScout: { status: string } } }[] } };
     expect(dashboard.data.opportunities[0]!.evEstimates.packScout.status).toBe("last_known");
     await t.mutation(internal.dataReleaseV3Lifecycle.rollback,
       await v3Body(v3RollbackRequest(retentionReleaseId(2), retentionReleaseId(1))));
-    const afterRollback = await t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: V3_FIXTURE_NOW }) as {
+    const afterRollback = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, { currentTime: V3_FIXTURE_NOW }) as {
       data: { opportunities: unknown[] } };
     expect(afterRollback.data.opportunities).toHaveLength(1);
   });
@@ -178,7 +178,7 @@ describe("one-time bounded compact EV migration", () => {
       const facts = await ctx.db.query("dataReleaseV3EvFacts").unique();
       await ctx.db.patch("dataReleaseV3EvFacts", facts!._id, { vendorKey: "wrong_provider" });
     });
-    expect(await t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: V3_FIXTURE_NOW }))
+    expect(await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, { currentTime: V3_FIXTURE_NOW }))
       .toMatchObject({ ok: false, code: "RELEASE_UNAVAILABLE" });
   });
 });

@@ -108,11 +108,10 @@ test("startup failures are stable and do not expose connection details", async (
 /**
  * Migrations that must each independently gate startup.
  *
- * The buyback-adjusted EV migration sits between two of the migrations the
- * readiness pins already covered, and every one of them is checked on its own:
- * corrupting them as a group would still pass if a pin were silently dropped,
- * so a pin that stops being enforced has to fail here rather than hide behind a
- * sibling that still fails closed.
+ * Every current feature migration is checked on its own: corrupting them as a
+ * group would still pass if a pin were silently dropped, so a pin that stops
+ * being enforced has to fail here rather than hide behind a sibling that still
+ * fails closed.
  */
 const PINNED_MIGRATIONS = [
   "20260819010000_buyback_ev_revisions",
@@ -120,6 +119,8 @@ const PINNED_MIGRATIONS = [
   "20260825041000_raise_provider_source_raw_response_limit",
   "20260826005000_source_relationship_confirmations",
   "20260826010000_heat_relationship_causality",
+  "20260826010000_provider_source_records_per_request",
+  "20260827010000_provider_source_platform_request_lanes",
   "20260827020000_buyback_ev_provider_source_origin",
 ] as const;
 

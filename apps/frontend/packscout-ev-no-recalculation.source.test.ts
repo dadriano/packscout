@@ -103,7 +103,9 @@ test("public surfaces age confidence through the shared client store only", () =
   ]) {
     const source = readFileSync(path.join(frontendRoot, name), "utf8");
     assert.match(source, /useClockBoundPackScoutEv/, name);
-    assert.doesNotMatch(source, /Date\.now|setInterval/, name);
+    assert.doesNotMatch(source, /Date\.now|setInterval|setTimeout/, name);
+    assert.doesNotMatch(source, /packScoutEvPresentation|safePresentPackScoutPublicEvV3/, name);
+    assert.doesNotMatch(source, /scoreBasisPoints\s*[+*/-]/, name);
     // No passive clock-tick live regions around EV state.
     assert.doesNotMatch(source, /aria-live="assertive"/, name);
   }
@@ -118,5 +120,7 @@ test("the confidence clock is hydration-safe and delegates decay to the contract
   assert.match(source, /getServerSnapshot/);
   assert.match(source, /getServerSnapshot: \(\) => referenceMillis/);
   assert.match(source, /presentLastKnownPackScoutEvV3/);
+  assert.match(source, /performance\.now/);
+  assert.doesNotMatch(source, /Date\.now/);
   assert.doesNotMatch(source, /aria-live/);
 });

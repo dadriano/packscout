@@ -6,6 +6,7 @@ import type {
 } from "@packscout/contracts";
 import {
   buildV3CurrentEv,
+  buildV3LastKnownEv,
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
@@ -37,13 +38,29 @@ test("presents the three nonpositive-policy overview KPIs", () => {
   );
   assert.equal(
     presentation[1]?.helper,
-    "Median EV % · 500 high confidence",
+    "Known current + last-known EV · 500 high confidence",
   );
   assert.equal(
     presentation[1]?.accessibleLabel,
-    "Median EV %: -1.80%. Negative.",
+    "Median EV %: -1.80%. Negative. Includes known current and last-known estimates. 500 high-confidence repacks.",
   );
   assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
+});
+
+test("overview opportunity rows retain server-presented last-known EV", () => {
+  const repack = buildV3ViewSummary({
+    evEstimates: { ...buildV3ViewSummary().evEstimates, packScout: buildV3LastKnownEv() },
+  });
+  const row = presentOpportunityRow(repack, 1);
+
+  assert.equal(row.packScoutEv.status, "last_known");
+  assert.equal(row.packScoutEv.statusLabel, "Last-known estimate");
+  assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
+  assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 50%");
+  assert.match(
+    row.packScoutEv.freshness.dataAsOfLabel,
+    /^Source evidence last observed /,
+  );
 });
 
 test("presents server-ranked opportunities without re-sorting or recomputing", () => {
@@ -78,7 +95,6 @@ test("a clock-resolved estimate retains its values in the server-ranked row", ()
     "Source data over 60 minutes old; last known values retained",
   );
 });
-
 test("keeps valid overview selection and otherwise falls back deterministically", () => {
   const opportunities = [
     { publicRepackId: "first" },

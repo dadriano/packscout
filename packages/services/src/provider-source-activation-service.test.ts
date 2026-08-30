@@ -529,8 +529,8 @@ test("activation rejects adapter request bounds outside the launch envelope", as
     ...dataforrestEventsV1SourceAdapterManifest,
     requestBounds: {
       ...dataforrestEventsV1SourceAdapterManifest.requestBounds,
-      pageLimit:
-        dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit + 1,
+      timeoutMilliseconds:
+        dataforrestEventsV1SourceAdapterManifest.requestBounds.timeoutMilliseconds + 1,
     },
   };
   const { service } = buildService({

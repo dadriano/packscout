@@ -80,6 +80,7 @@ test("source-owned run pins survive queued and running progress without repinnin
         mapper_key: source.mapperKey,
         mapper_version: "1",
         identity_namespace_key: source.identityNamespaceKey,
+        records_per_request: 250,
         connection_profile_id: fixture.connectionProfileId,
         connection_revision_id: fixture.connectionRevisionId,
         cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,
@@ -112,6 +113,8 @@ test("source-owned run pins survive queued and running progress without repinnin
     };
 
     await assertRepinRejected(revisionTwoPins);
+
+    await assertRepinRejected({ records_per_request: 500 });
 
     const startedAt = new Date(ACCEPTANCE_CREATED_AT.getTime() + 2_000);
     const leaseToken = "75000000-0000-4000-8000-000000000001";
@@ -202,6 +205,7 @@ test("source-owned run pins survive queued and running progress without repinnin
       ACCEPTANCE_NORMALIZED_CONTRACT_VERSION,
     );
     assert.equal(finished.requested_cursor_key, "initial");
+    assert.equal(finished.records_per_request, 250);
 
     const pinFunction = await fixture.database.$queryRaw<
       Array<{ definition: string }>
@@ -221,6 +225,7 @@ test("source-owned run pins survive queued and running progress without repinnin
       "mapper_key",
       "mapper_version",
       "identity_namespace_key",
+      "records_per_request",
       "connection_profile_id",
       "connection_revision_id",
       "cursor_codec_version",
@@ -231,7 +236,7 @@ test("source-owned run pins survive queued and running progress without repinnin
     ]) {
       assert.match(
         pinFunction[0]?.definition ?? "",
-        new RegExp(`"${pin}"`, "u"),
+        new RegExp(`\\b${pin}\\b`, "u"),
       );
     }
 

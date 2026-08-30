@@ -99,7 +99,7 @@ test("an open page updates confidence every minute without changing the server s
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: startedAt });
   const page = stubOpenPage();
   t.after(() => page.restore());
-  const store = createPackScoutEvClockStore(startedAt);
+  const store = createPackScoutEvClockStore(startedAt, () => Date.now());
   assert.equal(store.getServerSnapshot(), startedAt);
   assert.equal(store.getSnapshot(), startedAt);
   let notifications = 0;
@@ -125,18 +125,35 @@ test("clock snapshots never regress behind the served confidence clock", (t) => 
   assert.equal(store.getSnapshot(), deadline);
 });
 
-test("a browser clock rollback cannot increase confidence after it has aged", (t) => {
+test("browser wall-clock skew cannot age or rejuvenate the trusted served confidence", (t) => {
   const reference = Date.parse(FIXTURE_OBSERVED_AT);
-  const forward = deadline + 90 * 60_000;
-  t.mock.timers.enable({ apis: ["Date"], now: forward });
-  const store = createPackScoutEvClockStore(reference);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2099-01-01T00:00:00.000Z") });
+  let elapsed = 0;
+  const store = createPackScoutEvClockStore(reference, () => elapsed);
   const current = buildV3CurrentEv(8_500);
+  assert.equal(store.getSnapshot(), reference);
+  assert.equal(store.getServerSnapshot(), reference);
+  elapsed = 150 * 60_000;
   const aged = resolvePackScoutEvV3AtTime(current, price, store.getSnapshot()!);
-  assert.equal(store.getSnapshot(), forward);
-  t.mock.timers.setTime(deadline + 30 * 60_000);
-  assert.equal(store.getSnapshot(), forward);
+  assert.equal(store.getSnapshot(), reference + elapsed);
+  t.mock.timers.setTime(Date.parse("1999-01-01T00:00:00.000Z"));
+  assert.equal(store.getSnapshot(), reference + elapsed);
   assert.equal(store.getServerSnapshot(), reference);
   assert.deepEqual(resolvePackScoutEvV3AtTime(current, price, store.getSnapshot()!), aged);
+  elapsed = 180 * 60_000;
+  const later = resolvePackScoutEvV3AtTime(aged, price, store.getSnapshot()!);
+  assert.equal(later.confidence?.scoreBasisPoints, 2_500);
+  assert.deepEqual(later.metrics, current.metrics);
+});
+
+test("a monotonic clock discontinuity cannot move the snapshot backwards", () => {
+  const reference = Date.parse(FIXTURE_OBSERVED_AT);
+  let elapsed = 0;
+  const store = createPackScoutEvClockStore(reference, () => elapsed);
+  elapsed = 120_000;
+  assert.equal(store.getSnapshot(), reference + 120_000);
+  elapsed = 30_000;
+  assert.equal(store.getSnapshot(), reference + 120_000);
 });
 
 test("a pack without previous values schedules no confidence timer", (t) => {

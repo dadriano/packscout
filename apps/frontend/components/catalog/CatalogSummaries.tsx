@@ -30,7 +30,7 @@ export function CatalogSummaries({
           <h2 className={styles.heading} id={headingId}>
             {title}
           </h2>
-          <p className={styles.context}>Current catalog</p>
+          <p className={styles.context}>Published catalog</p>
         </div>
         <div aria-hidden="true" className={styles.columns}>
           <span>Repacks</span>

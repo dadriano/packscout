@@ -198,6 +198,7 @@ async function seedUpgradeFixture(
       requested_cursor: null,
       requested_cursor_fingerprint: null,
       requested_cursor_key: "initial",
+      records_per_request: 500,
       current_cursor: null,
       current_cursor_fingerprint: null,
       current_cursor_key: "initial",
@@ -399,39 +400,46 @@ test("request-lane migration replaces only ephemeral capacity state", { concurre
       "source_supervisor_request_lane_states_scope_unique",
     ]);
 
-    await assert.rejects(
-      harness.database.query(`
+    // Keep expected statement errors on an owned client: Pool.query removes an
+    // errored client before its socket closes, which can race database teardown.
+    const constraintClient = await harness.database.connect();
+    try {
+      await assert.rejects(
+        constraintClient.query(`
+          insert into public.source_supervisor_request_lane_states (
+            supervisor_epoch_id, organization_id, connection_profile_id,
+            request_scope, provider_id, lane_key, approved_request_limit,
+            updated_at
+          ) values ($1, $2, $3, 'platform', $4::uuid, ($4::uuid)::text, 3,
+                    clock_timestamp())
+        `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]),
+        /capacity_check|check constraint/i,
+      );
+      await constraintClient.query(`
         insert into public.source_supervisor_request_lane_states (
           supervisor_epoch_id, organization_id, connection_profile_id,
           request_scope, provider_id, lane_key, approved_request_limit,
-          updated_at
-        ) values ($1, $2, $3, 'platform', $4::uuid, ($4::uuid)::text, 3,
-                  clock_timestamp())
-      `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]),
-      /capacity_check|check constraint/i,
-    );
-    await harness.database.query(`
-      insert into public.source_supervisor_request_lane_states (
-        supervisor_epoch_id, organization_id, connection_profile_id,
-        request_scope, provider_id, lane_key, approved_request_limit,
-        active_request_permits, waiting_operations, updated_at
-      ) values
-        ($1, $2, $3, 'platform', $4::uuid, ($4::uuid)::text, 1, 1, 0,
-         clock_timestamp()),
-        ($1, $2, $3, 'connection_test', null, 'connection_test', 2, 0, 1,
-         clock_timestamp())
-    `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]);
-    await assert.rejects(
-      harness.database.query(`
-        insert into public.source_supervisor_request_lane_states (
-          supervisor_epoch_id, organization_id, connection_profile_id,
-          request_scope, provider_id, lane_key, approved_request_limit,
-          updated_at
-        ) values ($1, $2, $3, 'platform', $4::uuid, 'wrong-lane', 2,
-                  clock_timestamp())
-      `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]),
-      /identity_check|check constraint/i,
-    );
+          active_request_permits, waiting_operations, updated_at
+        ) values
+          ($1, $2, $3, 'platform', $4::uuid, ($4::uuid)::text, 1, 1, 0,
+           clock_timestamp()),
+          ($1, $2, $3, 'connection_test', null, 'connection_test', 2, 0, 1,
+           clock_timestamp())
+      `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]);
+      await assert.rejects(
+        constraintClient.query(`
+          insert into public.source_supervisor_request_lane_states (
+            supervisor_epoch_id, organization_id, connection_profile_id,
+            request_scope, provider_id, lane_key, approved_request_limit,
+            updated_at
+          ) values ($1, $2, $3, 'platform', $4::uuid, 'wrong-lane', 2,
+                    clock_timestamp())
+        `, [ids.epoch, ids.organization, fixture.connectionProfileId, ids.provider]),
+        /identity_check|check constraint/i,
+      );
+    } finally {
+      constraintClient.release();
+    }
   } finally {
     await harness.close();
   }

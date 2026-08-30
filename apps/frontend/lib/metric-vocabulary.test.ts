@@ -10,6 +10,7 @@ import {
   getPublicReasonCopy,
   METRIC_TRUST_COPY,
   PUBLIC_REASON_COPY,
+  SOURCE_AGE_COPY,
 } from "./metric-vocabulary";
 
 /**
@@ -170,7 +171,7 @@ test("maps the bounded v3 reason vocabulary to stable public copy", () => {
   );
   assert.equal(
     getPublicReasonCopy("SOURCE_DATA_STALE"),
-    "Source data is older than 60 minutes.",
+    "Unavailable: supported source evidence was not retained.",
   );
 
   const reasons = Object.keys(PUBLIC_REASON_COPY) as Array<
@@ -215,8 +216,16 @@ test("keeps the required source, advice, and bounded-summary language canonical"
     unavailable: "Unavailable",
   });
   assert.equal(ESTIMATE_STATUS_COPY.sold_out_historical, "Sold out · historical estimate");
-  assert.equal(ESTIMATE_STATUS_COPY.last_known, "Last known estimate");
+  assert.equal(ESTIMATE_STATUS_COPY.last_known, "Last-known estimate");
   assert.equal(ESTIMATE_STATUS_COPY.simulated, "Simulated data");
+  assert.match(
+    SOURCE_AGE_COPY.delayed_over_60_minutes,
+    /last known values retained/,
+  );
+  assert.match(
+    METRIC_TRUST_COPY.unavailableExplanation,
+    /Age alone does not make an estimate unavailable/,
+  );
 });
 
 test("metric trust language is complete and carries the disclaimer", () => {

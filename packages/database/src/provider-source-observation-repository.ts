@@ -13,11 +13,28 @@ import { PersistenceError } from "./persistence-error.ts";
 
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/;
 const SAFE_REASON_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9:._-]{0,254}[a-z0-9])?$/;
+const MAXIMUM_ROWS_PER_WRITE = 500;
 
 function asJson(
   value: NormalizedObservationSemanticContent,
 ): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function jsonValue(value: unknown): Prisma.Sql {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError("Persistence JSON values must be serializable.");
+  }
+  return Prisma.sql`cast(${serialized} as jsonb)`;
+}
+
+function batches<T>(values: readonly T[]): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += MAXIMUM_ROWS_PER_WRITE) {
+    result.push(values.slice(index, index + MAXIMUM_ROWS_PER_WRITE));
+  }
+  return result;
 }
 
 export type LaunchSourceRecordMeaning =
@@ -168,6 +185,73 @@ export type UpsertSemanticObservationResult =
       reasonCode: "source_identity_conflict";
     }>;
 
+interface PreparedSemanticObservation {
+  readonly input: UpsertSemanticObservationInput;
+  readonly normalizedContent: NormalizedObservationSemanticContent;
+  readonly normalizedContentHash: string;
+}
+
+function prepareSemanticObservation(
+  input: UpsertSemanticObservationInput,
+): PreparedSemanticObservation {
+  const expectedMeaning = resolveLaunchSourceRecordMeaning(
+    input.recordIdScopeKey,
+  );
+  if (
+    input.recordKind !== expectedMeaning.recordKind ||
+    input.recordDiscriminator !== expectedMeaning.recordDiscriminator
+  ) {
+    throw new TypeError(
+      `Record-ID scope ${input.recordIdScopeKey} requires ${expectedMeaning.recordKind}/${expectedMeaning.recordDiscriminator}.`,
+    );
+  }
+  const versionPins = providerSourceObservationVersionPins(
+    input.normalizedContractVersion,
+  );
+  if (input.hashVersion !== versionPins.hashVersion) {
+    throw new TypeError(
+      "Normalized observation hash version is unsupported.",
+    );
+  }
+  if (!SHA_256_PATTERN.test(input.normalizedContentHash)) {
+    throw new TypeError(
+      "Normalized content hash must be a lowercase SHA-256 digest.",
+    );
+  }
+  const normalizedContent = parseBoundSemanticContent(input, expectedMeaning);
+  const normalizedContentHash =
+    hashNormalizedObservationSemanticContent(normalizedContent);
+  if (input.normalizedContentHash !== normalizedContentHash) {
+    throw new TypeError(
+      "Normalized content hash does not match canonical semantic content.",
+    );
+  }
+  return { input, normalizedContent, normalizedContentHash };
+}
+
+function sourceRecordIdentityKey(input: Readonly<{
+  recordIdScopeKey: string;
+  providerRecordId: string;
+}>): string {
+  return JSON.stringify([input.recordIdScopeKey, input.providerRecordId]);
+}
+
+function semanticObservationIdentityKey(input: Readonly<{
+  sourceRecordId: string;
+  effectiveSourceTime: Date;
+  normalizedContractVersion: string;
+  hashVersion: string;
+  normalizedContentHash: string;
+}>): string {
+  return JSON.stringify([
+    input.sourceRecordId,
+    input.effectiveSourceTime.toISOString(),
+    input.normalizedContractVersion,
+    input.hashVersion,
+    input.normalizedContentHash,
+  ]);
+}
+
 export type SourceDeliveryDisposition =
   "inserted" | "revised" | "duplicate" | "quarantined";
 
@@ -211,6 +295,11 @@ export type RecordDeliveryOccurrenceInput = Readonly<{
 }> &
   SourceDeliveryDecision;
 
+export interface RecordedDeliveryOccurrence {
+  readonly recordIndex: number;
+  readonly occurrenceId: bigint;
+}
+
 export class ProviderSourceObservationRepository {
   /**
    * Persists only stable identity and semantic meaning. The caller owns the
@@ -230,38 +319,8 @@ export class ProviderSourceObservationRepository {
       skipSourceRevisionFenceCheck?: boolean;
     }>,
   ): Promise<UpsertSemanticObservationResult> {
-    const expectedMeaning = resolveLaunchSourceRecordMeaning(
-      input.recordIdScopeKey,
-    );
-    if (
-      input.recordKind !== expectedMeaning.recordKind ||
-      input.recordDiscriminator !== expectedMeaning.recordDiscriminator
-    ) {
-      throw new TypeError(
-        `Record-ID scope ${input.recordIdScopeKey} requires ${expectedMeaning.recordKind}/${expectedMeaning.recordDiscriminator}.`,
-      );
-    }
-    const versionPins = providerSourceObservationVersionPins(
-      input.normalizedContractVersion,
-    );
-    if (input.hashVersion !== versionPins.hashVersion) {
-      throw new TypeError(
-        "Normalized observation hash version is unsupported.",
-      );
-    }
-    if (!SHA_256_PATTERN.test(input.normalizedContentHash)) {
-      throw new TypeError(
-        "Normalized content hash must be a lowercase SHA-256 digest.",
-      );
-    }
-    const normalizedContent = parseBoundSemanticContent(input, expectedMeaning);
-    const normalizedContentHash =
-      hashNormalizedObservationSemanticContent(normalizedContent);
-    if (input.normalizedContentHash !== normalizedContentHash) {
-      throw new TypeError(
-        "Normalized content hash does not match canonical semantic content.",
-      );
-    }
+    const { normalizedContent, normalizedContentHash } =
+      prepareSemanticObservation(input);
 
     if (options?.skipSourceRevisionFenceCheck !== true) {
       const source = await transaction.provider_source_instances.findFirst({
@@ -344,6 +403,219 @@ export class ProviderSourceObservationRepository {
     };
   }
 
+  /**
+   * Resolves a complete page of stable identities and semantic observations in
+   * bounded statements. Validation finishes before the first database write,
+   * and result order exactly matches input order (including duplicates).
+   */
+  async upsertSemanticObservationsInTransaction(
+    transaction: PackscoutTransactionClient,
+    inputs: readonly UpsertSemanticObservationInput[],
+  ): Promise<readonly UpsertSemanticObservationResult[]> {
+    const prepared = inputs.map(prepareSemanticObservation);
+    if (prepared.length === 0) return [];
+    const scope = prepared[0]!.input;
+    if (
+      prepared.some(({ input }) =>
+        input.organizationId !== scope.organizationId ||
+        input.providerId !== scope.providerId ||
+        input.sourceInstanceId !== scope.sourceInstanceId ||
+        input.sourceRevisionId !== scope.sourceRevisionId
+      )
+    ) {
+      throw new TypeError(
+        "Semantic observation batches cannot span tenant, provider, source, or revision scopes.",
+      );
+    }
+
+    const source = await transaction.provider_source_instances.findFirst({
+      where: {
+        id: scope.sourceInstanceId,
+        organization_id: scope.organizationId,
+        provider_id: scope.providerId,
+      },
+      select: { active_revision_id: true },
+    });
+    if (!source || source.active_revision_id !== scope.sourceRevisionId) {
+      throw new PersistenceError(
+        "SOURCE_FENCED",
+        "Observation source revision is not current.",
+      );
+    }
+
+    const uniqueIdentityByKey = new Map<string, UpsertSemanticObservationInput>();
+    for (const { input } of prepared) {
+      const key = sourceRecordIdentityKey(input);
+      if (!uniqueIdentityByKey.has(key)) uniqueIdentityByKey.set(key, input);
+    }
+    const uniqueIdentities = [...uniqueIdentityByKey.values()];
+    for (const batch of batches(uniqueIdentities)) {
+      await transaction.source_record_identities.createMany({
+        data: batch.map((input) => ({
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          source_instance_id: input.sourceInstanceId,
+          record_id_scope_key: input.recordIdScopeKey,
+          provider_record_id: input.providerRecordId,
+          record_kind: input.recordKind,
+          record_discriminator: input.recordDiscriminator,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    const sourceRecordsByIdentity = new Map<string, Readonly<{
+      id: string;
+      record_kind: "catalog" | "pull" | "trade";
+      record_discriminator: string;
+    }>>();
+    for (const batch of batches(uniqueIdentities)) {
+      const rows = await transaction.source_record_identities.findMany({
+        where: {
+          organization_id: scope.organizationId,
+          source_instance_id: scope.sourceInstanceId,
+          OR: batch.map((input) => ({
+            record_id_scope_key: input.recordIdScopeKey,
+            provider_record_id: input.providerRecordId,
+          })),
+        },
+        select: {
+          id: true,
+          record_id_scope_key: true,
+          provider_record_id: true,
+          record_kind: true,
+          record_discriminator: true,
+        },
+      });
+      for (const row of rows) {
+        sourceRecordsByIdentity.set(sourceRecordIdentityKey({
+          recordIdScopeKey: row.record_id_scope_key,
+          providerRecordId: row.provider_record_id,
+        }), row);
+      }
+    }
+
+    const resolved = prepared.map((item) => {
+      const sourceRecord = sourceRecordsByIdentity.get(
+        sourceRecordIdentityKey(item.input),
+      );
+      if (!sourceRecord) {
+        throw new Error("Source record identity insert returned no identity.");
+      }
+      return { ...item, sourceRecord };
+    });
+    const ready = resolved.filter(({ input, sourceRecord }) =>
+      sourceRecord.record_kind === input.recordKind &&
+      sourceRecord.record_discriminator === input.recordDiscriminator
+    );
+    const createdSemanticKeys = new Set<string>();
+    for (const batch of batches(ready)) {
+      const rows = batch.map(({ input, normalizedContent, normalizedContentHash, sourceRecord }) =>
+        Prisma.sql`(
+          ${input.organizationId}::uuid,
+          ${sourceRecord.id}::uuid,
+          ${input.effectiveSourceTime},
+          ${input.normalizedContractVersion},
+          ${input.hashVersion},
+          ${normalizedContentHash},
+          ${jsonValue(normalizedContent)}
+        )`
+      );
+      const inserted = await transaction.$queryRaw<Array<{
+        sourceRecordId: string;
+        effectiveSourceTime: Date;
+        normalizedContractVersion: string;
+        hashVersion: string;
+        normalizedContentHash: string;
+      }>>(Prisma.sql`
+        insert into public.source_semantic_observations (
+          organization_id, source_record_id, effective_source_time,
+          normalized_contract_version, hash_version, normalized_content_hash,
+          normalized_content_json
+        ) values ${Prisma.join(rows)}
+        on conflict do nothing
+        returning source_record_id as "sourceRecordId",
+                  effective_source_time as "effectiveSourceTime",
+                  normalized_contract_version as "normalizedContractVersion",
+                  hash_version as "hashVersion",
+                  normalized_content_hash as "normalizedContentHash"
+      `);
+      for (const row of inserted) {
+        createdSemanticKeys.add(semanticObservationIdentityKey(row));
+      }
+    }
+
+    const semanticObservationsByIdentity = new Map<string, string>();
+    for (const batch of batches(ready)) {
+      const identities = batch.map(({ input, normalizedContentHash, sourceRecord }) =>
+        Prisma.sql`(
+          ${sourceRecord.id}::uuid,
+          ${input.effectiveSourceTime},
+          ${input.normalizedContractVersion},
+          ${input.hashVersion},
+          ${normalizedContentHash}
+        )`
+      );
+      const observations = await transaction.$queryRaw<Array<{
+        id: string;
+        sourceRecordId: string;
+        effectiveSourceTime: Date;
+        normalizedContractVersion: string;
+        hashVersion: string;
+        normalizedContentHash: string;
+      }>>(Prisma.sql`
+        select id,
+               source_record_id as "sourceRecordId",
+               effective_source_time as "effectiveSourceTime",
+               normalized_contract_version as "normalizedContractVersion",
+               hash_version as "hashVersion",
+               normalized_content_hash as "normalizedContentHash"
+        from public.source_semantic_observations
+        where (
+          source_record_id, effective_source_time, normalized_contract_version,
+          hash_version, normalized_content_hash
+        ) in (values ${Prisma.join(identities)})
+      `);
+      for (const observation of observations) {
+        semanticObservationsByIdentity.set(
+          semanticObservationIdentityKey(observation),
+          observation.id,
+        );
+      }
+    }
+
+    const unclaimedCreatedKeys = new Set(createdSemanticKeys);
+    return resolved.map(({ input, normalizedContentHash, sourceRecord }) => {
+      if (
+        sourceRecord.record_kind !== input.recordKind ||
+        sourceRecord.record_discriminator !== input.recordDiscriminator
+      ) {
+        return {
+          kind: "identity_conflict" as const,
+          sourceRecordId: sourceRecord.id,
+          semanticObservationId: null,
+          reasonCode: "source_identity_conflict" as const,
+        };
+      }
+      const key = semanticObservationIdentityKey({
+        sourceRecordId: sourceRecord.id,
+        effectiveSourceTime: input.effectiveSourceTime,
+        normalizedContractVersion: input.normalizedContractVersion,
+        hashVersion: input.hashVersion,
+        normalizedContentHash,
+      });
+      const semanticObservationId = semanticObservationsByIdentity.get(key);
+      if (!semanticObservationId) {
+        throw new Error("Semantic observation conflict could not be resolved.");
+      }
+      return {
+        kind: "ready" as const,
+        sourceRecordId: sourceRecord.id,
+        semanticObservationId,
+        semanticObservationCreated: unclaimedCreatedKeys.delete(key),
+      };
+    });
+  }
+
   /** Records Task 006's final record disposition inside its page transaction. */
   async recordDeliveryOccurrenceInTransaction(
     transaction: PackscoutTransactionClient,
@@ -369,9 +641,78 @@ export class ProviderSourceObservationRepository {
   ): Promise<void> {
     for (const input of inputs) validateDeliveryOccurrenceInput(input);
     if (inputs.length === 0) return;
-    await transaction.source_delivery_occurrences.createMany({
-      data: inputs.map(deliveryOccurrenceRow),
-    });
+    for (const batch of batches(inputs)) {
+      await transaction.source_delivery_occurrences.createMany({
+        data: batch.map(deliveryOccurrenceRow),
+      });
+    }
+  }
+
+  /**
+   * Records bounded delivery batches and returns generated ids keyed by the
+   * page's unique record index. Quarantine rows can therefore be bulk-written
+   * later in the same transaction without a per-record round trip.
+   */
+  async recordDeliveryOccurrencesWithIdsInTransaction(
+    transaction: PackscoutTransactionClient,
+    inputs: readonly RecordDeliveryOccurrenceInput[],
+  ): Promise<readonly RecordedDeliveryOccurrence[]> {
+    for (const input of inputs) validateDeliveryOccurrenceInput(input);
+    const recorded: RecordedDeliveryOccurrence[] = [];
+    for (const batch of batches(inputs)) {
+      const rows = batch.map((input) => Prisma.sql`(
+        ${input.organizationId}::uuid,
+        ${input.providerId}::uuid,
+        ${input.sourceInstanceId}::uuid,
+        ${input.sourceRevisionId}::uuid,
+        ${input.runId}::uuid,
+        ${input.pageId}::uuid,
+        ${input.recordIndex},
+        ${input.sourceRecordId === null
+          ? Prisma.sql`null::uuid`
+          : Prisma.sql`${input.sourceRecordId}::uuid`},
+        ${input.semanticObservationId === null
+          ? Prisma.sql`null::uuid`
+          : Prisma.sql`${input.semanticObservationId}::uuid`},
+        ${input.requestAttemptId}::uuid,
+        ${input.sourceTypeKey},
+        ${input.sourceAdapterVersion},
+        ${input.normalizedContractVersion},
+        ${input.mapperKey},
+        ${input.mapperVersion},
+        ${input.identityNamespaceKey},
+        ${input.cursorCodecVersion},
+        ${input.cursorGeneration},
+        ${input.connectionHealthGeneration},
+        ${input.supervisorEpochId}::uuid,
+        ${input.connectionProfileId}::uuid,
+        ${input.connectionRevisionId}::uuid,
+        ${input.collectedAt},
+        ${input.nativeEvidenceReference},
+        cast(${input.disposition} as public.source_delivery_disposition),
+        ${input.disposition === "quarantined" ? input.reasonCode : null}
+      )`);
+      recorded.push(
+        ...(await transaction.$queryRaw<Array<{
+          occurrenceId: bigint;
+          recordIndex: number;
+        }>>(Prisma.sql`
+          insert into public.source_delivery_occurrences (
+            organization_id, provider_id, source_instance_id,
+            source_revision_id, run_id, page_id, record_index,
+            source_record_id, semantic_observation_id, request_attempt_id,
+            source_type_key, source_adapter_version,
+            normalized_contract_version, mapper_key, mapper_version,
+            identity_namespace_key, cursor_codec_version, cursor_generation,
+            connection_health_generation, supervisor_epoch_id,
+            connection_profile_id, connection_revision_id, collected_at,
+            native_evidence_reference, disposition, reason_code
+          ) values ${Prisma.join(rows)}
+          returning id as "occurrenceId", record_index as "recordIndex"
+        `)),
+      );
+    }
+    return recorded;
   }
 }
 

@@ -52,7 +52,7 @@ export const PACKSCOUT_EV_METHOD = Object.freeze({
     },
     {
       title: "Confidence measures evidence, not upside",
-      body: `Available estimates start at full confidence, and only the approved evidence penalties reduce it: platform-published odds used instead of verified current-pool odds, midpoint value ranges, and delayed source data. Bands are Low, Medium, and High. ${METRIC_TRUST_COPY.confidenceExplanation}`,
+      body: `Available estimates start at full confidence, and only the approved evidence penalties reduce it: platform-published odds used instead of verified current-pool odds, midpoint value ranges, and delayed source data. Through 60 minutes, confidence matches the calculation-time score; after 60 minutes, the estimate becomes Last-known and its confidence continues to decay toward zero without hiding its economics. Bands are Low, Medium, and High. ${METRIC_TRUST_COPY.confidenceExplanation}`,
     },
     {
       title: "Unavailable beats a guess",

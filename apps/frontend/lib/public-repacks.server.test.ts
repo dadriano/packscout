@@ -124,22 +124,33 @@ test("catalog read arguments carry the credential exactly when one is configured
   assert.deepEqual(input, { currentTime: 1_724_000_000_000 });
 });
 
-test("every catalog fetchQuery presents its arguments through the credential wrapper", () => {
+test("every catalog request presents its arguments through the credential wrapper", () => {
   const source = readFileSync(
     new URL("./public-repacks.server.ts", import.meta.url),
     "utf8",
   );
   const fetchCalls = source.match(/fetchQuery\(/gu) ?? [];
+  const actionCalls = source.match(/fetchAction\(/gu) ?? [];
   assert.equal(
     fetchCalls.length,
-    6,
-    "one fetchQuery per catalog read (shell status, dashboard, list, detail, search, desired matches)",
+    1,
+    "collectible search remains the one time-insensitive query",
+  );
+  assert.equal(
+    actionCalls.length,
+    5,
+    "time-sensitive shell, dashboard, list, detail, and desired-match reads are trusted-clock actions",
   );
   const wrapped = source.match(/catalogReadArguments\(\{/gu) ?? [];
   assert.equal(
     wrapped.length,
-    fetchCalls.length,
-    "every catalog fetchQuery routes its arguments through catalogReadArguments",
+    fetchCalls.length + actionCalls.length,
+    "every catalog request routes its arguments through catalogReadArguments",
+  );
+  assert.equal(
+    source.includes("Date.now()"),
+    false,
+    "the frontend cannot supply the public confidence clock",
   );
   // The credential stays server-side: never a NEXT_PUBLIC_ variable, and the
   // module never logs anything the token could travel through.

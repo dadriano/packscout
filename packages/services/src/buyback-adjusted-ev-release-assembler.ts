@@ -92,9 +92,10 @@ function requireTimestamp(value: string, productKey: string | null): number {
  * publication-eligible revision at the release read clock.
  *
  * - A publishable available revision becomes the frozen `current` estimate.
- * - `expired_since_calculation` fails closed into the deterministic
- *   `SOURCE_DATA_STALE` state evaluated at the read clock, so a missed expiry
- *   transition can never publish a live estimate.
+ * - `expired_since_calculation` retains the immutable calculable estimate.
+ *   Public reads apply the versioned current/last-known freshness policy at
+ *   one evaluation clock; release assembly never erases known economics due
+ *   to age alone.
  * - A sold-out product freezes the last estimate that was still current at
  *   sellout as explicit history; an incoherent freeze blocks the release.
  * - A missing revision is an explicit unknown-time unavailable state.
@@ -212,17 +213,6 @@ function composePackScoutPublicEv(
       // an incoherent snapshot, never a silently degraded public state.
       block("SOLD_OUT_FREEZE_INCOHERENT", product.productKey);
     }
-    return {
-      status: "unavailable",
-      ...versions,
-      metrics: null,
-      confidence: null,
-      calculatedAt: readAt,
-      dataAsOf: { state: "known", observedAt },
-      reason: "SOURCE_DATA_STALE",
-    };
-  }
-  if (eligibility.readState.state === "expired_since_calculation") {
     return {
       status: "unavailable",
       ...versions,
