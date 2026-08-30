@@ -951,6 +951,16 @@ export const globalCatalogAggregateObservationValidator = v.object({
   delayedProviderCount: v.number(),
 });
 
+const retainedEvValueValidator = v.object({
+  estimate: packScoutPublicEvV3Validator,
+  calculationPriceUsdMinor: v.number(),
+  sourcePublicReleaseId: v.string(),
+  latestUnavailableAttempt: v.union(v.object({
+    calculatedAt: timestampValidator,
+    reason: buybackEvPublicReasonValidator,
+  }), v.null()),
+});
+
 export default defineSchema({
   providerCatalogCompletedHeads: defineTable({
     platformKey: v.string(),
@@ -1634,6 +1644,8 @@ export default defineSchema({
   dataReleaseV3Releases: defineTable({
     publicReleaseId: v.string(),
     releaseFingerprint: sha256Validator,
+    // Absent only on pre-cutover releases; new releases require compact EV facts.
+    evFactsRequired: v.optional(v.literal(true)),
     lifecycle: v.union(
       v.literal("staging"),
       v.literal("complete"),
@@ -1759,6 +1771,55 @@ export default defineSchema({
     .index("by_operation_id", ["operationId"])
     .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"]),
 
+  dataReleaseV3EvFacts: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    availability: publicPackAvailabilityValidator,
+    calculationPriceUsdMinor: v.union(v.number(), v.null()),
+    estimate: packScoutPublicEvV3Validator,
+  }).index("by_release_id_and_public_repack_id", ["releaseId", "publicRepackId"]),
+
+  dataReleaseV3EvFactSets: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    source: v.union(v.literal("staging"), v.literal("backfill")),
+    factsSha256: v.union(sha256Validator, v.null()),
+    status: v.union(v.literal("building"), v.literal("complete")),
+    count: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    lastRequestCursor: v.union(v.string(), v.null()),
+  }).index("by_release_id", ["releaseId"]),
+
+  // Derived history only: immutable release details and publication hashes
+  // remain unchanged. Only the activation transaction advances these rows.
+  dataReleaseV3RetainedEv: defineTable({
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    value: retainedEvValueValidator,
+  }).index("by_vendor_key_and_public_vendor_id_and_public_repack_id", [
+    "vendorKey", "publicVendorId", "publicRepackId",
+  ]),
+
+  dataReleaseV3EvRetentionTransitions: defineTable({
+    operationId: v.string(),
+    fromReleaseId: v.union(v.id("dataReleaseV3Releases"), v.null()),
+    toReleaseId: v.id("dataReleaseV3Releases"),
+    changeCount: v.number(),
+    changesSha256: v.string(),
+  }).index("by_from_release_id", ["fromReleaseId"])
+    .index("by_to_release_id", ["toReleaseId"]),
+
+  dataReleaseV3EvRetentionChanges: defineTable({
+    transitionId: v.id("dataReleaseV3EvRetentionTransitions"),
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    before: v.union(retainedEvValueValidator, v.null()),
+    after: v.union(retainedEvValueValidator, v.null()),
+  }).index("by_transition_id", ["transitionId"]),
+
   // Provider operations change independently of an immutable catalog release.
   // Keep their high-churn observation state in a dedicated table so freshness
   // updates never rewrite stable release documents or their active pointer.
@@ -1782,7 +1843,6 @@ export default defineSchema({
     "releaseId",
     "publicVendorId",
   ]),
-
   activeDataReleaseV3State: defineTable({
     key: v.literal("singleton"),
     generation: v.number(),
@@ -1791,6 +1851,10 @@ export default defineSchema({
     activeRelease: v.union(dataReleaseV3PointerValidator, v.null()),
     previousRelease: v.union(dataReleaseV3PointerValidator, v.null()),
     terminalOperationId: v.union(v.string(), v.null()),
+    // Absent only on pointers activated before derived EV retention existed.
+    // The next successful activation seeds that exact prior public release.
+    retainedEvTransitionId: v.optional(v.id("dataReleaseV3EvRetentionTransitions")),
+    retainedEvTransitionDirection: v.optional(v.union(v.literal("forward"), v.literal("reverse"))),
     updatedAt: timestampValidator,
   }).index("by_key", ["key"]),
 });

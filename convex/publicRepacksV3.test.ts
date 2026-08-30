@@ -7,6 +7,7 @@ import {
   publicRepackChaseSchema,
   type PublicCollectible,
   type PublicRepackChase,
+  type PublicRepackViewDetailV3,
 } from "@packscout/contracts";
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -389,7 +390,8 @@ describe("data_release_v3 public reads", () => {
       ({ publicRepackId }) => publicRepackId === V3_REPACK_ID_C,
     )!;
     expect(soldOut.availability).toBe("sold_out");
-    expect(soldOut.evEstimates.packScout.status).toBe("sold_out_historical");
+    expect(soldOut.evEstimates.packScout.status).toBe("last_known");
+    expect(soldOut.evEstimates.packScout.historicalSoldOutAt).toBeDefined();
     expect(soldOut.evEstimates.packScout.metrics).toBeDefined();
     expect(soldOut.actions?.repackLink).toBeUndefined();
     const unavailable = data.details.find(
@@ -526,7 +528,7 @@ describe("data_release_v3 public reads", () => {
     );
   });
 
-  test("a current estimate past 60 minutes remains visible as last known with decayed confidence", async () => {
+  test("last valid values remain after the source deadline while confidence decays without new publication", async () => {
     const t = convexTest(schema, modules);
     await publishFixture(t);
     const result = (await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
@@ -549,38 +551,28 @@ describe("data_release_v3 public reads", () => {
       currentTime: AFTER_DEADLINE,
     })) as AnyResult;
     expect(detail.ok).toBe(true);
-    const detailData = detail.data as {
-      evEstimates: {
-        packScout: { status: string; metrics?: unknown; dataAsOf?: unknown };
-      };
-      packScoutEvPresentation: {
-        status: string;
-        metrics: unknown;
-        confidence: { scoreBasisPoints: number };
-      };
-    };
-    // The immutable release estimate is never rewritten by a public read.
-    expect(detailData.evEstimates.packScout.status).toBe("current");
-    expect(detailData.evEstimates.packScout.metrics).toBeDefined();
-    expect(detailData.evEstimates.packScout.dataAsOf).toEqual({
+    const packScout = (detail.data as PublicRepackViewDetailV3).evEstimates.packScout;
+    expect(packScout.status).toBe("last_known");
+    if (packScout.status !== "last_known") throw new Error("missing retained EV");
+    expect(packScout.latestUnavailableReason).toBeNull();
+    expect(packScout.confidence.scoreBasisPoints).toBe(7_500);
+    expect(packScout.expiresAt).toBeNull();
+    expect(packScout.calculatedAt).toBe(new Date(NOW - 5 * 60_000).toISOString());
+    expect(packScout.dataAsOf).toEqual({
       state: "known",
       observedAt: new Date(NOW - 5 * 60_000).toISOString(),
     });
-    expect(detailData.packScoutEvPresentation.status).toBe("last_known");
-    expect(detailData.packScoutEvPresentation.metrics).toBeDefined();
-    expect(
-      detailData.packScoutEvPresentation.confidence.scoreBasisPoints,
-    ).toBeLessThanOrEqual(7_500);
-    // At the exact 60-minute boundary the public overlay is still current.
+    expect(packScout.metrics).toBeDefined();
+    // The one retained projection keeps its metrics at the exact boundary.
     const atDeadline = (await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
       publicRepackId: V3_REPACK_ID_A,
       publicReleaseId: RELEASE_ID_1,
       currentTime: Date.parse(V3_EXPIRES_AT),
     })) as AnyResult;
     expect(
-      (atDeadline.data as { packScoutEvPresentation: { status: string } })
-        .packScoutEvPresentation.status,
-    ).toBe("current");
+      (atDeadline.data as { evEstimates: { packScout: { status: string } } })
+        .evEstimates.packScout.status,
+    ).toBe("last_known");
   });
 
   test("the public detail action evaluates freshness from the trusted server clock", async () => {
@@ -596,12 +588,7 @@ describe("data_release_v3 public reads", () => {
 
     expect(detail.ok).toBe(true);
     expect(
-      (detail.data as {
-        packScoutEvPresentation: {
-          status: string;
-          confidenceEvaluatedAt: string;
-        };
-      }).packScoutEvPresentation,
+      (detail.data as PublicRepackViewDetailV3).evEstimates.packScout,
     ).toMatchObject({
       status: "last_known",
       confidenceEvaluatedAt: new Date(AFTER_DEADLINE).toISOString(),
@@ -766,25 +753,16 @@ describe("data_release_v3 public reads", () => {
       })) as AnyResult;
       expect(list.ok, scenario.name).toBe(true);
       const detail = (
-        list.data as {
-          details: {
-            publicRepackId: string;
-            providerHealth: {
-              state: string;
-              statusReason: string | null;
-            };
-            packScoutEvPresentation: { status: string; metrics: unknown };
-          }[];
-        }
+        list.data as { details: PublicRepackViewDetailV3[] }
       ).details.find(({ publicRepackId }) => publicRepackId === V3_REPACK_ID_A)!;
       expect(detail.providerHealth, scenario.name).toMatchObject({
         state: scenario.summaryState,
         statusReason: scenario.reason,
       });
-      expect(detail.packScoutEvPresentation.status, scenario.name).toBe(
-        "current",
+      expect(detail.evEstimates.packScout.status, scenario.name).toBe(
+        "last_known",
       );
-      expect(detail.packScoutEvPresentation.metrics, scenario.name).not.toBeNull();
+      expect(detail.evEstimates.packScout.metrics, scenario.name).not.toBeNull();
     }
   });
 
@@ -895,23 +873,15 @@ describe("data_release_v3 public reads", () => {
     })) as AnyResult;
     expect(list.ok).toBe(true);
     const presented = (
-      list.data as {
-        details: {
-          publicRepackId: string;
-          packScoutEvPresentation: {
-            status: string;
-            confidence: { scoreBasisPoints: number } | null;
-          };
-        }[];
-      }
+      list.data as { details: PublicRepackViewDetailV3[] }
     ).details.find(({ publicRepackId }) => publicRepackId === V3_REPACK_ID_A)!;
-    expect(presented.packScoutEvPresentation.status).toBe("last_known");
+    expect(presented.evEstimates.packScout.status).toBe("last_known");
     expect(
-      presented.packScoutEvPresentation.confidence?.scoreBasisPoints,
+      presented.evEstimates.packScout.confidence?.scoreBasisPoints,
     ).toBeLessThanOrEqual(7_500);
   });
 
-  test("retained confidence hydration supports the full release bound while new rows stay on the hot path", async () => {
+  test("compact retained confidence supports the full release bound and rejects tampered sealed facts", async () => {
     const details = Array.from(
       { length: MAX_DATA_RELEASE_V3_REPACKS },
       (_, index) =>
@@ -919,6 +889,9 @@ describe("data_release_v3 public reads", () => {
           publicRepackId:
             `00000000-0000-5000-8000-${String(index + 1_000).padStart(12, "0")}`,
           name: `Capacity Pack ${index + 1}`,
+          // This capacity case exercises EV facts, not chase reconciliation.
+          // Full pack+chase publication remains covered by the retention bounds tests.
+          topChase: null,
         }),
     );
 
@@ -956,13 +929,13 @@ describe("data_release_v3 public reads", () => {
 
     await t.run(async (ctx) => {
       const stored = await ctx.db
-        .query("dataReleaseV3Repacks")
+        .query("dataReleaseV3EvFacts")
         .withIndex("by_release_id_and_public_repack_id")
         .order("desc")
         .first();
       if (stored === null) throw new Error("missing capacity detail");
-      await ctx.db.patch("dataReleaseV3Repacks", stored._id, {
-        detail: { ...stored.detail, name: "Mismatched capacity detail" },
+      await ctx.db.patch("dataReleaseV3EvFacts", stored._id, {
+        calculationPriceUsdMinor: 1,
       });
     });
     const mismatchedDashboard = (await t.query(
@@ -1138,7 +1111,7 @@ describe("data_release_v3 public reads", () => {
         state: string;
         nextHealthEvaluationAt: string | null;
       };
-      details: { providerHealth: { state: string } }[];
+      details: PublicRepackViewDetailV3[];
     };
     expect(secondPage.rows.length).toBe(2);
     expect(secondPage.hasPrevious).toBe(true);
@@ -1146,6 +1119,15 @@ describe("data_release_v3 public reads", () => {
     expect(secondPage.confidenceEvaluatedAt).toBe(
       firstPage.confidenceEvaluatedAt,
     );
+    const known = secondPage.details.map(detail => detail.evEstimates.packScout)
+      .filter(estimate => estimate.status === "last_known");
+    expect(known.length).toBeGreaterThan(0);
+    for (const estimate of known) {
+      expect(estimate.confidenceEvaluatedAt).toBe(firstPage.confidenceEvaluatedAt);
+      expect(estimate.sourceAge.milliseconds).toBe(
+        firstEvaluationTime - Date.parse(estimate.dataAsOf.observedAt),
+      );
+    }
     expect(secondPage.providerHealthEvaluatedAt).toBe(
       new Date(laterWallTime).toISOString(),
     );

@@ -11,31 +11,32 @@ import {
 import { publicRepackIdSchema } from "./data-release-v2-values.ts";
 import {
   publicRepackHeatSchema,
+  type PublicRepackHeat,
 } from "./repack-heat.ts";
 import {
   DATA_RELEASE_V3_SCHEMA_VERSION,
   packScoutPublicEvPolicyVersionV3Schema,
 } from "./data-release-v3-ev-estimates.ts";
 import {
-  packScoutPublicEvPresentationV1Schema,
   publicEvPresentationResponseContextV1Schema,
   publicProviderHealthResponseContextV1Schema,
   publicProviderHealthSummaryV1Schema,
   publicProviderHealthV1Schema,
-  safePresentPackScoutPublicEvV3,
+  type PublicProviderHealthV1,
 } from "./public-ev-presentation-v1.ts";
 import {
   packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
-  publicRepackDetailV3Schema,
-  publicRepackSummaryV3FromDetail,
-  publicRepackSummaryV3Schema,
-  type PublicRepackSummaryV3,
+  publicRepackDetailDisplayedV3Schema,
+  publicRepackSummaryDisplayedV3Schema,
+  type PublicRepackDetailDisplayedV3,
+  type PublicRepackSummaryDisplayedV3,
 } from "./data-release-v3-entities.ts";
 
 export * from "./data-release-v3-ev-estimates.ts";
 export * from "./data-release-v3-entities.ts";
 export * from "./data-release-v3-search.ts";
+export * from "./data-release-v3-last-known-ev.ts";
 export * from "./public-ev-presentation-v1.ts";
 
 /**
@@ -63,73 +64,30 @@ export const dataReleaseV3IdentitySchema = z
 
 export type DataReleaseV3Identity = z.infer<typeof dataReleaseV3IdentitySchema>;
 
-function validatePublicRepackPresentationV3(
-  view: {
-    readonly evEstimates: PublicRepackSummaryV3["evEstimates"];
-    readonly packScoutEvPresentation: z.infer<
-      typeof packScoutPublicEvPresentationV1Schema
-    >;
-  },
-  context: z.RefinementCtx,
-): void {
-  const expected = safePresentPackScoutPublicEvV3(
-    view.evEstimates.packScout,
-    view.packScoutEvPresentation.confidenceEvaluatedAt,
-  );
-  if (
-    !expected.success ||
-    JSON.stringify(expected.presentation) !==
-      JSON.stringify(view.packScoutEvPresentation)
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["packScoutEvPresentation"],
-      message: "data_release_v3.presentation_overlay_mismatch",
-    });
-  }
-}
+export type PublicRepackViewSummaryV3 = PublicRepackSummaryDisplayedV3 &
+  Readonly<{ heat: PublicRepackHeat; providerHealth: PublicProviderHealthV1 }>;
+export type PublicRepackViewDetailV3 = PublicRepackDetailDisplayedV3 &
+  Readonly<{ heat: PublicRepackHeat; providerHealth: PublicProviderHealthV1 }>;
 
 /**
  * Heat travels beside EV and stays independent of EV confidence: any heat
  * state may pair with any PackScout EV state.
  */
-export const publicRepackViewSummaryV3Schema = publicRepackSummaryV3Schema
-  .safeExtend({
-    heat: publicRepackHeatSchema,
-    packScoutEvPresentation: packScoutPublicEvPresentationV1Schema,
-    providerHealth: publicProviderHealthV1Schema,
-  })
-  .superRefine(validatePublicRepackPresentationV3);
-export const publicRepackViewDetailV3Schema = publicRepackDetailV3Schema
-  .safeExtend({
-    heat: publicRepackHeatSchema,
-    packScoutEvPresentation: packScoutPublicEvPresentationV1Schema,
-    providerHealth: publicProviderHealthV1Schema,
-  })
-  .superRefine(validatePublicRepackPresentationV3);
-
-export type PublicRepackViewSummaryV3 = z.infer<
-  typeof publicRepackViewSummaryV3Schema
->;
-export type PublicRepackViewDetailV3 = z.infer<
-  typeof publicRepackViewDetailV3Schema
->;
+export const publicRepackViewSummaryV3Schema: z.ZodType<PublicRepackViewSummaryV3> =
+  publicRepackSummaryDisplayedV3Schema.safeExtend({
+    heat: publicRepackHeatSchema, providerHealth: publicProviderHealthV1Schema,
+  });
+export const publicRepackViewDetailV3Schema: z.ZodType<PublicRepackViewDetailV3> =
+  publicRepackDetailDisplayedV3Schema.safeExtend({
+    heat: publicRepackHeatSchema, providerHealth: publicProviderHealthV1Schema,
+  });
 
 export function publicRepackViewSummaryV3FromDetail(
   detail: PublicRepackViewDetailV3,
 ): PublicRepackViewSummaryV3 {
-  const {
-    heat,
-    packScoutEvPresentation,
-    providerHealth,
-    ...baseDetail
-  } = detail;
-  return publicRepackViewSummaryV3Schema.parse({
-    ...publicRepackSummaryV3FromDetail(baseDetail),
-    heat,
-    packScoutEvPresentation,
-    providerHealth,
-  });
+  return publicRepackViewSummaryV3Schema.parse(Object.fromEntries(
+    Object.entries(detail).filter(([key]) => key !== "description" && key !== "actions"),
+  ));
 }
 
 function summaryMatchesDetailV3(
@@ -174,8 +132,6 @@ function validateSelectedRepackV3(
   if (
     matching === undefined ||
     !packScoutEvProjectionsAreByteEquivalentV3(selectedRepack, matching) ||
-    JSON.stringify(selectedRepack.packScoutEvPresentation) !==
-      JSON.stringify(matching.packScoutEvPresentation) ||
     JSON.stringify(selectedRepack.providerHealth) !==
       JSON.stringify(matching.providerHealth)
   ) {
@@ -239,20 +195,15 @@ function validateResponsePresentationClockV3(
   views: readonly PublicRepackViewSummaryV3[],
   context: z.RefinementCtx,
 ): void {
-  const responseMilliseconds = Date.parse(confidenceEvaluatedAt);
   views.forEach((view, index) => {
-    const presentation = view.packScoutEvPresentation;
-    const presentationMilliseconds = Date.parse(
-      presentation.confidenceEvaluatedAt,
-    );
-    const clockMatches =
-      presentation.status === "historical"
-        ? presentationMilliseconds <= responseMilliseconds
-        : presentationMilliseconds === responseMilliseconds;
-    if (!clockMatches) {
+    const presentation = view.evEstimates.packScout;
+    // Raw snapshots are admitted only during the existing one-time migration;
+    // retained displayed values (including sold-out history) share one clock.
+    if (presentation.status === "last_known" &&
+        presentation.confidenceEvaluatedAt !== confidenceEvaluatedAt) {
       context.addIssue({
         code: "custom",
-        path: ["details", index, "packScoutEvPresentation", "confidenceEvaluatedAt"],
+        path: ["details", index, "evEstimates", "packScout", "confidenceEvaluatedAt"],
         message: "data_release_v3.presentation_clock_mismatch",
       });
     }
@@ -262,8 +213,7 @@ function validateResponsePresentationClockV3(
 /**
  * The dashboard opportunity projection. Opportunities carry the byte-
  * equivalent PackScout projection of their details, admit only purchasable
- * repacks with a current or last-known estimate, regardless of informational
- * provider-feed status, and rank by signed EV dollars.
+ * repacks with a last validated estimate, and rank by signed EV dollars.
  */
 export const publicDashboardBundleV3Schema = z
   .object({
@@ -285,14 +235,14 @@ export const publicDashboardBundleV3Schema = z
       context,
     );
     bundle.opportunities.forEach((repack, index) => {
-      // Eligibility keeps its exact original intent under the wider enum:
-      // both axes must hold. The pack must be purchasable (`available`
-      // alone, so `unavailable` and `unknown` are excluded beside
-      // `sold_out`) and its PackScout estimate must remain calculable.
+      // The listing must still be purchasable. A validated last-known
+      // estimate remains eligible even after its confidence reaches zero.
       if (
         !packAvailabilityIsPurchasableV3(repack.availability) ||
-        (repack.packScoutEvPresentation.status !== "current" &&
-          repack.packScoutEvPresentation.status !== "last_known")
+        (repack.evEstimates.packScout.status !== "current" &&
+          repack.evEstimates.packScout.status !== "last_known") ||
+        (repack.evEstimates.packScout.status === "last_known" &&
+          repack.evEstimates.packScout.historicalSoldOutAt !== null)
       ) {
         context.addIssue({
           code: "custom",
@@ -303,14 +253,12 @@ export const publicDashboardBundleV3Schema = z
       const previous = bundle.opportunities[index - 1];
       if (
         previous !== undefined &&
-        previous.packScoutEvPresentation.status !== "unavailable" &&
-        previous.packScoutEvPresentation.status !== "historical" &&
-        repack.packScoutEvPresentation.status !== "unavailable" &&
-        repack.packScoutEvPresentation.status !== "historical" &&
-        (previous.packScoutEvPresentation.metrics.evDollars.minorUnits <
-          repack.packScoutEvPresentation.metrics.evDollars.minorUnits ||
-          (previous.packScoutEvPresentation.metrics.evDollars.minorUnits ===
-            repack.packScoutEvPresentation.metrics.evDollars.minorUnits &&
+        previous.evEstimates.packScout.status !== "unavailable" &&
+        repack.evEstimates.packScout.status !== "unavailable" &&
+        (previous.evEstimates.packScout.metrics.evDollars.minorUnits <
+          repack.evEstimates.packScout.metrics.evDollars.minorUnits ||
+          (previous.evEstimates.packScout.metrics.evDollars.minorUnits ===
+            repack.evEstimates.packScout.metrics.evDollars.minorUnits &&
             previous.publicRepackId >= repack.publicRepackId))
       ) {
         context.addIssue({

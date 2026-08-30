@@ -47,6 +47,15 @@ export interface AdminWorkerFleetRuntimeInput {
   readonly database: WorkerFleetDatabase;
 }
 
+export interface DistributedAdminWorkerFleetRuntimeInput {
+  readonly presence: Pick<PrismaWorkerPresenceRepository, "listInstances">;
+  readonly evidence: Pick<
+    PrismaWorkerFleetReadRepository,
+    "listRunningRuns" | "listSchedules"
+  >;
+  readonly clock?: { now(): Date };
+}
+
 type CursorKind = "stalled_run" | "schedule";
 
 interface CursorPayload {
@@ -102,9 +111,21 @@ function lastSignalOf(record: RunningImportRunRecord): Date | null {
 export function createAdminWorkerFleetRuntime(
   input: AdminWorkerFleetRuntimeInput,
 ): Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy"> {
-  const clock = { now: () => new Date() };
-  const presence = new PrismaWorkerPresenceRepository(input.database);
-  const evidence = new PrismaWorkerFleetReadRepository(input.database);
+  return createDistributedAdminWorkerFleetRuntime({
+    presence: new PrismaWorkerPresenceRepository(input.database),
+    evidence: new PrismaWorkerFleetReadRepository(input.database),
+  });
+}
+
+/**
+ * Distributed composition: presence is central, while run/schedule evidence
+ * is a bounded provider-gateway aggregate supplied by the provider runtime.
+ */
+export function createDistributedAdminWorkerFleetRuntime(
+  input: DistributedAdminWorkerFleetRuntimeInput,
+): Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy"> {
+  const clock = input.clock ?? { now: () => new Date() };
+  const { presence, evidence } = input;
 
   function readPresence(): Promise<WorkerFleetSnapshot> {
     return readWorkerFleetSnapshot(presence, WORKER_FLEET_SCAN_LIMIT);

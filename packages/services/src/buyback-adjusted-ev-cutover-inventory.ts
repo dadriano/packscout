@@ -403,6 +403,28 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
         "Stored pre-buyback results keep their original method identity; they are never relabeled, selected, or mixed into the buyback-adjusted release.",
     }),
     item({
+      itemKey: "projection:central-worker-activity-kind",
+      kind: "projection",
+      path: "packages/database/prisma/central/schema.prisma",
+      elements: ["estimated_ev worker activity kind"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-processor.ts",
+      note:
+        "The split central control schema retains the pre-buyback worker activity label until the buyback-adjusted worker lane replaces it at cutover.",
+    }),
+    item({
+      itemKey: "projection:central-worker-presence-activity",
+      kind: "projection",
+      path: "packages/database/src/central-worker-presence-repository.ts",
+      elements: ["estimated_ev worker activity kind persistence"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-recomputation-processor.ts",
+      note:
+        "The split central worker-presence repository persists the same pre-buyback activity label until the replacement lane is cut over.",
+    }),
+    item({
       itemKey: "projection:data-inspection-record-kinds",
       kind: "projection",
       path: "packages/contracts/src/data-inspection.ts",
@@ -412,6 +434,17 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
         "packages/services/src/buyback-adjusted-ev-recomputation-contracts.ts",
       note:
         "Operator data inspection lists the pre-buyback record kind; the new method inspects buyback EV revisions.",
+    }),
+    item({
+      itemKey: "projection:provider-canonical-inspection-estimated-ev",
+      kind: "projection",
+      path: "packages/database/src/provider-canonical-inspection-repository.ts",
+      elements: ["estimated_ev provider canonical inspection projection"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/database/src/buyback-ev-revision-repository.ts",
+      note:
+        "Distributed admin inspection exposes the pre-buyback estimated-EV projection until the buyback EV revision repository becomes authoritative at cutover.",
     }),
     item({
       itemKey: "projection:provider-source-record-kinds",

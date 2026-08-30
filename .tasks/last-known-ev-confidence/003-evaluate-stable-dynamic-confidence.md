@@ -9,7 +9,7 @@
 
 ## Start Here
 
-Write one search test that crosses the 60-minute boundary and prove the same pack keeps its EV, changes to `last_known`, and appears exactly once across confidence-sorted pagination.
+Write one search test that crosses the 60-minute boundary and prove the same pack keeps its last-known EV, gains the over-60-minute limitation, and appears exactly once across confidence-sorted pagination.
 
 ## Objective
 
@@ -25,7 +25,7 @@ Confidence now changes with time. If every page evaluates at a different clock, 
 - Store the first page's evaluation timestamp inside the opaque cursor for confidence-sorted pagination.
 - Reuse the pinned timestamp for later pages and reject tampered, expired, release-mismatched, or query-mismatched cursors.
 - Keep ordinary EV sorting available for current and last-known estimates.
-- Freeze sold-out confidence at sellout and retain existing non-ranking behavior.
+- Continue aging sold-out confidence at the trusted response clock while retaining historical economics and non-ranking behavior.
 
 ## User-Facing Behavior
 
@@ -37,7 +37,7 @@ Every public response identifies the public freshness-policy version and `confid
 
 ## Acceptance Criteria
 
-- [x] Crossing 60 minutes changes presentation state without changing availability or economics.
+- [x] Crossing 60 minutes changes the source-age limitation without changing availability or economics.
 - [x] Search, detail, aggregates, and confidence bands use one timestamp per response.
 - [x] Confidence-sorted multi-page results contain no duplicates or omissions while scores decay.
 - [x] Tampered clocks and cursors fail with bounded structured errors.
@@ -48,6 +48,8 @@ Every public response identifies the public freshness-policy version and `confid
 Run focused Convex/public-query tests, cursor adversarial tests, and typecheck before completing this task.
 
 ## Spec Compliance
+
+Historical implementation results below precede the PR #50 merge amendment in `_index.md`; frozen sold-out confidence is superseded by continued aging under the retained-EV policy.
 
 - Related specs reviewed: none; this feature has no companion tech or UX specs.
 - Alignment: trusted public actions mint the response clock, confidence pagination binds its first-page clock in a signed opaque cursor, and provider health uses a distinct current server clock so opening a later page cannot extend health freshness. Search, details, aggregates, sold-out history, positive suppression, and the full retained 1,000-row compatibility bound are covered.

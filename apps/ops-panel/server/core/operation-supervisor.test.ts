@@ -126,8 +126,9 @@ function harness(
   };
 }
 
-test("each registered operation spawns exactly its own workspace script", async () => {
+test("each available operation spawns exactly its own workspace script", async () => {
   for (const definition of DATABASE_OPERATIONS) {
+    if (definition.unavailableReason !== undefined) continue;
     const panel = harness();
     const result = await panel.runner.start({
       operation: definition.id,
@@ -166,9 +167,23 @@ test("nothing outside the registry can be invoked", async () => {
   assert.equal(panel.children.length, 0, "no child was spawned for an impostor");
 });
 
+test("retired migration refuses without a marker, timer, event, or child", async () => {
+  const panel = harness();
+  const result = await panel.runner.start({ operation: "migrate" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.code, "ops_panel_operation_unavailable");
+  assert.deepEqual(panel.saved, []);
+  assert.deepEqual(panel.timers, []);
+  assert.deepEqual(panel.events, []);
+  assert.deepEqual(panel.children, []);
+  assert.equal(panel.runner.running(), null);
+  assert.equal(panel.runner.last(), null);
+});
+
 test("one operation at a time: a second request names what is running", async () => {
   const panel = harness();
-  assert.equal((await panel.runner.start({ operation: "migrate" })).ok, true);
+  assert.equal((await panel.runner.start({ operation: "seed" })).ok, true);
 
   for (const id of ["seed", "reset"] as const) {
     const refusal = await panel.runner.start({
@@ -178,7 +193,7 @@ test("one operation at a time: a second request names what is running", async ()
     assert.equal(refusal.ok, false);
     if (refusal.ok) continue;
     assert.equal(refusal.code, "ops_panel_operation_busy");
-    assert.match(refusal.message, /Apply migrations is already running/u);
+    assert.match(refusal.message, /Run the seed is already running/u);
   }
   assert.equal(panel.children.length, 1);
 
@@ -189,12 +204,12 @@ test("one operation at a time: a second request names what is running", async ()
 
 test("locality is re-read at execution time, not cached from construction", async () => {
   const panel = harness();
-  assert.equal((await panel.runner.start({ operation: "migrate" })).ok, true);
+  assert.equal((await panel.runner.start({ operation: "seed" })).ok, true);
   panel.children[0]?.request.onExit({ code: 0, signal: null });
 
   // The developer repoints their environment at a shared database.
   panel.repointTo(REMOTE);
-  const refusal = await panel.runner.start({ operation: "migrate" });
+  const refusal = await panel.runner.start({ operation: "seed" });
   assert.equal(refusal.ok, false);
   assert.equal(
     refusal.ok === false ? refusal.code : "",
@@ -236,11 +251,11 @@ test("a mismatched acknowledgement refuses before spawning", async () => {
 
 test("the in-flight marker is written before the child starts", async () => {
   const panel = harness();
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   assert.equal(panel.children[0]?.markersWhenSpawned, 1);
   const marker = panel.saved[0];
   assert.ok(marker);
-  assert.equal(marker.operation, "migrate");
+  assert.equal(marker.operation, "seed");
   assert.equal(marker.database, "packscout_dev");
 });
 
@@ -263,18 +278,18 @@ test("a successful run settles, clears its marker and reports the outcome", asyn
 
 test("a failing run reports the exit code without inventing a cause", async () => {
   const panel = harness();
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   panel.children[0]?.request.onExit({ code: 3, signal: null });
 
   const last = panel.runner.last();
   assert.equal(last?.outcome, "failed");
-  assert.match(last?.message ?? "", /db:prisma:migrate:deploy/u);
+  assert.match(last?.message ?? "", /db:seed:local/u);
   assert.match(last?.message ?? "", /exit code 3/u);
 });
 
 test("output streams to subscribers and is capped at the configured limit", async () => {
   const panel = harness({ lineLimit: 3 });
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   panel.children[0]?.request.onOutput("one\ntwo\nthree\nfour\nfive\n");
 
   assert.deepEqual(
@@ -329,7 +344,7 @@ test("the overall timeout stops the run, kills the child and says so", async () 
 
 test("a child that never starts settles the run as failed", async () => {
   const panel = harness();
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   panel.children[0]?.request.onError(new Error("spawn npm ENOENT"));
   assert.equal(panel.runner.last()?.outcome, "failed");
   assert.match(panel.runner.last()?.message ?? "", /spawn npm ENOENT/u);
@@ -340,7 +355,7 @@ test("messages and output are sanitised before they leave the runner", async () 
   const panel = harness({
     sanitize: (text) => text.replaceAll(secret, "[redacted]"),
   });
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   panel.children[0]?.request.onOutput(`could not reach ${secret}\n`);
   panel.children[0]?.request.onError(new Error(`failed for ${secret}`));
 
@@ -418,7 +433,7 @@ test("shutdown terminates the child but leaves the marker for the next start", a
  */
 test("the lock is held until a timed-out run's process tree has actually exited", async () => {
   const panel = harness({ timeoutMs: 60_000, holdTermination: true });
-  await panel.runner.start({ operation: "migrate" });
+  await panel.runner.start({ operation: "seed" });
   panel.timers[0]?.handler();
 
   assert.equal(panel.runner.last()?.outcome, "timed_out");
@@ -488,7 +503,7 @@ test("a delayed marker store still lands the in-flight marker before the child s
     clearTimer: () => undefined,
   });
 
-  const started = runner.start({ operation: "migrate" });
+  const started = runner.start({ operation: "seed" });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(
     children.length,

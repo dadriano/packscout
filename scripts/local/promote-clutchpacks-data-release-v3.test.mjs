@@ -34,9 +34,10 @@ const {
   import.meta.url,
 );
 const {
-  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   approvedPublicCatalogConfigurationV1Schema,
-  safePresentPackScoutPublicEvV3,
+  dataReleaseV3RetainedEvWitnessSchema,
+  presentLastKnownPackScoutEvV3,
 } = await tsImport(
   "@packscout/contracts",
   import.meta.url,
@@ -53,7 +54,7 @@ const PRIOR_RELEASE_ID = "22222222-2222-4222-8222-222222222221";
 const RACING_RELEASE_ID = "22222222-2222-4222-8222-222222222223";
 const FINGERPRINT = "a".repeat(64);
 const HASH = "b".repeat(64);
-const PUBLIC_VENDOR_ID = "60000000-0000-4000-8000-000000000001";
+const PUBLIC_VENDOR_ID = "60000000-0000-5000-8000-000000000001";
 const PUBLICATION_SECRET = Buffer.alloc(32, 7).toString("base64");
 const DATABASE_IDENTITY = Object.freeze({
   databaseName: "packscout_clutchpacks_v3_canary",
@@ -131,7 +132,7 @@ function activationEnvironment(expectedActivePublicReleaseId = null) {
 }
 
 function publicRepackId(index) {
-  return `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+  return `30000000-0000-5000-8000-${String(index + 1).padStart(12, "0")}`;
 }
 
 function product(index) {
@@ -197,6 +198,10 @@ function detail(index, overrides = {}) {
     vendorKey: "clutchpacks",
     availability: "available",
     topChase: null,
+    price: {
+      displayMoney: { minorUnits: 10_000, currency: "USD" },
+      usdComparison: { status: "available", value: { minorUnits: 10_000, currency: "USD" } },
+    },
     evEstimates: {
       packScout: {
         status: "current",
@@ -799,7 +804,7 @@ function activeState(publicReleaseId = null, generation = 0) {
     generation,
     activeRelease: publicReleaseId === null
       ? null
-      : { publicReleaseId, releaseFingerprint: "c".repeat(64) },
+      : { publicReleaseId, releaseFingerprint: publicReleaseId === RELEASE_ID ? FINGERPRINT : "c".repeat(64) },
     previousRelease: null,
   };
 }
@@ -863,10 +868,38 @@ function readBackVerification(candidate = plan(), currentTime = DEFAULT_CURRENT_
   return {
     currentTime,
     providerObservation: observationRequest(candidate, currentTime),
-    presentPackScoutPublicEv: safePresentPackScoutPublicEvV3,
+    presentPackScoutPublicEv: presentLastKnownPackScoutEvV3,
+    retainedEvWitnessSchema: dataReleaseV3RetainedEvWitnessSchema,
+    retainedEvWitness: retainedEvWitness(candidate),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   };
+}
+
+function retainedEvWitness(candidate = plan(), generation = 1) {
+  return dataReleaseV3RetainedEvWitnessSchema.parse({
+    generation,
+    activePublicReleaseId: candidate.publicReleaseId,
+    activeReleaseFingerprint: candidate.releaseFingerprint,
+    retention: { operationId: "fixture-transition", direction: "forward", changesSha256: HASH },
+    entries: planRecords(candidate, "repacks").map((entry) => ({
+      vendorKey: entry.vendorKey,
+      publicVendorId: entry.publicVendorId,
+      publicRepackId: entry.publicRepackId,
+      activeFacts: {
+        availability: entry.availability,
+        estimate: structuredClone(entry.evEstimates.packScout),
+        calculationPriceUsdMinor: entry.price.usdComparison.value.minorUnits,
+      },
+      retained: entry.evEstimates.packScout.status === "unavailable" ? null : {
+        estimate: structuredClone(entry.evEstimates.packScout),
+        calculationPriceUsdMinor: entry.price.usdComparison.value.minorUnits,
+        sourcePublicReleaseId: candidate.publicReleaseId,
+        latestUnavailableAttempt: null,
+      },
+    })),
+    witnessSha256: HASH,
+  });
 }
 
 function publicHealth(observation, currentTime) {
@@ -926,19 +959,23 @@ function publicReadBack(
   const plannedById = new Map(
     plannedDetails.map((entry) => [entry.publicRepackId, entry]),
   );
+  const witness = options.retainedEvWitness ?? retainedEvWitness(candidate);
+  const factsById = new Map(witness.entries.map((entry) => [entry.publicRepackId, entry]));
   const detailAt = (entry, evaluationTime) => {
     const confidenceEvaluatedAt = new Date(evaluationTime).toISOString();
-    const presented = safePresentPackScoutPublicEvV3(
-      entry.evEstimates.packScout,
-      confidenceEvaluatedAt,
-    );
-    assert.equal(presented.success, true);
+    const facts = factsById.get(entry.publicRepackId);
+    const presented = facts.retained === null ? facts.activeFacts.estimate : presentLastKnownPackScoutEvV3({
+      estimate: facts.retained.estimate,
+      calculationPriceUsdMinor: facts.retained.calculationPriceUsdMinor,
+      referenceTimeIso: confidenceEvaluatedAt,
+      latestUnavailableReason: facts.retained.latestUnavailableAttempt?.reason ?? null,
+    });
     return {
       ok: true,
       data: {
         ...structuredClone(entry),
         heat: { status: "unavailable" },
-        packScoutEvPresentation: presented.presentation,
+        evEstimates: { ...structuredClone(entry.evEstimates), packScout: presented },
         providerHealth: publicHealth(observation, evaluationTime),
       },
     };
@@ -957,7 +994,11 @@ function publicReadBack(
   const opportunityCandidates = plannedDetails.map((entry) =>
     detailAt(entry, dashboardTime)).filter(({ data }) =>
     data.availability === "available" &&
-    ["current", "last_known"].includes(data.packScoutEvPresentation.status));
+    data.evEstimates.packScout.status === "last_known" &&
+    data.evEstimates.packScout.historicalSoldOutAt === null).sort((left, right) =>
+      right.data.evEstimates.packScout.metrics.evDollars.minorUnits -
+        left.data.evEstimates.packScout.metrics.evDollars.minorUnits ||
+      left.data.publicRepackId.localeCompare(right.data.publicRepackId));
   const dashboardDetails = opportunityCandidates
     .slice(0, 6)
     .map(({ data }) => structuredClone(data));
@@ -983,7 +1024,7 @@ function publicReadBack(
         data: {
           release: { publicReleaseId: candidate.publicReleaseId },
           publicFreshnessPolicyVersion:
-            PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+            PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
           confidenceEvaluatedAt,
           providerHealthEvaluatedAt: confidenceEvaluatedAt,
           desiredCollectible: collectibleDisplay(item),
@@ -1016,7 +1057,7 @@ function publicReadBack(
           publicEvPolicyVersion: candidate.manifest.publicEvPolicyVersion,
         },
         publicFreshnessPolicyVersion:
-          PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+          PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
         confidenceEvaluatedAt: new Date(shellTime).toISOString(),
         providerHealthEvaluatedAt: new Date(shellTime).toISOString(),
         providerHealthSummary: healthSummary(
@@ -1029,7 +1070,7 @@ function publicReadBack(
       data: {
         release: { publicReleaseId: candidate.publicReleaseId },
         publicFreshnessPolicyVersion:
-          PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+          PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
         confidenceEvaluatedAt: new Date(listTime).toISOString(),
         providerHealthEvaluatedAt: new Date(listTime).toISOString(),
         providerHealthSummary: healthSummary(
@@ -1047,7 +1088,7 @@ function publicReadBack(
       data: {
         release: { publicReleaseId: candidate.publicReleaseId },
         publicFreshnessPolicyVersion:
-          PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+          PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
         confidenceEvaluatedAt: new Date(dashboardTime).toISOString(),
         providerHealthEvaluatedAt: new Date(dashboardTime).toISOString(),
         providerHealthSummary: healthSummary(dashboardHealth),
@@ -1187,9 +1228,10 @@ function fakeDependencies({
       async open() {
         timeline.push("open");
         return {
-          presentPackScoutPublicEv: safePresentPackScoutPublicEvV3,
+          presentPackScoutPublicEv: presentLastKnownPackScoutEvV3,
+          retainedEvWitnessSchema: dataReleaseV3RetainedEvWitnessSchema,
           publicFreshnessPolicyVersion:
-            PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+            PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
           readDatabaseIdentity,
           catalog: {
             async loadCatalogSnapshot() {
@@ -1216,6 +1258,28 @@ function fakeDependencies({
             async status() {
               timeline.push("status");
               return stagedStatus;
+            },
+            async retainedEvWitnessReadiness(request) {
+              timeline.push("ev-witness-ready");
+              assert.equal(request.expectedGeneration, currentActive.generation);
+              assert.equal(request.expectedActivePublicReleaseId, currentActive.activeRelease?.publicReleaseId ?? null);
+              assert.equal(request.expectedActiveReleaseFingerprint, currentActive.activeRelease?.releaseFingerprint ?? null);
+              return {
+                generation: currentActive.generation,
+                activePublicReleaseId: currentActive.activeRelease?.publicReleaseId ?? null,
+                activeReleaseFingerprint: currentActive.activeRelease?.releaseFingerprint ?? null,
+                retention: currentActive.activeRelease === null ? null : {
+                  operationId: "fixture-transition", direction: "forward", changesSha256: HASH,
+                },
+              };
+            },
+            async retainedEvWitness(request) {
+              timeline.push("ev-witness");
+              assert.equal(request.expectedActivePublicReleaseId, currentActive.activeRelease.publicReleaseId);
+              assert.equal(request.expectedActiveReleaseFingerprint, currentActive.activeRelease.releaseFingerprint);
+              assert.equal(request.expectedGeneration, currentActive.generation);
+              assert.equal(request.scopes.length, 17);
+              return retainedEvWitness(candidate, currentActive.generation);
             },
           },
           async runBackfill() {
@@ -1776,7 +1840,7 @@ test("public readback rejects a health clock that does not govern provider statu
   );
 });
 
-test("historical detail readback validates health without inventing an action clock", async () => {
+test("historical retained detail readback validates health at its confidence clock", async () => {
   const candidate = plan();
   const historical = planRecords(candidate, "repacks")[0];
   historical.availability = "sold_out";
@@ -1806,8 +1870,8 @@ test("historical detail readback validates health without inventing an action cl
   });
 
   assert.equal(
-    readBack.details[0].data.packScoutEvPresentation.status,
-    "historical",
+    readBack.details[0].data.evEstimates.packScout.status,
+    "last_known",
   );
   assert.equal(readBack.details[0].data.providerHealth.state, "delayed");
   await assert.doesNotReject(() => assertClutchpacksPublicReadBack(
@@ -1840,11 +1904,11 @@ test("known EV remains last-known after its legacy deadline", async () => {
     providerObservation: verification.providerObservation,
   });
   assert.equal(
-    readBack.list.data.rows[0].packScoutEvPresentation.status,
+    readBack.list.data.rows[0].evEstimates.packScout.status,
     "last_known",
   );
   assert.equal(
-    readBack.list.data.rows[1].packScoutEvPresentation.status,
+    readBack.list.data.rows[1].evEstimates.packScout.status,
     "unavailable",
   );
   await assert.doesNotReject(() => assertClutchpacksPublicReadBack(
@@ -1873,6 +1937,85 @@ test("provider health does not gate known EV from Top Opportunities", async () =
     scope(),
     { ...readBackVerification(candidate), providerObservation },
   ));
+});
+
+test("signed prior facts govern EV after unavailable, older, or equal candidate releases without changing release bytes", async () => {
+  for (const scenario of ["unavailable", "older", "equal"]) {
+    const candidate = plan();
+    const first = planRecords(candidate, "repacks")[0];
+    const original = structuredClone(first.evEstimates.packScout);
+    first.price.displayMoney.minorUnits = 15_000;
+    first.price.usdComparison.value.minorUnits = 15_000;
+    const calculatedAt = new Date(Date.parse(READ_AT) +
+      (scenario === "unavailable" ? 10 * 60_000 : scenario === "older" ? -5 * 60_000 : 0)).toISOString();
+    first.evEstimates.packScout = scenario === "unavailable" ? {
+      status: "unavailable", methodVersion: original.methodVersion,
+      confidencePolicyVersion: original.confidencePolicyVersion,
+      metrics: null, confidence: null, calculatedAt,
+      dataAsOf: { state: "known", observedAt: calculatedAt }, reason: "BUYBACK_UNAVAILABLE",
+    } : {
+      ...original, calculatedAt, dataAsOf: { state: "known", observedAt: calculatedAt },
+      expiresAt: new Date(Date.parse(calculatedAt) + 60 * 60_000).toISOString(),
+      metrics: { ...original.metrics,
+        grossEvMoney: { currency: "USD", minorUnits: 13_500 },
+        evDollars: { currency: "USD", minorUnits: -1_500 } },
+    };
+    const witness = retainedEvWitness(candidate);
+    witness.entries[0].retained = {
+      estimate: original, calculationPriceUsdMinor: 10_000,
+      sourcePublicReleaseId: PRIOR_RELEASE_ID,
+      latestUnavailableAttempt: scenario === "unavailable"
+        ? { calculatedAt, reason: "BUYBACK_UNAVAILABLE" } : null,
+    };
+    const before = JSON.stringify(candidate);
+    const readBack = publicReadBack(candidate, 17, scope(), { retainedEvWitness: witness });
+    const displayed = readBack.list.data.rows[0].evEstimates.packScout;
+    assert.equal(displayed.status, "last_known");
+    assert.deepEqual(displayed.metrics, original.metrics);
+    assert.equal(displayed.calculationPriceUsdMinor, 10_000);
+    assert.equal(displayed.calculatedAt, original.calculatedAt);
+    assert.equal(displayed.confidence.scoreBasisPoints, scenario === "unavailable" ? 0 : 10_000);
+    await assert.doesNotReject(() => assertClutchpacksPublicReadBack(readBack, candidate, scope(), {
+      ...readBackVerification(candidate), retainedEvWitness: witness,
+    }));
+    assert.equal(JSON.stringify(candidate), before);
+  }
+});
+
+test("retained sold-out economics do not rank a restocked pack", async () => {
+  const candidate = plan();
+  const witness = retainedEvWitness(candidate);
+  witness.entries[0].retained.estimate = {
+    ...witness.entries[0].retained.estimate, status: "sold_out_historical", expiresAt: null,
+    soldOutAt: new Date(Date.parse(READ_AT) + 10 * 60_000).toISOString(),
+  };
+  witness.entries[0].retained.sourcePublicReleaseId = PRIOR_RELEASE_ID;
+  const readBack = publicReadBack(candidate, 17, scope(), { retainedEvWitness: witness });
+  assert.equal(readBack.list.data.rows[0].availability, "available");
+  assert.equal(readBack.dashboard.data.opportunities.some((row) => row.publicRepackId === publicRepackId(0)), false);
+  await assert.doesNotReject(() => assertClutchpacksPublicReadBack(readBack, candidate, scope(), {
+    ...readBackVerification(candidate), retainedEvWitness: witness,
+  }));
+});
+
+test("public readback refuses unbound retained witnesses and the retired EV overlay", async () => {
+  const mutations = [
+    ({ verification }) => { verification.retainedEvWitness.activePublicReleaseId = PRIOR_RELEASE_ID; },
+    ({ verification }) => { verification.retainedEvWitness.activeReleaseFingerprint = HASH; },
+    ({ verification }) => { verification.retainedEvWitness.entries.pop(); },
+    ({ verification }) => { verification.retainedEvWitness.entries[0].publicVendorId = "70000000-0000-5000-8000-000000000001"; },
+    ({ verification }) => { verification.retainedEvWitness.entries[0].activeFacts.availability = "sold_out"; },
+    ({ verification }) => { verification.retainedEvWitness.entries[0].activeFacts.estimate.calculatedAt = "2026-08-27T19:21:00.000Z"; },
+    ({ readBack }) => { readBack.list.data.rows[0].packScoutEvPresentation = readBack.list.data.rows[0].evEstimates.packScout; },
+  ];
+  for (const mutate of mutations) {
+    const candidate = plan();
+    const verification = readBackVerification(candidate);
+    const readBack = publicReadBack(candidate);
+    mutate({ verification, readBack });
+    await assert.rejects(() => assertClutchpacksPublicReadBack(readBack, candidate, scope(), verification),
+      (error) => assertPromotionError(error, "CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT"));
+  }
 });
 
 test("stage recomputes, rejects positive EV before publication, then reads exact status without activation", async () => {
@@ -1977,6 +2120,7 @@ test("a newer settled head also blocks before activation", async () => {
     "assemble:1",
     "status",
     "active-state",
+    "ev-witness-ready",
     "watermark",
     "close",
   ]);
@@ -2299,15 +2443,70 @@ test("activation requires the already-staged fingerprint and expected active poi
     "assemble:1",
     "status",
     "active-state",
+    "ev-witness-ready",
     "watermark",
     "activate",
     "watermark",
     "provider-observation-facts",
     "provider-observation-refresh",
+    "active-state",
+    "ev-witness",
     "public-read",
+    "ev-witness",
     "close",
   ]);
   assert.equal(fake.timeline.includes("backfill:stage"), false);
+});
+
+test("genesis and non-genesis refuse an old or mismatched witness backend before activation", async () => {
+  for (const prior of [null, PRIOR_RELEASE_ID]) {
+    for (const failure of ["unsupported", "generation", "fingerprint"]) {
+      const fake = fakeDependencies({ active: activeState(prior, prior === null ? 0 : 4) });
+      const open = fake.dependencies.open;
+      fake.dependencies.open = async (...args) => {
+        const opened = await open(...args);
+        const read = opened.publication.retainedEvWitnessReadiness;
+        opened.publication.retainedEvWitnessReadiness = async (request) => {
+          if (failure === "unsupported") throw new Error("unsupported signed endpoint");
+          const ready = await read(request);
+          return failure === "generation" ? { ...ready, generation: ready.generation + 1 }
+            : { ...ready, activeReleaseFingerprint: HASH };
+        };
+        return opened;
+      };
+      await assert.rejects(() => runClutchpacksDataReleaseV3Promotion({
+        argv: ["--activate", "--expected-release-fingerprint", FINGERPRINT,
+          "--expected-active-release", prior ?? "genesis"],
+        environment: activationEnvironment(prior), dependencies: fake.dependencies, writeOutput() {},
+      }), (error) => assertPromotionError(error, "CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT"));
+      assert.equal(fake.timeline.includes("activate"), false);
+      assert.equal(fake.timeline.includes("public-read"), false);
+      assert.equal(fake.timeline.includes("provider-observation-refresh"), false);
+      assert.equal(fake.getActiveState().activeRelease?.publicReleaseId ?? null, prior);
+    }
+  }
+});
+
+test("a changed retained fact witness across public reads is not accepted", async () => {
+  const fake = fakeDependencies({ active: activeState(PRIOR_RELEASE_ID, 4) });
+  const open = fake.dependencies.open;
+  fake.dependencies.open = async (...args) => {
+    const opened = await open(...args);
+    const read = opened.publication.retainedEvWitness;
+    let count = 0;
+    opened.publication.retainedEvWitness = async (request) => {
+      const witness = await read(request);
+      return ++count === 1 ? witness : { ...witness, witnessSha256: "d".repeat(64) };
+    };
+    return opened;
+  };
+  await assert.rejects(() => runClutchpacksDataReleaseV3Promotion({
+    argv: ["--activate", "--expected-release-fingerprint", FINGERPRINT,
+      "--expected-active-release", PRIOR_RELEASE_ID],
+    environment: activationEnvironment(PRIOR_RELEASE_ID), dependencies: fake.dependencies, writeOutput() {},
+  }), (error) => assertPromotionError(error, "CLUTCHPACKS_V3_ACTIVATION_ROLLED_BACK"));
+  assert.equal(fake.timeline.filter((event) => event === "ev-witness").length, 2);
+  assert.equal(fake.getActiveState().activeRelease.publicReleaseId, PRIOR_RELEASE_ID);
 });
 
 test("provider observation uses signed activation server time under local clock skew", async () => {
@@ -2441,10 +2640,10 @@ test("failed public verification rolls activation back to the guarded predecesso
     PRIOR_RELEASE_ID,
   );
   assert.deepEqual(fake.timeline.slice(-8), [
-    "activate",
-    "watermark",
     "provider-observation-facts",
     "provider-observation-refresh",
+    "active-state",
+    "ev-witness",
     "public-read",
     "active-state",
     "rollback",
@@ -2554,7 +2753,7 @@ test("public readback byte-matches every stored list summary and detail field", 
       readBack.details[0].data.actions = {};
     },
     (readBack) => {
-      readBack.list.data.rows[0].packScoutEvPresentation.confidence
+      readBack.list.data.rows[0].evEstimates.packScout.confidence
         .scoreBasisPoints -= 1;
     },
     (readBack) => {

@@ -16,6 +16,7 @@ import {
   presentTopChaseValue,
   presentVendorReportedEvV3,
 } from "@/lib/packscout-ev-presentation";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
@@ -83,8 +84,9 @@ function RepackRow({
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
 }>) {
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const estimate = presentPackScoutEvV3({
-    estimate: repack.packScoutEvPresentation,
+    estimate: boundEstimate,
     price: repack.price,
     availability: repack.availability,
     repackName: repack.name,
@@ -143,7 +145,9 @@ function RepackRow({
       <td className={styles.numeric}>
         <MetricValue compact metric={estimate.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
         {showStatusNote ? (
-          <span className={styles.chaseEvidence}>{estimate.statusLabel}</span>
+          <span className={styles.chaseEvidence} title={[
+            estimate.freshness.dataAsOfLabel, estimate.reasonCopy, estimate.calculationPriceNote,
+          ].filter(Boolean).join(" ")}>{estimate.statusLabel}</span>
         ) : null}
       </td>
       <td className={styles.numeric}>

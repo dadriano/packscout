@@ -9,7 +9,7 @@
 
 ## Start Here
 
-Write the 60-minute boundary table first: 60 minutes stays `current` at 7,500 with no static penalties; 60 minutes plus one millisecond becomes `last_known`, keeps all EV metrics, and begins the rational decay.
+Use the PR #50 merge amendment in `_index.md`: known dynamic estimates use one last-known projection; confidence is 7,500 at 60 minutes with no static penalties, then declines linearly to zero by four hours without removing economics.
 
 ## Objective
 
@@ -21,9 +21,9 @@ The V1 confidence policy combines calculation-time evidence limitations with a h
 
 ## Requirements
 
-- Define a versioned public freshness policy with `current`, `last_known`, `historical`, and `unavailable` states.
+- Keep immutable raw calculation states separate from the single versioned last-known display projection and explicit unavailable state.
 - Preserve the four EV metrics whenever the underlying V1 result was calculable, including a confidence score of zero.
-- Encode the approved rational decay with integer arithmetic and half-up rounding.
+- Encode the approved linear age penalty with bounded integer arithmetic; preserve sold-out economics while continuing confidence aging.
 - Preserve the exact V1 age-band scores through 60 minutes by evaluating them at the pinned response clock, and distinguish over-60 source age from the 30-through-60 limitation.
 - Keep missing essential evidence and the existing positive-EV suppression path unavailable.
 
@@ -56,6 +56,8 @@ An unavailable estimate contains null economics and one stable public reason. It
 Run the focused contract test suite and typecheck before completing this task.
 
 ## Spec Compliance
+
+Historical implementation results below precede the PR #50 merge amendment; its original half-up formula is superseded by the retained-EV contract described above.
 
 - Related specs reviewed: none; this feature has no companion tech or UX specs.
 - Alignment: added a separately versioned read-time presentation contract, exact boundary examples, deterministic half-up decay, immutable raw V1 preservation, provider-health schemas, and strict dynamic response clocks exactly as specified.

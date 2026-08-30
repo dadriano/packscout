@@ -2,10 +2,11 @@ import {
   packScoutBuybackEvMetricsAreConsistentV1,
   type DashboardKpis,
   type DataReleaseV3Identity,
+  type PackScoutDisplayedEvSourceAgeStateV3,
+  type PackScoutDisplayedEvV3,
   type PublicBuybackSummaryV3,
   type PublicRepackChase,
   type PublicRepackSummaryV3,
-  type PublicRepackViewSummaryV3,
   type VendorReportedEvV3,
 } from "@packscout/contracts";
 import { presentConfidenceLimitations } from "./confidence-limitations";
@@ -33,14 +34,6 @@ const PRESENTATION_LOCALE = "en-US" as const;
 
 type PublicMoney = Readonly<{ minorUnits: number; currency: string }>;
 type PublicPrice = PublicRepackSummaryV3["price"];
-type PackScoutPublicEvPresentationV3 =
-  PublicRepackViewSummaryV3["packScoutEvPresentation"];
-type AvailablePackScoutPublicEvPresentationV3 = Exclude<
-  PackScoutPublicEvPresentationV3,
-  { status: "unavailable" }
->;
-type PackScoutPublicEvSourceAgeStateV3 =
-  AvailablePackScoutPublicEvPresentationV3["sourceAge"]["state"];
 
 export type MetricSemanticState = "neutral" | "negative" | "unavailable";
 
@@ -82,7 +75,7 @@ export type ConfidencePresentation = Readonly<{
 }>;
 
 export type PackScoutEvFreshnessPresentation = Readonly<{
-  sourceAgeState: PackScoutPublicEvSourceAgeStateV3 | null;
+  sourceAgeState: PackScoutDisplayedEvSourceAgeStateV3 | null;
   sourceAgeLabel: string | null;
   delayed: boolean;
   calculatedAt: string;
@@ -97,9 +90,9 @@ export type PackScoutEvFreshnessPresentation = Readonly<{
 
 export type PackScoutEvStatusKind =
   | "current"
-  | "last_known"
-  | "historical"
-  | "unavailable";
+  | "sold_out_historical"
+  | "unavailable"
+  | "last_known";
 
 export type PackScoutEvV3Presentation = Readonly<{
   availability: "available" | "unavailable";
@@ -122,6 +115,7 @@ export type PackScoutEvV3Presentation = Readonly<{
   freshness: PackScoutEvFreshnessPresentation;
   reason?: PublicMetricReason;
   reasonCopy?: string;
+  calculationPriceNote?: string;
   outboundActionAllowed: boolean;
   accessibleLabel: string;
 }>;
@@ -139,7 +133,7 @@ export type VendorReportedEvV3Presentation = Readonly<{
 }>;
 
 export type PackScoutEvV3PresentationInput = Readonly<{
-  estimate: PackScoutPublicEvPresentationV3;
+  estimate: PackScoutDisplayedEvV3;
   price: PublicPrice;
   availability: PublicRepackSummaryV3["availability"];
   repackName?: string;
@@ -406,9 +400,9 @@ export function presentBuybackSummaryV3(
 
 // --- confidence --------------------------------------------------------------
 
-type PackScoutConfidence = Extract<
-  PackScoutPublicEvPresentationV3,
-  { status: "current" | "last_known" | "historical" }
+type PackScoutConfidence = Exclude<
+  PackScoutDisplayedEvV3,
+  { status: "unavailable" }
 >["confidence"];
 
 export function presentPackScoutConfidence(
@@ -426,7 +420,7 @@ export function presentPackScoutConfidence(
   }
   const band = confidence.band;
   const score = formatBasisPoints(confidence.scoreBasisPoints, {
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   });
   const limitations = presentConfidenceLimitations(confidence.limitationCodes);
   return Object.freeze({
@@ -448,12 +442,16 @@ export function presentPackScoutConfidence(
 // --- freshness and timestamps -------------------------------------------------
 
 function presentFreshness(
-  estimate: PackScoutPublicEvPresentationV3,
+  estimate: PackScoutDisplayedEvV3,
 ): PackScoutEvFreshnessPresentation {
   const sourceAgeState =
     estimate.status === "unavailable" ? null : estimate.sourceAge.state;
   const dataAsOf =
     estimate.dataAsOf.state === "known" ? estimate.dataAsOf.observedAt : null;
+  const soldOutAt = estimate.status === "sold_out_historical" ? estimate.soldOutAt
+    : estimate.status === "last_known" ? estimate.historicalSoldOutAt : null;
+  const confidenceEvaluatedAt = estimate.status === "last_known"
+    ? estimate.confidenceEvaluatedAt : estimate.calculatedAt;
   return Object.freeze({
     sourceAgeState,
     sourceAgeLabel:
@@ -467,15 +465,10 @@ function presentFreshness(
       dataAsOf === null
         ? ESTIMATE_STATUS_COPY.unknownSourceTime
         : `Source evidence last observed ${formatPublicTimestamp(dataAsOf)}`,
-    confidenceEvaluatedAt: estimate.confidenceEvaluatedAt,
-    confidenceEvaluatedLabel:
-      `Confidence evaluated ${formatPublicTimestamp(estimate.confidenceEvaluatedAt)}`,
-    soldOutAt:
-      estimate.status === "historical" ? estimate.soldOutAt : null,
-    soldOutLabel:
-      estimate.status === "historical"
-        ? `Sold out ${formatPublicTimestamp(estimate.soldOutAt)}`
-        : null,
+    confidenceEvaluatedAt,
+    confidenceEvaluatedLabel: `Confidence evaluated ${formatPublicTimestamp(confidenceEvaluatedAt)}`,
+    soldOutAt,
+    soldOutLabel: soldOutAt === null ? null : `Sold out ${formatPublicTimestamp(soldOutAt)}`,
   });
 }
 
@@ -516,7 +509,11 @@ export function packScoutMetricConsistencyIssuesV3(
   ) {
     issues.push("EV % must equal Gross EV % minus 100 percentage points");
   }
-  if (input.price.usdComparison.status !== "available") {
+  const calculationPrice = input.estimate.status === "last_known"
+    ? input.estimate.calculationPriceUsdMinor
+    : input.price.usdComparison.status === "available"
+      ? input.price.usdComparison.value.minorUnits : null;
+  if (calculationPrice === null) {
     issues.push(
       "a presentable PackScout estimate requires a comparable Pack Price",
     );
@@ -526,7 +523,7 @@ export function packScoutMetricConsistencyIssuesV3(
       grossReturnBasisPoints: metrics.grossReturnBasisPoints,
       evDollarsMinorUnits: metrics.evDollars.minorUnits,
       evPercentBasisPoints: metrics.evPercentBasisPoints,
-      packPriceMinorUnits: input.price.usdComparison.value.minorUnits,
+      packPriceMinorUnits: calculationPrice,
     })
   ) {
     issues.push(
@@ -554,14 +551,16 @@ function packPurchaseActionsAllowed(
   return presentPackAvailability(availability).purchaseActionsAvailable;
 }
 
+function unavailableStatus(): Readonly<{ status: PackScoutEvStatusKind; statusLabel: string }> {
+  return { status: "unavailable", statusLabel: ESTIMATE_STATUS_COPY.unavailable };
+}
 function unavailablePackScoutPresentation(
   reason: PublicMetricReason,
   input: PackScoutEvV3PresentationInput,
   freshness: PackScoutEvFreshnessPresentation,
 ): PackScoutEvV3Presentation {
   const reasonCopy = getPublicReasonCopy(reason);
-  const status = "unavailable" as const;
-  const statusLabel = ESTIMATE_STATUS_COPY.unavailable;
+  const { status, statusLabel } = unavailableStatus();
   const simulated = isSimulatedRepackListing(input.repackName);
   return Object.freeze({
     availability: "unavailable" as const,
@@ -626,7 +625,20 @@ export function presentPackScoutEvV3(
   }
 
   const { metrics, confidence } = input.estimate;
-  const historical = input.estimate.status === "historical";
+  const historical = input.estimate.status === "sold_out_historical" ||
+    (input.estimate.status === "last_known" && input.estimate.historicalSoldOutAt !== null);
+  const retained = input.estimate.status === "last_known";
+  const latestUnavailableReason = retained ? input.estimate.latestUnavailableReason : null;
+  const lastKnown = retained && (input.estimate.sourceAge.state === "delayed_over_60_minutes" ||
+    latestUnavailableReason !== null);
+  const reasonCopy = latestUnavailableReason === null ? undefined
+    : `Fresh calculation unavailable: ${getPublicReasonCopy(latestUnavailableReason).replace(/^Unavailable: /, "")}`;
+  const calculationPriceNote = retained && (input.price.usdComparison.status !== "available" ||
+    input.price.usdComparison.value.minorUnits !== input.estimate.calculationPriceUsdMinor)
+    ? `EV uses the calculation-time Pack Price of ${formatMoneyMinorUnits({
+      minorUnits: input.estimate.calculationPriceUsdMinor, currency: "USD",
+    })}; the current listing price is shown separately.`
+    : undefined;
   const state = semanticStateForSignedBasisPoints(metrics.evPercentBasisPoints);
   const stateLabel = semanticLabel(state);
   const zeroPayout = metrics.grossEvMoney.minorUnits === 0;
@@ -652,11 +664,13 @@ export function presentPackScoutEvV3(
   );
   const packPrice = presentRepackPrice(input.price);
   const confidencePresentation = presentPackScoutConfidence(confidence);
-  const statusLabel = ESTIMATE_STATUS_COPY[input.estimate.status];
+  const statusLabel = historical
+    ? ESTIMATE_STATUS_COPY.sold_out_historical
+    : lastKnown ? ESTIMATE_STATUS_COPY.last_known : ESTIMATE_STATUS_COPY.current;
   const simulated = isSimulatedRepackListing(input.repackName);
   return Object.freeze({
     availability: "available" as const,
-    status: input.estimate.status,
+    status: historical ? "sold_out_historical" : lastKnown ? "last_known" : "current",
     statusLabel,
     semanticState: state,
     semanticLabel: stateLabel,
@@ -675,6 +689,8 @@ export function presentPackScoutEvV3(
     packPrice,
     confidence: confidencePresentation,
     freshness,
+    ...(latestUnavailableReason === null ? {} : { reason: latestUnavailableReason, reasonCopy }),
+    ...(calculationPriceNote === undefined ? {} : { calculationPriceNote }),
     outboundActionAllowed:
       packPurchaseActionsAllowed(input.availability) && !historical,
     accessibleLabel: [
@@ -692,6 +708,8 @@ export function presentPackScoutEvV3(
         ? ["Valid $0.00 payout: every supported outcome pays no guaranteed buyback."]
         : []),
       confidencePresentation.accessibleLabel,
+      ...(reasonCopy ? [reasonCopy] : []),
+      ...(calculationPriceNote ? [calculationPriceNote] : []),
       ...(freshness.sourceAgeLabel ? [`${freshness.sourceAgeLabel}.`] : []),
       `${freshness.dataAsOfLabel}.`,
       `${freshness.confidenceEvaluatedLabel}.`,

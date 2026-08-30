@@ -2,6 +2,8 @@ import type { ZodError } from "zod";
 import { isUtf8 } from "node:buffer";
 import { JSONParser, TokenType } from "@streamparser/json";
 import {
+  DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  dataforrestEventsJsonNodeBudget,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
   dataforrestEventsPageV1Schema,
@@ -16,6 +18,7 @@ import {
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
   type NormalizedObservationOutcome,
+  type NormalizedContinuation,
 } from "@packscout/contracts";
 import type {
   ConnectionTestInterpretationContext,
@@ -49,16 +52,15 @@ const timestampFields = new Set([
   "first_seen_at",
 ]);
 const maximumJsonNestingDepth = 64;
-// The transport manifest caps raw responses at no more than 8 MiB.
-// Data-rich catalog records can contain hundreds of bounded native facts, so
-// a full 500-record page needs a higher aggregate traversal allowance while
-// the independent depth, object-key, and array-item limits remain enforced.
-// The cap is above both observed 183,215- and 214,914-node Phygitals pages and
-// the reviewed 500 x 945 native-fact page while keeping the heaviest accepted
-// object graph inside the unchanged single-page memory gate.
-const maximumJsonNodeCount = 480_000;
+// Byte and whole-page value-node admission come from the exact immutable
+// adapter profile. Historical profiles retain 8 MiB/480,000 values; the separately
+// capacity-tested Courtyard-v2 revision admits 32 MiB/640,000 values.
 const maximumJsonObjectKeys = 256;
 const maximumJsonArrayItems = 5_000;
+// Native arrays share the existing whole-page value-node budget, rather than
+// an observed-shape guess: a 24,005-item sales array fits a 214,945-node page.
+// Every item consumes a node before materialization. This does not increase
+// total work/memory admission or change envelope/manifest record-count limits.
 const jsonParserInputChunkBytes = 64 * 1024;
 const reservedJsonObjectKeys = new Set([
   "__proto__",
@@ -68,6 +70,23 @@ const reservedJsonObjectKeys = new Set([
 const jsonQuotationMark = 0x22;
 const jsonReverseSolidus = 0x5c;
 const jsonUnicodeEscape = 0x75;
+
+type JsonShapeLocation = "root" | "records" | "record" | "native" | "other";
+
+function childJsonShapeLocation(
+  parent: JsonShapeLocation,
+  key: string | number | null,
+): JsonShapeLocation {
+  if (parent === "native") return "native";
+  if (parent === "root" && key === "records") return "records";
+  if (parent === "records" && typeof key === "number") return "record";
+  if (parent === "record" && key === "data") return "native";
+  return "other";
+}
+
+function jsonArrayItemLimit(location: JsonShapeLocation, maximumJsonNodeCount: number): number {
+  return location === "native" ? maximumJsonNodeCount : maximumJsonArrayItems;
+}
 
 function hexadecimalNibble(value: number): number | null {
   if (value >= 0x30 && value <= 0x39) return value - 0x30;
@@ -131,7 +150,7 @@ function hasOnlyScalarUnicodeEscapes(bytes: Uint8Array): boolean {
   return true;
 }
 
-function parseUtf8Json(bytes: Uint8Array): unknown {
+function parseUtf8Json(bytes: Uint8Array, maximumJsonNodeCount: number): unknown {
   if (!isUtf8(bytes) || !hasOnlyScalarUnicodeEscapes(bytes)) {
     throw new SyntaxError("dataforrest_events.utf8_invalid");
   }
@@ -140,10 +159,10 @@ function parseUtf8Json(bytes: Uint8Array): unknown {
     stringBufferSize: 64 * 1024,
     numberBufferSize: 64,
   });
-  const containers: Array<
+  const containers: Array<{ location: JsonShapeLocation } & (
     | { kind: "array"; itemCount: number }
-    | { kind: "object"; expectingKey: boolean; keyCount: number }
-  > = [];
+    | { kind: "object"; expectingKey: boolean; keyCount: number; key: string | null }
+  )> = [];
   let nodeCount = 0;
   let parsed = false;
   let root: unknown;
@@ -155,26 +174,32 @@ function parseUtf8Json(bytes: Uint8Array): unknown {
     const parent = containers.at(-1);
     if (parent?.kind === "array") {
       parent.itemCount += 1;
-      if (parent.itemCount > maximumJsonArrayItems) {
+      if (parent.itemCount > jsonArrayItemLimit(parent.location, maximumJsonNodeCount)) {
         throw new SyntaxError("dataforrest_events.json_array_limit");
       }
     }
+    return parent === undefined
+      ? "root"
+      : childJsonShapeLocation(
+        parent.location,
+        parent.kind === "array" ? parent.itemCount - 1 : parent.key,
+      );
   };
   parser.onToken = ({ token, value }) => {
     if (token === TokenType.LEFT_BRACE) {
-      registerValue();
+      const location = registerValue();
       if (containers.length >= maximumJsonNestingDepth) {
         throw new SyntaxError("dataforrest_events.json_depth_limit");
       }
-      containers.push({ kind: "object", expectingKey: true, keyCount: 0 });
+      containers.push({ kind: "object", expectingKey: true, keyCount: 0, key: null, location });
       return;
     }
     if (token === TokenType.LEFT_BRACKET) {
-      registerValue();
+      const location = registerValue();
       if (containers.length >= maximumJsonNestingDepth) {
         throw new SyntaxError("dataforrest_events.json_depth_limit");
       }
-      containers.push({ kind: "array", itemCount: 0 });
+      containers.push({ kind: "array", itemCount: 0, location });
       return;
     }
     if (token === TokenType.RIGHT_BRACE) {
@@ -207,6 +232,7 @@ function parseUtf8Json(bytes: Uint8Array): unknown {
         throw new SyntaxError("dataforrest_events.json_object_key_limit");
       }
       container.expectingKey = false;
+      container.key = value as string;
       return;
     }
     if (
@@ -243,14 +269,53 @@ function parseUtf8Json(bytes: Uint8Array): unknown {
   return root;
 }
 
-function hasBoundedJsonShape(root: unknown): boolean {
-  const pending: Array<Readonly<{ value: unknown; depth: number }>> = [{
+function hasBoundedJsonShape(root: unknown, maximumJsonNodeCount: number): boolean {
+  type ValueFrame = Readonly<{
+    kind: "value";
+    value: unknown;
+    depth: number;
+    location: JsonShapeLocation;
+  }>;
+  type ChildrenFrame = {
+    kind: "children";
+    value: readonly unknown[] | Readonly<Record<string, unknown>>;
+    keys: readonly string[] | null;
+    childCount: number;
+    nextIndex: number;
+    depth: number;
+    location: JsonShapeLocation;
+  };
+  // One iterator per container keeps metadata bounded by nesting depth, even
+  // when one native array consumes nearly the entire page's node budget.
+  const pending: Array<ValueFrame | ChildrenFrame> = [{
+    kind: "value",
     value: root,
     depth: 0,
+    location: "root",
   }];
   let nodeCount = 0;
+  let pendingValueCount = 1;
   while (pending.length > 0) {
-    const current = pending.pop()!;
+    const current = pending.at(-1)!;
+    if (current.kind === "children") {
+      if (current.nextIndex === current.childCount) {
+        pending.pop();
+        continue;
+      }
+      const index = current.nextIndex++;
+      const key = current.keys === null ? index : current.keys[index]!;
+      pending.push({
+        kind: "value",
+        value: current.keys === null
+          ? (current.value as readonly unknown[])[index]
+          : (current.value as Readonly<Record<string, unknown>>)[key],
+        depth: current.depth + 1,
+        location: childJsonShapeLocation(current.location, key),
+      });
+      continue;
+    }
+    pending.pop();
+    pendingValueCount -= 1;
     nodeCount += 1;
     if (nodeCount > maximumJsonNodeCount) return false;
     const value = current.value;
@@ -269,10 +334,11 @@ function hasBoundedJsonShape(root: unknown): boolean {
       return false;
     }
     if (Array.isArray(value)) {
-      if (value.length > maximumJsonArrayItems) return false;
-      for (let index = value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: value[index], depth: current.depth + 1 });
-      }
+      if (value.length > jsonArrayItemLimit(current.location, maximumJsonNodeCount)) return false;
+      if (nodeCount + pendingValueCount + value.length > maximumJsonNodeCount) return false;
+      pendingValueCount += value.length;
+      pending.push({ kind: "children", value, keys: null, childCount: value.length,
+        nextIndex: 0, depth: current.depth, location: current.location });
       continue;
     }
     const prototype = Object.getPrototypeOf(value);
@@ -286,12 +352,11 @@ function hasBoundedJsonShape(root: unknown): boolean {
     ) {
       return false;
     }
-    for (const key of keys as string[]) {
-      pending.push({
-        value: (value as Record<string, unknown>)[key],
-        depth: current.depth + 1,
-      });
-    }
+    if (nodeCount + pendingValueCount + keys.length > maximumJsonNodeCount) return false;
+    pendingValueCount += keys.length;
+    pending.push({ kind: "children", value: value as Readonly<Record<string, unknown>>,
+      keys: keys as string[], childCount: keys.length, nextIndex: 0,
+      depth: current.depth, location: current.location });
   }
   return true;
 }
@@ -341,8 +406,10 @@ function pageEnvelopeShapeCandidate(root: unknown): unknown {
 export function isBoundedDataforrestEventsPageV1(
   value: unknown,
   pageLimit: number,
+  adapterVersion: string = DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
 ): value is DataforrestEventsPageV1 {
-  if (!hasBoundedJsonShape(value)) return false;
+  const maximumJsonNodeCount = dataforrestEventsJsonNodeBudget(adapterVersion);
+  if (maximumJsonNodeCount === null || !hasBoundedJsonShape(value, maximumJsonNodeCount)) return false;
   const parsedShape = dataforrestEventsPageV1Schema.safeParse(
     pageEnvelopeShapeCandidate(value),
   );
@@ -375,17 +442,27 @@ function parsePage(
   pageLimit: number,
   adapterVersion: string,
 ): PageParseResult {
+  return parseRawPage(request.value.protectedRawResponse, pageLimit, adapterVersion);
+}
+
+/** Shared byte parser only; it creates neither request nor completion authority. */
+function parseRawPage(
+  bytes: Uint8Array,
+  pageLimit: number,
+  adapterVersion: string,
+): PageParseResult {
+  const maximumJsonNodeCount = dataforrestEventsJsonNodeBudget(adapterVersion);
+  if (dataforrestManifest(adapterVersion) === null || maximumJsonNodeCount === null) {
+    return { ok: false };
+  }
   let raw: unknown;
   try {
-    raw = parseUtf8Json(request.value.protectedRawResponse);
+    raw = parseUtf8Json(bytes, maximumJsonNodeCount);
   } catch {
     return { ok: false };
   }
   try {
-    if (dataforrestManifest(adapterVersion) === null) {
-      return { ok: false };
-    }
-    if (!isBoundedDataforrestEventsPageV1(raw, pageLimit)) {
+    if (!isBoundedDataforrestEventsPageV1(raw, pageLimit, adapterVersion)) {
       return { ok: false };
     }
     return { ok: true, page: raw };
@@ -584,6 +661,56 @@ function interpretRecords(
   return page.records.map((record, recordIndex) =>
     interpretRecord(record, provider, recordIndex, adapterVersion)
   );
+}
+
+export interface DataforrestRawResponseInspectionInput {
+  readonly provider: LaunchProviderKey;
+  readonly sourceTypeKey: string;
+  readonly adapterVersion: string;
+  readonly pageLimit: number;
+  readonly protectedRawResponse: Uint8Array;
+}
+
+export type DataforrestRawResponseInspectionResult = Readonly<{
+  kind: "untrusted_inspection";
+}> & (Readonly<{
+  ok: true;
+  recordCount: number;
+  outcomes: readonly NormalizedObservationOutcome[];
+  continuation: NormalizedContinuation;
+}> | Readonly<{
+  ok: false;
+  code: "inspection_pins_invalid" | "inspection_response_invalid";
+}>);
+
+/**
+ * Pure inspection for bounded canaries. Outcomes are untrusted data, not a
+ * completed page, request receipt, native-evidence seal, or commit capability.
+ * No raw evidence or returned cursor is exposed, and no caller bytes are changed.
+ */
+export function inspectDataforrestRawResponse(
+  input: DataforrestRawResponseInspectionInput,
+): DataforrestRawResponseInspectionResult {
+  const kind = "untrusted_inspection" as const;
+  const manifest = dataforrestManifest(input.adapterVersion);
+  if (manifest === null || input.sourceTypeKey !== manifest.sourceTypeKey ||
+    !manifest.supportedProviders.some(({ provider }) => provider === input.provider) ||
+    !Number.isSafeInteger(input.pageLimit) || input.pageLimit < 1 || input.pageLimit > manifest.requestBounds.pageLimit) {
+    return Object.freeze({ kind, ok: false, code: "inspection_pins_invalid" });
+  }
+  if (!(input.protectedRawResponse instanceof Uint8Array) ||
+    input.protectedRawResponse.byteLength > manifest.requestBounds.maximumResponseBytes) {
+    return Object.freeze({ kind, ok: false, code: "inspection_response_invalid" });
+  }
+  try {
+    const parsed = parseRawPage(input.protectedRawResponse, input.pageLimit, input.adapterVersion);
+    if (!parsed.ok) return Object.freeze({ kind, ok: false, code: "inspection_response_invalid" });
+    return Object.freeze({ kind, ok: true, recordCount: parsed.page.records.length,
+      outcomes: interpretRecords(parsed.page, input.provider, input.adapterVersion),
+      continuation: dataforrestContinuation(parsed.page) });
+  } catch {
+    return Object.freeze({ kind, ok: false, code: "inspection_response_invalid" });
+  }
 }
 
 async function interpretDataforrestConnectionTestUnsafe(

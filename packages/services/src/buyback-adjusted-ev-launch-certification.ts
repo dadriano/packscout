@@ -720,7 +720,12 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
           testName:
-            "last-known estimates retain metrics while confidence decays",
+            "stale data without any retained value remains explicitly unavailable",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
+          testName:
+            "last known estimates retain numbers at zero confidence and original timestamps",
         },
         {
           file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
@@ -958,7 +963,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/confidence-limitations.test.ts",
           testName:
-            "maps the exact confidence-policy V1 limitation vocabulary to copy",
+            "maps the complete displayed-confidence limitation vocabulary to copy",
         },
         {
           file: "apps/frontend/lib/packscout-ev-examples.test.ts",
@@ -990,23 +995,50 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
     },
     {
       claim:
-        "The 60-minute transition keeps known economics visible while the " +
-        "shared server policy derives last-known confidence.",
+        "Last supported EV values and original timestamps remain visible as " +
+        "confidence decays to zero. Client clocks cannot increase confidence, " +
+        "and later unavailable publications retain those values without " +
+        "turning sold-out history into a live opportunity.",
       evidence: [
         {
-          file: "packages/contracts/src/public-ev-presentation-v1.test.ts",
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
           testName:
-            "public confidence follows the approved boundary table without expiring EV",
+            "crossing the old expiry keeps every EV value and its original times",
         },
         {
-          file: "apps/frontend/lib/packscout-ev-presentation.test.ts",
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
           testName:
-            "last-known estimates retain metrics while confidence decays",
+            "confidence continues decaying to zero without disappearing or compounding",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "sold-out history keeps its sale time while confidence ages; absent values stay absent",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "an open page updates confidence every minute without changing the server snapshot",
+        },
+        {
+          file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
+          testName:
+            "browser wall-clock skew cannot age or rejuvenate the trusted served confidence",
         },
         {
           file: "convex/publicRepacksV3.test.ts",
           testName:
-            "a current estimate past 60 minutes remains visible as last known with decayed confidence",
+            "last valid values remain after the source deadline while confidence decays without new publication",
+        },
+        {
+          file: "convex/dataReleaseV3RetainedEv.test.ts",
+          testName:
+            "unavailable publications retain exact values, timestamps, price basis and rank at zero confidence",
+        },
+        {
+          file: "convex/dataReleaseV3RetainedEv.test.ts",
+          testName:
+            "sold-out history remains visible after expiry without becoming an opportunity",
         },
       ],
     },

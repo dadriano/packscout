@@ -3,7 +3,11 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express, { type Express } from "express";
 import type { QuarantineEntryDetail, QuarantineEntrySummary } from "@packscout/contracts";
-import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
+import {
+  AuthServiceError,
+  ProviderSourceImportRequestError,
+  type AuthenticatedActor,
+} from "@packscout/services";
 import { createSessionCookiePolicy } from "../auth/cookies.ts";
 import { createSameOriginGuard } from "../auth/request-protection.ts";
 import {
@@ -15,6 +19,7 @@ import {
 
 const origin = "https://admin.packscout.test";
 const organizationId = "00000000-0000-4000-8000-000000000010";
+const otherOrganizationId = "00000000-0000-4000-8000-000000000011";
 const providerId = "00000000-0000-4000-8000-000000000020";
 const revisionId = "00000000-0000-4000-8000-000000000021";
 const runId = "00000000-0000-4000-8000-000000000030";
@@ -169,6 +174,7 @@ async function withServer(app: Express, runTest: (baseUrl: string) => Promise<vo
 
 function createHarness(
   readOverrides: Partial<ImportOperationsRouterDependencies["reads"]> = {},
+  manualImportError?: unknown,
 ) {
   const calls = { manual: 0, retryOne: 0, retryMany: 0 };
   const organizations: string[] = [];
@@ -178,6 +184,8 @@ function createHarness(
       if (csrfToken !== undefined && csrfToken !== "csrf-token") {
         throw new AuthServiceError("FORBIDDEN", "The request could not be verified.", 403);
       }
+      if (sessionToken === "other-organization-session") return { ...admin, organizationId: otherOrganizationId };
+      if (sessionToken === "no-permission-session") return { ...admin, permissions: [] };
       return sessionToken === "data-session" ? dataOperator : sessionToken === "viewer-session" ? viewer : admin;
     },
     requirePermission(session, permission) {
@@ -223,6 +231,7 @@ function createHarness(
         calls.manual += 1;
         assert.equal(input.actor.organizationId, organizationId);
         assert.equal(input.expectedSourceRevisionId, revisionId);
+        if (manualImportError !== undefined) throw manualImportError;
         return {
           run: { id: runId, providerId, configurationRevisionId: revisionId, trigger: "manual", state: "queued" },
           deduplicated: input.actor.role === "admin",
@@ -261,7 +270,7 @@ test("run and quarantine reads require session, enforce tenant scope, validate b
 
     for (const path of [
       "/api/import-runs?state=incomplete&trigger=continuation&limit=25",
-      `/api/import-runs/${runId}`,
+      `/api/import-runs/${runId}?providerId=${providerId}`,
       "/api/quarantine?state=open&recordKind=trade&limit=25",
       `/api/quarantine/${quarantineId}`,
     ]) {
@@ -274,6 +283,68 @@ test("run and quarantine reads require session, enforce tenant scope, validate b
   });
   assert.ok(organizations.length >= 3);
   assert.ok(organizations.every((value) => value === organizationId));
+});
+
+test("run detail requires provider qualification before reads and preserves structured validation errors", async () => {
+  let reads = 0;
+  const { app, cookiePolicy } = createHarness({
+    async getRun() { reads += 1; return detail; },
+  });
+  await withServer(app, async (baseUrl) => {
+    const path = `${baseUrl}/api/import-runs/${runId}`;
+    assert.equal((await fetch(path)).status, 401);
+    assert.equal((await fetch(`${path}?providerId=${providerId}`, {
+      headers: { Cookie: `${cookiePolicy.name}=no-permission-session` },
+    })).status, 403);
+    for (const invalidPath of [
+      path,
+      `${path}?providerId=`,
+      `${path}?providerId=courtyard`,
+      `${path}?providerId=${providerId}&providerId=${providerId}`,
+      `${path}?providerId=${providerId}&organizationId=${otherOrganizationId}`,
+      `${baseUrl}/api/import-runs/not-a-run?providerId=${providerId}`,
+    ]) {
+      const response = await fetch(invalidPath, {
+        headers: { Cookie: `${cookiePolicy.name}=data-session` },
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).code, "INVALID_OPERATION_REQUEST");
+    }
+  });
+  assert.equal(reads, 0);
+});
+
+test("run detail forwards exact provider and authenticated organization and does not retry not-found reads", async () => {
+  const targets: Array<{ organizationId: string; providerId: string; runId: string }> = [];
+  const otherProviderId = "00000000-0000-4000-8000-000000000022";
+  const { app, cookiePolicy } = createHarness({
+    async getRun(target) {
+      targets.push(target);
+      return target.organizationId === organizationId && target.providerId === providerId
+        ? detail : null;
+    },
+  });
+  await withServer(app, async (baseUrl) => {
+    const path = `${baseUrl}/api/import-runs/${runId}`;
+    assert.equal((await fetch(`${path}?providerId=${providerId}`, {
+      headers: { Cookie: `${cookiePolicy.name}=data-session` },
+    })).status, 200);
+    for (const [selectedProviderId, session] of [
+      [otherProviderId, "data-session"],
+      [providerId, "other-organization-session"],
+    ]) {
+      const response = await fetch(`${path}?providerId=${selectedProviderId}`, {
+        headers: { Cookie: `${cookiePolicy.name}=${session}` },
+      });
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "Import run not found.", code: "IMPORT_RUN_NOT_FOUND" });
+    }
+  });
+  assert.deepEqual(targets, [
+    { organizationId, providerId, runId },
+    { organizationId, providerId: otherProviderId, runId },
+    { organizationId: otherOrganizationId, providerId, runId },
+  ]);
 });
 
 test("admin and data operators can request imports while active work deduplicates", async () => {
@@ -317,6 +388,32 @@ test("admin and data operators can request imports while active work deduplicate
     });
   });
   assert.equal(calls.manual, 2);
+});
+
+test("Run now exposes an uninstalled integration as a stable provider-scoped error", async () => {
+  const { app, calls, cookiePolicy } = createHarness(
+    {},
+    new ProviderSourceImportRequestError(
+      "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+      503,
+    ),
+  );
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/data-providers/${providerId}/import-runs`,
+      {
+        method: "POST",
+        headers: mutationHeaders(cookiePolicy.name, "data-session"),
+        body: JSON.stringify({ expectedSourceRevisionId: revisionId }),
+      },
+    );
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "No source integration is installed for this provider.",
+      code: "PROVIDER_SOURCE_ADAPTER_UNAVAILABLE",
+    });
+  });
+  assert.equal(calls.manual, 1);
 });
 
 test("single and bounded bulk retries enforce permissions and return independent safe outcomes", async () => {

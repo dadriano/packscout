@@ -5,9 +5,9 @@ import {
   containsProtectedEvPublicationKeyV3,
   parsePackScoutBuybackEvTimestampMillisV1,
   publicRepackDetailV3Schema,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
   type PackScoutBuybackEvPublicReasonCodeV1,
-  type PackScoutPublicEvPresentationV1,
+  type PackScoutDisplayedEvV3,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import type { PackScoutBuybackEvRecomputationCommandV1 } from "./buyback-adjusted-ev-recomputation-contracts.ts";
@@ -362,7 +362,7 @@ export interface PackScoutBuybackEvSimulationScenarioResultV1 {
   readonly recomputationOutcome: "created" | "unchanged";
   readonly revisionId: string;
   readonly publicRepackId: string;
-  readonly publicState: PackScoutPublicEvPresentationV1["status"];
+  readonly publicState: PackScoutDisplayedEvV3["status"];
   readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
 }
 
@@ -652,18 +652,12 @@ export class PackScoutBuybackEvSimulator {
           scenario.scenarioKey,
         );
       }
-      const presented = safePresentPackScoutPublicEvV3(
-        parsed.data.evEstimates.packScout,
-        frame.readAt,
-      );
-      if (!presented.success) {
-        runFailure(
-          "READ_BACK_DIVERGENT",
-          `The published simulated detail failed public freshness presentation: ${presented.reason}.`,
-          scenario.scenarioKey,
-        );
-      }
-      const packScout = presented.presentation;
+      const packScout = presentLastKnownPackScoutEvV3({
+        estimate: parsed.data.evEstimates.packScout,
+        calculationPriceUsdMinor: parsed.data.price.usdComparison.status === "available"
+          ? parsed.data.price.usdComparison.value.minorUnits : 0,
+        referenceTimeIso: frame.readAt,
+      });
       const expectation = scenario.expectation;
       const limitationCodes =
         packScout.status === "unavailable"

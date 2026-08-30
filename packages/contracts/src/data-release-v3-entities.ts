@@ -29,6 +29,10 @@ import {
   publicBuybackSummaryV3Schema,
   publicEvEstimatesV3Schema,
 } from "./data-release-v3-ev-estimates.ts";
+import {
+  packScoutDisplayedEvV3Schema,
+  type PackScoutDisplayedEvV3,
+} from "./data-release-v3-last-known-ev.ts";
 
 /**
  * The single availability gate for this release. `available` is the only
@@ -82,9 +86,14 @@ const repackSummaryV3Shape = {
 } as const;
 
 type RepackSummaryV3Input = z.infer<z.ZodObject<typeof repackSummaryV3Shape>>;
+type RepackSummaryDisplayedV3Input = Omit<RepackSummaryV3Input, "evEstimates"> & {
+  evEstimates: Omit<RepackSummaryV3Input["evEstimates"], "packScout"> & {
+    packScout: PackScoutDisplayedEvV3;
+  };
+};
 
 function validateRepackSummaryV3(
-  repack: RepackSummaryV3Input,
+  repack: RepackSummaryDisplayedV3Input,
   context: z.RefinementCtx,
 ): void {
   if (
@@ -183,14 +192,10 @@ export const publicRepackSummaryV3Schema = z
   .strict()
   .superRefine(validateRepackSummaryV3);
 
-export const publicRepackDetailV3Schema = z
-  .object({
-    ...repackSummaryV3Shape,
-    description: nonBlankTextSchema(4_000).nullable(),
-    actions: publicRepackActionsSchema,
-  })
-  .strict()
-  .superRefine((repack, context) => {
+function validateRepackDetailV3(
+  repack: RepackSummaryDisplayedV3Input & {actions: z.infer<typeof publicRepackActionsSchema>},
+  context: z.RefinementCtx,
+): void {
     validateRepackSummaryV3(repack, context);
     if (
       repack.actionAvailability.promo !== (repack.actions.promo !== undefined) ||
@@ -218,10 +223,37 @@ export const publicRepackDetailV3Schema = z
         message: "data_release_v3.non_purchasable_actionable",
       });
     }
-  });
+}
+
+export const publicRepackDetailV3Schema = z
+  .object({
+    ...repackSummaryV3Shape,
+    description: nonBlankTextSchema(4_000).nullable(),
+    actions: publicRepackActionsSchema,
+  })
+  .strict()
+  .superRefine(validateRepackDetailV3);
 
 export type PublicRepackSummaryV3 = z.infer<typeof publicRepackSummaryV3Schema>;
 export type PublicRepackDetailV3 = z.infer<typeof publicRepackDetailV3Schema>;
+
+/** Read presentation is separate from immutable publication/calculation facts. */
+export const publicRepackSummaryDisplayedV3Schema = z.object({
+  ...repackSummaryV3Shape,
+  evEstimates: z.object({
+    ...publicEvEstimatesV3Schema.shape,
+    packScout: packScoutDisplayedEvV3Schema,
+  }).strict(),
+}).strict().superRefine(validateRepackSummaryV3);
+
+export const publicRepackDetailDisplayedV3Schema = z.object({
+  ...publicRepackSummaryDisplayedV3Schema.shape,
+  description: nonBlankTextSchema(4_000).nullable(),
+  actions: publicRepackActionsSchema,
+}).strict().superRefine(validateRepackDetailV3);
+
+export type PublicRepackSummaryDisplayedV3 = z.infer<typeof publicRepackSummaryDisplayedV3Schema>;
+export type PublicRepackDetailDisplayedV3 = z.infer<typeof publicRepackDetailDisplayedV3Schema>;
 
 export function publicRepackSummaryV3FromDetail(
   repack: PublicRepackDetailV3,
@@ -236,7 +268,7 @@ export function publicRepackSummaryV3FromDetail(
 
 /** Canonical bytes of one repack projection's EV estimates. */
 export function packScoutEvProjectionBytesV3(projection: {
-  readonly evEstimates: z.infer<typeof publicEvEstimatesV3Schema>;
+  readonly evEstimates: RepackSummaryDisplayedV3Input["evEstimates"];
 }): string {
   return JSON.stringify(projection.evEstimates);
 }
@@ -250,11 +282,11 @@ export function packScoutEvProjectionBytesV3(projection: {
 export function packScoutEvProjectionsAreByteEquivalentV3(
   left: {
     readonly publicRepackId: string;
-    readonly evEstimates: z.infer<typeof publicEvEstimatesV3Schema>;
+    readonly evEstimates: RepackSummaryDisplayedV3Input["evEstimates"];
   },
   right: {
     readonly publicRepackId: string;
-    readonly evEstimates: z.infer<typeof publicEvEstimatesV3Schema>;
+    readonly evEstimates: RepackSummaryDisplayedV3Input["evEstimates"];
   },
 ): boolean {
   return (

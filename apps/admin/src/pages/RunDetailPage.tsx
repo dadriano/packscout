@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { importRunDetailLocationSchema, type ImportRunDetailLocation } from "@packscout/contracts";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import { getImportRun, type ImportRunDetail, type ImportRunState } from "../api/import-operations";
 import { EmptyState } from "../components/EmptyState";
-import { QuarantineStatus, RunStatus, dateTime, duration, humanize } from "../components/operations/OperationStatus";
+import { QuarantineStatus, RunStatus, dateTime, duration, humanize, revisionCount } from "../components/operations/OperationStatus";
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -17,6 +18,21 @@ function stateGuidance(state: ImportRunState): string {
 
 export function RunDetailPage() {
   const { runId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const providerIds = searchParams.getAll("providerId");
+  const providerId = providerIds.length === 1 ? providerIds[0] ?? "" : "";
+  const location = importRunDetailLocationSchema.safeParse({ providerId, runId });
+  return location.success
+    ? <QualifiedRunDetailPage key={`${providerId}:${runId}`} {...location.data} />
+    : <UnqualifiedRunDetailPage />;
+}
+
+function UnqualifiedRunDetailPage() {
+  useDocumentTitle("Import Run");
+  return <div className="ops-error" role="alert"><p>A valid provider and run are required. Open the run from its provider or run history.</p><Link className="admin-button admin-button-secondary" to="/runs">Return to runs</Link></div>;
+}
+
+function QualifiedRunDetailPage({ providerId, runId }: ImportRunDetailLocation) {
   const [run, setRun] = useState<ImportRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,9 +43,12 @@ export function RunDetailPage() {
 
   useEffect(() => {
     let active = true;
-    void getImportRun(runId)
+    void getImportRun({ providerId, runId })
       .then(({ run: nextRun }) => {
         if (!active) return;
+        if (nextRun.id !== runId || nextRun.providerId !== providerId) {
+          throw new AdminApiError("Run evidence did not match its provider.", 503);
+        }
         if (priorState.current && priorState.current !== nextRun.state) {
           setAnnouncement(`Import state changed to ${humanize(nextRun.state)}.`);
         }
@@ -49,7 +68,7 @@ export function RunDetailPage() {
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [refreshIndex, runId]);
+  }, [providerId, refreshIndex, runId]);
 
   useEffect(() => {
     if (run?.state !== "queued" && run?.state !== "running") return;
@@ -89,7 +108,7 @@ export function RunDetailPage() {
       <section className="ops-metrics" aria-label="Run metrics">
         <div><span>Pages committed</span><strong>{run.counters.pages}</strong></div>
         <div><span>Records seen</span><strong>{recordTotal}</strong><small>{run.counters.catalog} catalog · {run.counters.pulls} pulls · {run.counters.trades} trades</small></div>
-        <div><span>Accepted</span><strong>{run.counters.accepted}</strong><small>{run.counters.unchanged} unchanged · {run.counters.revised} revised</small></div>
+        <div><span>Accepted</span><strong>{run.counters.accepted}</strong><small>{run.counters.unchanged} unchanged · {revisionCount(run.counters.revised)}</small></div>
         <div><span>Quarantined then / now</span><strong>{run.counters.quarantined} / {Math.max(0, run.counters.quarantined - run.counters.resolvedQuarantines)}</strong><small>{run.counters.resolvedQuarantines} resolved separately</small></div>
       </section>
 
@@ -126,7 +145,7 @@ export function RunDetailPage() {
 
       <section className="ops-pages" aria-labelledby="run-pages-title">
         <header className="admin-section-header"><div><span className="admin-kicker">Durable page commits</span><h2 id="run-pages-title">Page progress</h2></div><span className="admin-section-count">{run.pages.length} shown</span></header>
-        {run.pages.length === 0 ? <EmptyState title="No pages committed" description="A queued run or a failure before the first durable commit has no page progress." /> : <div>{run.pages.map((page) => <article key={page.pageNumber}><strong>Page {page.pageNumber}</strong><span>{dateTime(page.committedAt)}</span><dl><div><dt>Records</dt><dd>{page.catalog} catalog · {page.pulls} pulls · {page.trades} trades</dd></div><div><dt>Outcomes</dt><dd>{page.accepted} accepted · {page.unchanged} unchanged · {page.revised} revised · {page.quarantined} quarantined</dd></div><div><dt>Cursor in</dt><dd className="ops-cursor">{page.requestedCursorPreview ?? "Feed start"}</dd></div><div><dt>Cursor out</dt><dd className="ops-cursor">{page.nextCursorPreview ?? "Provider head"}</dd></div></dl></article>)}</div>}
+        {run.pages.length === 0 ? <EmptyState title="No pages committed" description="A queued run or a failure before the first durable commit has no page progress." /> : <div>{run.pages.map((page) => <article key={page.pageNumber}><strong>Page {page.pageNumber}</strong><span>{dateTime(page.committedAt)}</span><dl><div><dt>Records</dt><dd>{page.catalog} catalog · {page.pulls} pulls · {page.trades} trades</dd></div><div><dt>Outcomes</dt><dd>{page.accepted} accepted · {page.unchanged} unchanged · {revisionCount(page.revised)} · {page.quarantined} quarantined</dd></div><div><dt>Cursor in</dt><dd className="ops-cursor">{page.requestedCursorPreview ?? "Feed start"}</dd></div><div><dt>Cursor out</dt><dd className="ops-cursor">{page.nextCursorPreview ?? "Provider head"}</dd></div></dl></article>)}</div>}
       </section>
 
       <section className="ops-related" aria-labelledby="run-quarantine-title">

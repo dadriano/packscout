@@ -55,6 +55,7 @@ test("run ledger keeps historical outcome separate from current quarantine resol
   assert.match(html, /2 created · 1 now resolved/);
   assert.match(html, /Provider response failed validation/);
   assert.match(html, /Provider head/);
+  assert.ok(html.includes(`href="/runs/${run.id}?providerId=${run.providerId}"`));
   assert.doesNotMatch(html, /rawPayload|walletAddress|username|bearerToken/i);
 });
 
@@ -66,5 +67,15 @@ test("expired quarantine evidence remains visible but cannot be selected for ret
   assert.match(html, /Expired/);
   assert.match(html, /Unavailable for retry/);
   assert.match(html, /type="checkbox" disabled=""/);
+  assert.ok(html.includes(`href="/runs/${quarantine.runId}?providerId=${quarantine.providerId}"`));
   assert.doesNotMatch(html, /raw JSON|walletAddress|username/i);
+});
+
+test("run ledger does not label unmeasured revisions as zero or combined changes", () => {
+  Object.assign(globalThis, { React });
+  const unmeasured = { ...run, counters: { ...run.counters, revised: null } };
+  const html = renderToStaticMarkup(<MemoryRouter><RunLedger runs={[unmeasured]} /></MemoryRouter>);
+  assert.match(html, /9 accepted · 2 unchanged/);
+  assert.match(html, /Revision count unavailable/);
+  assert.doesNotMatch(html, /\d+ revised/);
 });

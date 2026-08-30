@@ -480,7 +480,6 @@ test("worker environment strips evidence token and pins four Task010 source lane
 
   for (const runner of [
     "inspect-provider-source-task010-target.mts",
-    "migrate-provider-source-task010-target.mts",
     "bootstrap-provider-source-task010-target.mts",
     "start-provider-source-task010-admin.mts",
     "start-provider-source-task010-supervisor.mts",
@@ -495,8 +494,8 @@ test("worker environment strips evidence token and pins four Task010 source lane
   }
 });
 
-test("migration invocation uses no shell or secret-bearing command argument", () => {
-  const invocation = task010MigrationInvocation({
+test("retired migration invocation never returns executable authority", () => {
+  assert.throws(() => task010MigrationInvocation({
     nodeExecPath: "/usr/local/bin/node",
     npmExecPath: "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
     databaseUrl: baseEnvironment.PACKSCOUT_DATABASE_URL,
@@ -505,24 +504,8 @@ test("migration invocation uses no shell or secret-bearing command argument", ()
       PATH: "/usr/bin",
       NODE_OPTIONS: "--import=/tmp/attacker.mjs",
     },
-  });
-  assert.equal(invocation.executable, "/usr/local/bin/node");
-  assert.deepEqual(invocation.arguments, [
-    "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-    "run",
-    "db:prisma:migrate:deploy",
-  ]);
-  assert.equal(
-    invocation.arguments
-      .join(" ")
-      .includes(baseEnvironment.PACKSCOUT_DATABASE_URL),
-    false,
-  );
-  assert.equal(
-    invocation.environment.PACKSCOUT_DATABASE_URL,
-    baseEnvironment.PACKSCOUT_DATABASE_URL,
-  );
-  assert.equal(invocation.environment.NODE_OPTIONS, undefined);
+  }), (error) => error instanceof Task010SafetyError &&
+    error.code === "MIGRATION_WORKFLOW_RETIRED");
 });
 
 test("reconciliation blocks every unresolved disposition, quarantine, relationship, EV, and attempt gap", () => {

@@ -1,4 +1,5 @@
 import type {
+  ImportRunDetailLocation,
   QuarantineEntryDetail,
   QuarantineEntrySummary,
   QuarantineRetryOutcome,
@@ -15,7 +16,7 @@ export interface ImportRunCounters {
   trades: number;
   accepted: number;
   unchanged: number;
-  revised: number;
+  revised: number | null;
   quarantined: number;
   resolvedQuarantines: number;
 }
@@ -51,7 +52,7 @@ export interface ImportRunDetail extends ImportRunSummary {
     trades: number;
     accepted: number;
     unchanged: number;
-    revised: number;
+    revised: number | null;
     quarantined: number;
   }>;
   timeline: Array<{ state: ImportRunState; occurredAt: string; summary: string }>;
@@ -85,8 +86,12 @@ export function listImportRuns(query: PageQuery & {
   return requestJson(`/import-runs${queryString(query)}`);
 }
 
-export function getImportRun(runId: string): Promise<{ run: ImportRunDetail }> {
-  return requestJson(`/import-runs/${encodeURIComponent(runId)}`);
+export function getImportRun(
+  location: ImportRunDetailLocation,
+): Promise<{ run: ImportRunDetail }> {
+  return requestJson(`/import-runs/${encodeURIComponent(location.runId)}${
+    queryString({ providerId: location.providerId })
+  }`);
 }
 
 export function requestManualImport(

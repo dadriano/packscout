@@ -395,11 +395,10 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
     {},
     { confidenceEvaluatedAt },
   );
-  assert.equal(lastKnown.evEstimates.packScout.status, "current");
-  assert.equal(lastKnown.packScoutEvPresentation.status, "last_known");
+    assert.equal(lastKnown.evEstimates.packScout.status, "last_known");
   assert.equal(
-    lastKnown.packScoutEvPresentation.confidence?.scoreBasisPoints,
-    3_750,
+    lastKnown.evEstimates.packScout.confidence?.scoreBasisPoints,
+    0,
   );
 
   const baseline = buildPublicDashboardBundleV3();
@@ -441,10 +440,10 @@ test("dynamic views bind last-known EV and distinct confidence and health clocks
     "response and live presentation clocks cannot diverge",
   );
   const tamperedPresentation = structuredClone(lastKnown);
-  if (tamperedPresentation.packScoutEvPresentation.status === "unavailable") {
+  if (tamperedPresentation.evEstimates.packScout.status === "unavailable") {
     throw new Error("unexpected unavailable fixture");
   }
-  tamperedPresentation.packScoutEvPresentation.confidence.scoreBasisPoints -= 1;
+  tamperedPresentation.evEstimates.packScout.confidence.scoreBasisPoints -= 1;
   assert.equal(
     publicRepackViewDetailV3Schema.safeParse(tamperedPresentation).success,
     false,

@@ -131,6 +131,7 @@ export const productionCatalogRetentionPathSchema = z.enum([
 
 export const productionDataReleaseV3PathSchema = z.enum([
   PRODUCTION_DATA_RELEASE_V3_PATHS.activeState,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness,
   PRODUCTION_DATA_RELEASE_V3_PATHS.start,
   PRODUCTION_DATA_RELEASE_V3_PATHS.applyBatch,
   PRODUCTION_DATA_RELEASE_V3_PATHS.finalize,

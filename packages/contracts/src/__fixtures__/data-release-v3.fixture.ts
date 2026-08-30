@@ -18,9 +18,9 @@ import {
   publicRepackListPageV3Schema,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
   vendorReportedEvV3Schema,
-  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
@@ -411,17 +411,18 @@ export function buildPublicRepackViewDetailV3(
     (detail.evEstimates.packScout.status === "sold_out_historical"
       ? detail.evEstimates.packScout.soldOutAt
       : detail.evEstimates.packScout.calculatedAt);
-  const presented = safePresentPackScoutPublicEvV3(
-    detail.evEstimates.packScout,
-    confidenceEvaluatedAt,
-  );
-  if (!presented.success) {
-    throw new Error(`fixture EV presentation failed: ${presented.reason}`);
-  }
+  const estimate = detail.evEstimates.packScout.status === "unavailable"
+    ? detail.evEstimates.packScout
+    : presentLastKnownPackScoutEvV3({
+        estimate: detail.evEstimates.packScout,
+        calculationPriceUsdMinor: detail.price.usdComparison.status === "available"
+          ? detail.price.usdComparison.value.minorUnits : DATA_RELEASE_V3_PACK_PRICE_MINOR_UNITS,
+        referenceTimeIso: confidenceEvaluatedAt,
+      });
   return publicRepackViewDetailV3Schema.parse({
     ...detail,
     heat: unavailableRepackHeat(),
-    packScoutEvPresentation: presented.presentation,
+    evEstimates: { ...detail.evEstimates, packScout: estimate },
     providerHealth:
       options.providerHealth ?? buildHealthyPublicProviderHealthV1(),
   });
@@ -450,7 +451,7 @@ export function buildPublicShellStatusV3(): PublicShellStatusV3 {
   return {
     release: buildDataReleaseV3Identity(),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
     confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
@@ -482,7 +483,7 @@ export function buildPublicDashboardBundleV3(): PublicDashboardBundleV3 {
   return publicDashboardBundleV3Schema.parse({
     release: buildDataReleaseV3Identity(),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
     confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
@@ -509,7 +510,7 @@ export function buildPublicRepackListPageV3(): PublicRepackListPageV3 {
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
     confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
     providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
@@ -559,7 +560,7 @@ export function buildAllAvailabilityStatesPublicRepackListPageV3(): PublicRepack
   return publicRepackListPageV3Schema.parse({
     release: buildDataReleaseV3Identity(),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
     confidenceEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_SOLD_OUT_AT,
     providerHealthSummary: buildHealthyPublicProviderHealthSummaryV1(),
@@ -577,7 +578,7 @@ export function buildDesiredCollectibleRepackResultsV3(): DesiredCollectibleRepa
   return desiredCollectibleRepackResultsV3Schema.parse({
     release: buildDataReleaseV3Identity(),
     publicFreshnessPolicyVersion:
-      PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+      PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
     confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     providerHealthEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
     desiredCollectible: chaseCollectibleDisplay,

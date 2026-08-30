@@ -9,6 +9,7 @@ import {
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
   type SourceAdapterManifestV1,
+  type ProviderSourceResponseLimitDiagnostic,
 } from "@packscout/contracts";
 import {
   HardenedProviderRequestError,
@@ -19,6 +20,9 @@ import {
   interpretDataforrestConnectionTest,
   interpretDataforrestPage,
   interpretDataforrestSourceTest,
+  inspectDataforrestRawResponse,
+  type DataforrestRawResponseInspectionInput,
+  type DataforrestRawResponseInspectionResult,
 } from "./dataforrest-events-page-interpreter.ts";
 import {
   ProviderEndpointPolicyError,
@@ -72,6 +76,7 @@ function failedRequest(
   durationMilliseconds = 0,
   responseBytes = 0,
   code: string = failure.code,
+  responseLimitDiagnostic?: ProviderSourceResponseLimitDiagnostic,
 ): UnboundSourceAdapterRequestResult {
   return Object.freeze({
     ok: false,
@@ -81,7 +86,17 @@ function failedRequest(
       severity: failure.disposition === "retryable" ? "warning" : "critical",
       phase: "request_capture",
       code,
-    }) satisfies SourceAdapterSafeDiagnostic]),
+    }) satisfies SourceAdapterSafeDiagnostic, ...(responseLimitDiagnostic === undefined ? [] : [Object.freeze({
+      severity: "warning" as const,
+      phase: "request_capture",
+      code: `response_too_large_${responseLimitDiagnostic.trigger}`,
+      counters: Object.freeze({
+        maximum_response_bytes: responseLimitDiagnostic.maximumResponseBytes,
+        ...(responseLimitDiagnostic.reportedResponseBytes === undefined ? {} : {
+          reported_response_bytes: responseLimitDiagnostic.reportedResponseBytes,
+        }),
+      }),
+    })])]),
   });
 }
 
@@ -486,12 +501,26 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
           error.durationMilliseconds,
           error.responseBytes,
           error.code,
+          error.responseLimitDiagnostic,
         );
       }
       return failedRequest(
         stableFailure("retryable", "network_interruption"),
       );
     }
+  }
+
+  /** Inspection-only data: never a durable request, completed page or commit capability. */
+  inspectRawResponse(input: DataforrestRawResponseInspectionInput): DataforrestRawResponseInspectionResult {
+    if (!(input.protectedRawResponse instanceof Uint8Array) ||
+      input.sourceTypeKey !== this.manifest.sourceTypeKey ||
+      input.adapterVersion !== this.manifest.adapterVersion ||
+      input.pageLimit > this.manifest.requestBounds.pageLimit ||
+      input.protectedRawResponse.byteLength > this.manifest.requestBounds.maximumResponseBytes ||
+      !this.manifest.supportedProviders.some(({ provider }) => provider === input.provider)) {
+      return Object.freeze({ kind: "untrusted_inspection", ok: false, code: "inspection_pins_invalid" });
+    }
+    return inspectDataforrestRawResponse(input);
   }
 
   interpretConnectionTest(

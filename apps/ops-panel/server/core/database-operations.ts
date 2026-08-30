@@ -1,5 +1,5 @@
 /**
- * The panel's entire vocabulary of database operations: three named workflows,
+ * The panel's entire vocabulary of database operations: three named actions,
  * declared here as data.
  *
  * Permanent design invariant: this list *is* the interface. No endpoint accepts
@@ -9,10 +9,10 @@
  *
  * Each operation delegates to a canonical workspace script rather than
  * reimplementing the work privately, so "what the panel does" and "what a
- * developer does at a terminal" cannot drift apart. `db:prisma:migrate:deploy`
- * already existed; the seed and reset workflows are defined alongside it and
- * carry `:local` in their names because the repository's script-safety check
- * requires destructive and environment-specific scripts to say so.
+ * developer does at a terminal" cannot drift apart. Migration execution is
+ * unavailable until this panel has an explicitly scoped distributed target;
+ * its historical identifier remains readable in interrupted run records only.
+ * The seed and reset workflows carry their existing `:local` scope.
  */
 
 export const DATABASE_OPERATION_IDS = ["migrate", "seed", "reset"] as const;
@@ -32,7 +32,7 @@ export type OperationAcknowledgement = "confirm" | "database_name";
 export interface DatabaseOperationDefinition {
   readonly id: DatabaseOperationId;
   readonly label: string;
-  /** The canonical workspace script this operation runs. Never caller-supplied. */
+  /** Server-owned script identity; historical only when the action is unavailable. */
   readonly workspaceScript: string;
   readonly acknowledgement: OperationAcknowledgement;
   /** What the operation does, in one sentence. */
@@ -40,6 +40,8 @@ export interface DatabaseOperationDefinition {
   /** What it will cost the operator if they were wrong. Stated before running. */
   readonly consequence: string;
   readonly destructive: boolean;
+  /** A server-owned capability refusal, shown before any confirmation. */
+  readonly unavailableReason?: string;
 }
 
 export const DATABASE_OPERATIONS: readonly DatabaseOperationDefinition[] =
@@ -50,10 +52,12 @@ export const DATABASE_OPERATIONS: readonly DatabaseOperationDefinition[] =
       workspaceScript: "db:prisma:migrate:deploy",
       acknowledgement: "confirm",
       summary:
-        "Applies every migration this checkout has that the database has not run yet.",
+        "Unavailable until the panel supports explicit central or single-provider migration targets.",
       consequence:
-        "Pending migrations run against the local database and change its schema. Applied migrations are not rolled back by this operation.",
+        "No migration is run by this panel. Use a scoped deployment command after selecting its exact target.",
       destructive: false,
+      unavailableReason:
+        "Migration execution is unavailable in this panel. Select central or one provider explicitly using db:prisma:migrate:deploy:central or db:prisma:migrate:deploy:provider. No database was changed.",
     }),
     Object.freeze({
       id: "seed",

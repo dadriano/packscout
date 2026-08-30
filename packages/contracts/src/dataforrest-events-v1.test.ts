@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { dataforestEventsV1EvidenceFixture } from "./__fixtures__/dataforest-events-v1.fixture.ts";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -350,6 +351,18 @@ test("ClutchPacks adapter v2 pack semantics remain reproducible under v3", () =>
     value: "One card per pack.",
   });
   assert.equal(v3.providerFacts.evInput.state, "present");
+
+  const distributed = normalizeDataforrestEventRecordForAdapter(
+    raw,
+    "clutchpacks",
+    "fixture:clutchpacks-pack-distributed",
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.equal(distributed.kind, "catalog");
+  if (distributed.kind !== "catalog") {
+    assert.fail("expected distributed catalog observation");
+  }
+  assert.deepEqual(distributed.providerFacts, v3.providerFacts);
 });
 
 test("ClutchPacks card facts normalize from the exact V1 asset allowlist", () => {

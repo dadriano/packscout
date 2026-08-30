@@ -2,7 +2,7 @@ import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   packScoutPublicEvV3Schema,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
   type PackScoutPublicEvV3,
   type PublicBuybackSummaryV3,
   type PublicRepackSummaryV3,
@@ -169,15 +169,13 @@ function presentExample(
   estimate: PackScoutPublicEvV3,
   priceMinorUnits: number,
 ): PackScoutEvV3Presentation {
-  const result = safePresentPackScoutPublicEvV3(
+  const displayedEstimate = presentLastKnownPackScoutEvV3({
     estimate,
-    EXAMPLE_OBSERVED_AT,
-  );
-  if (!result.success) {
-    throw new Error(`PackScout worked example presentation failed: ${result.reason}`);
-  }
+    calculationPriceUsdMinor: priceMinorUnits,
+    referenceTimeIso: EXAMPLE_OBSERVED_AT,
+  });
   return presentPackScoutEvV3({
-    estimate: result.presentation,
+    estimate: displayedEstimate,
     price: examplePrice(priceMinorUnits),
     availability: "available",
   });

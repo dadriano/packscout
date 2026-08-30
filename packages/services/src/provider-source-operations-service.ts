@@ -1,5 +1,6 @@
 import {
   PROVIDER_SOURCE_OPERATIONS_VERSION,
+  importRunDetailPath,
   launchProviderKeySchema,
   providerSourceDiagnosticHistorySchema,
   providerSourceOperationsDetailSchema,
@@ -469,6 +470,7 @@ function sourceSummary(input: Readonly<{
           lifecycle: input.source.state,
           pauseRequested: input.source.pauseRequested,
           recordsPerRequest: input.source.recordsPerRequest,
+          requestSizePolicy: "schedule_revision",
           configuration: {
             validated: true,
             fields: [
@@ -566,7 +568,7 @@ export class ProviderSourceOperationsService {
         organizationId,
       }),
     ]);
-    if (catalog.providers.length !== 4) {
+    if (catalog.providers.length < 1 || catalog.providers.length > 50) {
       throw new ProviderSourceOperationsError("SOURCE_OPERATIONS_UNAVAILABLE");
     }
     const sources = catalog.providers.map(({ id }) => selectedSource(catalog, id));
@@ -763,7 +765,7 @@ export class ProviderSourceOperationsService {
           ...(event.runId ? [{
             kind: "run" as const,
             label: "Open run",
-            href: `/runs/${event.runId}`,
+            href: importRunDetailPath({ providerId: input.providerId, runId: event.runId }),
           }] : []),
           ...(event.quarantineId ? [{
             kind: "quarantine" as const,

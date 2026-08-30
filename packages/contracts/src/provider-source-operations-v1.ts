@@ -117,7 +117,7 @@ const runSummarySchema = z.object({
   lastProgressAt: timestampSchema,
   reachedHead: z.boolean(),
   failureCode: safeCodeSchema.nullable(),
-  recordsPerRequest: providerSourceRecordsPerRequestSchema,
+  recordsPerRequest: providerSourceRecordsPerRequestSchema.nullable(),
 }).strict();
 
 const countSummarySchema = z.object({
@@ -128,11 +128,14 @@ const countSummarySchema = z.object({
 }).strict();
 
 const dispositionSummarySchema = z.object({
-  inserted: boundedCountSchema,
-  revised: boundedCountSchema,
+  inserted: boundedCountSchema.nullable(),
+  revised: boundedCountSchema.nullable(),
   duplicate: boundedCountSchema,
   quarantined: boundedCountSchema,
-}).strict();
+}).strict().refine(
+  ({ inserted, revised }) => (inserted === null) === (revised === null),
+  { message: "Insert/update counts must be measured together or both unavailable." },
+);
 
 export const providerSourceOperationsSourceSchema = z.object({
   providerId: uuidSchema,
@@ -152,6 +155,7 @@ export const providerSourceOperationsSourceSchema = z.object({
     lifecycle: z.enum(["draft", "paused", "active", "disabled", "replaced"]),
     pauseRequested: z.boolean(),
     recordsPerRequest: providerSourceRecordsPerRequestSchema,
+    requestSizePolicy: z.enum(["schedule_revision", "adapter_profile"]),
     configuration: z.object({
       validated: z.literal(true),
       fields: z.array(z.object({
@@ -225,7 +229,7 @@ export const providerSourceOperationsOverviewSchema = z.object({
   refreshedAt: timestampSchema,
   connectionMode: providerSourceOperationsConnectionModeSchema,
   connection: providerSourceOperationsConnectionSchema.nullable(),
-  sources: z.array(providerSourceOperationsSourceSchema).length(4),
+  sources: z.array(providerSourceOperationsSourceSchema).max(50),
 }).strict().superRefine((overview, context) => {
   const requiresConnection = overview.connectionMode === "shared";
   if (requiresConnection !== (overview.connection !== null)) {

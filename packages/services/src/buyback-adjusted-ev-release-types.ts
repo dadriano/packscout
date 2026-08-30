@@ -338,18 +338,19 @@ export interface DataReleaseV3CanonicalCatalogPort {
   }): Promise<DataReleaseV3CanonicalSnapshot>;
 }
 
-/**
- * The task-006 recomputation boundary is the only eligible source of
- * completed buyback-adjusted revisions for publication.
- * `PackScoutBuybackAdjustedEvRecomputationService` satisfies this port.
- */
+/** A calculation made for one promotion snapshot, without a stored revision. */
+export type PackScoutBuybackEvPromotionEligibilityV1 = Readonly<{
+  calculationSource: "promotion";
+}> & Omit<PackScoutBuybackEvPublicationEligibilityV1, "revision">;
+
+/** Publication accepts completed stored revisions or calculations made at its read clock. */
 export interface DataReleaseV3EligibilityPort {
   getPublicationEligibleRevision(query: {
     readonly organizationId: string;
     readonly platformKey: string;
     readonly productKey: string;
     readonly readAt: string;
-  }): Promise<PackScoutBuybackEvPublicationEligibilityV1 | null>;
+  }): Promise<PackScoutBuybackEvPublicationEligibilityV1 | PackScoutBuybackEvPromotionEligibilityV1 | null>;
 }
 
 export type DataReleaseV3Batch = {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogImage } from "./CatalogImage.client";
 import { presentOpportunityRow } from "./overview-presentation";
@@ -77,7 +78,8 @@ function OpportunityRow({
   selected: boolean;
   onSelectOpportunity: OpportunitySelectionHandler;
 }>) {
-  const row = presentOpportunityRow(repack, rank);
+  const estimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
+  const row = presentOpportunityRow(repack, rank, estimate);
 
   return (
     <tr data-selected={selected ? "true" : "false"}>
@@ -137,8 +139,12 @@ function OpportunityRow({
         >
           Confidence: {row.packScoutEv.confidence.displayValue}
         </span>
-        {row.packScoutEv.status === "last_known" ? (
-          <span className={styles.estimateEvidence}>
+        {row.packScoutEv.status !== "current" ? (
+          <span className={styles.estimateEvidence} title={[
+            row.packScoutEv.freshness.dataAsOfLabel,
+            row.packScoutEv.reasonCopy,
+            row.packScoutEv.calculationPriceNote,
+          ].filter(Boolean).join(" ")}>
             {row.packScoutEv.statusLabel}
             {row.packScoutEv.freshness.sourceAgeLabel ? (
               <span>{row.packScoutEv.freshness.sourceAgeLabel}</span>

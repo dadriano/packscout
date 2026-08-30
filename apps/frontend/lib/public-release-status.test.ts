@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   publicReadError,
 } from "@packscout/contracts";
 import {
@@ -54,7 +54,7 @@ test("shell status maps provider health without using immutable release age", ()
       data: {
         release,
         publicFreshnessPolicyVersion:
-          PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+          PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
         confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
         providerHealthEvaluatedAt,
         providerHealthSummary: healthy,

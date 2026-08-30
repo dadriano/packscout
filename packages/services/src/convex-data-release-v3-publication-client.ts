@@ -5,6 +5,17 @@ import {
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
   PRODUCTION_DATA_RELEASE_V3_PATHS,
+  DATA_RELEASE_V3_RETAINED_EV_WITNESS_HASH_DOMAIN,
+  MAX_DATA_RELEASE_V3_RETAINED_EV_WITNESS_BYTES,
+  dataReleaseV3RetainedEvWitnessRequestSchema,
+  dataReleaseV3RetainedEvWitnessSchema,
+  dataReleaseV3RetainedEvWitnessWithinByteLimit,
+  dataReleaseV3RetainedEvWitnessReadinessRequestSchema,
+  dataReleaseV3RetainedEvWitnessReadinessSchema,
+  type DataReleaseV3RetainedEvWitnessReadinessRequest,
+  type DataReleaseV3RetainedEvWitnessReadiness,
+  type DataReleaseV3RetainedEvWitnessRequest,
+  type DataReleaseV3RetainedEvWitness,
   canonicalJson,
   sha256CanonicalJson,
   type ProductionDataReleaseV3Path,
@@ -204,11 +215,19 @@ export class SignedConvexDataReleaseV3PublicationClient
   implements DataReleaseV3PublicationPort, DataReleaseV3ProviderObservationPort
 {
   readonly #http: SignedConvexPublicationHttpClient;
+  readonly #witnessHttp: SignedConvexPublicationHttpClient;
 
   constructor(options: SignedConvexDataReleaseV3PublicationClientOptions) {
     this.#http = new SignedConvexPublicationHttpClient({
       maximumRequestBytes: MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
       ...options,
+    });
+    this.#witnessHttp = new SignedConvexPublicationHttpClient({
+      ...options,
+      maximumRequestBytes: Math.min(options.maximumRequestBytes ?? MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
+        MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES),
+      maximumResponseBytes: Math.min(options.maximumResponseBytes ?? MAX_DATA_RELEASE_V3_RETAINED_EV_WITNESS_BYTES,
+        MAX_DATA_RELEASE_V3_RETAINED_EV_WITNESS_BYTES),
     });
   }
 
@@ -216,10 +235,11 @@ export class SignedConvexDataReleaseV3PublicationClient
     path: ProductionDataReleaseV3Path,
     bodyJson: string,
     signal?: AbortSignal,
+    http = this.#http,
   ): Promise<z.infer<typeof receiptSchema>> {
     let raw: unknown;
     try {
-      raw = await this.#http.request(
+      raw = await http.request(
         path,
         bodyJson,
         dataReleaseV3ReceiptHash,
@@ -329,6 +349,52 @@ export class SignedConvexDataReleaseV3PublicationClient
       throw invalidResponse();
     }
     return details.data.status;
+  }
+
+  /** Scoped raw retention evidence, authenticated independently of public projections. */
+  async retainedEvWitnessReadiness(request: DataReleaseV3RetainedEvWitnessReadinessRequest,
+    signal?: AbortSignal): Promise<DataReleaseV3RetainedEvWitnessReadiness> {
+    const parsedRequest = dataReleaseV3RetainedEvWitnessReadinessRequestSchema.safeParse(request);
+    if (!parsedRequest.success) return refuseInvalidRequest();
+    const operationId = "data-release-v3-retained-ev-readiness";
+    const receipt = await this.#requestReceipt(PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness,
+      canonicalJson({ schemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION, operationId,
+        mode: "readiness", ...parsedRequest.data }), signal, this.#witnessHttp);
+    const parsed = dataReleaseV3RetainedEvWitnessReadinessSchema.safeParse(receipt.details);
+    if (!parsed.success || receipt.operationKind !== "retainedEvWitnessReadiness" ||
+        receipt.result !== "retained_ev_witness_ready" || receipt.operationId !== operationId ||
+        receipt.idempotencyKey !== operationId || receipt.publicReleaseId !== request.expectedActivePublicReleaseId ||
+        parsed.data.generation !== request.expectedGeneration ||
+        parsed.data.activePublicReleaseId !== request.expectedActivePublicReleaseId ||
+        parsed.data.activeReleaseFingerprint !== request.expectedActiveReleaseFingerprint) throw invalidResponse();
+    return parsed.data;
+  }
+
+  /** A real witness always requests at least one exact repack scope. */
+  async retainedEvWitness(request: DataReleaseV3RetainedEvWitnessRequest,
+    signal?: AbortSignal): Promise<DataReleaseV3RetainedEvWitness> {
+    const parsedRequest = dataReleaseV3RetainedEvWitnessRequestSchema.safeParse(request);
+    if (!parsedRequest.success) return refuseInvalidRequest();
+    const operationId = `data-release-v3-retained-ev:${request.expectedActivePublicReleaseId}`;
+    const receipt = await this.#requestReceipt(PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness,
+      canonicalJson({ schemaVersion: DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION, operationId,
+        ...parsedRequest.data }), signal, this.#witnessHttp);
+    const parsed = dataReleaseV3RetainedEvWitnessSchema.safeParse(receipt.details);
+    if (!parsed.success || !dataReleaseV3RetainedEvWitnessWithinByteLimit(receipt) ||
+        receipt.operationKind !== "retainedEvWitness" || receipt.result !== "retained_ev_witness" ||
+        receipt.operationId !== operationId || receipt.idempotencyKey !== operationId ||
+        receipt.publicReleaseId !== request.expectedActivePublicReleaseId) throw invalidResponse();
+    const { witnessSha256, ...witness } = parsed.data;
+    const responseScopes = witness.entries.map(({ vendorKey, publicVendorId, publicRepackId }) =>
+      ({ vendorKey, publicVendorId, publicRepackId }));
+    if (witness.generation !== request.expectedGeneration ||
+        witness.activePublicReleaseId !== request.expectedActivePublicReleaseId ||
+        witness.activeReleaseFingerprint !== request.expectedActiveReleaseFingerprint ||
+        canonicalJson(responseScopes) !== canonicalJson(request.scopes) ||
+        await sha256CanonicalJson(DATA_RELEASE_V3_RETAINED_EV_WITNESS_HASH_DOMAIN, witness) !== witnessSha256) {
+      throw invalidResponse();
+    }
+    return parsed.data;
   }
 
   async start(

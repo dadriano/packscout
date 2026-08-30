@@ -12,6 +12,8 @@ import {
   dataforrestEventsPageV1Schema,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedSourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
@@ -41,6 +43,7 @@ import {
   type PageReadOperation,
   type SourceAdapterRequestTerminalizationInput,
   type SourceTestOperation,
+  type SuccessfulSourceAdapterRequest,
 } from "./source-adapter.ts";
 import {
   SourceRequestLeaseAuthority,
@@ -318,7 +321,7 @@ function jsonNodeCount(root: unknown): number {
     const value = pending.pop();
     count += 1;
     if (Array.isArray(value)) {
-      pending.push(...value);
+      for (const child of value) pending.push(child);
     } else if (value !== null && typeof value === "object") {
       pending.push(...Object.values(value));
     }
@@ -506,6 +509,28 @@ test("fixed DataForrest interpretation seals native evidence for zero-copy compl
   assert.equal(completed.ok, true);
   if (!completed.ok) assert.fail("DataForrest page completion failed.");
   assert.strictEqual(completed.value.protectedNativeEvidence, evidence);
+  operation.requestLease.close();
+});
+
+test("raw inspection matches production normalization but cannot forge a terminalized request", async () => {
+  const manifest = dataforrestCourtyardDistributedSourceAdapterManifest;
+  const page = {
+    records: [{ ...dataforestEventsV1EvidenceFixture.courtyard.initial.records[1]!,
+      data: { asset: { title: "Inspection card" }, prices: { sales: Array(5_886).fill(null) } } }],
+    next_cursor: "inspection-only-next", poll_after_seconds: 0,
+  };
+  const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+  const operation = await pageOperation(runtime(), "courtyard", null, manifest.requestBounds, manifest);
+  const capture = await successfulCapture(adapter, operation);
+  const inspected = adapter.inspectRawResponse({ provider: "courtyard", sourceTypeKey: manifest.sourceTypeKey,
+    adapterVersion: manifest.adapterVersion, pageLimit: 100, protectedRawResponse: capture.value.protectedRawResponse });
+  assert.equal(inspected.ok, true);
+  if (!inspected.ok) assert.fail("expected raw inspection");
+  await assert.rejects(interpretSourceAdapterPage(adapter, operation,
+    inspected as unknown as SuccessfulSourceAdapterRequest), SourceAdapterContractError);
+  const interpreted = await interpretSourceAdapterPage(adapter, operation, capture);
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) assert.deepEqual(inspected.outcomes, interpreted.value.normalizedPage.outcomes);
   operation.requestLease.close();
 });
 
@@ -1263,6 +1288,225 @@ test("deep sub-2MiB JSON fails as one sanitized operation-appropriate result", a
   page.requestLease.close();
 });
 
+test("native arrays consume the aggregate node budget without widening envelope arrays", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const manifest = dataforrestLaunchDistributedSourceAdapterManifest;
+  for (const [field, itemCount, expected] of [
+    ["data", 10_000, true],
+    ["data", 10_001, true],
+    ["data", 24_005, true],
+    ["data", 480_001, false],
+    ["unreviewed_envelope_field", 5_001, false],
+  ] as const) {
+    const page = {
+      records: [{
+        ...base,
+        [field]: {
+          ...base.data,
+          native_facts: Array.from({ length: itemCount }, () => null),
+        },
+      }],
+      next_cursor: "native-array-boundary-next",
+      poll_after_seconds: 0,
+    };
+    assert.equal(isBoundedDataforrestEventsPageV1(page, 100), expected);
+    const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+    const operation = await pageOperation(
+      runtime(), "courtyard", null, manifest.requestBounds, manifest,
+    );
+    const capture = await successfulCapture(adapter, operation);
+    const interpreted = await interpretSourceAdapterPage(adapter, operation, capture);
+    assert.equal(interpreted.ok, expected, `${field}: ${itemCount}`);
+    if (interpreted.ok) {
+      assert.equal(interpreted.value.normalizedPage.outcomes.length, 1);
+      const evidence = interpreted.value.protectedNativeEvidence[0] as unknown as {
+        value: { data: { native_facts: readonly unknown[] } };
+      };
+      assert.equal(evidence.value.data.native_facts.length, itemCount);
+    } else {
+      assert.equal(interpreted.failure.code, "invalid_response");
+    }
+    operation.requestLease.close();
+  }
+});
+
+test("native payloads retain the exact 64-container depth and 256-object-key bounds", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const manifest = dataforrestLaunchDistributedSourceAdapterManifest;
+  const nested = (arrayCount: number): unknown => {
+    let value: unknown = null;
+    for (let index = 0; index < arrayCount; index += 1) value = [value];
+    return value;
+  };
+  // Root, records, record and data are the first four containers.
+  for (const [nativeFacts, expected] of [
+    [nested(60), true],
+    [nested(61), false],
+    [Object.fromEntries(Array.from({ length: 256 }, (_, index) => [`field_${index}`, null])), true],
+    [Object.fromEntries(Array.from({ length: 257 }, (_, index) => [`field_${index}`, null])), false],
+  ] as const) {
+    const page = {
+      records: [{ ...base, data: { ...base.data, native_facts: nativeFacts } }],
+      next_cursor: "native-structural-boundary-next", poll_after_seconds: 0,
+    };
+    assert.equal(isBoundedDataforrestEventsPageV1(page, 100), expected);
+    const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+    const operation = await pageOperation(runtime(), "courtyard", null, manifest.requestBounds, manifest);
+    const capture = await successfulCapture(adapter, operation);
+    const interpreted = await interpretSourceAdapterPage(adapter, operation, capture);
+    assert.equal(interpreted.ok, expected);
+    operation.requestLease.close();
+  }
+});
+
+test("Courtyard native sales arrays of 5,886 and 5,019 items fit a 100-record page", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const manifest = dataforrestLaunchDistributedSourceAdapterManifest;
+  assert.equal(manifest.requestBounds.pageLimit, 100);
+  assert.equal(manifest.requestBounds.maximumResponseBytes, 8 * 1024 * 1024);
+  const page = {
+    records: Array.from({ length: 100 }, (_, index) => ({
+      ...base,
+      record_id: `bounded-courtyard-card-${index}`,
+      data: {
+        ...base.data,
+        prices: {
+          priceHistory: Array.from({ length: index === 58 ? 16 : 1 }, (_, historyIndex) => ({
+            sales: Array.from({
+              length: index === 22 ? 5_886 : index === 58 && historyIndex === 15 ? 5_019 : 0,
+            }, () => null),
+          })),
+        },
+      },
+    })),
+    next_cursor: "courtyard-native-sales-next",
+    poll_after_seconds: 0,
+  };
+  assert.equal(isBoundedDataforrestEventsPageV1(page, 100), true);
+  const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+  const operation = await pageOperation(
+    runtime(), "courtyard", null, manifest.requestBounds, manifest,
+  );
+  const capture = await successfulCapture(adapter, operation);
+  const interpreted = await interpretSourceAdapterPage(adapter, operation, capture);
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) {
+    assert.equal(interpreted.value.normalizedPage.outcomes.length, 100);
+  }
+  operation.requestLease.close();
+});
+
+test("Courtyard's observed 24,005-item native sales array fits the unchanged whole-page resource budget", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const manifest = dataforrestCourtyardDistributedSourceAdapterManifest;
+  const page = {
+    records: Array.from({ length: 100 }, (_, index) => ({
+      ...base, record_id: `native-resource-card-${index}`,
+      data: { ...base.data, prices: { priceHistory: [{
+        sales: Array.from({ length: index === 0 ? 24_005 : 0 }, () => ({
+          native_a: null, native_b: null, native_c: null, native_d: null,
+          native_e: null, native_f: null, native_g: null,
+        })),
+      }] } },
+    })),
+    next_cursor: "native-resource-next", poll_after_seconds: 0,
+  };
+  // Safe synthetic records reproduce the observed cardinality; no live fields are retained.
+  assert.ok(jsonNodeCount(page) < 480_000);
+  assert.ok(Buffer.byteLength(JSON.stringify(page)) < 8_388_608);
+  assert.equal(isBoundedDataforrestEventsPageV1(page, 100), true);
+  const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+  const operation = await pageOperation(runtime(), "courtyard", null, manifest.requestBounds, manifest);
+  const request = await successfulCapture(adapter, operation);
+  const result = await interpretSourceAdapterPage(adapter, operation, request);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.value.normalizedPage.outcomes.length, 100);
+    const evidence = result.value.protectedNativeEvidence[0] as unknown as { value: { data: unknown } };
+    assert.deepEqual(evidence.value.data, page.records[0]!.data);
+  }
+  operation.requestLease.close();
+});
+
+test("flat and distributed native arrays accept exactly 480,000 total nodes and reject one more", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const manifest = dataforrestCourtyardDistributedSourceAdapterManifest;
+  for (const recordCount of [1, 4]) {
+    for (const extraNode of [0, 1]) {
+      const page = {
+        records: Array.from({ length: recordCount }, (_, index) => ({
+          ...base, record_id: `native-node-budget-${index}`,
+          data: { ...base.data, native_facts: [] as unknown[] },
+        })), next_cursor: "native-node-budget-next", poll_after_seconds: 0,
+      };
+      const remainingNodes = 480_000 + extraNode - jsonNodeCount(page);
+      for (const [index, record] of page.records.entries()) {
+        record.data.native_facts = Array(Math.floor(remainingNodes / recordCount) +
+          (index < remainingNodes % recordCount ? 1 : 0)).fill(null);
+      }
+      assert.equal(jsonNodeCount(page), 480_000 + extraNode);
+      assert.equal(isBoundedDataforrestEventsPageV1(page, 100), extraNode === 0);
+      const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+      const operation = await pageOperation(runtime(), "courtyard", null, manifest.requestBounds, manifest);
+      const request = await successfulCapture(adapter, operation);
+      const result = await interpretSourceAdapterPage(adapter, operation, request);
+      assert.equal(result.ok, extraNode === 0, `${recordCount} arrays, ${extraNode} excess nodes`);
+      if (result.ok) {
+        assert.equal(result.value.protectedNativeEvidence.length, recordCount);
+        for (const [index, rawEvidence] of result.value.protectedNativeEvidence.entries()) {
+          const evidence = rawEvidence as unknown as { value: { data: { native_facts: unknown[] } } };
+          assert.equal(evidence.value.data.native_facts.length, page.records[index]!.data.native_facts.length);
+        }
+      }
+      operation.requestLease.close();
+    }
+  }
+});
+
+test("copy-free shape validation refuses excess scheduled array and object work before reading children", () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const page = { records: [{ ...base, data: { ...base.data, native_facts: [] as unknown[] } }],
+    next_cursor: "pending-budget-next", poll_after_seconds: 0 };
+  const values = page.records[0]!.data.native_facts;
+  let childReads = 0;
+  values.length = 480_000;
+  Object.defineProperty(values, 0, { configurable: true, get() { childReads += 1; return null; } });
+  assert.equal(isBoundedDataforrestEventsPageV1(page, 100), false);
+  assert.equal(childReads, 0);
+  values.length = 0;
+  const remainder = 480_000 - jsonNodeCount(page);
+  values.length = remainder;
+  const child = { a: null, b: null };
+  Object.defineProperty(child, "a", { enumerable: true, get() { childReads += 1; return null; } });
+  values[0] = child;
+  assert.equal(isBoundedDataforrestEventsPageV1(page, 100), false);
+  assert.equal(childReads, 0);
+});
+
+test("native-array capacity does not widen the 5,000-record wire or 100-record operation limits", async () => {
+  const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
+  const page = (recordCount: number) => ({
+    records: Array.from({ length: recordCount }, () => base),
+    next_cursor: "record-count-boundary-next",
+    poll_after_seconds: 0,
+  });
+  assert.equal(isBoundedDataforrestEventsPageV1(page(5_000), 10_000), true);
+  assert.equal(isBoundedDataforrestEventsPageV1(page(5_001), 10_000), false);
+  const manifest = dataforrestLaunchDistributedSourceAdapterManifest;
+  for (const [recordCount, expected] of [[100, true], [101, false], [5_001, false]] as const) {
+    const candidate = page(recordCount);
+    assert.equal(isBoundedDataforrestEventsPageV1(candidate, 100), expected);
+    const adapter = adapterWithClient(async () => jsonResponse(candidate), manifest);
+    const operation = await pageOperation(
+      runtime(), "courtyard", null, manifest.requestBounds, manifest,
+    );
+    const capture = await successfulCapture(adapter, operation);
+    const interpreted = await interpretSourceAdapterPage(adapter, operation, capture);
+    assert.equal(interpreted.ok, expected, `${recordCount} records`);
+    operation.requestLease.close();
+  }
+});
+
 test("adversarial structural limits reject before materializing the provider tree", async () => {
   const base = dataforestEventsV1EvidenceFixture.courtyard.initial.records[0]!;
   const currentBounds = dataforrestEventsV1SourceAdapterManifest.requestBounds;
@@ -1275,7 +1519,7 @@ test("adversarial structural limits reject before materializing the provider tre
     }).replace(JSON.stringify(placeholder), rawData);
   const adversarialPages = [
     rawPageWithData(`{"nested":${"[".repeat(100_000)}0${"]".repeat(100_000)}}`),
-    rawPageWithData(`{"native_facts":[${"0,".repeat(5_000)}0]}`),
+    rawPageWithData(`{"native_facts":[${"0,".repeat(480_000)}0]}`),
     JSON.stringify({
       records: Array.from({ length: 500 }, (_, recordIndex) => ({
         ...base,

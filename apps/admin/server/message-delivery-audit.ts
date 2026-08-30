@@ -1,4 +1,4 @@
-import { PrismaAuthAuditSink } from "@packscout/database";
+import { CentralAuthAuditSink } from "@packscout/database";
 import { createRecordReferencer } from "./auth/actor-key.ts";
 
 /**
@@ -19,7 +19,7 @@ import { createRecordReferencer } from "./auth/actor-key.ts";
 
 /** The Prisma client shape this sink needs, taken from the existing sink. */
 type MessageDeliveryAuditDatabase = ConstructorParameters<
-  typeof PrismaAuthAuditSink
+  typeof CentralAuthAuditSink
 >[0];
 
 export type MessageDeliveryAuditAction = "message_delivery.retry";

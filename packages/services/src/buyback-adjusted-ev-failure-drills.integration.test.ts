@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
   type PackScoutBuybackEvPublicReasonCodeV1,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -408,19 +408,19 @@ test("failure, expiry, interruption, malformed-projection, and replay drills fai
     if (expiredPackScout.status !== "current") return;
     if (freshPackScout?.status !== "current") return;
     assert.deepEqual(expiredPackScout.metrics, freshPackScout.metrics);
-    const presented = safePresentPackScoutPublicEvV3(
-      expiredPackScout,
-      READ_EXPIRED,
-    );
-    assert.equal(presented.success, true);
-    if (!presented.success) return;
-    assert.equal(presented.presentation.status, "last_known");
+    const presented = presentLastKnownPackScoutEvV3({
+      estimate: expiredPackScout,
+      calculationPriceUsdMinor: 10_000,
+      referenceTimeIso: READ_EXPIRED,
+    });
+    assert.equal(presented.status, "last_known");
+    if (presented.status !== "last_known") throw new Error("missing retained EV");
     assert.deepEqual(
-      presented.presentation.metrics,
+      presented.metrics,
       expiredPackScout.metrics,
     );
     assert.ok(
-      presented.presentation.confidence.limitationCodes.includes(
+      presented.confidence.limitationCodes.includes(
         "source_age_over_60_minutes",
       ),
     );

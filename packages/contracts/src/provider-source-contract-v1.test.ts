@@ -27,7 +27,16 @@ import {
   validateProviderSourceRecordsPerRequest,
 } from "./provider-source-contract-v1.ts";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT,
+  DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestEventsJsonNodeBudget,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestEventsV1SourceAdapterManifests,
+  dataforrestLaunchDistributedSourceAdapterManifest,
 } from "./dataforrest-events-v1.ts";
 
 test("launch source constants retain the evidence-backed operating envelope", () => {
@@ -348,4 +357,72 @@ test("the adapter manifest is credential-free, strict, and uses the launch bound
     sourceAdapterManifestV1Schema.safeParse({ ...parsedV1, token: "forbidden" }).success,
     false,
   );
+});
+
+test("ClutchPacks distributed requests use an isolated 2,000-record profile", () => {
+  const manifest = sourceAdapterManifestV1Schema.parse(
+    dataforrestClutchpacksDistributedSourceAdapterManifest,
+  );
+  assert.equal(DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT, 5_000);
+  assert.equal(DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS, 2_000);
+  assert.equal(
+    manifest.adapterVersion,
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.deepEqual(manifest.requestBounds, {
+    pageLimit: 2_000,
+    maximumResponseBytes: 8_388_608,
+    timeoutMilliseconds: 10_000,
+  });
+  assert.deepEqual(
+    manifest.supportedProviders.map(({ provider }) => provider),
+    ["clutchpacks"],
+  );
+  assert.equal(
+    dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit,
+    5_000,
+  );
+  assert.equal(providerSourceRecordsPerRequest.default, 500);
+});
+
+test("remaining launch providers share one immutable 100-record distributed profile", () => {
+  const manifest = sourceAdapterManifestV1Schema.parse(
+    dataforrestLaunchDistributedSourceAdapterManifest,
+  );
+  assert.equal(DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS, 100);
+  assert.equal(
+    manifest.adapterVersion,
+    DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.equal(manifest.requestBounds.pageLimit, 100);
+  assert.deepEqual(
+    manifest.supportedProviders.map(({ provider }) => provider),
+    ["courtyard", "collector_crypt", "phygitals"],
+  );
+});
+
+test("configurable source limits do not redefine any distributed capacity profile", () => {
+  const expectedProfiles = [
+    ["dataforrest-events-adapter-v1", 5_000, 8_388_608, 480_000],
+    ["dataforrest-events-adapter-v2", 5_000, 8_388_608, 480_000],
+    ["dataforrest-events-adapter-v3", 5_000, 8_388_608, 480_000],
+    ["dataforrest-clutchpacks-distributed-adapter-v1", 2_000, 8_388_608, 480_000],
+    ["dataforrest-launch-distributed-adapter-v1", 100, 8_388_608, 480_000],
+    ["dataforrest-collector-crypt-distributed-adapter-v1", 1_000, 8_388_608, 480_000],
+    ["dataforrest-courtyard-distributed-adapter-v1", 100, 8_388_608, 480_000],
+    ["dataforrest-courtyard-distributed-adapter-v2", 100, 33_554_432, 640_000],
+    ["dataforrest-phygitals-distributed-adapter-v1", 100, 8_388_608, 480_000],
+    ["dataforrest-phygitals-distributed-adapter-v2", 100, 8_388_608, 480_000],
+  ];
+  assert.deepEqual(dataforrestEventsV1SourceAdapterManifests.map((manifest) => [
+    manifest.adapterVersion,
+    manifest.requestBounds.pageLimit,
+    manifest.requestBounds.maximumResponseBytes,
+    dataforrestEventsJsonNodeBudget(manifest.adapterVersion),
+  ]), expectedProfiles);
+  for (const manifest of dataforrestEventsV1SourceAdapterManifests) {
+    assert.equal(manifest.requestBounds.timeoutMilliseconds, 10_000);
+    assert.equal(manifest.maximumPlatformRequestCap, 2);
+  }
+  assert.equal(dataforrestEventsJsonNodeBudget("unknown-adapter"), null);
 });

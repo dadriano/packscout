@@ -5,6 +5,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
+  assertClutchpacksRetainedEvWitnessUnchanged,
+  clutchpacksExpectedDisplayedEv,
+  clutchpacksRetainedEvWitnessRequest,
+  requireClutchpacksEvWitnessReadiness,
+} from "./clutchpacks-public-ev-readback.mjs";
+import {
   assertSameConnectedPostgresIdentity,
   connectedPostgresIdentityBindingParts,
   readConnectedPostgresIdentity,
@@ -1079,26 +1085,30 @@ function withoutDynamicPublicFields(record) {
     record === null ||
     typeof record !== "object" ||
     !Object.hasOwn(record, "heat") ||
-    !Object.hasOwn(record, "packScoutEvPresentation") ||
+    Object.hasOwn(record, "packScoutEvPresentation") ||
     !Object.hasOwn(record, "providerHealth")
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
   const {
     heat,
-    packScoutEvPresentation,
     providerHealth,
     ...stored
   } = record;
   if (
     heat === null || typeof heat !== "object" ||
-    packScoutEvPresentation === null ||
-    typeof packScoutEvPresentation !== "object" ||
+    stored.evEstimates?.packScout === null ||
+    typeof stored.evEstimates?.packScout !== "object" ||
     providerHealth === null || typeof providerHealth !== "object"
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
-  return stored;
+  return withoutDisplayedEv(stored);
+}
+
+function withoutDisplayedEv(record) {
+  const { packScout: _displayedEv, ...otherEstimates } = record.evEstimates;
+  return { ...record, evEstimates: otherEstimates };
 }
 
 function plannedRepackSummary(detail) {
@@ -1224,7 +1234,7 @@ export async function assertClutchpacksPublicReadBack(
   scope,
   verification,
 ) {
-  const safePresentPackScoutPublicEvV3 = verification?.presentPackScoutPublicEv;
+  const presentLastKnownPackScoutEvV3 = verification?.presentPackScoutPublicEv;
   const publicFreshnessPolicyVersion = verification?.publicFreshnessPolicyVersion;
   const shell = readBack?.shell;
   const list = readBack?.list;
@@ -1241,9 +1251,19 @@ export async function assertClutchpacksPublicReadBack(
   const observation = verification?.providerObservation;
   if (
     observation === undefined ||
-    typeof safePresentPackScoutPublicEvV3 !== "function" ||
+    typeof presentLastKnownPackScoutEvV3 !== "function" ||
     typeof publicFreshnessPolicyVersion !== "string"
   ) {
+    refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+  }
+  let expectedDisplayedEv;
+  try {
+    const project = clutchpacksExpectedDisplayedEv(plan, verification);
+    expectedDisplayedEv = (...args) => {
+      try { return project(...args); }
+      catch { refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT"); }
+    };
+  } catch {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
   if (
@@ -1305,18 +1325,12 @@ export async function assertClutchpacksPublicReadBack(
   );
   const opportunityCandidates = [];
   for (const detail of repackRecords(plan)) {
-    const presented = safePresentPackScoutPublicEvV3(
-      detail.evEstimates?.packScout,
-      dashboardContext.confidenceEvaluatedAt,
-    );
-    if (!presented.success) {
-      refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
-    }
+    const presented = expectedDisplayedEv(detail, dashboardContext.confidenceEvaluatedAt);
     if (
       detail.availability === "available" &&
-      ["current", "last_known"].includes(presented.presentation.status)
+      presented.status === "last_known" && presented.historicalSoldOutAt === null
     ) {
-      opportunityCandidates.push({ detail, presentation: presented.presentation });
+      opportunityCandidates.push({ detail, presentation: presented });
     }
   }
   opportunityCandidates.sort((left, right) =>
@@ -1348,7 +1362,8 @@ export async function assertClutchpacksPublicReadBack(
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
-  const plannedDetails = sortedEntityRecords("repacks", repackRecords(plan));
+  const plannedRecords = repackRecords(plan);
+  const plannedDetails = sortedEntityRecords("repacks", plannedRecords.map(withoutDisplayedEv));
   const listedDetails = sortedEntityRecords(
     "repacks",
     list.data.details.map(withoutDynamicPublicFields),
@@ -1371,14 +1386,13 @@ export async function assertClutchpacksPublicReadBack(
   const dashboardSummaries = dashboard.data.opportunities.map(
     withoutDynamicPublicFields,
   );
-  const expectedDashboardSummaries = expectedOpportunityDetails.map(
-    plannedRepackSummary,
-  );
+  const expectedDashboardSummaries = expectedOpportunityDetails.map((detail) =>
+    plannedRepackSummary(withoutDisplayedEv(detail)));
   if (
     !isDeepStrictEqual(listedDetails, plannedDetails) ||
     !isDeepStrictEqual(directDetails, plannedDetails) ||
     !isDeepStrictEqual(listedSummaries, plannedSummaries) ||
-    !isDeepStrictEqual(dashboardDetails, expectedOpportunityDetails) ||
+    !isDeepStrictEqual(dashboardDetails, expectedOpportunityDetails.map(withoutDisplayedEv)) ||
     !isDeepStrictEqual(dashboardSummaries, expectedDashboardSummaries)
   ) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
@@ -1478,28 +1492,23 @@ export async function assertClutchpacksPublicReadBack(
     ))) {
     refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
   }
-  const plannedById = new Map(plannedDetails.map((detail) => [
+  const plannedById = new Map(plannedRecords.map((detail) => [
     detail.publicRepackId,
-    detail.evEstimates?.packScout,
+    detail,
   ]));
   const publicViews = [
     ...list.data.rows.map((detail) => ({ detail, readContext: listContext })),
     ...list.data.details.map((detail) => ({ detail, readContext: listContext })),
     ...details.map((result) => {
       const detail = result.data;
-      const clock = exactPublicReadClock({
-        confidenceEvaluatedAt:
-          detail.packScoutEvPresentation?.confidenceEvaluatedAt,
-      });
+      if (detail.evEstimates?.packScout?.status === "unavailable") {
+        return { detail, readContext: { providerHealth: null, confidenceEvaluatedAt: null } };
+      }
+      const clock = exactPublicReadClock(detail.evEstimates?.packScout);
       const readContext = {
         ...clock,
-        providerHealth:
-          detail.packScoutEvPresentation?.status === "historical"
-            ? null
-            : publicProviderHealthForObservation(
-                observation,
-                clock.currentTimeMilliseconds,
-              ),
+        providerHealth: publicProviderHealthForObservation(
+          observation, clock.currentTimeMilliseconds),
       };
       return { detail, readContext };
     }),
@@ -1522,10 +1531,7 @@ export async function assertClutchpacksPublicReadBack(
   for (const { detail, readContext } of publicViews) {
     const estimate = detail.evEstimates?.packScout;
     const planned = plannedById.get(detail.publicRepackId);
-    const expectedPresentation = safePresentPackScoutPublicEvV3(
-      planned,
-      readContext.confidenceEvaluatedAt,
-    );
+    const expectedPresentation = expectedDisplayedEv(planned, readContext.confidenceEvaluatedAt);
     const providerHealthMatches = readContext.providerHealth === null
       ? providerHealthMatchesObservationWithoutClock(
           observation,
@@ -1538,14 +1544,9 @@ export async function assertClutchpacksPublicReadBack(
     if (
       planned === undefined ||
       !estimate ||
-      !isDeepStrictEqual(estimate, planned) ||
-      !expectedPresentation.success ||
-      !isDeepStrictEqual(
-        detail.packScoutEvPresentation,
-        expectedPresentation.presentation,
-      ) ||
+      !isDeepStrictEqual(estimate, expectedPresentation) ||
       !providerHealthMatches ||
-      !["current", "sold_out_historical", "unavailable"].includes(
+      !["last_known", "unavailable"].includes(
         estimate.status,
       ) ||
       (estimate.status !== "unavailable" &&
@@ -1937,6 +1938,11 @@ export async function runClutchpacksDataReleaseV3Promotion({
     ) {
       refuse("CLUTCHPACKS_V3_ACTIVE_POINTER_MOVED");
     }
+    try {
+      await requireClutchpacksEvWitnessReadiness(opened.publication, activeBefore);
+    } catch {
+      refuse("CLUTCHPACKS_V3_PUBLIC_READBACK_DIVERGENT");
+    }
     assertNoPositiveClutchpacksEv(plan, expectedIds);
     const activationWatermark = await opened.loadSettledWatermark();
     const activationCurrentTime = dependencies.now();
@@ -2005,6 +2011,10 @@ export async function runClutchpacksDataReleaseV3Promotion({
         providerObservationReceipt,
         providerObservation,
       );
+      const witnessRequest = clutchpacksRetainedEvWitnessRequest(
+        plan, await opened.publication.activeState(),
+      );
+      const retainedEvWitness = await opened.publication.retainedEvWitness(witnessRequest);
       readBack = await opened.readPublicRelease({
         plan,
         scope,
@@ -2014,8 +2024,12 @@ export async function runClutchpacksDataReleaseV3Promotion({
       await assertClutchpacksPublicReadBack(readBack, plan, scope, {
         providerObservation,
         presentPackScoutPublicEv: opened.presentPackScoutPublicEv,
+        retainedEvWitness,
+        retainedEvWitnessSchema: opened.retainedEvWitnessSchema,
         publicFreshnessPolicyVersion: opened.publicFreshnessPolicyVersion,
       });
+      assertClutchpacksRetainedEvWitnessUnchanged(retainedEvWitness,
+        await opened.publication.retainedEvWitness(witnessRequest));
     } catch (verificationError) {
       if (outcome.outcome !== "activated") throw verificationError;
       const recovery = await recoverUnverifiedActivation(
@@ -2257,9 +2271,10 @@ export function createProductionDependencies() {
           catalog,
           assembler,
           publication,
-          presentPackScoutPublicEv: contracts.safePresentPackScoutPublicEvV3,
+          presentPackScoutPublicEv: contracts.presentLastKnownPackScoutEvV3,
+          retainedEvWitnessSchema: contracts.dataReleaseV3RetainedEvWitnessSchema,
           publicFreshnessPolicyVersion:
-            contracts.PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+            contracts.PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
           readDatabaseIdentity: () =>
             readClutchpacksDataReleaseV3DatabaseIdentity(lifecycle.client),
           loadSettledWatermark: () =>

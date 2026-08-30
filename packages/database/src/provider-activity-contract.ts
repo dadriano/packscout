@@ -1,0 +1,233 @@
+import { createHash } from "node:crypto";
+
+export type ProviderActivitySeverity = "info" | "warning" | "critical";
+export type ProviderActivityEvidenceValue = string | number | boolean | null;
+
+export interface ProviderActivityEvent {
+  readonly id: string;
+  readonly eventDigest: string;
+  readonly eventType: string;
+  readonly severity: ProviderActivitySeverity;
+  readonly dedupeKey: string;
+  readonly recoveryKey: string;
+  readonly localRunId: string | null;
+  readonly localQuarantineId: string | null;
+  readonly title: string;
+  readonly summary: string;
+  readonly evidence: Readonly<Record<string, ProviderActivityEvidenceValue>>;
+  readonly eventAt: Date;
+  readonly deliveryAttemptCount: number;
+  readonly lastFailureCode: string | null;
+}
+
+export type ProviderObservedRuntimeState =
+  | "idle"
+  | "running"
+  | "paused"
+  | "stopped"
+  | "error";
+
+export interface ProviderLocalHealthObservation {
+  readonly providerId: string;
+  readonly observedState: ProviderObservedRuntimeState;
+  readonly freshnessState: string;
+  readonly qualityState: string;
+  readonly consecutiveFailures: number;
+  readonly openQuarantineCount: number;
+  readonly lastAttemptedAt: Date | null;
+  readonly lastHeadReachedAt: Date | null;
+  readonly recoveredAt: Date | null;
+  readonly lastRunnerHeartbeatAt: Date | null;
+  readonly latestFailureCode: string | null;
+  readonly recoveryHint: string | null;
+  readonly publicationLag: bigint;
+  readonly observedAt: Date;
+}
+
+export interface ProviderActivityBatch {
+  readonly providerId: string;
+  readonly health: ProviderLocalHealthObservation;
+  readonly events: readonly ProviderActivityEvent[];
+}
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const digestPattern = /^[0-9a-f]{64}$/;
+const safeKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const safeFailurePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
+const protectedTextPattern =
+  /(?:authorization|bearer\s+|cookie|credential|cursor|database[_-]?url|password|payload|secret|(?:api|access|refresh|auth)[_-]?token|api[_-]?key|postgres(?:ql)?:\/\/)/i;
+const activityEvidenceKeys = new Set([
+  "coalescedCount",
+  "expiredCount",
+  "failureCode",
+  "generation",
+  "overflowDigest",
+  "overflowGeneration",
+  "quarantineState",
+  "retentionState",
+  "runState",
+  "selectedCount",
+  "state",
+]);
+
+function validDate(value: Date): boolean {
+  return value instanceof Date && Number.isFinite(value.getTime());
+}
+
+export function sanitizeProviderActivityEvidence(
+  value: unknown,
+): Readonly<Record<string, ProviderActivityEvidenceValue>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Provider activity evidence must be an object.");
+  }
+  const entries = Object.entries(value).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (
+    entries.length > 11
+    || entries.some(([key]) => !activityEvidenceKeys.has(key))
+  ) {
+    throw new TypeError("Provider activity evidence has an invalid key.");
+  }
+  const output: Record<string, ProviderActivityEvidenceValue> = {};
+  for (const [key, item] of entries) {
+    if (
+      item !== null
+      && typeof item !== "string"
+      && typeof item !== "number"
+      && typeof item !== "boolean"
+    ) {
+      throw new TypeError("Provider activity evidence has an invalid value.");
+    }
+    if (
+      typeof item === "number"
+      && (!Number.isSafeInteger(item) || item < 0)
+    ) {
+      throw new TypeError("Provider activity evidence has an invalid number.");
+    }
+    if (
+      typeof item === "string"
+      && (
+        item.length > 256
+        || protectedTextPattern.test(item)
+        || !safeKeyPattern.test(item)
+      )
+    ) {
+      throw new TypeError("Provider activity evidence has an unsafe value.");
+    }
+    output[key] = item;
+  }
+  if (Buffer.byteLength(JSON.stringify(output), "utf8") > 2_048) {
+    throw new TypeError("Provider activity evidence is too large.");
+  }
+  return Object.freeze(output);
+}
+
+function safeSentence(value: string, maximum: number): boolean {
+  return value === value.trim()
+    && value.length >= 1
+    && value.length <= maximum
+    && ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    })
+    && !protectedTextPattern.test(value);
+}
+
+export function providerActivityEventDigest(
+  event: Omit<
+    ProviderActivityEvent,
+    "eventDigest" | "deliveryAttemptCount" | "lastFailureCode"
+  >,
+): string {
+  const evidence = sanitizeProviderActivityEvidence(event.evidence);
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        id: event.id,
+        eventType: event.eventType,
+        severity: event.severity,
+        dedupeKey: event.dedupeKey,
+        recoveryKey: event.recoveryKey,
+        localRunId: event.localRunId,
+        localQuarantineId: event.localQuarantineId,
+        title: event.title,
+        summary: event.summary,
+        evidence,
+        eventAt: event.eventAt.toISOString(),
+      }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+export function assertProviderActivityEvent(
+  event: ProviderActivityEvent,
+): ProviderActivityEvent {
+  if (
+    !uuidPattern.test(event.id)
+    || !digestPattern.test(event.eventDigest)
+    || !safeKeyPattern.test(event.eventType)
+    || !safeKeyPattern.test(event.dedupeKey)
+    || !safeKeyPattern.test(event.recoveryKey)
+    || (event.localRunId !== null && !uuidPattern.test(event.localRunId))
+    || (event.localQuarantineId !== null
+      && !uuidPattern.test(event.localQuarantineId))
+    || !safeSentence(event.title, 160)
+    || !safeSentence(event.summary, 500)
+    || !validDate(event.eventAt)
+    || !Number.isInteger(event.deliveryAttemptCount)
+    || event.deliveryAttemptCount < 0
+    || (event.lastFailureCode !== null
+      && !safeFailurePattern.test(event.lastFailureCode))
+  ) {
+    throw new TypeError("Provider activity event is invalid.");
+  }
+  const evidence = sanitizeProviderActivityEvidence(event.evidence);
+  const expectedDigest = providerActivityEventDigest({
+    ...event,
+    evidence,
+  });
+  if (expectedDigest !== event.eventDigest) {
+    throw new TypeError("Provider activity event digest does not match.");
+  }
+  return Object.freeze({ ...event, evidence });
+}
+
+export function assertProviderHealthObservation(
+  health: ProviderLocalHealthObservation,
+): ProviderLocalHealthObservation {
+  const states = new Set<ProviderObservedRuntimeState>([
+    "idle",
+    "running",
+    "paused",
+    "stopped",
+    "error",
+  ]);
+  if (
+    !uuidPattern.test(health.providerId)
+    || !states.has(health.observedState)
+    || !safeKeyPattern.test(health.freshnessState)
+    || !safeKeyPattern.test(health.qualityState)
+    || !Number.isSafeInteger(health.consecutiveFailures)
+    || health.consecutiveFailures < 0
+    || !Number.isSafeInteger(health.openQuarantineCount)
+    || health.openQuarantineCount < 0
+    || health.publicationLag < 0n
+    || !validDate(health.observedAt)
+    || [
+      health.lastAttemptedAt,
+      health.lastHeadReachedAt,
+      health.recoveredAt,
+      health.lastRunnerHeartbeatAt,
+    ].some((value) => value !== null && !validDate(value))
+    || (health.latestFailureCode !== null
+      && !safeFailurePattern.test(health.latestFailureCode))
+    || (health.recoveryHint !== null
+      && (!safeSentence(health.recoveryHint, 256)))
+  ) {
+    throw new TypeError("Provider health observation is invalid.");
+  }
+  return Object.freeze(health);
+}

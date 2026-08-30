@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   canonicalJson,
   publicRepackViewDetailV3Schema,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
   unavailableRepackHeat,
   type PublicRepackDetailV3,
 } from "@packscout/contracts";
@@ -243,17 +243,17 @@ test("every approved public state appears and passes the production contracts", 
       assert.ok(isPackScoutBuybackEvSimulatedPublicIdV1(detail.publicRepackId));
       assert.ok(detail.vendorKey.startsWith("simulated-"));
       assert.ok(detail.name.startsWith("[Simulated]"));
-      const presented = safePresentPackScoutPublicEvV3(
-        detail.evEstimates.packScout,
-        result.readAt,
-      );
-      assert.equal(presented.success, true);
-      if (!presented.success) continue;
+      const presented = presentLastKnownPackScoutEvV3({
+        estimate: detail.evEstimates.packScout,
+        calculationPriceUsdMinor: detail.price.usdComparison.status === "available"
+          ? detail.price.usdComparison.value.minorUnits : 0,
+        referenceTimeIso: result.readAt,
+      });
       // Heat stays explicitly unavailable on v3 views (documented divergence).
       const view = publicRepackViewDetailV3Schema.safeParse({
         ...detail,
         heat: unavailableRepackHeat(),
-        packScoutEvPresentation: presented.presentation,
+        evEstimates: { ...detail.evEstimates, packScout: presented },
         providerHealth: {
           state: "healthy",
           observedAt: result.readAt,
@@ -333,18 +333,18 @@ test("every approved public state appears and passes the production contracts", 
   // The fixed observation becomes last-known purely by advancing the read
   // clock; its immutable release metrics remain present.
   assert.deepEqual(states.get("courtyard-source-age-expiry"), [
-    "current",
-    "current",
+    "last_known",
+    "last_known",
     "last_known",
     "last_known",
   ]);
 
-  // Sold-out history stays frozen with its original confidence.
+  // Sold-out economics remain retained while display confidence keeps aging.
   assert.deepEqual(states.get("trove-sold-out-historical"), [
-    "historical",
-    "historical",
-    "historical",
-    "historical",
+    "last_known",
+    "last_known",
+    "last_known",
+    "last_known",
   ]);
 
   // Per-pack and per-draw unit bases both traverse the path.

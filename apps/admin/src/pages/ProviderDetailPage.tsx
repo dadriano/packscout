@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type {
-  ProviderSourceDiagnosticFilter,
-  ProviderSourceDiagnosticHistory,
-  ProviderSourceOperationsDetail,
-  ProviderSourceOperationsSource,
+import {
+  importRunDetailPath,
+  type ProviderSourceDiagnosticFilter,
+  type ProviderSourceDiagnosticHistory,
+  type ProviderSourceOperationsDetail,
+  type ProviderSourceOperationsSource,
 } from "@packscout/contracts";
 import { Link, useParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
@@ -31,7 +32,7 @@ import {
   RECORDS_PER_REQUEST_SAVED,
   parseRecordsPerRequest,
 } from "../components/source-configuration/records-per-request";
-import { dateTime, humanize, interval } from "../components/operations/OperationStatus";
+import { dateTime, humanize, insertRevisionCounts, interval } from "../components/operations/OperationStatus";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -399,7 +400,7 @@ export function ProviderDetailPage() {
     event.preventDefault();
     const source = detail?.source.source;
     const scheduleRevisionId = recordsPerRequestOriginRevision.current;
-    if (!source || !scheduleRevisionId) return;
+    if (!source || !scheduleRevisionId || source.requestSizePolicy !== "schedule_revision") return;
     const recordsPerRequest = parseRecordsPerRequest(recordsPerRequestDraft);
     if (recordsPerRequest === null) {
       setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
@@ -585,7 +586,11 @@ export function ProviderDetailPage() {
                 {pendingKey?.endsWith(":interval") ? "Saving timing…" : "Save timing"}
               </button>
             </form>
-            <form onSubmit={(event) => { void reviseRecordsPerRequest(event); }}>
+            {sourceRevision?.requestSizePolicy === "adapter_profile" ? (
+              <p className="source-config-field-help" role="note">
+                {`Request size is pinned by the active adapter profile (${sourceRevision.recordsPerRequest.toLocaleString("en-US")} records). Changing it requires a reviewed configuration handoff; this page does not modify that profile.`}
+              </p>
+            ) : <form onSubmit={(event) => { void reviseRecordsPerRequest(event); }}>
               <div className="admin-field source-admin-inline__records-field">
                 <label htmlFor="provider-source-records-per-request">
                   Maximum records per request
@@ -638,7 +643,7 @@ export function ProviderDetailPage() {
                   ? "Saving request size…"
                   : "Save request size"}
               </button>
-            </form>
+            </form>}
           </div>
         </section>
       )}
@@ -688,12 +693,12 @@ export function ProviderDetailPage() {
 
       <section className="source-run-history" aria-labelledby="source-run-history-title">
         <header className="admin-section-header"><div><span className="admin-kicker">Selected source only</span><h2 id="source-run-history-title">Run history</h2></div><Link to={`/runs?providerId=${source.providerId}`}>All runs</Link></header>
-        {detail.runHistory.length === 0 ? <EmptyState title="No runs recorded" description="Run now or wait for the next scheduled interval. A queued run may wait for worker or connection capacity." /> : <div className="source-run-history__rows">{detail.runHistory.map((run) => <article key={run.id}><div><Link to={`/runs/${run.id}`}>{humanize(run.trigger)} run</Link><span>{dateTime(run.requestedAt)}</span></div><StatusBadge label={humanize(run.state)} tone={run.state === "failed" ? "danger" : run.state === "succeeded" ? "ready" : "pending"} /><dl><div><dt>Progress</dt><dd>{dateTime(run.lastProgressAt)}</dd></div><div><dt>Elapsed</dt><dd>{run.startedAt ? milliseconds(Math.max(0, Date.parse(run.finishedAt ?? detail.refreshedAt) - Date.parse(run.startedAt))) : "Not started"}</dd></div><div><dt>Provider head</dt><dd>{run.reachedHead ? "Reached" : "Not reached"}</dd></div><div><dt>Failure</dt><dd>{run.failureCode ?? "None"}</dd></div></dl></article>)}</div>}
+        {detail.runHistory.length === 0 ? <EmptyState title="No runs recorded" description="Run now or wait for the next scheduled interval. A queued run may wait for worker or connection capacity." /> : <div className="source-run-history__rows">{detail.runHistory.map((run) => <article key={run.id}><div><Link to={importRunDetailPath({ providerId: detail.source.providerId, runId: run.id })}>{humanize(run.trigger)} run</Link><span>{dateTime(run.requestedAt)}</span></div><StatusBadge label={humanize(run.state)} tone={run.state === "failed" ? "danger" : run.state === "succeeded" ? "ready" : "pending"} /><dl><div><dt>Progress</dt><dd>{dateTime(run.lastProgressAt)}</dd></div><div><dt>Elapsed</dt><dd>{run.startedAt ? milliseconds(Math.max(0, Date.parse(run.finishedAt ?? detail.refreshedAt) - Date.parse(run.startedAt))) : "Not started"}</dd></div><div><dt>Provider head</dt><dd>{run.reachedHead ? "Reached" : "Not reached"}</dd></div><div><dt>Failure</dt><dd>{run.failureCode ?? "None"}</dd></div></dl></article>)}</div>}
       </section>
 
       <section className="source-page-progress" aria-labelledby="source-page-progress-title">
         <header className="admin-section-header"><div><span className="admin-kicker">Atomic committed pages</span><h2 id="source-page-progress-title">Page progress</h2></div><span className="admin-section-count">{detail.pageProgress.length} shown</span></header>
-        {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={`/runs/${page.runId}`}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{page.dispositions.inserted} inserted · {page.dispositions.revised} revised · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Cursor</dt><dd className="ops-cursor">{page.cursorFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
+        {detail.pageProgress.length === 0 ? <EmptyState title="No committed pages" description="A queued run, no live worker, or a failure before commit has no page progress." /> : <div className="source-page-progress__rows">{detail.pageProgress.map((page) => <article key={`${page.runId}:${page.pageNumber}`}><header><strong>Page {page.pageNumber}</strong><Link to={importRunDetailPath({ providerId: detail.source.providerId, runId: page.runId })}>Open run</Link><time dateTime={page.committedAt}>{dateTime(page.committedAt)}</time></header><dl><div><dt>Streams</dt><dd>{page.records.catalog} catalog · {page.records.pulls} pulls · {page.records.trades} trades · {page.records.total} total</dd></div><div><dt>Dispositions</dt><dd>{insertRevisionCounts(page.dispositions.inserted, page.dispositions.revised)} · {page.dispositions.duplicate} duplicate · {page.dispositions.quarantined} quarantined</dd></div><div><dt>Continuation</dt><dd>{page.continuation ? humanize(page.continuation.kind) : "Provider head"}</dd></div><div><dt>Cursor</dt><dd className="ops-cursor">{page.cursorFingerprint ?? "Not attached"}</dd></div></dl></article>)}</div>}
       </section>
 
       <SourceDiagnosticFeed

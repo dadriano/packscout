@@ -95,6 +95,7 @@ describe("data_release_v3 protocol parity", () => {
       "applyBatch",
       "finalize",
       "refreshProviderObservation",
+      "retainedEvWitness",
       "rollback",
       "start",
       "status",

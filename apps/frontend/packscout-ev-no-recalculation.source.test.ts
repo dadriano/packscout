@@ -94,7 +94,7 @@ test("components never format EV numbers or own break-even thresholds", () => {
   }
 });
 
-test("public surfaces render the server-evaluated estimate without browser clock policy", () => {
+test("public surfaces age confidence through the shared client store only", () => {
   for (const name of [
     "components/catalog/OpportunityTable.client.tsx",
     "components/catalog/AllRepacksTable.client.tsx",
@@ -102,28 +102,25 @@ test("public surfaces render the server-evaluated estimate without browser clock
     "components/catalog/PackInspector.client.tsx",
   ]) {
     const source = readFileSync(path.join(frontendRoot, name), "utf8");
-    if (name === "components/catalog/OpportunityTable.client.tsx") {
-      assert.match(source, /presentOpportunityRow/, name);
-    } else {
-      assert.match(source, /packScoutEvPresentation/, name);
-    }
-    assert.doesNotMatch(source, /evEstimates\.packScout/, name);
-    assert.doesNotMatch(source, /safePresentPackScoutPublicEvV3/, name);
-    assert.doesNotMatch(source, /packscout-ev-deadline/, name);
+    assert.match(source, /useClockBoundPackScoutEv/, name);
     assert.doesNotMatch(source, /Date\.now|setInterval|setTimeout/, name);
-    // Confidence is evaluated by the trusted public-read boundary. Components
-    // neither rescore it nor announce passive clock ticks.
+    assert.doesNotMatch(source, /packScoutEvPresentation|safePresentPackScoutPublicEvV3/, name);
     assert.doesNotMatch(source, /scoreBasisPoints\s*[+*/-]/, name);
+    // No passive clock-tick live regions around EV state.
     assert.doesNotMatch(source, /aria-live="assertive"/, name);
   }
+});
 
-  const overviewPresenter = readFileSync(
-    path.join(
-      frontendRoot,
-      "components/catalog/overview-presentation.ts",
-    ),
+test("the confidence clock is hydration-safe and delegates decay to the contract", () => {
+  const source = readFileSync(
+    path.join(frontendRoot, "lib/packscout-ev-clock.client.ts"),
     "utf8",
   );
-  assert.match(overviewPresenter, /packScoutEvPresentation/);
-  assert.doesNotMatch(overviewPresenter, /evEstimates\.packScout/);
+  assert.match(source, /useSyncExternalStore/);
+  assert.match(source, /getServerSnapshot/);
+  assert.match(source, /getServerSnapshot: \(\) => referenceMillis/);
+  assert.match(source, /presentLastKnownPackScoutEvV3/);
+  assert.match(source, /performance\.now/);
+  assert.doesNotMatch(source, /Date\.now/);
+  assert.doesNotMatch(source, /aria-live/);
 });

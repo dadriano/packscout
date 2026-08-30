@@ -5,10 +5,12 @@ import type {
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import {
-  buildV3LastKnownPresentation,
+  buildV3CurrentEv,
+  buildV3LastKnownEv,
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
+import { resolvePackScoutEvV3AtTime } from "@/lib/packscout-ev-clock.client";
 import {
   presentCatalogSummaries,
   presentDashboardKpis,
@@ -47,14 +49,14 @@ test("presents the three nonpositive-policy overview KPIs", () => {
 
 test("overview opportunity rows retain server-presented last-known EV", () => {
   const repack = buildV3ViewSummary({
-    packScoutEvPresentation: buildV3LastKnownPresentation(),
+    evEstimates: { ...buildV3ViewSummary().evEstimates, packScout: buildV3LastKnownEv() },
   });
   const row = presentOpportunityRow(repack, 1);
 
   assert.equal(row.packScoutEv.status, "last_known");
   assert.equal(row.packScoutEv.statusLabel, "Last-known estimate");
   assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
-  assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 72%");
+  assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 50%");
   assert.match(
     row.packScoutEv.freshness.dataAsOfLabel,
     /^Source evidence last observed /,
@@ -77,6 +79,22 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.simulated, false);
 });
 
+test("a clock-resolved estimate retains its values in the server-ranked row", () => {
+  const repack = buildV3ViewSummary();
+  const current = buildV3CurrentEv(8_500);
+  assert.equal(current.status, "current");
+  const deadline =
+    current.status === "current" ? Date.parse(current.expiresAt) : 0;
+  const expired = resolvePackScoutEvV3AtTime(current, repack.price, deadline + 1);
+
+  const row = presentOpportunityRow(repack, 1, expired);
+  assert.equal(row.packScoutEv.status, "last_known");
+  assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
+  assert.equal(
+    row.packScoutEv.freshness.sourceAgeLabel,
+    "Source data over 60 minutes old; last known values retained",
+  );
+});
 test("keeps valid overview selection and otherwise falls back deterministically", () => {
   const opportunities = [
     { publicRepackId: "first" },

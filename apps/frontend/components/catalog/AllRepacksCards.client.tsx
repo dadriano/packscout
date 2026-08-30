@@ -13,6 +13,7 @@ import {
   presentRepackPrice,
   presentTopChaseValue,
 } from "@/lib/packscout-ev-presentation";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
@@ -39,8 +40,9 @@ function RepackCard({
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
 }>) {
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const estimate = presentPackScoutEvV3({
-    estimate: repack.packScoutEvPresentation,
+    estimate: boundEstimate,
     price: repack.price,
     availability: repack.availability,
     repackName: repack.name,
@@ -125,6 +127,14 @@ function RepackCard({
             {estimate.confidence.displayValue}
           </dd>
         </div>
+        {estimate.status !== "current" ? (
+          <div>
+            <dt>Estimate</dt>
+            <dd title={[
+              estimate.freshness.dataAsOfLabel, estimate.reasonCopy, estimate.calculationPriceNote,
+            ].filter(Boolean).join(" ")}>{estimate.statusLabel}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
           <dd>{displayedChase?.collectible.name ?? "Unavailable"}</dd>

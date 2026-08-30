@@ -701,6 +701,14 @@ const settleProductUserWelcome = httpAction(async (ctx, request) => {
 
 const http = httpRouter();
 
+http.route({
+  path: PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness,
+  method: "POST",
+  handler: httpAction((ctx, request) => handleAuthenticatedDataReleaseV3Request(
+    ctx, request, internal.dataReleaseV3Read.retainedEvWitness,
+  )),
+});
+
 
 
 http.route({

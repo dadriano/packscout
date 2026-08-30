@@ -1,17 +1,23 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
+  CentralAdminProviderRepository,
   PrismaAdminImportRunRepository,
   ProviderSourceImportRunRepository,
   ProviderSourceQuarantineRepository,
   type AdminImportRunRecord,
   type AdminImportRunState,
+  type CentralQueryClient,
 } from "@packscout/database";
 import {
+  ProviderSourceImportAdmissionService,
   ProviderSourceImportRequestService,
   ProviderSourceQuarantineService,
   createProviderObservationMapperRegistryFromManifest,
   providerSourceQuarantineSummary,
   type ProviderActorKeyer,
+  type ProviderSourceImportRunSummary,
+  type ProviderSourceIntegrationCapabilityRegistry,
+  type ProviderSourceManualImportDelegate,
 } from "@packscout/services";
 import type { QuarantineEntrySummary } from "@packscout/contracts";
 import type {
@@ -27,6 +33,16 @@ type AdminOperationsDatabase = ConstructorParameters<
 export interface AdminImportOperationsRuntimeInput {
   readonly database: AdminOperationsDatabase;
   readonly actorPseudonymKey: Uint8Array;
+}
+
+export interface AdminManualImportAdmissionRuntimeInput {
+  readonly central: CentralQueryClient;
+  readonly sourceIntegrations: Pick<
+    ProviderSourceIntegrationCapabilityRegistry,
+    "resolve"
+  >;
+  readonly delegate: ProviderSourceManualImportDelegate;
+  readonly now?: () => Date;
 }
 
 export class InvalidOperationCursorError extends Error {
@@ -179,6 +195,51 @@ function toRunDetail(
   };
 }
 
+interface AdminManualImportRequestDelegate {
+  requestManual(input: Parameters<
+    ImportOperationsRouterDependencies["manualImports"]["request"]
+  >[0]): Promise<Readonly<{
+    run: ProviderSourceImportRunSummary;
+    coalesced: boolean;
+  }>>;
+}
+
+function manualImportRoutes(
+  imports: AdminManualImportRequestDelegate,
+): ImportOperationsRouterDependencies["manualImports"] {
+  return {
+    async request(request) {
+      const result = await imports.requestManual(request);
+      return {
+        run: {
+          id: result.run.id,
+          providerId: result.run.providerId,
+          configurationRevisionId: result.run.sourceRevisionId,
+          trigger: result.run.trigger,
+          state: result.run.state,
+        },
+        deduplicated: result.coalesced,
+      };
+    },
+  };
+}
+
+/**
+ * Distributed Run now composition. It deliberately accepts only a central
+ * client and an already provider-routed delegate; the route cannot choose a
+ * database target and the delegate is unreachable until admission succeeds.
+ */
+export function createAdminManualImportAdmissionRuntime(
+  input: AdminManualImportAdmissionRuntimeInput,
+): ImportOperationsRouterDependencies["manualImports"] {
+  return manualImportRoutes(new ProviderSourceImportAdmissionService({
+    providers: new CentralAdminProviderRepository(input.central),
+    sourceIntegrations: input.sourceIntegrations,
+    delegate: input.delegate,
+    clock: { now: input.now ?? (() => new Date()) },
+  }));
+}
+
 export function createAdminImportOperationsRuntime(
   input: AdminImportOperationsRuntimeInput,
 ): Omit<ImportOperationsRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
@@ -233,7 +294,7 @@ export function createAdminImportOperationsRuntime(
       },
       async getRun(request) {
         const run = await runReads.get(request);
-        if (!run) return null;
+        if (!run || run.providerId !== request.providerId) return null;
         const related = await quarantineRepository.listEntriesPage(
           request.organizationId,
           { runId: request.runId, limit: 100 },
@@ -273,25 +334,7 @@ export function createAdminImportOperationsRuntime(
         };
       },
     },
-    manualImports: {
-      async request(request) {
-        const result = await imports.requestManual({
-          actor: request.actor,
-          providerId: request.providerId,
-          expectedSourceRevisionId: request.expectedSourceRevisionId,
-        });
-        return {
-          run: {
-            id: result.run.id,
-            providerId: result.run.providerId,
-            configurationRevisionId: result.run.sourceRevisionId,
-            trigger: result.run.trigger,
-            state: result.run.state,
-          },
-          deduplicated: result.coalesced,
-        };
-      },
-    },
+    manualImports: manualImportRoutes(imports),
     quarantine,
   };
 }

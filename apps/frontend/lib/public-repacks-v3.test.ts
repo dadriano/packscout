@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   publicReadError,
 } from "@packscout/contracts";
 import {
@@ -48,7 +48,7 @@ function dashboardPayload() {
     data: {
       release: buildV3ReleaseIdentity(),
       publicFreshnessPolicyVersion:
-        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
       confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthSummary: buildV3ProviderHealthSummary(),
@@ -96,7 +96,7 @@ function listPayload() {
     data: {
       release: buildV3ReleaseIdentity(),
       publicFreshnessPolicyVersion:
-        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
       confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthSummary: buildV3ProviderHealthSummary(),
@@ -154,7 +154,7 @@ test("parses provider health on shell, dashboard, and list responses", () => {
     data: {
       release: buildV3ReleaseIdentity(),
       publicFreshnessPolicyVersion:
-        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
       confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
       providerHealthSummary,

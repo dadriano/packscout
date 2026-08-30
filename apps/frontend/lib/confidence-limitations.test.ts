@@ -12,9 +12,10 @@ const everyLimitationCode: readonly PackScoutConfidenceLimitationCode[] = [
   "source_age_over_15_through_30_minutes",
   "source_age_over_30_through_60_minutes",
   "source_age_over_60_minutes",
+  "latest_calculation_unavailable",
 ];
 
-test("maps the exact confidence-policy V1 limitation vocabulary to copy", () => {
+test("maps the complete displayed-confidence limitation vocabulary to copy", () => {
   const copy = presentConfidenceLimitations(everyLimitationCode);
 
   assert.equal(copy.length, everyLimitationCode.length);

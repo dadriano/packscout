@@ -9,19 +9,19 @@ import {
   publicDashboardBundleV3Schema,
   publicReadError,
   publicRepackListPageV3Schema,
+  publicRepackDetailV3Schema,
   publicShellStatusV3Schema,
   publicRepackViewDetailV3Schema,
-  publicRepackViewSummaryV3FromDetail,
-  safePresentPackScoutPublicEvV3,
-  searchPublicCollectiblesInputSchema,
   unavailableRepackHeat,
+  type PackScoutDisplayedEvV3,
+  publicRepackViewSummaryV3FromDetail,
+  searchPublicCollectiblesInputSchema,
   type DashboardKpis,
   type DataReleaseV3Identity,
   type ListPublicRepacksInput,
   type PublicCollectible,
   type PublicReadError,
   type PublicRepackChase,
-  type PublicRepackDetailV3,
   type PublicRepackFilters,
   type PublicRepackViewDetailV3,
   type PublicShellStatusV3,
@@ -46,9 +46,12 @@ import {
 } from "./dataReleaseV3Lifecycle";
 import {
   dataReleaseV3SearchRowMatchesDetail,
-  MAX_DATA_RELEASE_V3_REPACKS,
   type DataReleaseV3SearchRow,
 } from "./dataReleaseV3Search";
+import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
+import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
+import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
   encodeDataReleaseV3Cursor,
   isDataReleaseV3EvaluationTime,
@@ -62,8 +65,6 @@ import {
 import {
   dataReleaseV3ProviderHealthContext,
   dataReleaseV3PresentationContext,
-  dataReleaseV3SearchRowWithPresentationConfidence,
-  presentDataReleaseV3SearchRowFromStaticMetadata,
 } from "./dataReleaseV3PublicPresentation";
 
 /**
@@ -71,11 +72,12 @@ import {
  *
  * Every read resolves exactly one atomically activated release, re-proves its
  * internal consistency, and fails closed with a bounded error instead of ever
- * serving a partial, mixed, or tampered projection. EV source age is evaluated
- * at one trusted Convex-server response clock. Passing the old 60-minute
- * current window changes the presentation to `last_known` and decays
- * confidence; it never erases otherwise valid immutable EV metrics. Public
- * actions mint that clock; only internal deterministic tests may supply it.
+ * serving a partial, mixed, or tampered projection. Valid published values
+ * remain visible as last-known EV, with confidence evaluated at the request
+ * clock. The activation-owned retained projection also survives later
+ * unavailable releases; all rankings and details use that same projection.
+ * Public actions mint the trusted clock; cursor-pinned confidence never uses
+ * a caller-controlled clock. Provider health is informational only.
  *
  * Heat republication against v3 releases belongs to task 009; until a heat
  * frame targets a v3 release, every view carries the explicit unavailable
@@ -83,8 +85,6 @@ import {
  */
 
 const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
-const RETAINED_V6_DETAIL_READ_CEILING_BYTES = 8 * 1024 * 1024;
-const RETAINED_V6_POST_HYDRATION_READ_RESERVE_BYTES = 4 * 1024 * 1024;
 
 type Success<T> = { readonly ok: true; readonly data: T };
 type PublicResult<T> = Success<T> | PublicReadError;
@@ -122,6 +122,10 @@ export type ActiveDataReleaseV3 = Readonly<{
   releaseDocument: Doc<"dataReleaseV3Releases">;
   rows: readonly DataReleaseV3SearchRow[];
   rowByPublicId: ReadonlyMap<string, DataReleaseV3SearchRow>;
+  storedRowByPublicId: ReadonlyMap<string, DataReleaseV3SearchRow>;
+  evByPublicId: ReadonlyMap<string, PackScoutDisplayedEvV3>;
+  factsByPublicId: ReadonlyMap<string, DataReleaseV3EvFacts>;
+  legacyEvSnapshot: boolean;
   categoryByPublicId: ReadonlyMap<
     string,
     Readonly<{ parentPublicCategoryId: string | null; depth: number }>
@@ -134,6 +138,7 @@ export type ActiveDataReleaseV3 = Readonly<{
 
 async function loadActiveDataReleaseV3(
   ctx: QueryCtx,
+  currentTime?: number,
 ): Promise<ActiveDataReleaseV3 | null> {
   try {
     const state = await loadActiveDataReleaseV3State(ctx);
@@ -225,11 +230,21 @@ async function loadActiveDataReleaseV3(
         },
       ]),
     );
+    const legacyEvSnapshot = await usesLegacyEvSnapshot(ctx, release, state);
+    if (!legacyEvSnapshot) await loadRetainedEvPointer(ctx, state);
+    const displayed = currentTime === undefined || legacyEvSnapshot ? null
+      : await loadDataReleaseV3DisplayedRepacks(ctx, release, rows, currentTime);
+    if (currentTime !== undefined && !legacyEvSnapshot && displayed === null) return null;
+    const publicRows = displayed?.rows ?? rows;
     return {
       identity: identityParse.data,
       releaseDocument: release,
-      rows,
-      rowByPublicId: new Map(rows.map((row) => [row.publicRepackId, row])),
+      rows: publicRows,
+      rowByPublicId: new Map(publicRows.map((row) => [row.publicRepackId, row])),
+      storedRowByPublicId: new Map(rows.map((row) => [row.publicRepackId, row])),
+      evByPublicId: displayed?.evByPublicId ?? new Map(),
+      factsByPublicId: displayed?.factsByPublicId ?? new Map(),
+      legacyEvSnapshot,
       categoryByPublicId,
       vendors: [...vendorKeyByPublicId].map(([publicVendorId, vendorKey]) => ({
         publicVendorId,
@@ -241,214 +256,32 @@ async function loadActiveDataReleaseV3(
   }
 }
 
-async function loadVerifiedRepackDetail(
-  ctx: QueryCtx,
-  release: ActiveDataReleaseV3,
-  publicRepackId: string,
-): Promise<PublicRepackDetailV3 | null> {
-  const storedRow = release.rowByPublicId.get(publicRepackId);
-  if (storedRow === undefined) return null;
-  const stored = await ctx.db
-    .query("dataReleaseV3Repacks")
-    .withIndex("by_release_id_and_public_repack_id", (index) =>
-      index
-        .eq("releaseId", release.releaseDocument._id)
-        .eq("publicRepackId", publicRepackId),
-  )
-    .unique();
-  if (stored === null) return null;
-  const detail = stored.detail as PublicRepackDetailV3;
-  try {
-    return dataReleaseV3SearchRowMatchesDetail(storedRow, detail)
-      ? detail
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Exact temporary compatibility for retained V6 search rows. One bounded
- * release-scoped read replaces per-row queries and proves the complete detail
- * set before any legacy confidence metadata is trusted. Its byte ceiling and
- * post-read reserve keep the transaction below Convex's 16 MiB read limit; an
- * oversized retained release fails closed instead of overrunning that limit.
- * New rows never call this path. Remove it once active and previous releases
- * both report zero omitted static-confidence fields (owner: V3 rollout
- * maintainers).
- */
-async function loadVerifiedRepackDetailsByPublicId(
-  ctx: QueryCtx,
-  release: ActiveDataReleaseV3,
-): Promise<ReadonlyMap<string, PublicRepackDetailV3> | null> {
-  const expectedCount = release.releaseDocument.expectedCounts.repacks;
-  if (
-    !Number.isSafeInteger(expectedCount) ||
-    expectedCount < 0 ||
-    expectedCount > MAX_DATA_RELEASE_V3_REPACKS
-  ) {
-    return null;
-  }
-  const metrics = await ctx.meta.getTransactionMetrics();
-  const maximumBytesRead = Math.min(
-    RETAINED_V6_DETAIL_READ_CEILING_BYTES,
-    metrics.bytesRead.remaining -
-      RETAINED_V6_POST_HYDRATION_READ_RESERVE_BYTES,
-  );
-  if (maximumBytesRead < 1) return null;
-  const storedDetailsPage = await ctx.db
-    .query("dataReleaseV3Repacks")
-    .withIndex("by_release_id_and_public_repack_id", (index) =>
-      index.eq("releaseId", release.releaseDocument._id),
-    )
-    .paginate({
-      cursor: null,
-      numItems: expectedCount + 1,
-      maximumBytesRead,
-    });
-  if (!storedDetailsPage.isDone) return null;
-  const storedDetails = storedDetailsPage.page;
-  if (storedDetails.length !== expectedCount) return null;
-
-  const byPublicRepackId = new Map<string, PublicRepackDetailV3>();
-  for (const stored of storedDetails) {
-    const row = release.rowByPublicId.get(stored.publicRepackId);
-    const detail = stored.detail as PublicRepackDetailV3;
-    if (row === undefined) return null;
-    let rowMatchesDetail: boolean;
-    try {
-      rowMatchesDetail = dataReleaseV3SearchRowMatchesDetail(row, detail);
-    } catch {
-      return null;
-    }
-    if (
-      stored.releaseId !== release.releaseDocument._id ||
-      detail.publicRepackId !== stored.publicRepackId ||
-      byPublicRepackId.has(stored.publicRepackId) ||
-      !rowMatchesDetail
-    ) {
-      return null;
-    }
-    byPublicRepackId.set(stored.publicRepackId, detail);
-  }
-  return byPublicRepackId.size === release.rowByPublicId.size
-    ? byPublicRepackId
-    : null;
-}
-
-/**
- * Dynamically evaluates confidence without touching stored EV metrics. New
- * rows carry the exact static penalty and stay on the search-row hot path.
- * Retained V6 rows may omit that field; only confidence-sensitive reads
- * hydrate and re-prove those rows from their immutable detail. Remove this
- * fallback once active and previous releases both report zero omitted fields
- * (owner: V3 rollout maintainers).
- */
-async function presentSearchRows(
-  ctx: QueryCtx,
-  release: ActiveDataReleaseV3,
-  rows: readonly DataReleaseV3SearchRow[],
-  evaluationTime: number,
-  hydrateRetainedRows: boolean,
-): Promise<
-  Readonly<{
-    rows: DataReleaseV3SearchRow[];
-    retainedDetailsByPublicId: ReadonlyMap<
-      string,
-      PublicRepackDetailV3
-    > | null;
-  }> | null
-> {
-  const retainedRows = hydrateRetainedRows
-    ? rows.filter(
-        (row) =>
-          row.packScoutExpiresAtMillis !== null &&
-          row.packScoutStaticConfidencePenaltyBasisPoints === undefined,
-      )
-    : [];
-  const retainedDetails = retainedRows.length === 0
-    ? null
-    : await loadVerifiedRepackDetailsByPublicId(ctx, release);
-  if (retainedRows.length > 0 && retainedDetails === null) return null;
-  const retainedHydrations = retainedRows.map((row) => {
-    const detail = retainedDetails?.get(row.publicRepackId) ?? null;
-    if (detail === null) return null;
-    const result = safePresentPackScoutPublicEvV3(
-      detail.evEstimates.packScout,
-      new Date(evaluationTime).toISOString(),
-    );
-    return result.success
-      ? ([
-          row.publicRepackId,
-          dataReleaseV3SearchRowWithPresentationConfidence(
-            row,
-            result.presentation,
-          ),
-        ] as const)
-      : null;
-  });
-  const retainedByPublicRepackId = new Map<
-    string,
-    DataReleaseV3SearchRow
-  >();
-  for (const hydration of retainedHydrations) {
-    if (hydration === null) return null;
-    retainedByPublicRepackId.set(hydration[0], hydration[1]);
-  }
-  const presented: DataReleaseV3SearchRow[] = [];
-  for (const row of rows) {
-    const fromMetadata = presentDataReleaseV3SearchRowFromStaticMetadata(
-      row,
-      evaluationTime,
-    );
-    if (fromMetadata === null) return null;
-    if (
-      row.packScoutExpiresAtMillis === null ||
-      row.packScoutStaticConfidencePenaltyBasisPoints !== undefined ||
-      !hydrateRetainedRows
-    ) {
-      presented.push(fromMetadata);
-      continue;
-    }
-    const hydrated = retainedByPublicRepackId.get(row.publicRepackId);
-    if (hydrated === undefined) return null;
-    presented.push(hydrated);
-  }
-  return {
-    rows: presented,
-    retainedDetailsByPublicId: retainedDetails,
-  };
-}
-
 async function hydrateRepackViews(
   ctx: QueryCtx,
   release: ActiveDataReleaseV3,
   rows: readonly DataReleaseV3SearchRow[],
-  evaluationTime: number,
   health: DataReleaseV3ProviderHealthSnapshot,
-  retainedDetailsByPublicId: ReadonlyMap<
-    string,
-    PublicRepackDetailV3
-  > | null = null,
 ): Promise<PublicRepackViewDetailV3[] | null> {
   const views: PublicRepackViewDetailV3[] = [];
   for (const row of rows) {
-    const detail =
-      retainedDetailsByPublicId === null
-        ? await loadVerifiedRepackDetail(ctx, release, row.publicRepackId)
-        : (retainedDetailsByPublicId.get(row.publicRepackId) ?? null);
-    if (detail === null) return null;
-    const presentation = safePresentPackScoutPublicEvV3(
-      detail.evEstimates.packScout,
-      new Date(evaluationTime).toISOString(),
-    );
-    if (!presentation.success) return null;
-    const view = publicRepackViewDetailV3Schema.safeParse({
-      ...detail,
+    const stored = await ctx.db.query("dataReleaseV3Repacks")
+      .withIndex("by_release_id_and_public_repack_id", (index) => index.eq("releaseId", release.releaseDocument._id)
+        .eq("publicRepackId", row.publicRepackId)).unique();
+    const rawRow = release.storedRowByPublicId.get(row.publicRepackId);
+    const displayedEstimate = release.evByPublicId.get(row.publicRepackId);
+    const facts = release.factsByPublicId.get(row.publicRepackId);
+    if (stored === null || rawRow === undefined) return null;
+    const parsed = publicRepackDetailV3Schema.safeParse(stored.detail);
+    if (!parsed.success || !dataReleaseV3SearchRowMatchesDetail(rawRow, parsed.data)) return null;
+    if (!release.legacyEvSnapshot && (displayedEstimate === undefined || facts === undefined ||
+        canonicalJson(evFactsFromDetail(parsed.data)) !== canonicalJson(facts))) return null;
+    // During the explicit one-time cutover only, keep the published snapshot
+    // unchanged. Never expire its values or switch merely because facts seal.
+    const estimate = release.legacyEvSnapshot ? parsed.data.evEstimates.packScout : displayedEstimate!;
+    const view = publicRepackViewDetailV3Schema.safeParse({ ...parsed.data,
+      evEstimates: { ...parsed.data.evEstimates, packScout: estimate },
       heat: unavailableRepackHeat(),
-      packScoutEvPresentation: presentation.presentation,
-      providerHealth:
-        health.byPublicVendorId.get(detail.publicVendorId) ??
+      providerHealth: health.byPublicVendorId.get(parsed.data.publicVendorId) ??
         missingDataReleaseV3ProviderHealth(),
     });
     if (!view.success) return null;
@@ -956,40 +789,28 @@ export const getDashboardBundleV3AtTime = internalQuery({
     } catch {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const health = await loadDataReleaseV3ProviderHealthSnapshot(
-      ctx,
-      active.releaseDocument,
-      active.vendors,
-      currentTime,
+      ctx, active.releaseDocument, active.vendors, currentTime,
     );
-    const presentedSearch = await presentSearchRows(
-      ctx,
-      active,
-      active.rows,
-      currentTime,
-      true,
-    );
-    if (presentedSearch === null) {
-      return publicReadError("RELEASE_UNAVAILABLE");
-    }
-    const allRows = presentedSearch.rows;
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
     }
     const matchingRows = allRows.filter((row) =>
       rowMatchesFilters(row, request.filters),
     );
-    // Rank every purchasable repack with a calculable estimate. Provider-feed
-    // status is informational; source-evidence age is already represented by
-    // the server-derived confidence score and last-known presentation state.
-    const opportunityCandidates = matchingRows.filter(
-      (row) =>
-        packIsPurchasable(row.availability) &&
-        row.packScoutEvDollarsMinor !== null,
-    );
-    const opportunityRows = [...opportunityCandidates]
+    // Opportunities are actionable buys: only available repacks with a
+    // last-known PackScout estimate rank, by signed EV dollars
+    // descending. Sold-out, unavailable, and unknown packs stay visible in the
+    // catalog and never rank here.
+    const opportunityRows = [...matchingRows]
+      .filter(
+        (row) =>
+          packIsPurchasable(row.availability) &&
+          row.packScoutEvDollarsMinor !== null,
+      )
       .sort((left, right) =>
         compareRows(left, right, {
           search: "",
@@ -998,14 +819,7 @@ export const getDashboardBundleV3AtTime = internalQuery({
         }),
       )
       .slice(0, 6);
-    const details = await hydrateRepackViews(
-      ctx,
-      active,
-      opportunityRows,
-      currentTime,
-      health,
-      presentedSearch.retainedDetailsByPublicId,
-    );
+    const details = await hydrateRepackViews(ctx, active, opportunityRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -1070,34 +884,28 @@ export const listPublicRepacksV3AtTime = internalQuery({
     if (!sortIsSupported(request.sort)) {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
-    if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const storedActive = await loadActiveDataReleaseV3(ctx);
+    if (storedActive === null) return publicReadError("RELEASE_UNAVAILABLE");
     const pagination = await resolveDataReleaseV3Pagination(
-      ctx,
-      request,
-      active.identity.publicReleaseId,
-      currentTime,
+      ctx, request, storedActive.identity.publicReleaseId, currentTime,
     );
     if (!pagination.ok) return publicReadError(pagination.code);
-    const confidenceEvaluatedAtMillis =
-      pagination.confidenceEvaluatedAtMillis;
-    const health = await loadDataReleaseV3ProviderHealthSnapshot(
-      ctx,
-      active.releaseDocument,
-      active.vendors,
-      currentTime,
-    );
-    const presentedSearch = await presentSearchRows(
-      ctx,
-      active,
-      active.rows,
-      confidenceEvaluatedAtMillis,
-      request.sort === "packscout_confidence",
-    );
-    if (presentedSearch === null) {
+    const confidenceEvaluatedAtMillis = pagination.confidenceEvaluatedAtMillis;
+    const displayed = storedActive.legacyEvSnapshot ? null
+      : await loadDataReleaseV3DisplayedRepacks(
+          ctx, storedActive.releaseDocument, storedActive.rows, confidenceEvaluatedAtMillis,
+        ).catch(() => null);
+    if (!storedActive.legacyEvSnapshot && displayed === null) {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
-    const allRows = presentedSearch.rows;
+    const active = displayed === null ? storedActive : {
+      ...storedActive, ...displayed,
+      rowByPublicId: new Map(displayed.rows.map(row => [row.publicRepackId, row])),
+    };
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, currentTime,
+    );
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -1144,14 +952,7 @@ export const listPublicRepacksV3AtTime = internalQuery({
       pagination.offset,
       pagination.offset + request.pageSize,
     );
-    const details = await hydrateRepackViews(
-      ctx,
-      active,
-      pageRows,
-      confidenceEvaluatedAtMillis,
-      health,
-      presentedSearch.retainedDetailsByPublicId,
-    );
+    const details = await hydrateRepackViews(ctx, active, pageRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -1248,7 +1049,7 @@ export const getPublicRepackV3AtTime = internalQuery({
     ) {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, args.currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     if (args.publicReleaseId !== active.identity.publicReleaseId) {
       return publicReadError("REPACK_NOT_FOUND");
@@ -1256,18 +1057,9 @@ export const getPublicRepackV3AtTime = internalQuery({
     const row = active.rowByPublicId.get(args.publicRepackId);
     if (row === undefined) return publicReadError("REPACK_NOT_FOUND");
     const health = await loadDataReleaseV3ProviderHealthSnapshot(
-      ctx,
-      active.releaseDocument,
-      active.vendors,
-      args.currentTime,
+      ctx, active.releaseDocument, active.vendors, args.currentTime,
     );
-    const views = await hydrateRepackViews(
-      ctx,
-      active,
-      [row],
-      args.currentTime,
-      health,
-    );
+    const views = await hydrateRepackViews(ctx, active, [row], health);
     if (views === null || views[0] === undefined) {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
@@ -1358,7 +1150,7 @@ export const findRepacksByDesiredCollectibleV3AtTime = internalQuery({
       directArgs(queryArgs),
     );
     if (!request.success) return publicReadError("INVALID_QUERY");
-    const active = await loadActiveDataReleaseV3(ctx);
+    const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
     const lookup = await loadReleaseCollectible(
       ctx,
@@ -1371,23 +1163,7 @@ export const findRepacksByDesiredCollectibleV3AtTime = internalQuery({
     if (lookup.status === "invalid") {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
-    const health = await loadDataReleaseV3ProviderHealthSnapshot(
-      ctx,
-      active.releaseDocument,
-      active.vendors,
-      currentTime,
-    );
-    const presentedSearch = await presentSearchRows(
-      ctx,
-      active,
-      active.rows,
-      currentTime,
-      false,
-    );
-    if (presentedSearch === null) {
-      return publicReadError("RELEASE_UNAVAILABLE");
-    }
-    const allRows = presentedSearch.rows;
+    const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.data.filters)) {
       return publicReadError("INVALID_QUERY");
     }
@@ -1432,13 +1208,10 @@ export const findRepacksByDesiredCollectibleV3AtTime = internalQuery({
         return compareText(left.publicRepackId, right.publicRepackId);
       });
     const visibleRows = matchingRows.slice(0, request.data.limit);
-    const details = await hydrateRepackViews(
-      ctx,
-      active,
-      visibleRows,
-      currentTime,
-      health,
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, currentTime,
     );
+    const details = await hydrateRepackViews(ctx, active, visibleRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const result = desiredCollectibleRepackResultsV3Schema.safeParse({
       release: active.identity,

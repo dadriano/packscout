@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
   ApprovedPublicCatalogConfigurationV1,
   PackScoutBuybackEvEvidenceOutcomeV1,
-  PackScoutPublicEvPresentationV1,
+  PackScoutDisplayedEvV3,
   PublicRepackDetailV3,
   PublicRepackSummaryV3,
 } from "@packscout/contracts";
@@ -13,7 +13,7 @@ import {
   packScoutEvProjectionsAreByteEquivalentV3,
   containsProtectedEvPublicationKeyV3,
   containsProtectedPublicationField,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
 } from "@packscout/contracts";
 import {
   BuybackEvRevisionRepository,
@@ -487,7 +487,7 @@ export async function seedBuybackEvCertificationCatalog(
 /** The narrow structural surface of the task-010 presentation boundary. */
 export interface PackScoutEvPresentationBoundary {
   presentPackScoutEvV3(input: {
-    estimate: PackScoutPublicEvPresentationV1;
+    estimate: PackScoutDisplayedEvV3;
     price: PublicRepackSummaryV3["price"];
     availability: PublicRepackSummaryV3["availability"];
     repackName?: string;
@@ -940,18 +940,13 @@ export async function runBuybackEvLaunchCertificationHarness(
       );
 
       // Hop 6: rendered presentation output.
-      const publicPresentation = safePresentPackScoutPublicEvV3(
+      const publicPresentation = presentLastKnownPackScoutEvV3({
         estimate,
-        CERTIFICATION_TIMELINE.readAt,
-      );
-      check(
-        state,
-        publicPresentation.success,
-        "the public freshness presentation could not be derived",
-      );
-      if (!publicPresentation.success) continue;
+        calculationPriceUsdMinor: fixture.packPriceMinorUnits,
+        referenceTimeIso: CERTIFICATION_TIMELINE.readAt,
+      });
       const rendered = input.presentation.presentPackScoutEvV3({
-        estimate: publicPresentation.presentation,
+        estimate: publicPresentation,
         price: detail.price,
         availability: detail.availability,
         repackName: detail.name,

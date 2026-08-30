@@ -1,0 +1,219 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { ProviderPrismaClient } from "@packscout/database";
+import {
+  ClutchpacksManualImportLocalError,
+  readClutchpacksManualImportLocalConfiguration,
+  runClutchpacksManualImportOnce,
+} from "./clutchpacks-manual-import-local-runtime.ts";
+
+const providerId = "00000000-0000-4000-8000-000000000020";
+const actorKey = Buffer.alloc(32, 17).toString("base64");
+
+function environment(
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return {
+    PACKSCOUT_PROVIDER_DATABASE_URL:
+      "postgresql://provider:secret@127.0.0.1:5432/packscout_clutchpacks",
+    PACKSCOUT_PROVIDER_ID: providerId,
+    PACKSCOUT_PROVIDER_KEY: "clutchpacks",
+    PACKSCOUT_PROVIDER_CAPTURE_ROOT: "/srv/packscout/captures",
+    PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: actorKey,
+    ...overrides,
+  };
+}
+
+test("local ClutchPacks configuration stays explicit and provider-scoped", () => {
+  const configuration = readClutchpacksManualImportLocalConfiguration(
+    environment(),
+    "preview:worker",
+  );
+
+  assert.equal(configuration.providerId, providerId);
+  assert.equal(configuration.providerKey, "clutchpacks");
+  assert.equal(configuration.captureRoot, "/srv/packscout/captures");
+  assert.equal(configuration.actorHmacKey?.byteLength, 32);
+  assert.equal(configuration.workerId, "preview:worker");
+});
+
+test("live ClutchPacks configuration does not require capture-only settings", () => {
+  const configuration = readClutchpacksManualImportLocalConfiguration(
+    environment({
+      PACKSCOUT_PROVIDER_CAPTURE_ROOT: undefined,
+      PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: undefined,
+    }),
+    "preview:worker",
+    "live",
+  );
+
+  assert.equal(configuration.captureRoot, null);
+  assert.equal(configuration.actorHmacKey, null);
+});
+
+test("local composition rejects another provider before constructing a database", async () => {
+  let databaseCreations = 0;
+  await assert.rejects(
+    runClutchpacksManualImportOnce({
+      environment: environment({ PACKSCOUT_PROVIDER_KEY: "courtyard" }),
+      fallbackWorkerId: "preview:worker",
+      dependencies: {
+        createDatabaseLifecycle() {
+          databaseCreations += 1;
+          throw new Error("must not run");
+        },
+        createExecutor() {
+          throw new Error("must not run");
+        },
+      },
+    }),
+    (error: unknown) =>
+      error instanceof ClutchpacksManualImportLocalError
+      && error.code === "CLUTCHPACKS_IMPORT_CONFIGURATION_INVALID",
+  );
+  assert.equal(databaseCreations, 0);
+});
+
+test("local composition starts one provider database and consumes one command", async () => {
+  const events: string[] = [];
+  const client = {} as ProviderPrismaClient;
+  const result = await runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle(input) {
+        assert.equal(input.providerId, providerId);
+        assert.equal(input.providerKey, "clutchpacks");
+        assert.equal(input.connectionLimit, 2);
+        return {
+          client,
+          async start() { events.push("database_started"); },
+          async close() { events.push("database_closed"); },
+        };
+      },
+      createExecutor(input) {
+        assert.equal(input.database, client);
+        assert.equal(input.captureRoot, "/srv/packscout/captures");
+        assert.equal(input.workerId, "preview:worker");
+        events.push("executor_created");
+        return {
+          async executeNext() {
+            events.push("command_consumed");
+            return {
+              kind: "completed" as const,
+              runId: "00000000-0000-4000-8000-000000000030",
+              pageCount: 1,
+              counters: {
+                pages: 1,
+                catalog: 946,
+                pulls: 15,
+                marketEvents: 15,
+                accepted: 976,
+                duplicate: 0,
+                quarantined: 0,
+                materialChanges: 976,
+              },
+            };
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(result.kind, "completed");
+  assert.deepEqual(events, [
+    "database_started",
+    "executor_created",
+    "command_consumed",
+    "database_closed",
+  ]);
+});
+
+test("local composition always closes the provider database", async () => {
+  const events: string[] = [];
+  await assert.rejects(runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as ProviderPrismaClient,
+          async start() { events.push("database_started"); },
+          async close() { events.push("database_closed"); },
+        };
+      },
+      createExecutor() {
+        return {
+          async executeNext() {
+            throw new Error("fixture execution failed");
+          },
+        };
+      },
+    },
+  }), /fixture execution failed/u);
+  assert.deepEqual(events, ["database_started", "database_closed"]);
+});
+
+test("committed ClutchPacks work relays only after the provider closes", async () => {
+  const events: string[] = [];
+  const result = await runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as ProviderPrismaClient,
+          start: () => Promise.resolve(),
+          async close() { events.push("database_closed"); },
+        };
+      },
+      createExecutor() {
+        return {
+          async executeNext() {
+            events.push("provider_committed");
+            return { kind: "idle" as const };
+          },
+        };
+      },
+      async relayProviderActivity() { events.push("activity_relayed"); },
+    },
+  });
+
+  assert.equal(result.kind, "idle");
+  assert.deepEqual(events, [
+    "provider_committed",
+    "database_closed",
+    "activity_relayed",
+  ]);
+});
+
+test("central relay failure cannot fail committed ClutchPacks work", async () => {
+  const failures: string[] = [];
+  const result = await runClutchpacksManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:worker",
+    dependencies: {
+      createDatabaseLifecycle() {
+        return {
+          client: {} as ProviderPrismaClient,
+          start: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      },
+      createExecutor() {
+        return { executeNext: () => Promise.resolve({ kind: "idle" as const }) };
+      },
+      relayProviderActivity: () => Promise.reject(
+        new Error("postgresql://observer:secret@central/packscout"),
+      ),
+      observeRelayFailure(failureCode) {
+        failures.push(failureCode);
+        throw new Error("observer logger unavailable");
+      },
+    },
+  });
+
+  assert.equal(result.kind, "idle");
+  assert.deepEqual(failures, ["CENTRAL_ACTIVITY_UNAVAILABLE"]);
+  assert.doesNotMatch(JSON.stringify(failures), /secret|postgresql:\/\//iu);
+});

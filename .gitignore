@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+packages/database/prisma/generated/
 
 # Build output
 .next/

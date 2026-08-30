@@ -8,6 +8,7 @@
  */
 export const PRODUCTION_DATA_RELEASE_V3_PATHS = Object.freeze({
   activeState: "/internal/data-release/v3/active-state",
+  retainedEvWitness: "/internal/data-release/v3/retained-ev-witness",
   start: "/internal/data-release/v3/start",
   applyBatch: "/internal/data-release/v3/apply-batch",
   finalize: "/internal/data-release/v3/finalize",

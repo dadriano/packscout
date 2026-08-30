@@ -14,6 +14,8 @@ The raw `packscout-buyback-adjusted-ev-confidence-v1` calculation record remains
 
 ## Source Authority
 
+PR #50 merge amendment: the approved PR #51 retained-EV policy supersedes this task's original hyperbolic decay and frozen sold-out confidence. The current contract is `packscout-last-known-ev-confidence-v1`; historical task verification below does not certify the merged tree.
+
 1. This feature PRD and its numbered tasks govern public EV freshness after 60 minutes.
 2. `PackScout_Methodology.docx` governs EV definitions, evidence limitations, and responsible-play intent; it does not require a 60-minute availability cutoff.
 3. `.tasks/buyback-adjusted-ev` remains the historical V1 calculation and publication record.
@@ -25,23 +27,23 @@ The raw `packscout-buyback-adjusted-ev-confidence-v1` calculation record remains
 
 - A calculable EV remains visible and sortable at every evidence age.
 - Age alone never changes a known estimate to unavailable and never nulls its economics.
-- Unavailable remains reserved for missing or unsupported essential price, odds, value, buyback, currency, draw, or provenance evidence, plus the existing positive-EV suppression policy.
-- Sold-out packs retain their historical estimate, freeze freshness at sellout, never rank, and expose no outbound action.
+- A latest unavailable calculation retains an earlier valid estimate at zero confidence, with its original price and provenance. If no valid estimate exists, missing essential evidence and the existing positive-EV suppression policy remain unavailable.
+- Sold-out packs retain their historical economics; confidence continues aging, they never rank, and they expose no outbound action.
 
 ### Public confidence policy
 
 - Through 60 minutes, public confidence applies the existing V1 age bands at the response's pinned evaluation time: no age penalty through 15 minutes, 1,000 points over 15 through 30 minutes, and 2,500 points over 30 through 60 minutes.
-- After 60 minutes, state becomes `last_known` and adds the public limitation `source_age_over_60_minutes`.
-- Let `C60 = max(0, 7500 - staticPenalties)`, where static penalties are 1,500 for published odds and 2,000 for midpoint value ranges.
-- Let `delta = max(0, evaluationTime - dataAsOf - 60 minutes)` and compute `confidence = round_half_up(C60 × 24 hours ÷ (24 hours + delta))`.
-- The score is monotonic, bounded from 0 through 10,000, and may round to zero without making EV unavailable.
+- Known dynamic estimates use the single `evEstimates.packScout` last-known projection; after 60 minutes it adds `source_age_over_60_minutes`.
+- Static penalties remain 1,500 for published odds and 2,000 for midpoint value ranges.
+- After 60 minutes, let `delta = min(3 hours, evaluationTime - dataAsOf - 60 minutes)` and compute `confidence = max(0, 10000 - staticPenalties - 2500 - floor(delta × 2500 / 1 hour))`.
+- The score is monotonic, bounded from 0 through 10,000, and reaches zero by four hours without making known economics unavailable. A latest unavailable calculation sets retained confidence to zero immediately.
 
 ### Evaluation time and pagination
 
 - Each response uses one authoritative evaluation time for every row, aggregate, detail, and confidence band.
 - The first page of a confidence-sorted search pins that evaluation time in its opaque cursor; later pages reuse it.
 - Cursor/query validation rejects clocks outside the trusted publication path and prevents caller-selected stale clocks.
-- Sold-out packs evaluate confidence at the earlier of sellout time and response evaluation time.
+- Sold-out packs use the same response confidence clock while retaining the original sellout marker and economics.
 
 ### Provider health
 

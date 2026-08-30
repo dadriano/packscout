@@ -215,13 +215,12 @@ test("keeps the required source, advice, and bounded-summary language canonical"
     not_documented: "Not documented",
     unavailable: "Unavailable",
   });
-  assert.equal(ESTIMATE_STATUS_COPY.current, "Current estimate");
+  assert.equal(ESTIMATE_STATUS_COPY.sold_out_historical, "Sold out · historical estimate");
   assert.equal(ESTIMATE_STATUS_COPY.last_known, "Last-known estimate");
-  assert.equal(ESTIMATE_STATUS_COPY.historical, "Sold out · historical estimate");
   assert.equal(ESTIMATE_STATUS_COPY.simulated, "Simulated data");
   assert.match(
-    SOURCE_AGE_COPY.last_known_over_60_minutes,
-    /last-known estimate/,
+    SOURCE_AGE_COPY.delayed_over_60_minutes,
+    /last known values retained/,
   );
   assert.match(
     METRIC_TRUST_COPY.unavailableExplanation,

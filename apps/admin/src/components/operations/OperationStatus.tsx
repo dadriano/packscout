@@ -10,6 +10,16 @@ export function dateTime(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "Not recorded";
 }
 
+export function revisionCount(value: number | null): string {
+  return value === null ? "Revision count unavailable" : `${value} revised`;
+}
+
+export function insertRevisionCounts(inserted: number | null, revised: number | null): string {
+  return inserted === null || revised === null
+    ? "Insert/update breakdown unavailable"
+    : `${inserted} inserted · ${revised} revised`;
+}
+
 export function duration(start: string | null, finish: string | null): string {
   if (!start) return "Not started";
   if (!finish) return "In progress";

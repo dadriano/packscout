@@ -42,7 +42,14 @@ const SKIPPED_DIRECTORIES = new Set([
   ".turbo",
 ]);
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js"]);
+const SOURCE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".mjs",
+  ".cjs",
+  ".js",
+  ".prisma",
+]);
 
 function isTestFile(relativePath: string): boolean {
   return (
@@ -52,11 +59,18 @@ function isTestFile(relativePath: string): boolean {
   );
 }
 
+function shouldSkipDirectory(directory: string): boolean {
+  const name = path.basename(directory);
+  return SKIPPED_DIRECTORIES.has(name)
+    || name.startsWith(".next")
+    || relative(directory) === "packages/database/prisma/generated";
+}
+
 function walk(directory: string, files: string[] = []): string[] {
   if (!existsSync(directory)) return files;
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (SKIPPED_DIRECTORIES.has(entry.name) || entry.name.startsWith(".next")) {
+      if (shouldSkipDirectory(path.join(directory, entry.name))) {
         continue;
       }
       walk(path.join(directory, entry.name), files);
@@ -76,6 +90,15 @@ function tokensIn(content: string): readonly string[] {
     content.includes(token),
   );
 }
+
+test("only the exact Prisma output path exempts a generated directory", () => {
+  assert.equal(shouldSkipDirectory(path.join(
+    repositoryRoot, "packages/database/prisma/generated",
+  )), true);
+  for (const directory of ["apps/frontend/generated", "packages/database/src/generated"]) {
+    assert.equal(shouldSkipDirectory(path.join(repositoryRoot, directory)), false);
+  }
+});
 
 test("the cutover inventory is well formed and every referenced surface exists", () => {
   assert.ok(PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1.length > 0);

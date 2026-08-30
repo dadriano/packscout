@@ -276,8 +276,24 @@ test("a degraded fleet surfaces the stale instance, stalled run, and wedged sche
   const links = [...renderer.container.querySelectorAll("a")].map((anchor) =>
     anchor.getAttribute("href"),
   );
-  assert.ok(links.includes(`/runs/${runId}`));
+  assert.ok(links.includes(`/runs/${runId}?providerId=${providerId}`));
+  assert.equal(links.filter((href) => href?.startsWith("/runs/")).length, 4);
+  assert.ok(links.filter((href) => href?.startsWith("/runs/")).every((href) => href === `/runs/${runId}?providerId=${providerId}`));
   assert.ok(links.includes(`/providers/${providerId}`));
+});
+
+test("a worker activity without provider context never offers an unqualified run link", async (context) => {
+  stubFleet(context, {
+    instances: [{ ...liveInstance, activity: { ...liveInstance.activity, providerId: null } }],
+    fleet: evaluateWorkerFleet({ now, instances: [{ status: "running", heartbeatAgeMs: 5_000 }], stalledRuns: 0, wedgedSchedules: 0 }),
+    stalledRuns: [],
+    schedules: [],
+  });
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+  assert.match(pageText(renderer), /Run provider unavailable/);
+  assert.equal(renderer.container.querySelectorAll('a[href^="/runs/"]').length, 0);
 });
 
 test("a dead fleet states the silence duration as the headline fact", async (context) => {

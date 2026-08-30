@@ -40,6 +40,32 @@ function shell(element: React.ReactElement, session: AuthSessionResponse) {
   );
 }
 
+test("adapter-pinned request sizes are visible without an inapplicable save control", async (context) => {
+  const detail = operationsDetail();
+  detail.source.source!.requestSizePolicy = "adapter_profile";
+  detail.source.source!.recordsPerRequest = 2_000;
+  const requests = stubFetch(context, ({ input }) => {
+    if (String(input).includes("/diagnostics")) {
+      return jsonResponse({ ...diagnosticHistory(), snapshot: detail.source });
+    }
+    return jsonResponse(detail);
+  });
+  const rendered = await renderPage(
+    <ToastProvider><SessionProvider initialSession={operationsSession()}>
+      <MemoryRouter initialEntries={[`/providers/${detail.source.providerId}`]}>
+        <Routes><Route path="/providers/:providerId" element={<ProviderDetailPage />} /></Routes>
+      </MemoryRouter>
+    </SessionProvider></ToastProvider>,
+  );
+  cleanupPage(context, rendered);
+  await settlePage();
+  assert.match(pageText(rendered), /pinned by the active adapter profile \(2,000 records\)/u);
+  assert.equal(rendered.container.querySelector("#provider-source-records-per-request"), null);
+  assert.ok(![...rendered.container.querySelectorAll("button")].some((button) =>
+    button.textContent?.includes("Save request size")));
+  assert.ok(requests.every(({ init }) => !init?.method || init.method === "GET"));
+});
+
 test("operations overview renders four server rows and returns exact Run, Pause, and Resume outcomes", async (context) => {
   const overview = operationsOverview();
   const requests = stubFetch(context, ({ input }) => {
@@ -85,6 +111,7 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   });
   await settlePage();
   assert.match(pageText(renderer), /manual run created and queued/iu);
+  assert.ok(renderer.container.querySelector(`a[href="/runs/${operationsFixtureIds.runs[0]}?providerId=${operationsFixtureIds.providers[0]}"]`));
 
   await act(async () => {
     findButton(renderer, "Pause").click();
@@ -221,6 +248,9 @@ test("provider detail preserves safe state through refresh and action failures w
   assert.match(pageText(routed), /Safe fingerprint/);
   assert.match(pageText(routed), /Page committed/);
   assert.match(pageText(routed), /Shared connection/);
+  const runLinks = [...routed.container.querySelectorAll<HTMLAnchorElement>('a[href^="/runs/"]')];
+  assert.ok(runLinks.length >= 3, "active, history, and committed-page run links remain available");
+  assert.ok(runLinks.every((link) => new URL(link.href).searchParams.get("providerId") === detail.source.providerId));
   assert.match(pageText(routed), /Current run: 500\. Next run: 1,000\./u);
   assert.match(
     pageText(routed),

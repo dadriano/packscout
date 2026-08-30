@@ -1,4 +1,4 @@
-import { PrismaEmailMessageOutboxRepository } from "@packscout/database";
+import { CentralEmailMessageOutboxRepository } from "@packscout/database";
 import { EmailMessageOutboxService } from "@packscout/services";
 import {
   createOperatorAccountCreatedNotifier,
@@ -12,7 +12,7 @@ import {
  */
 
 type OperatorAccountCreatedNoticeDatabase = ConstructorParameters<
-  typeof PrismaEmailMessageOutboxRepository
+  typeof CentralEmailMessageOutboxRepository
 >[0];
 
 export function createAdminOperatorAccountCreatedNoticeRuntime(input: {
@@ -20,7 +20,7 @@ export function createAdminOperatorAccountCreatedNoticeRuntime(input: {
 }): OperatorAccountCreatedNotifier {
   return createOperatorAccountCreatedNotifier({
     outbox: new EmailMessageOutboxService({
-      queue: new PrismaEmailMessageOutboxRepository(input.database),
+      queue: new CentralEmailMessageOutboxRepository(input.database),
     }),
   });
 }

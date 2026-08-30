@@ -324,6 +324,37 @@ test("a failed record read keeps the filters and their counts on screen", async 
   assert.ok(page.container.querySelector("#inspect-kind"));
 });
 
+test("an unreachable selected provider does not collapse the central provider roster", async (t) => {
+  stubFetch(
+    t,
+    routeFetch({
+      "/summary": () =>
+        jsonResponse({
+          error: "Canonical data is temporarily unavailable.",
+          code: "CANONICAL_STORE_UNAVAILABLE",
+        }, 503),
+      "/entities": () =>
+        jsonResponse({
+          error: "Canonical data is temporarily unavailable.",
+          code: "CANONICAL_STORE_UNAVAILABLE",
+        }, 503),
+    }),
+  );
+  const page = await renderPage(route());
+  cleanupPage(t, page);
+  await settlePage();
+
+  const options = [...page.container.querySelectorAll("#inspect-provider option")]
+    .map((option) => option.textContent?.trim());
+  assert.ok(options.some((option) => option?.includes("Courtyard")));
+  assert.ok(options.some((option) => option?.includes("Phygitals")));
+  assert.doesNotMatch(
+    pageText(page),
+    /The provider list is temporarily unavailable/i,
+  );
+  assert.match(pageText(page), /These records could not be loaded/i);
+});
+
 test("no providers configured reads as its own state", async (t) => {
   stubFetch(
     t,

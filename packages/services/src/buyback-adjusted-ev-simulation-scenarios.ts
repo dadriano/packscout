@@ -5,8 +5,8 @@ import {
   type PackScoutBuybackEvConfidenceLimitationCodeV1,
   type PackScoutBuybackEvEvidenceOutcomeV1,
   type PackScoutBuybackEvPublicReasonCodeV1,
-  type PackScoutPublicEvPresentationLimitationCodeV1,
-  type PackScoutPublicEvPresentationV1,
+  type PackScoutDisplayedEvConfidenceLimitationCodeV3,
+  type PackScoutDisplayedEvV3,
   type PublicCategory,
   type PublicCollectible,
   type PublicRepackChase,
@@ -105,10 +105,10 @@ export type PackScoutBuybackEvSimulatedSourceRevisionV1 =
 
 /** Bounded per-frame expectation; never a precomputed final metric. */
 export interface PackScoutBuybackEvSimulationExpectationV1 {
-  readonly publicState: PackScoutPublicEvPresentationV1["status"];
+  readonly publicState: PackScoutDisplayedEvV3["status"];
   readonly publicReason: PackScoutBuybackEvPublicReasonCodeV1 | null;
   readonly limitationCodes:
-    readonly PackScoutPublicEvPresentationLimitationCodeV1[];
+    readonly PackScoutDisplayedEvConfidenceLimitationCodeV3[];
 }
 
 export interface PackScoutBuybackEvSimulationScenarioFrameV1 {
@@ -340,7 +340,7 @@ function courtyardSource(input: {
 }
 
 const CURRENT: PackScoutBuybackEvSimulationExpectationV1 = {
-  publicState: "current",
+  publicState: "last_known",
   publicReason: null,
   limitationCodes: ["platform_published_odds"],
 };
@@ -506,7 +506,7 @@ function clutchpacksPoolPulls(
     purpose:
       "current-pool odds with outcome-specific rates, explicit ineligibility, midpoint ranges, pull-driven depletion, and a restock at frame 3",
     expectation: {
-      publicState: "current",
+      publicState: "last_known",
       publicReason: null,
       limitationCodes: ["closed_range_midpoint"],
     },
@@ -939,7 +939,7 @@ function courtyardDelayed(
     scenarioKey,
     purpose: `source evidence delayed by ${delayMinutes} minutes at its calculation clock`,
     expectation: {
-      publicState: "current",
+      publicState: "last_known",
       publicReason: null,
       limitationCodes: ["platform_published_odds", limitation],
     },
@@ -970,7 +970,8 @@ function courtyardDelayed(
 
 /**
  * A sold-out product frozen as explicit history: the estimate that was
- * current at sellout keeps its original confidence forever. The work item's
+ * current at sellout keeps its original economics. Display confidence ages
+ * independently; the immutable revision keeps its original confidence. The work item's
  * calculation clock is pinned to the sellout instant, so every frame replays
  * the identical revision and the frame clock only advances around it.
  */
@@ -1002,9 +1003,16 @@ function troveSoldOutHistorical(
     scenarioKey,
     purpose: "a sold-out repack freezes its last valid estimate as history",
     expectation: {
-      publicState: "historical",
+      publicState: "last_known",
       publicReason: null,
-      limitationCodes: ["platform_published_odds"],
+      limitationCodes: ["platform_published_odds", ...(
+        Date.parse(build.readAt) - Date.parse(observedAt) > 60 * MINUTE
+          ? ["source_age_over_60_minutes" as const]
+          : Date.parse(build.readAt) - Date.parse(observedAt) > 30 * MINUTE
+            ? ["source_age_over_30_through_60_minutes" as const]
+            : Date.parse(build.readAt) - Date.parse(observedAt) > 15 * MINUTE
+              ? ["source_age_over_15_through_30_minutes" as const] : []
+      )],
     },
     sourceRevision,
     calculatedAt: soldOutAt,
@@ -1047,7 +1055,7 @@ function courtyardSourceAgeExpiry(
         }
       : sourceAgeMilliseconds > 30 * MINUTE
         ? {
-            publicState: "current",
+            publicState: "last_known",
             publicReason: null,
             limitationCodes: [
               "platform_published_odds",

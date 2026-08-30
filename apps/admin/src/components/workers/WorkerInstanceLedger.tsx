@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { WorkerInstanceView } from "@packscout/contracts";
+import { importRunDetailPath, type WorkerInstanceView } from "@packscout/contracts";
 import { age, dateTime } from "../operations/OperationStatus";
 import { LivenessStatus, activityLabel } from "./WorkerFleetStatus";
 
@@ -76,11 +76,11 @@ export function WorkerInstanceLedger({
             </dl>
             {instance.activity.runId || instance.activity.providerId ? (
               <p className="ops-ledger__links">
-                {instance.activity.runId ? (
-                  <Link to={`/runs/${instance.activity.runId}`}>
+                {instance.activity.runId && instance.activity.providerId ? (
+                  <Link to={importRunDetailPath({ providerId: instance.activity.providerId, runId: instance.activity.runId })}>
                     Open the run it is working
                   </Link>
-                ) : null}
+                ) : instance.activity.runId ? <span>Run provider unavailable</span> : null}
                 {instance.activity.providerId ? (
                   <Link to={`/providers/${instance.activity.providerId}`}>
                     Open the provider

@@ -1,12 +1,13 @@
-import type {
-  ProviderSourceOperationsConnection,
-  ProviderSourceOperationsConnectionMode,
-  ProviderSourceOperationsSource,
+import {
+  importRunDetailPath,
+  type ProviderSourceOperationsConnection,
+  type ProviderSourceOperationsConnectionMode,
+  type ProviderSourceOperationsSource,
 } from "@packscout/contracts";
 import { Link } from "react-router-dom";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
 import { recordsPerRequestDisplay } from "../source-configuration/records-per-request";
-import { dateTime, humanize, interval } from "./OperationStatus";
+import { dateTime, humanize, insertRevisionCounts, interval } from "./OperationStatus";
 
 export type SourceOperationCommand = "run" | "pause" | "resume";
 
@@ -210,10 +211,10 @@ export function ProviderSourceOperationsLedger({
                 <div><dt>Progress / head</dt><dd>{dateTime(source.freshness.lastProgressAt)} / {dateTime(source.freshness.lastHeadReachedAt)}</dd></div>
                 <div><dt>Pages / records</dt><dd>{source.progress.pages} / {source.progress.records.total} · {source.progress.total.label}</dd></div>
                 <div><dt>Streams</dt><dd>{source.progress.records.catalog} catalog · {source.progress.records.pulls} pulls · {source.progress.records.trades} trades</dd></div>
-                <div><dt>Dispositions</dt><dd>{source.progress.dispositions.inserted} inserted · {source.progress.dispositions.revised} revised · {source.progress.dispositions.duplicate} duplicate · {source.progress.dispositions.quarantined} quarantined</dd></div>
+                <div><dt>Dispositions</dt><dd>{insertRevisionCounts(source.progress.dispositions.inserted, source.progress.dispositions.revised)} · {source.progress.dispositions.duplicate} duplicate · {source.progress.dispositions.quarantined} quarantined</dd></div>
                 <div><dt>Throughput / elapsed</dt><dd>{source.progress.throughputRecordsPerSecond === null ? "Not available" : `${source.progress.throughputRecordsPerSecond}/s`} / {elapsed(source.progress.elapsedMilliseconds)}</dd></div>
                 <div><dt>Retry / quarantine</dt><dd>{source.processor?.retryCount ?? 0} retries · {source.progress.openQuarantine} open</dd></div>
-                <div><dt>Run / lease age</dt><dd>{source.activeRun ? <Link to={`/runs/${source.activeRun.id}`}>{humanize(source.activeRun.state)}</Link> : "No active run"} / {source.processor?.runLeaseAgeMilliseconds === null || source.processor?.runLeaseAgeMilliseconds === undefined ? "No lease" : elapsed(source.processor.runLeaseAgeMilliseconds)}</dd></div>
+                <div><dt>Run / lease age</dt><dd>{source.activeRun ? <Link to={importRunDetailPath({ providerId: source.providerId, runId: source.activeRun.id })}>{humanize(source.activeRun.state)}</Link> : "No active run"} / {source.processor?.runLeaseAgeMilliseconds === null || source.processor?.runLeaseAgeMilliseconds === undefined ? "No lease" : elapsed(source.processor.runLeaseAgeMilliseconds)}</dd></div>
               </dl>
               {actionRequired ? (
                 <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">

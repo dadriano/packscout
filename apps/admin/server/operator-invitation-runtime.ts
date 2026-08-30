@@ -1,12 +1,12 @@
 import {
-  DatabaseEmailLinkRateLimiter,
-  enqueueEmailMessageIntent,
-  issueEmailLinkToken,
-  PACKSCOUT_TRANSACTION_OPTIONS,
-  PrismaEmailLinkAuditSink,
-  PrismaEmailLinkTokenRepository,
+  CENTRAL_TRANSACTION_OPTIONS,
+  CentralEmailLinkAuditSink,
+  CentralEmailLinkRateLimiter,
+  CentralEmailLinkTokenRepository,
+  enqueueCentralEmailMessageIntent,
+  issueCentralEmailLinkToken,
   type OutstandingEmailLinkToken,
-  type PackscoutPrismaClient,
+  type CentralPrismaClient,
 } from "@packscout/database";
 import {
   AuthServiceError,
@@ -265,7 +265,7 @@ export function createOperatorInvitationFlow(
 }
 
 export interface AdminOperatorInvitationRuntimeInput {
-  readonly database: PackscoutPrismaClient;
+  readonly database: CentralPrismaClient;
   readonly authService: AuthService;
   /** From `PACKSCOUT_EMAIL_LINK_TOKEN_SECRET`; at least 32 bytes. */
   readonly secret: string;
@@ -285,18 +285,18 @@ export function createAdminOperatorInvitationRuntime(
     authService: input.authService,
     security: createEmailLinkTokenSecurity(input.secret),
     configuration: resolveEmailLinkTokenConfiguration(input.env ?? process.env),
-    throttle: new DatabaseEmailLinkRateLimiter(input.database),
-    linkAudit: new PrismaEmailLinkAuditSink(input.database),
-    store: new PrismaEmailLinkTokenRepository(input.database),
+    throttle: new CentralEmailLinkRateLimiter(input.database),
+    linkAudit: new CentralEmailLinkAuditSink(input.database),
+    store: new CentralEmailLinkTokenRepository(input.database),
     clock,
     commitIssuance: async ({ token, message }) => {
       await input.database.$transaction(async (transaction) => {
-        await issueEmailLinkToken(transaction, token);
+        await issueCentralEmailLinkToken(transaction, token);
         const outbox = new EmailMessageOutboxService({
           clock,
           queue: {
             enqueue: (enqueue) =>
-              enqueueEmailMessageIntent(transaction, {
+              enqueueCentralEmailMessageIntent(transaction, {
                 kind: enqueue.kind,
                 recipient: enqueue.recipient,
                 idempotencyKey: enqueue.idempotencyKey,
@@ -312,7 +312,7 @@ export function createAdminOperatorInvitationRuntime(
         if (enqueued.status !== "enqueued") {
           throw new Error("The operator invitation message intent was refused.");
         }
-      }, PACKSCOUT_TRANSACTION_OPTIONS);
+      }, CENTRAL_TRANSACTION_OPTIONS);
     },
   });
   return { flow };

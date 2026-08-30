@@ -12,11 +12,97 @@ import {
   type CanonicalProviderSummary,
   type CanonicalRecordKind,
 } from "@packscout/contracts";
-import type { PrismaCanonicalInspectionRepository } from "@packscout/database";
 import {
   redactSensitive,
   summarizeProvenance,
 } from "./inspection-redaction.ts";
+
+/**
+ * Persistence boundary for the canonical inspection use case.
+ *
+ * The original implementation happened to use the legacy combined Prisma
+ * repository directly. Keeping that concrete class in the service signature
+ * made it impossible to preserve this HTTP contract while routing an
+ * authorized request to a provider-local database. Both persistence models
+ * now implement this read-only shape; runtime composition chooses exactly one.
+ */
+export interface CanonicalInspectionRepository {
+  listProviders(organizationId: string): Promise<readonly {
+    readonly platformKey: string;
+    readonly displayName: string;
+    readonly state: string;
+  }[]>;
+  providerExists(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+  }): Promise<boolean>;
+  countBounded(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKind;
+    readonly bound: number;
+  }): Promise<{ readonly count: number; readonly bounded: boolean }>;
+  kindRecency(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKind;
+    readonly collectedExtrema: boolean;
+  }): Promise<{
+    readonly oldestCollectedAt: Date | null;
+    readonly newestCollectedAt: Date | null;
+    readonly oldestAcceptedAt: Date | null;
+    readonly newestAcceptedAt: Date | null;
+    readonly collectedExtremaComplete: boolean;
+  }>;
+  listEntities(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKind;
+    readonly externalId?: string;
+    readonly externalIdPrefix?: string;
+    readonly offset: number;
+    readonly limit: number;
+    readonly direction?: "asc" | "desc";
+  }): Promise<{
+    readonly items: readonly {
+      readonly entityId: string;
+      readonly platformKey: string;
+      readonly recordKind: CanonicalRecordKind;
+      readonly externalId: string;
+      readonly revisionNumber: number | null;
+      readonly sourceUpdatedAt: Date | null;
+      readonly sourceCollectedAt: Date | null;
+      readonly acceptedAt: Date | null;
+    }[];
+    readonly hasMore: boolean;
+  }>;
+  readEntity(input: {
+    readonly organizationId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKind;
+    readonly externalId: string;
+  }): Promise<{
+    readonly entityId: string;
+    readonly platformKey: string;
+    readonly recordKind: CanonicalRecordKind;
+    readonly externalId: string;
+    readonly revisionNumber: number | null;
+    readonly sourceUpdatedAt: Date | null;
+    readonly sourceCollectedAt: Date | null;
+    readonly acceptedAt: Date | null;
+    readonly content: unknown;
+    readonly contentHash: string | null;
+    readonly provenance: unknown;
+    readonly provenanceHash: string | null;
+    readonly relationships: readonly {
+      readonly relationshipKind: string;
+      readonly targetPlatformKey: string;
+      readonly targetRecordKind: CanonicalRecordKind;
+      readonly targetExternalId: string | null;
+      readonly resolved: boolean;
+    }[];
+  } | null>;
+}
 
 /**
  * The read side of the admin's canonical data inspection.
@@ -111,7 +197,7 @@ async function throughStore<T>(run: () => Promise<T>): Promise<T> {
 
 export class CanonicalInspectionService {
   constructor(
-    private readonly repository: PrismaCanonicalInspectionRepository,
+    private readonly repository: CanonicalInspectionRepository,
   ) {}
 
   async listProviders(

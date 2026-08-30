@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { userInfo } from "node:os";
 import { test } from "node:test";
 import type { Express } from "express";
 import {
@@ -39,63 +37,6 @@ const now = new Date("2026-08-06T12:00:00.000Z");
 const sessionSecret = "admin-runtime-session-secret-at-least-32-bytes";
 const password = "correct horse battery staple";
 const rawSecret = "Bearer never-return private-user 0xprivate-wallet";
-
-async function reserveFreePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  return port;
-}
-
-async function childDatabaseUrl(
-  database: Awaited<ReturnType<typeof createMigratedTestDatabase>>["database"],
-): Promise<string> {
-  const [current] = await database.$queryRaw<Array<{ databaseName: string }>>`
-    select current_database() as "databaseName"
-  `;
-  if (!current) throw new Error("Test database identity is unavailable.");
-  const configured = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL;
-  const adminUrl = new URL(
-    configured ??
-      `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`,
-  );
-  adminUrl.pathname = `/${current.databaseName}`;
-  adminUrl.search = "";
-  adminUrl.hash = "";
-  return adminUrl.toString();
-}
-
-function waitForChildOutput(
-  child: ChildProcess,
-  marker: string,
-): Promise<{ readOutput(): string }> {
-  let output = "";
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Admin entrypoint did not report startup."));
-    }, 15_000);
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-      if (!output.includes(marker)) return;
-      clearTimeout(timeout);
-      resolve({ readOutput: () => output });
-    };
-    child.stdout?.on("data", onData);
-    child.stderr?.on("data", onData);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      if (!output.includes(marker)) {
-        reject(new Error("Admin entrypoint exited before startup."));
-      }
-    });
-  });
-}
 
 async function withServer(app: Express, run: (baseUrl: string) => Promise<void>) {
   const server = app.listen(0, "127.0.0.1");
@@ -361,7 +302,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
         headers: readHeaders,
       });
       assert.equal(runs.status, 200);
-      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       assert.equal(detailBefore.status, 200);
@@ -395,7 +336,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
         : null;
       assert.equal(retryBody.outcome.outcome, "not_found");
       assert.equal(attempt, null);
-      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       const historical = await detailAfter.json() as {
@@ -456,12 +397,13 @@ test("real admin composition reads safe operations, queues source runs, and excl
   }
 });
 
-test("admin entrypoint starts Prisma before listening and closes cleanly on SIGTERM", async () => {
-  const harness = await createMigratedTestDatabase();
+test("admin entrypoint uses concrete provider routing and never falls back to the legacy database", async () => {
   let child: ChildProcess | undefined;
   try {
-    const databaseUrl = await childDatabaseUrl(harness.database);
-    const port = await reserveFreePort();
+    const controlDatabaseUrl =
+      "postgresql://control-user:control-secret@127.0.0.1:1/packscout";
+    const legacyDatabaseUrl =
+      "postgresql://legacy-user:legacy-secret@127.0.0.1:1/packscout_dev";
     child = spawn(
       process.execPath,
       ["--import", "tsx", "apps/admin/server/index.ts"],
@@ -470,9 +412,10 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
         env: {
           ...process.env,
           NODE_ENV: "production",
-          PACKSCOUT_DATABASE_URL: databaseUrl,
+          PACKSCOUT_CONTROL_DATABASE_URL: controlDatabaseUrl,
+          PACKSCOUT_DATABASE_URL: legacyDatabaseUrl,
           PACKSCOUT_ADMIN_HOST: "127.0.0.1",
-          PACKSCOUT_ADMIN_PORT: String(port),
+          PACKSCOUT_ADMIN_PORT: "5101",
           PACKSCOUT_ADMIN_ALLOWED_ORIGINS: origin,
           PACKSCOUT_SESSION_HASHING_SECRET: sessionSecret,
           PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: Buffer.alloc(32, 7).toString(
@@ -489,25 +432,28 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    const startup = await waitForChildOutput(
-      child,
-      `Packscout Admin is available at http://127.0.0.1:${port}`,
-    );
-    assert.equal(startup.readOutput().includes(databaseUrl), false);
-    const exitPromise = new Promise<{
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    const exit = await new Promise<{
       code: number | null;
       signal: NodeJS.Signals | null;
     }>((resolve) => {
       child!.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    assert.equal(child.kill("SIGTERM"), true);
-    const exit = await exitPromise;
-    assert.deepEqual(exit, { code: 0, signal: null });
+    assert.notEqual(exit.code, 0);
+    assert.equal(exit.signal, null);
+    assert.match(output, /central database is unavailable/i);
+    assert.doesNotMatch(output, /provider runtime composition is required/i);
+    assert.doesNotMatch(output, /control-secret|legacy-secret|packscout_dev/);
     child = undefined;
   } finally {
     if (child?.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
     }
-    await harness.close();
   }
 });

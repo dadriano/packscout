@@ -435,6 +435,19 @@ export const sourceAdapterSafeDiagnosticSchema = z
   })
   .strict();
 
+/** Reported length or partial stream count, never a claim of a complete body. */
+export const providerSourceResponseLimitDiagnosticSchema = z.object({
+  trigger: z.enum(["declared_content_length", "streamed_body"]),
+  maximumResponseBytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  reportedResponseBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.trigger === "streamed_body" && value.reportedResponseBytes === undefined) ||
+    (value.reportedResponseBytes !== undefined && value.reportedResponseBytes <= value.maximumResponseBytes)) {
+    context.addIssue({ code: "custom", message: "provider_source.invalid_response_limit_diagnostic" });
+  }
+});
+export type ProviderSourceResponseLimitDiagnostic = z.infer<typeof providerSourceResponseLimitDiagnosticSchema>;
+
 export const sourceAdapterProviderDeclarationSchema = z
   .object({
     provider: launchProviderKeySchema,

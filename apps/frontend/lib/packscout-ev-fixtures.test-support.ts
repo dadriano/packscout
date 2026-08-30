@@ -1,12 +1,13 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
-  PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
   packScoutPublicEvV3Schema,
-  safePresentPackScoutPublicEvV3,
+  presentLastKnownPackScoutEvV3,
+  type PackScoutDisplayedEvV3,
   unavailableRepackHeat,
   type PackScoutPublicEvV3,
   type PublicRepackChase,
@@ -85,6 +86,25 @@ export function buildV3CurrentEv(
   });
 }
 
+/**
+ * A structurally valid current estimate whose public deadline is firmly in
+ * the past relative to any real test clock — for proving that server
+ * rendering keeps the served values and the post-hydration clock
+ * ages confidence without removing those values.
+ */
+export function buildV3PastDeadlineCurrentEv(gross = 8_500): PackScoutPublicEvV3 {
+  return packScoutPublicEvV3Schema.parse({
+    status: "current",
+    methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+    confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
+    metrics: buildV3Metrics(gross),
+    confidence: FRESH_CONFIDENCE,
+    calculatedAt: "2026-08-18T10:00:00.000Z",
+    dataAsOf: { state: "known", observedAt: "2026-08-18T10:00:00.000Z" },
+    sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" },
+    expiresAt: "2026-08-18T11:00:00.000Z",
+  });
+}
 /** A current estimate whose evidence is 20 minutes old (delayed band). */
 export function buildV3DelayedEv(gross: number): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
@@ -123,6 +143,26 @@ export function buildV3SoldOutEv(gross = 8_500): PackScoutPublicEvV3 {
   });
 }
 
+
+/** A retained supported estimate evaluated at an explicit display clock. */
+export function buildV3LastKnownEv(
+  gross = 8_500,
+  options: Readonly<{
+    price?: number;
+    referenceTimeIso?: string;
+    latestUnavailableReason?: "BUYBACK_UNAVAILABLE" | "ODDS_UNAVAILABLE";
+    soldOut?: boolean;
+  }> = {},
+): PackScoutDisplayedEvV3 {
+  return presentLastKnownPackScoutEvV3({
+    estimate: options.soldOut ? buildV3SoldOutEv(gross)
+      : buildV3CurrentEv(gross, { price: options.price }),
+    calculationPriceUsdMinor: options.price ?? FIXTURE_PACK_PRICE_MINOR,
+    referenceTimeIso: options.referenceTimeIso ?? "2026-08-19T12:00:00.000Z",
+    ...(options.latestUnavailableReason ? { latestUnavailableReason: options.latestUnavailableReason } : {}),
+  });
+}
+
 export function buildV3UnavailableEv(
   reason:
     | "SOURCE_EVIDENCE_UNAVAILABLE"
@@ -131,6 +171,7 @@ export function buildV3UnavailableEv(
     | "ODDS_UNAVAILABLE"
     | "VALUE_UNAVAILABLE"
     | "BUYBACK_UNAVAILABLE"
+    | "SOURCE_DATA_STALE"
     | "CALCULATION_UNAVAILABLE" = "BUYBACK_UNAVAILABLE",
 ): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
@@ -139,7 +180,8 @@ export function buildV3UnavailableEv(
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
     metrics: null,
     confidence: null,
-    calculatedAt: FIXTURE_OBSERVED_AT,
+    calculatedAt: reason === "SOURCE_DATA_STALE"
+      ? FIXTURE_LAST_KNOWN_EVALUATED_AT : FIXTURE_OBSERVED_AT,
     dataAsOf: { state: "known", observedAt: FIXTURE_OBSERVED_AT },
     reason,
   });
@@ -156,64 +198,6 @@ export function buildV3UnknownTimeUnavailableEv(): PackScoutPublicEvV3 {
     dataAsOf: { state: "unknown_source_time", observedAt: null },
     reason: "SOURCE_EVIDENCE_UNAVAILABLE",
   });
-}
-
-export function buildV3EvPresentation(
-  estimate: PackScoutPublicEvV3,
-  confidenceEvaluatedAt = estimate.status === "sold_out_historical"
-    ? FIXTURE_SOLD_OUT_AT
-    : estimate.calculatedAt,
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  const result = safePresentPackScoutPublicEvV3(
-    estimate,
-    confidenceEvaluatedAt,
-  );
-  if (!result.success) {
-    throw new Error(
-      `buildV3EvPresentation produced an invalid presentation: ${result.reason}`,
-    );
-  }
-  return result.presentation;
-}
-
-export function buildV3LastKnownPresentation(
-  gross = 8_500,
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  return buildV3EvPresentation(
-    buildV3CurrentEv(gross),
-    FIXTURE_LAST_KNOWN_EVALUATED_AT,
-  );
-}
-
-export function buildV3CurrentPresentation(
-  gross: number,
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  return buildV3EvPresentation(buildV3CurrentEv(gross), FIXTURE_CURRENT_EVALUATED_AT);
-}
-
-export function buildV3DelayedPresentation(
-  gross: number,
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  const estimate = buildV3DelayedEv(gross);
-  return buildV3EvPresentation(estimate, estimate.calculatedAt);
-}
-
-export function buildV3HistoricalPresentation(
-  gross = 8_500,
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  return buildV3EvPresentation(buildV3SoldOutEv(gross));
-}
-
-export function buildV3UnavailablePresentation(
-  reason: Parameters<typeof buildV3UnavailableEv>[0] = "BUYBACK_UNAVAILABLE",
-): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  const estimate = buildV3UnavailableEv(reason);
-  return buildV3EvPresentation(estimate, estimate.calculatedAt);
-}
-
-export function buildV3UnknownTimeUnavailablePresentation(): PublicRepackViewDetailV3["packScoutEvPresentation"] {
-  const estimate = buildV3UnknownTimeUnavailableEv();
-  return buildV3EvPresentation(estimate, estimate.calculatedAt);
 }
 
 export function buildV3HealthyProviderHealth(): PublicRepackViewDetailV3["providerHealth"] {
@@ -314,13 +298,9 @@ export function buildV3ViewDetail(
 ): PublicRepackViewDetailV3 {
   const publicRepackId = overrides.publicRepackId ?? FIXTURE_REPACK_ID;
   const packScoutEv =
-    overrides.evEstimates?.packScout ?? buildV3CurrentEv(8_500);
-  const fixtureEvaluationAt = new Date(
-    Math.max(
-      Date.parse(FIXTURE_CURRENT_EVALUATED_AT),
-      Date.parse(packScoutEv.calculatedAt),
-    ),
-  ).toISOString();
+    overrides.evEstimates?.packScout ?? buildV3LastKnownEv(8_500, {
+      referenceTimeIso: FIXTURE_CURRENT_EVALUATED_AT,
+    });
   return publicRepackViewDetailV3Schema.parse({
     publicRepackId,
     publicVendorId: FIXTURE_VENDOR_ID,
@@ -348,9 +328,6 @@ export function buildV3ViewDetail(
         observedAt: FIXTURE_OBSERVED_AT,
       },
     },
-    packScoutEvPresentation:
-      overrides.packScoutEvPresentation ??
-      buildV3EvPresentation(packScoutEv, fixtureEvaluationAt),
     providerHealth:
       overrides.providerHealth ?? buildV3HealthyProviderHealth(),
     topChase: buildV3Chase(publicRepackId),
@@ -393,7 +370,6 @@ export function buildV3SoldOutViewDetail(
         reason: "NOT_REPORTED",
       },
     },
-    packScoutEvPresentation: buildV3EvPresentation(buildV3SoldOutEv(8_500)),
     actionAvailability: { promo: false, repackLink: false },
     actions: {},
     ...overrides,
@@ -426,19 +402,17 @@ export function buildV3ReleaseIdentity() {
 export function buildV3ListPage(
   details: readonly PublicRepackViewDetailV3[],
 ): ListPublicRepacksPageV3 {
-  const confidenceEvaluatedAt =
-    details.find(
-      ({ packScoutEvPresentation }) =>
-        packScoutEvPresentation.status !== "historical",
-    )?.packScoutEvPresentation.confidenceEvaluatedAt ??
-    details.at(-1)?.packScoutEvPresentation.confidenceEvaluatedAt ??
-    FIXTURE_CURRENT_EVALUATED_AT;
+  const confidenceEvaluatedAt = new Date(Math.max(
+    Date.parse(FIXTURE_CURRENT_EVALUATED_AT),
+    ...details.map(({ evEstimates }) => Date.parse(evEstimates.packScout.status === "last_known"
+      ? evEstimates.packScout.confidenceEvaluatedAt : evEstimates.packScout.calculatedAt)),
+  )).toISOString();
   const payload = {
     ok: true,
     data: {
       release: buildV3ReleaseIdentity(),
       publicFreshnessPolicyVersion:
-        PACKSCOUT_PUBLIC_EV_CONFIDENCE_DECAY_POLICY_VERSION_V1,
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
       confidenceEvaluatedAt,
       providerHealthEvaluatedAt: confidenceEvaluatedAt,
       providerHealthSummary: buildV3ProviderHealthSummary(
