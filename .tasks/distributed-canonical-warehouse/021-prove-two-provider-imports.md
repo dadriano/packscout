@@ -106,6 +106,45 @@ route and source authority in memory for provider-local continuity.
   Phygitals admission/reader checks and eight guarded v4 replay tests passed.
   No live ClutchPacks queued command was consumed for these checks.
 
+## Detached process recovery follow-up — 2026-08-29
+
+After the checkpoint above, the Courtyard and Phygitals operating-system
+processes disappeared. Their last pages were committed and their leases later
+expired; no blocked database transaction or source-timeout failure was found.
+Tool-session cleanup fits the timing but is not a proven exit cause.
+
+Unchanged generic runners were started as detached processes. Existing fenced
+recovery retained every page, configuration, cursor, and incomplete attempt:
+
+- Courtyard resumed as `714393a7-2610-49a4-89e6-34f00eb01e65`, fence 74, linked
+  to `a3f0b43c-0af5-4d40-8563-b92b12a15f37`. At `2026-08-30T02:10:42Z`, the
+  recovery had committed 97,300 records, bringing its retained chain to
+  598,100 accepted records with zero duplicates or quarantines. The original
+  72 pre-fix lease failures and this one later process-exit recovery are
+  distinct history, not a recurrence of per-page lease churn.
+- Phygitals resumed as `f0a58859-f3ba-4fdd-b29d-77ec4b959332`, fence 6, linked
+  to `557652e2-1fd8-4b5f-9965-52061bc661ef`. Its first requested cursor exactly
+  matched the previous page 622 checkpoint. At the same observation, it had
+  committed 129,700 additional events with zero new duplicates/quarantines;
+  its v4 chain contained 191,900 source records. Config v4 and all older
+  canonical and quarantine history were unchanged.
+- Collector Crypt was moved to a detached process only after the old exact
+  process exited. Reusing its existing logical worker identity renewed the
+  same live fence 1 and continued run
+  `fe6ea7ea-dce6-42ba-bba6-e493921f96b9` from page 5,236. It reached 529,000
+  accepted records with zero duplicates/quarantines at the same observation,
+  without creating a recovery run or a new command.
+
+All three detached processes have operating-system parent ID 1, separate process
+groups, and private retained logs. Source head is still pending. This handoff
+changed no schema, mapping, configuration, or cursor and did not consume the
+ClutchPacks queue.
+
+An independent read-only checkpoint at `2026-08-30T02:15:34Z` confirmed that
+all three run IDs, owners, and fences still matched and every current run had
+advanced without new quarantine. The ClutchPacks queued run still had fence 0,
+zero pages, no start timestamp, and an unowned import lease.
+
 ## Start Here
 
 Begin from the completed ClutchPacks proof in Task 023. Preserve the

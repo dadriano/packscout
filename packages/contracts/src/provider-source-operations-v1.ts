@@ -225,7 +225,7 @@ export const providerSourceOperationsOverviewSchema = z.object({
   refreshedAt: timestampSchema,
   connectionMode: providerSourceOperationsConnectionModeSchema,
   connection: providerSourceOperationsConnectionSchema.nullable(),
-  sources: z.array(providerSourceOperationsSourceSchema).min(1).max(50),
+  sources: z.array(providerSourceOperationsSourceSchema).max(50),
 }).strict().superRefine((overview, context) => {
   const requiresConnection = overview.connectionMode === "shared";
   if (requiresConnection !== (overview.connection !== null)) {

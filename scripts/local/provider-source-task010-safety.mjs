@@ -394,38 +394,10 @@ export function assertBootstrapPasswordAbsent(environment) {
   }
 }
 
-export function task010MigrationInvocation(input) {
-  if (!input.npmExecPath || !input.nodeExecPath) {
-    throw new Task010SafetyError("NPM_EXEC_PATH_INVALID");
-  }
-  const inheritedNames = [
-    "HOME",
-    "PATH",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-    "SystemRoot",
-    "ComSpec",
-    "PATHEXT",
-    "npm_config_cache",
-  ];
-  const environment = Object.fromEntries(
-    inheritedNames.flatMap((name) =>
-      input.environment[name] === undefined
-        ? []
-        : [[name, input.environment[name]]],
-    ),
-  );
-  environment.PACKSCOUT_DATABASE_URL = input.databaseUrl;
-  return Object.freeze({
-    executable: input.nodeExecPath,
-    arguments: Object.freeze([
-      input.npmExecPath,
-      "run",
-      "db:prisma:migrate:deploy",
-    ]),
-    environment: Object.freeze(environment),
-  });
+export function task010MigrationInvocation() {
+  // This legacy workflow cannot select a distributed schema or target safely.
+  // Refuse before inspecting authority; never redirect to a different database.
+  throw new Task010SafetyError("MIGRATION_WORKFLOW_RETIRED");
 }
 
 export function task010ConfigurationCapacityDecision() {

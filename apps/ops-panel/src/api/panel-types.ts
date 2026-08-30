@@ -280,6 +280,7 @@ export interface DatabaseOperationDefinition {
   summary: string;
   consequence: string;
   destructive: boolean;
+  unavailableReason?: string;
 }
 
 /** `unknown` means the panel restarted mid-run and will not guess. */

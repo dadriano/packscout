@@ -58,9 +58,10 @@ test("only registered identifiers resolve to an operation", () => {
   }
 });
 
-test("every operation runs a workspace script that actually exists", () => {
+test("every available operation runs a workspace script that actually exists", () => {
   const scripts = rootScripts();
   for (const operation of DATABASE_OPERATIONS) {
+    if (operation.unavailableReason !== undefined) continue;
     assert.ok(
       typeof scripts[operation.workspaceScript] === "string",
       `the root workspace defines no ${operation.workspaceScript} script for ${operation.id}`,
@@ -68,10 +69,11 @@ test("every operation runs a workspace script that actually exists", () => {
   }
 });
 
-test("migrate reuses the workspace's existing canonical deploy workflow", () => {
+test("migrate retains its historical identifier but cannot execute it", () => {
   const migrate = findDatabaseOperation("migrate");
   assert.equal(migrate?.workspaceScript, "db:prisma:migrate:deploy");
   assert.equal(migrate?.destructive, false);
+  assert.match(migrate?.unavailableReason ?? "", /central or one provider/u);
 });
 
 /**
@@ -107,4 +109,21 @@ test("every operation states a consequence before it can be confirmed", () => {
     assert.ok(operation.consequence.length > 20, `${operation.id} states no consequence`);
     assert.ok(operation.summary.length > 20, `${operation.id} states no summary`);
   }
+});
+
+test("only explicit central and single-provider deploy scripts remain", () => {
+  const scripts = rootScripts();
+  const database = JSON.parse(readFileSync(
+    path.join(workspaceRoot, "packages/database/package.json"), "utf8",
+  )) as { scripts: Record<string, string> };
+  assert.equal(scripts["db:prisma:migrate:deploy"], undefined);
+  assert.equal(scripts["db:prisma:migrate:deploy:central"],
+    "npm run prisma:migrate:deploy:central --workspace=@packscout/database");
+  assert.equal(scripts["db:prisma:migrate:deploy:provider"],
+    "npm run prisma:migrate:deploy:provider --workspace=@packscout/database");
+  assert.equal(database.scripts["prisma:migrate:deploy"], undefined);
+  assert.match(database.scripts["prisma:migrate:deploy:central"] ?? "",
+    /prisma migrate deploy --schema prisma\/central\/schema\.prisma$/u);
+  assert.match(database.scripts["prisma:migrate:deploy:provider"] ?? "",
+    /prisma migrate deploy --schema prisma\/provider\/schema\.prisma$/u);
 });

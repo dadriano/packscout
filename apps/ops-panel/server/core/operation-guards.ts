@@ -20,16 +20,18 @@ import type { LocalTargetDecision } from "./database-target.ts";
  * Gate order, and why:
  *  1. locality — the structural gate; a non-local target is refused whatever
  *     else is true, because nothing about the request can make it local;
- *  2. busy — one operation at a time, so the operator learns what is running
+ *  2. capability — unavailable actions never reach a marker or process spawn;
+ *  3. busy — one operation at a time, so the operator learns what is running
  *     rather than queueing behind it invisibly;
- *  3. drift — the target moved since the dialog was rendered, which is a
+ *  4. drift — the target moved since the dialog was rendered, which is a
  *     different mistake from mistyping and deserves a different sentence;
- *  4. acknowledgement — the typed name must match the database that is actually
+ *  5. acknowledgement — the typed name must match the database that is actually
  *     about to be destroyed.
  */
 
 export type OperationRefusalCode =
   | "ops_panel_database_not_local"
+  | "ops_panel_operation_unavailable"
   | "ops_panel_operation_busy"
   | "ops_panel_operation_target_drifted"
   | "ops_panel_operation_acknowledgement_mismatch"
@@ -101,6 +103,15 @@ export function decideOperationStart({
       status: 409,
       code: locality.code,
       message: `${definition.label} cannot run: ${locality.message}`,
+    };
+  }
+
+  if (definition.unavailableReason !== undefined) {
+    return {
+      ok: false,
+      status: 409,
+      code: "ops_panel_operation_unavailable",
+      message: definition.unavailableReason,
     };
   }
 

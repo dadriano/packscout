@@ -104,6 +104,25 @@ The PostgreSQL instance or cluster supplies the environment boundary, so
 database names do not receive development, preproduction, or production
 suffixes.
 
+## Migration controls awaiting a distributed port
+
+Use only `db:prisma:migrate:deploy:central` or
+`db:prisma:migrate:deploy:provider` with an explicitly selected target. The
+unqualified aggregate deploy alias has been removed. It must not silently pick
+a central database or fan out across providers.
+
+The ops-panel's historical migration action is visible but unavailable: its
+target confirmation and migration-history probe still describe the older
+combined schema. Requests return a structured `409` before a process or run
+marker starts. Re-enable it only after target resolution, schema selection,
+history, and confirmation all identify the same central or single-provider
+database. Existing seed/reset behavior is unchanged; this is not a claim that
+the ops-panel has been ported.
+
+The older Task010 migration entrypoint is also retired and refuses before
+loading environment authority or opening a database. Neither retired path is a
+fallback for distributed deployment.
+
 ## Readiness evidence
 
 Before pointing a runtime at a target, require all of the following:

@@ -71,6 +71,30 @@ frontend/admin production builds. The local previews remained healthy after
 the builds. This is not a claim of source-head completion or full feature
 acceptance; Tasks 021 and 022 remain in progress.
 
+The later process handoff is recorded in Task 021: Courtyard and Phygitals
+resumed their exact durable checkpoints through normal fenced recovery, and
+Collector Crypt moved to a detached process while retaining its run/fence.
+All three now run independently of agent tool sessions. The empty-provider
+overview review fix is covered by focused regressions. Migration deployment is
+supported only through the explicit central/single-provider CLI; the legacy
+ops-panel migration action and Task010 deploy path now refuse safely pending
+a role-aware ops-panel port. A full `npm run verify:framework` rerun passed for
+these review changes, including 319 contract tests, 493 admin tests, 543
+ops-panel tests, 493 tooling tests, and both production builds. Existing
+environment-gated skips remain explicitly reported; no standards baseline was
+weakened. The bounded review watch produced these two follow-ups but no
+approval; import monitoring continues every ten minutes.
+
+### Incoming main integration
+
+Newer `main` commit `7911a6c` introduces configurable request sizes and conflicts
+with this branch in five files. Integrating it requires more than marker
+cleanup: preserve immutable distributed 100/2,000-record source profiles,
+populate its new `recordsPerRequest` projections, and retain independently
+scoped Prisma commands. Its broader EV/Convex changes also require a fresh
+integration proof. The local checkpoint remains isolated; the PR is not
+merge-ready until that separate integration is completed.
+
 ## Context
 
 PackScout needs a simple PostgreSQL warehouse that can hold provider catalogs, repacks, collectibles, pulls, and market activity without carrying forward the current single-database canonical revision graph. The new system separates failure and scale boundaries while keeping the current admin application and frontend-serving contracts recognizable.

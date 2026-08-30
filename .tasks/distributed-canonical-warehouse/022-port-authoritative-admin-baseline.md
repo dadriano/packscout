@@ -172,6 +172,9 @@ database connection was used.
   material changes, not separate inserted/revised counts. The existing admin
   projections now use explicit unavailable insert/update counts and render
   that limitation instead of mislabeling all material changes as revisions.
+- A provider-source overview with no active providers is now a valid empty
+  response, not a `503`. Focused regressions preserve the 50-provider bound,
+  authentication, organization scoping, and zero unnecessary provider calls.
 - Full admin parity is **not complete**. Background Work/recomputation,
   Compare/parity, and provider-local quarantine detail/retry still need their
   distributed implementations. These remain explicit Task 022 work; route
@@ -237,3 +240,13 @@ database connection was used.
   frontend still showed all 17 locally published ClutchPacks repacks.
 - A passing verifier certifies this checkpoint, not the unimplemented
   Background Work, Compare, and quarantine detail/retry parity described above.
+- The prior full-gate result applies to checkpoint `5e280fb`. The empty-overview
+  and migration-control review follow-ups also passed a complete
+  `npm run verify:framework` rerun on 2026-08-29, including both production
+  builds. Updated suites passed 319 contract tests, 493 admin tests, 543
+  ops-panel tests, and 493 tooling tests (three environment-gated tooling skips
+  plus three passing isolated embedded-admin tests). All remaining suite
+  counts and protected skips matched the prior checkpoint.
+- The optional follow-up browser recheck was blocked by the Browser URL policy;
+  no alternate browser or HTTP workaround was attempted. The successful live
+  UI evidence above remains evidence for `5e280fb`, not a new browser pass.

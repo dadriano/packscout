@@ -9,8 +9,9 @@ import {
 import { decideOperationStart, unknownOperationRefusal } from "./operation-guards.ts";
 
 const migrate = findDatabaseOperation("migrate");
+const seed = findDatabaseOperation("seed");
 const reset = findDatabaseOperation("reset");
-assert.ok(migrate && reset);
+assert.ok(migrate && seed && reset);
 
 function localityFor(url: string | undefined): LocalTargetDecision {
   return requireLocalDatabaseTarget(
@@ -102,7 +103,7 @@ test("a target that drifted since the dialog opened is refused as drift, not a t
 
 test("drift refuses a non-destructive operation as well", () => {
   const decision = decideOperationStart({
-    definition: migrate,
+    definition: seed,
     locality: localityFor(LOCAL),
     running: null,
     expectedDatabase: "packscout_scratch",
@@ -157,7 +158,7 @@ test("a matching acknowledgement admits the destructive operation", () => {
 
 test("a disruptive operation needs no typed name", () => {
   const decision = decideOperationStart({
-    definition: migrate,
+    definition: seed,
     locality: localityFor(LOCAL),
     running: null,
   });
@@ -169,4 +170,18 @@ test("the unknown-operation refusal names the closed vocabulary", () => {
   assert.equal(refusal.status, 400);
   assert.equal(refusal.code, "ops_panel_operation_unknown");
   assert.match(refusal.message, /migrate, seed, reset/u);
+});
+
+test("the retired migration action refuses a local target with scoped guidance", () => {
+  const decision = decideOperationStart({
+    definition: migrate,
+    locality: localityFor(LOCAL),
+    running: null,
+  });
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.equal(decision.status, 409);
+  assert.equal(decision.code, "ops_panel_operation_unavailable");
+  assert.match(decision.message, /central or one provider/u);
+  assert.doesNotMatch(decision.message, /hunter2/u);
 });

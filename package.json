@@ -102,7 +102,6 @@
     "db:prisma:validate:central": "npm run prisma:validate:central --workspace=@packscout/database",
     "db:prisma:validate:provider": "npm run prisma:validate:provider --workspace=@packscout/database",
     "db:prisma:generate": "npm run prisma:generate --workspace=@packscout/database",
-    "db:prisma:migrate:deploy": "npm run prisma:migrate:deploy --workspace=@packscout/database",
     "db:seed:local": "node scripts/local/seed-postgres-development-data.mjs",
     "db:reset:local": "node scripts/local/reset-postgres-development-database.mjs",
     "db:bootstrap-first-admin:local": "node --import tsx scripts/local/bootstrap-postgres-development-first-admin.mts",

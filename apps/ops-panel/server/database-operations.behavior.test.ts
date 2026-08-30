@@ -15,6 +15,7 @@ import { createLogSourceRegistry } from "./core/log-sources.ts";
 import { createLogStreamHub } from "./core/log-stream-hub.ts";
 import {
   createDatabaseOperationRunner,
+  type OperationMarker,
   type OperationSpawnRequest,
 } from "./core/operation-supervisor.ts";
 import { createStudioSupervisor } from "./core/studio-supervisor.ts";
@@ -84,11 +85,12 @@ async function panel(options: { databaseUrl?: string; lineLimit?: number } = {})
   });
 
   const spawned: OperationSpawnRequest[] = [];
+  const markers: (OperationMarker | null)[] = [];
   const kills: number[] = [];
   const timers: FakeTimer[] = [];
   const operations = createDatabaseOperationRunner({
     permit: () => requireLocalDatabaseTarget(env),
-    markerStore: { load: async () => null, save: async () => undefined },
+    markerStore: { load: async () => null, save: async (marker) => { markers.push(marker); } },
     lineLimit: options.lineLimit ?? 2_000,
     spawn: (request) => {
       spawned.push(request);
@@ -126,6 +128,7 @@ async function panel(options: { databaseUrl?: string; lineLimit?: number } = {})
     audit,
     env,
     spawned,
+    markers,
     timers,
     operations,
     origin: `http://127.0.0.1:${port}`,
@@ -200,6 +203,31 @@ test("a non-local target makes the region unavailable and refuses every operatio
   );
 });
 
+test("migration is visibly unavailable and direct requests refuse without executing", async (t) => {
+  const harness = await panel();
+  t.after(() => harness.close());
+  const snapshot = await (await fetch(`${harness.origin}/api/database/operations`)).json();
+  const migration = snapshot.operations.find((operation: { id: string }) => operation.id === "migrate");
+  assert.match(migration.unavailableReason, /central or one provider/u);
+  assert.equal(snapshot.operations.find((operation: { id: string }) => operation.id === "seed").unavailableReason, undefined);
+  assert.equal(snapshot.operations.find((operation: { id: string }) => operation.id === "reset").unavailableReason, undefined);
+
+  const response = await harness.post("migrate", {
+    acknowledgement: "packscout_dev", expectedDatabase: "packscout_dev",
+    workspaceScript: "db:prisma:migrate:deploy:central",
+  });
+  assert.equal(response.status, 409);
+  const failure = await response.json();
+  assert.equal(failure.code, "ops_panel_operation_unavailable");
+  assert.equal(failure.error, migration.unavailableReason);
+  assert.doesNotMatch(JSON.stringify(failure), /hunter2/u);
+  assert.deepEqual(harness.spawned, []);
+  assert.deepEqual(harness.markers, []);
+  assert.deepEqual(harness.timers, []);
+  assert.equal(harness.operations.running(), null);
+  assert.equal(harness.audit.list()[0]?.outcome, "rejected");
+});
+
 test("no endpoint accepts anything but a registered operation name", async (t) => {
   const harness = await panel();
   t.after(() => harness.close());
@@ -263,17 +291,17 @@ test("a second operation is refused as busy while the first is still running", a
   const harness = await panel();
   t.after(() => harness.close());
 
-  const started = await harness.post("migrate");
+  const started = await harness.post("seed");
   assert.equal(started.status, 202);
   const startedPayload = await started.json();
-  assert.equal(startedPayload.running.operation, "migrate");
-  assert.equal(harness.spawned[0]?.script, "db:prisma:migrate:deploy");
+  assert.equal(startedPayload.running.operation, "seed");
+  assert.equal(harness.spawned[0]?.script, "db:seed:local");
 
   const busy = await harness.post("seed");
   assert.equal(busy.status, 409);
   const payload = await busy.json();
   assert.equal(payload.code, "ops_panel_operation_busy");
-  assert.match(payload.error, /Apply migrations is already running/u);
+  assert.match(payload.error, /Run the seed is already running/u);
   assert.equal(harness.spawned.length, 1);
 });
 
@@ -281,7 +309,7 @@ test("the lock does not gate log streaming or status reads", async (t) => {
   const harness = await panel();
   t.after(() => harness.close());
 
-  assert.equal((await harness.post("migrate")).status, 202);
+  assert.equal((await harness.post("seed")).status, 202);
 
   assert.equal((await fetch(`${harness.origin}/api/logs/sources`)).status, 200);
   assert.equal((await fetch(`${harness.origin}/api/database`)).status, 200);
@@ -330,7 +358,7 @@ test("the stream carries a snapshot, live output and the settled outcome", async
   await readUntil(/event: operations/u);
   assert.match(received, /^retry: 3000\n\n/u);
 
-  assert.equal((await harness.post("migrate")).status, 202);
+  assert.equal((await harness.post("seed")).status, 202);
   harness.spawned[0]?.onOutput("applying 001\napplying 002\napplying 003\nextra\n");
   await readUntil(/event: operation-output/u);
   assert.match(received, /applying 001/u);
@@ -347,7 +375,7 @@ test("a timed-out run reports the limit it hit rather than going quiet", async (
   const harness = await panel();
   t.after(() => harness.close());
 
-  assert.equal((await harness.post("migrate")).status, 202);
+  assert.equal((await harness.post("seed")).status, 202);
   harness.timers[0]?.handler();
 
   const payload = await (

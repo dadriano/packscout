@@ -47,7 +47,9 @@ export function DatabaseOperationsCard({
   // dismissed after the fact.
   const confirming =
     availability.available && pendingConfirmation?.database === database
-      ? pendingConfirmation.definition
+      ? payload.operations.find((definition) =>
+          definition.id === pendingConfirmation.definition.id &&
+          definition.unavailableReason === undefined) ?? null
       : null;
 
   useEffect(() => {
@@ -82,6 +84,7 @@ export function DatabaseOperationsCard({
   const blocked = pending || availability.busyWith !== null;
 
   function open(definition: DatabaseOperationDefinition): void {
+    if (definition.unavailableReason !== undefined) return;
     setTyped("");
     setPendingConfirmation({ definition, database });
   }
@@ -106,9 +109,8 @@ export function DatabaseOperationsCard({
       </div>
 
       <p className="panel-card-headline">
-        Three workflows run against <span className="panel-mono">{database}</span>,
-        each one a workspace script rather than a command the panel invents. The
-        panel runs one at a time.
+        Available workflows run against <span className="panel-mono">{database}</span>,
+        one workspace script at a time. Unavailable operations cannot be confirmed.
       </p>
 
       <div className="panel-toolbar">
@@ -118,13 +120,23 @@ export function DatabaseOperationsCard({
             type="button"
             className="panel-button"
             data-destructive={definition.destructive ? "yes" : undefined}
-            disabled={blocked}
+            disabled={blocked || definition.unavailableReason !== undefined}
+            aria-describedby={definition.unavailableReason !== undefined
+              ? `database-operation-${definition.id}-unavailable` : undefined}
             onClick={() => open(definition)}
           >
             {definition.label}
           </button>
         ))}
       </div>
+
+      {payload.operations.filter((definition) => definition.unavailableReason !== undefined)
+        .map((definition) => (
+          <p key={definition.id} id={`database-operation-${definition.id}-unavailable`}
+            className="panel-card-detail">
+            {definition.unavailableReason}
+          </p>
+        ))}
 
       {availability.busyWith ? (
         <p className="panel-card-detail" role="status">
