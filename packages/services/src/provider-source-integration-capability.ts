@@ -1,5 +1,6 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   type LaunchProviderKey,
@@ -140,7 +141,7 @@ ProviderSourceIntegrationCapabilityRegistry {
     ),
     providerSourceIntegrationCapability(
       "collector_crypt",
-      dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion,
     ),
     providerSourceIntegrationCapability(
       "phygitals",

@@ -8,6 +8,7 @@ import {
   DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -524,6 +525,146 @@ function phygitalsCardRecord(
     data,
   };
 }
+
+function collectorSourceFixture(
+  pages: readonly DataforrestEventsPageV1[],
+  manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest,
+) {
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration("collector_crypt", manifest),
+      resolvedAuthority: {
+        ...resolvedAuthority,
+        providerKey: "collector_crypt",
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceConfiguration: { platform: "collector_crypt" },
+      },
+    }),
+    captureAuthority: {
+      ...authority,
+      providerKey: "collector_crypt",
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
+function collectorPullRecords(count: number): DataforrestEventRecordV1[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...cardOnlyPullRecord(`collector-profile-pull-${index}`),
+    platform: "collector_crypt",
+  }));
+}
+
+test("Collector requests and accepts exactly 1,000 records with an exact version-pinned continuation", async () => {
+  const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;
+  const fixture = collectorSourceFixture([
+    sourcePage({ cursor: "collector-profile-next", continuation: "continue", records: collectorPullRecords(1_000) }),
+    sourcePage({ cursor: "collector-profile-head", continuation: "head", records: [] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  assert.equal(first.records.length, 1_000);
+  assert.equal(first.records.every((record) => record.kind === "pull" && record.disposition !== "quarantine"), true);
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "1000");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("platform"), "collector_crypt");
+  const cursor = first.nextCursor as Record<string, CanonicalJsonValue>;
+  assert.equal(cursor.adapterVersion, manifest.adapterVersion);
+  assert.equal(cursor.cursorCodecKey, manifest.cursorCodecKey);
+  assert.deepEqual(fixture.translations, [{ sourceRecordCount: 1_000, normalizedRecordCount: 1_000 }]);
+  const historicalCursor = { ...cursor, adapterVersion: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion };
+  await assert.rejects(fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    pageNumber: 2,
+    checkpoint: historicalCursor,
+    checkpointFingerprint: providerMixedCursorFingerprint(historicalCursor),
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError
+    && error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID");
+  assert.equal(fixture.requestedUrls.length, 1);
+  const second = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    pageNumber: 2,
+    checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  })));
+  assert.equal(second.continuation, "head");
+  assert.equal(fixture.requestedUrls[1]?.searchParams.get("cursor"), "collector-profile-next");
+  assert.equal(fixture.requestedUrls[1]?.searchParams.get("limit"), "1000");
+  assert.equal(fixture.terminalizations.every(({ operationScope }) =>
+    operationScope.operationKind === "page_read" && operationScope.pageLimit === 1_000
+    && operationScope.adapterVersion === manifest.adapterVersion), true);
+});
+
+test("Collector rejects 1,001 source records before translation without raising the 1,000-record request", async () => {
+  const fixture = collectorSourceFixture([sourcePage({
+    cursor: "collector-over-limit", continuation: "head", records: collectorPullRecords(1_001),
+  })]);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError
+      && error.code === "PROVIDER_DATAFORREST_INVALID_RESPONSE");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "1000");
+  assert.equal(fixture.terminalizations.length, 1);
+  assert.equal(fixture.terminalizations[0]?.outcome.ok, true);
+  assert.deepEqual(fixture.translations, []);
+});
+
+test("Collector retains the hard 8 MiB response guard at 1,000 records per request", async () => {
+  const maximumResponseBytes = 8_388_608;
+  assert.equal(dataforrestCollectorCryptDistributedSourceAdapterManifest.requestBounds.maximumResponseBytes, maximumResponseBytes);
+  const fixture = collectorSourceFixture([sourcePage({
+    cursor: "collector-over-byte-limit", continuation: "head",
+    records: [{ ...collectorPullRecords(1)[0]!, data: { native_padding: "x".repeat(maximumResponseBytes) } }],
+  })]);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError
+      && error.code === "PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "1000");
+  assert.equal(fixture.terminalizations.length, 1);
+  assert.equal(fixture.terminalizations[0]?.outcome.ok, false);
+  assert.deepEqual(fixture.translations, []);
+});
+
+test("Collector-only profile rejects other providers before HTTP and historical 100-record pages remain readable", async () => {
+  const current = dataforrestCollectorCryptDistributedSourceAdapterManifest;
+  const fixture = collectorSourceFixture([]);
+  for (const providerKey of ["courtyard", "clutchpacks", "phygitals"] as const) {
+    assert.throws(() => createProviderDataforrestLiveIntegration(providerKey, current), /invalid/);
+    await assert.rejects(fixture.source.nextPage(sourceInput({
+      authority: { ...fixture.captureAuthority, providerKey },
+    })), (error: unknown) => error instanceof ProviderDataforrestSourceError
+      && error.code === "PROVIDER_DATAFORREST_AUTHORITY_INVALID");
+  }
+  assert.equal(fixture.requestedUrls.length, 0);
+  const historical = collectorSourceFixture([sourcePage({
+    cursor: "collector-historical-head", continuation: "head", records: collectorPullRecords(100),
+  })], dataforrestLaunchDistributedSourceAdapterManifest);
+  const page = validateProviderMixedPage(await historical.source.nextPage(sourceInput({
+    authority: historical.captureAuthority,
+  })));
+  assert.equal(page.records.length, 100);
+  assert.equal(historical.requestedUrls[0]?.searchParams.get("limit"), "100");
+});
+
+test("Collector profile upgrade preserves identical canonical record identity and content", async () => {
+  const pages = [];
+  for (const manifest of [
+    dataforrestLaunchDistributedSourceAdapterManifest,
+    dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  ]) {
+    const fixture = collectorSourceFixture([sourcePage({
+      cursor: "collector-identical-observation", continuation: "head", records: collectorPullRecords(1),
+    })], manifest);
+    pages.push(validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority,
+    }))));
+  }
+  assert.equal(pages[0]!.records[0]!.kind, "pull");
+  assert.notEqual(pages[0]!.records[0]!.disposition, "quarantine");
+  assert.deepEqual(pages[0]!.records, pages[1]!.records);
+  assert.notDeepEqual(pages[0]!.nextCursor, pages[1]!.nextCursor);
+});
 
 async function phygitalsMixedPage(
   records: readonly DataforrestEventRecordV1[],

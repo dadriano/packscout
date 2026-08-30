@@ -20,6 +20,7 @@ import {
 } from "./provider-source-facts-v1.ts";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -38,6 +39,7 @@ export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
 export {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -53,6 +55,7 @@ export const DATAFORREST_EVENTS_V1_ENDPOINT =
   "https://198.204.245.26.sslip.io/v1/events" as const;
 export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
 export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
+export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS = 1_000;
 export const DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS = 100;
 
 export const dataforrestIdentityNamespaceByProvider =
@@ -173,6 +176,7 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
     | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
@@ -256,6 +260,18 @@ export const dataforrestLaunchDistributedSourceAdapterManifest =
     },
   );
 
+/** Collector-only request profile; historical launch-v1 remains at 100. */
+export const dataforrestCollectorCryptDistributedSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "collector_crypt",
+      ),
+    },
+  );
+
 /** Phygitals-only native-card interpretation; shared launch-v1 stays immutable. */
 export const dataforrestPhygitalsDistributedSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
@@ -286,6 +302,7 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 ]);
@@ -372,6 +389,7 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION

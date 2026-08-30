@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -89,7 +90,13 @@ test("launch registry installs exact tuples for all four providers and refuses u
   const adapterKey =
     dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion;
   assert.equal(installed.has("courtyard", adapterKey), true);
-  assert.equal(installed.has("collector_crypt", adapterKey), true);
+  assert.equal(installed.has("collector_crypt", adapterKey), false);
+  assert.equal(installed.has("collector_crypt",
+    dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), true);
+  for (const providerKey of ["courtyard", "clutchpacks", "phygitals"]) {
+    assert.equal(installed.has(providerKey,
+      dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), false);
+  }
   assert.equal(installed.has("phygitals", adapterKey), false);
   assert.equal(installed.has("phygitals",
     dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion), true);

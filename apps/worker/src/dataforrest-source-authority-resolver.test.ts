@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
@@ -205,7 +206,7 @@ describe("central DataForrest source authority", () => {
 
   for (const [providerKey, manifest] of [
     ["courtyard", dataforrestLaunchDistributedSourceAdapterManifest],
-    ["collector_crypt", dataforrestLaunchDistributedSourceAdapterManifest],
+    ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
   ] as const) {
   test(`resolves ${providerKey} only through its exact distributed tuple`, async () => {
@@ -263,6 +264,16 @@ describe("central DataForrest source authority", () => {
       {
         ...request,
         providerKey: "collector_crypt",
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+        adapterKey: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "courtyard",
+        adapterKey: dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion,
       },
       {
         ...request,

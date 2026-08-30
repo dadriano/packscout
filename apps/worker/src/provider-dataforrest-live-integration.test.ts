@@ -2,25 +2,36 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
-  DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "@packscout/contracts";
 import { providerDataforrestLiveIntegrationRegistry } from
   "./provider-dataforrest-live-integration.ts";
 
-test("the worker installs the exact Collector Crypt launch tuple", () => {
+test("the worker installs only the exact Collector Crypt 1,000-record tuple", () => {
   const integration = providerDataforrestLiveIntegrationRegistry.resolve(
     "collector_crypt",
-    DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+    DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   );
 
   assert.ok(integration);
   assert.equal(integration.providerKey, "collector_crypt");
   assert.equal(
     integration.manifest.requestBounds.pageLimit,
-    DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+    DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
   );
+  assert.equal(integration.manifest.requestBounds.maximumResponseBytes, 8_388_608);
+  assert.equal(providerDataforrestLiveIntegrationRegistry.resolveProvider("collector_crypt"), integration);
+  assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
+    "collector_crypt", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  ), null);
+  for (const providerKey of ["courtyard", "clutchpacks", "phygitals"]) {
+    assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
+      providerKey, DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+    ), null);
+  }
   assert.equal(integration.mapper.mapperKey, "collector-crypt-provider-observation");
   assert.equal(integration.mapper.mapperVersion, "1");
   assert.equal(
