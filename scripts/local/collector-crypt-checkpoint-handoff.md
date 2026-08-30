@@ -30,6 +30,51 @@ are deliberately unchanged. Do not use it for a different provider or revision.
   final explicit resume/queue succeeds. Do not stop other providers. Do not click
   ordinary Run now during the handoff, and never invoke generic config sync.
 
+## Already-failed terminal-timeout entry
+
+The separately approved `--entry terminal-timeout` path admits only run
+`fe6ea7ea-dce6-42ba-bba6-e493921f96b9`, configuration 2
+`4abb1a00-570d-4c44-a75a-f3543fe5aa91`, fence 1, failed at
+`2026-08-30T04:24:23.938Z` with `PROVIDER_DATAFORREST_REQUEST_TIMEOUT`, 9,273
+committed pages / 927,300 accepted records and zero duplicates/quarantines.
+Initial runtime must still be error/generation 2, with exactly one retained run,
+no active run/actionable command/other SQL transaction or owned worker lease,
+and identical runtime, run-final and last-page continuation envelopes/hashes.
+No other failure, revision, source head or changed checkpoint is admitted.
+
+This entry does **not** require or accept a PID/owner argument. It uses durable
+terminal-run and released-lease evidence, not an unchecked dead PID. Root still
+owns ensuring no new Collector process/supervisor starts during handoff.
+
+```bash
+env -u PACKSCOUT_DATA_API_TOKEN NODE_ENV=development node --import tsx \
+  scripts/local/handoff-collector-crypt-page-profile.mts --check-only \
+  --entry terminal-timeout --operation-id OPERATION_UUID
+```
+
+Review `terminal_timeout_pause_review`, then repeat with `--pause` and
+`--review-digest HASH`. The utility freezes a distinct `terminal_timeout_intent`
+receipt with the exact failure/authority/checkpoint digest and row version,
+then uses the existing authorized **error → paused** command (generation 3).
+Its reason and provenance explicitly record that failure **predates** this pause;
+the old failed run, failure code, ledger, pages and cursor remain unchanged.
+The clean-pause admission policy continues to reject this timeout.
+
+Thereafter use the same operation ID and `--entry terminal-timeout` for
+`--check-only` → reviewed `--prepare` → `--check-only` → reviewed `--resume`.
+The existing fresh saved-cursor 1,000-record/8 MiB canary and central-last
+activation are unchanged. Resume reaches generation 4 and queues exactly one new
+run at the saved progress; it does not retry or relabel the failed run.
+Interrupted intent-before-pause, pause-before-output, staged/prepared transitions
+and resume-before-queue reuse their exact receipts. The utility never starts a
+worker or calls the source in check-only/pause/resume modes.
+
+Automated acceptance is in `collector-crypt-checkpoint-handoff-timeout.test.mjs`
+(exact terminal admission, wrong failures/head/authority/lease drift, failure-
+before-pause provenance, locked CAS and receipt crash retries), the CLI test
+(explicit entry/no PID), and receipt tests (generation-4 resume/queue idempotence).
+Actual source canary and first new-run commits remain root-owned live evidence.
+
 ## Reviewed phases
 
 Every command uses this prefix (placeholders are nonsecret, not literal values):

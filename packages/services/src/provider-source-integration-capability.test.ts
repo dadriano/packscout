@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -89,7 +90,13 @@ test("launch registry installs exact tuples for all four providers and refuses u
   const installed = createLaunchSourceIntegrationCapabilities();
   const adapterKey =
     dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion;
-  assert.equal(installed.has("courtyard", adapterKey), true);
+  assert.equal(installed.has("courtyard", adapterKey), false);
+  assert.equal(installed.has("courtyard",
+    dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), true);
+  for (const providerKey of ["clutchpacks", "collector_crypt", "phygitals"]) {
+    assert.equal(installed.has(providerKey,
+      dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), false);
+  }
   assert.equal(installed.has("collector_crypt", adapterKey), false);
   assert.equal(installed.has("collector_crypt",
     dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), true);

@@ -4,6 +4,7 @@ import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "@packscout/contracts";
@@ -45,6 +46,27 @@ test("the worker installs only the exact Collector Crypt 1,000-record tuple", ()
     ),
     null,
   );
+});
+
+test("the worker installs only the immutable Courtyard native-card tuple", () => {
+  const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+    "courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+  );
+  assert.ok(integration);
+  assert.equal(integration.manifest.requestBounds.pageLimit, 100);
+  assert.equal(integration.manifest.requestBounds.maximumResponseBytes, 8_388_608);
+  assert.equal(integration.mapper.mapperKey, "courtyard-provider-observation");
+  assert.equal(integration.mapper.mapperVersion, "1");
+  assert.equal(integration.mapper.identityNamespaceKey, "dataforrest-courtyard-records-v1");
+  assert.equal(providerDataforrestLiveIntegrationRegistry.resolveProvider("courtyard"), integration);
+  assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
+    "courtyard", DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  ), null);
+  for (const provider of ["clutchpacks", "collector_crypt", "phygitals"]) {
+    assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(
+      provider, DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+    ), null);
+  }
 });
 
 test("the worker installs the exact versioned Phygitals tuple and mapper", () => {

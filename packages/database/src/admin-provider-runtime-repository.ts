@@ -9,6 +9,7 @@ import {
   appendProviderLocalAudit,
 } from "./provider-local-evidence.ts";
 import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
+import { providerMixedPageDigest } from "./provider-mixed-page-contract.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -125,6 +126,8 @@ export type AdminRunNowPersistenceResult =
         | "generation_conflict"
         | "configuration_conflict"
         | "configuration_expired"
+        | "cursor_conflict"
+        | "active_run_conflict"
         | "runtime_unavailable";
       readonly generation: bigint;
       readonly runtimeState: "idle" | "running" | "paused" | "stopped" | "error";
@@ -424,6 +427,9 @@ export class PrismaAdminProviderRuntimeRepository {
     readonly commandId: string;
     readonly runId: string;
     readonly correlationId: string;
+    /** Recovery callers pin the saved checkpoint; ordinary UI callers may omit it. */
+    readonly expectedCursorFingerprint?: string | null;
+    readonly requireNoActiveRun?: boolean;
   }): Promise<AdminRunNowPersistenceResult> {
     return this.database.$transaction(async (transaction) => {
       const runtime = await lockRuntime(transaction);
@@ -470,6 +476,10 @@ export class PrismaAdminProviderRuntimeRepository {
           expectedConfigVersionNumber: input.expectedConfigVersionNumber,
         };
         if (!safeRunRequestMatches(replay)) return conflict("idempotency_conflict");
+        if (input.expectedCursorFingerprint !== undefined
+          && replay.run.requested_cursor_hash !== input.expectedCursorFingerprint) {
+          return conflict("cursor_conflict");
+        }
         return {
           kind: "deduplicated",
           run: runRecord(replay.run),
@@ -487,6 +497,10 @@ export class PrismaAdminProviderRuntimeRepository {
       if (runtime.config_expires_at !== null && runtime.config_expires_at <= clock.now) {
         return conflict("configuration_expired");
       }
+      if (input.expectedCursorFingerprint !== undefined && (
+        runtime.source_cursor_hash !== input.expectedCursorFingerprint
+        || (runtime.source_cursor === null ? null : providerMixedPageDigest(runtime.source_cursor)) !== input.expectedCursorFingerprint
+      )) return conflict("cursor_conflict");
       if (runtime.operating_state !== "idle" && runtime.operating_state !== "running") {
         return conflict("runtime_unavailable");
       }
@@ -497,6 +511,7 @@ export class PrismaAdminProviderRuntimeRepository {
         for update
         limit 1
       `);
+      if (active && input.requireNoActiveRun) return conflict("active_run_conflict");
       await transaction.control_commands.create({
         data: {
           id: input.commandId,

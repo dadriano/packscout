@@ -65,7 +65,7 @@ export type CollectorHandoffAuthority = Awaited<ReturnType<typeof readCollectorH
 /** No query text, raw payload, or opaque cursor is exposed by the caller's output projection. */
 export async function readCollectorHandoffCheckpoint(database: ProviderPrismaClient | ProviderTransactionClient,
   input: Readonly<{ oldProcessAlive: boolean; runId?: string }>): Promise<CollectorHandoffCheckpoint> {
-  const [identity, runtime, lease, run, activeRunCount, actionableCommandCount, ledger, [clock]] = await Promise.all([
+  const [identity, runtime, lease, run, activeRunCount, actionableCommandCount, ledger, [clock], runCount, otherOwnedWorkerLeaseCount] = await Promise.all([
     database.database_identity.findUniqueOrThrow({ where: { singleton_key: true } }),
     database.provider_runtime.findUniqueOrThrow({ where: { singleton_key: true } }),
     database.provider_worker_states.findUniqueOrThrow({ where: { worker_role: "import" } }),
@@ -77,6 +77,8 @@ export async function readCollectorHandoffCheckpoint(database: ProviderPrismaCli
     database.$queryRaw<Array<{ now: Date; active: number }>>`select clock_timestamp() as now,
       (select count(*)::integer from pg_stat_activity where datname=current_database()
         and pid<>pg_backend_pid() and (state='active' or xact_start is not null)) as active`,
+    database.provider_runs.count(),
+    database.provider_worker_states.count({ where: { worker_role: { not: "import" }, lease_owner: { not: null } } }),
   ]);
   if (!run || !clock || identity.provider_id !== runtime.central_provider_id || identity.provider_key !== runtime.provider_key) {
     refuseHandoff("HANDOFF_RUNTIME_IDENTITY_INVALID");
@@ -87,7 +89,7 @@ export async function readCollectorHandoffCheckpoint(database: ProviderPrismaCli
     databaseRole: identity.database_role, schemaVersion: identity.schema_version,
     runtimeState: runtime.operating_state, generation: runtime.state_generation.toString(), runtimeRowVersion: runtime.row_version.toString(),
     cachedConfigId: runtime.cached_config_version_id, cachedConfigNumber: runtime.cached_config_version_number?.toString() ?? null,
-    cursor: runtime.source_cursor, cursorHash: runtime.source_cursor_hash, activeRunCount, actionableCommandCount,
+    cursor: runtime.source_cursor, cursorHash: runtime.source_cursor_hash, activeRunCount, runCount, otherOwnedWorkerLeaseCount, actionableCommandCount,
     otherActiveTransactionCount: clock.active, oldProcessAlive: input.oldProcessAlive, databaseNow: clock.now.toISOString(),
     lease: { owner: lease.lease_owner, fence: lease.lease_fence.toString(), expiresAt: lease.lease_expires_at?.toISOString() ?? null },
     ledgerSequence: ledger.last_sequence.toString(), run: { id: run.id, state: run.state,
@@ -104,6 +106,7 @@ export function retainedCollectorCheckpoint(snapshot: CollectorHandoffCheckpoint
   return { runId: snapshot.run.id, runFence: snapshot.run.fence, generation: snapshot.generation,
     pageCount: snapshot.run.pageCount, accepted: snapshot.run.accepted, duplicates: snapshot.run.duplicates,
     quarantines: snapshot.run.quarantines, materialChanges: snapshot.run.materialChanges,
+    runState: snapshot.run.state, failureCode: snapshot.run.failureCode, finishedAt: snapshot.run.finishedAt,
     lastPageId: snapshot.lastPage?.id ?? null, previousCursorHash: snapshot.run.finalCursorHash,
     ledgerSequence: snapshot.ledgerSequence };
 }

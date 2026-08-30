@@ -8,6 +8,8 @@ export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION =
   "dataforrest-clutchpacks-distributed-adapter-v1" as const;
 export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION =
   "dataforrest-collector-crypt-distributed-adapter-v1" as const;
+export const DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION =
+  "dataforrest-courtyard-distributed-adapter-v1" as const;
 export const DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION =
   "dataforrest-launch-distributed-adapter-v1" as const;
 export const DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION =

@@ -18,9 +18,44 @@ import { readCollectorHandoffAuthority, readCollectorHandoffCheckpoint, retained
   type CollectorHandoffAuthority } from "./collector-crypt-checkpoint-handoff-state.mts";
 import { readPauseReceipt, pauseReceipt, submitCollectorPause, assertCollectorPauseProvenance,
   resumeCollectorHandoff, type CollectorPauseReceipt } from "./collector-crypt-checkpoint-handoff-receipts.mts";
+import { collectorTimeoutReceipt, readCollectorTimeoutReceipt, submitCollectorTimeoutPause,
+  assertCollectorTimeoutProvenance, assertCollectorTimeoutHandoffDrained,
+  type CollectorTimeoutReceipt } from "./collector-crypt-checkpoint-handoff-timeout.mts";
+
+export { CollectorCheckpointHandoffError };
+const allowedCollectorHandoffCodes = new Set([
+  "HANDOFF_CANARY_AUTHORITY_INVALID", "HANDOFF_CANARY_BYTE_LIMIT", "HANDOFF_CANARY_JSON_INVALID",
+  "HANDOFF_CANARY_PAGE_INVALID", "HANDOFF_CANARY_STATUS_INVALID", "HANDOFF_CANARY_TRANSPORT_FAILED",
+  "HANDOFF_CHECKPOINT_NOT_DRAINED", "HANDOFF_CURSOR_INVALID", "HANDOFF_OPERATION_ID_INVALID",
+  "HANDOFF_PREPARATION_NOT_DURABLE", "HANDOFF_SOURCE_COMPATIBILITY_CHANGED", "HANDOFF_PAUSE_PROVENANCE_INVALID",
+  "HANDOFF_PAUSE_RECEIPT_CHANGED", "HANDOFF_PAUSE_RECEIPT_INVALID", "HANDOFF_PAUSE_REFUSED", "HANDOFF_PAUSE_TARGET_CHANGED",
+  "HANDOFF_QUEUED_RUN_CHANGED", "HANDOFF_QUEUE_REFUSED_RESUME_RECEIPT_RETAINED", "HANDOFF_RESUME_RECEIPT_CHANGED", "HANDOFF_RESUME_REFUSED",
+  "HANDOFF_ACTIVATION_DIGEST_UNAVAILABLE", "HANDOFF_ACTIVATION_NOT_PREPARED", "HANDOFF_CANARY_EXPIRED", "HANDOFF_CANARY_PROOF_INVALID",
+  "HANDOFF_CENTRAL_AUTHORITY_CHANGED", "HANDOFF_CENTRAL_CAS_FAILED", "HANDOFF_OPERATOR_UNAVAILABLE", "HANDOFF_RUNTIME_IDENTITY_INVALID",
+  "HANDOFF_STAGED_AUTHORITY_CHANGED", "HANDOFF_STAGED_CHECKPOINT_CHANGED", "HANDOFF_TIMEOUT_CHECKPOINT_CHANGED",
+  "HANDOFF_TIMEOUT_LEASE_CHANGED", "HANDOFF_TIMEOUT_PAUSE_REFUSED", "HANDOFF_TIMEOUT_PROVENANCE_INVALID",
+  "HANDOFF_TIMEOUT_RECEIPT_CHANGED", "HANDOFF_TIMEOUT_RECEIPT_INVALID", "HANDOFF_TIMEOUT_RUN_CHANGED",
+  "HANDOFF_ARGUMENTS_INVALID", "HANDOFF_CACHED_CONFIGURATION_CHANGED", "HANDOFF_CHECKPOINT_CHANGED_AFTER_PROBE",
+  "HANDOFF_ENTRY_RECEIPT_CONFLICT", "HANDOFF_NOT_ACTIVATED", "HANDOFF_OPERATION_FAILED", "HANDOFF_PAUSE_REQUIRED",
+  "HANDOFF_PROCESS_STATUS_UNAVAILABLE", "HANDOFF_PROVIDER_OPERATION_FAILED", "HANDOFF_RESUME_PRECONDITION_CHANGED",
+  "HANDOFF_RETAINED_CHECKPOINT_CHANGED", "HANDOFF_REVIEW_REQUIRED", "HANDOFF_REVIEW_STALE", "HANDOFF_ROUTE_UNAVAILABLE",
+  "HANDOFF_RUNTIME_CAS_FAILED", "HANDOFF_UTILITY_LEASE_EXPIRED", "HANDOFF_UTILITY_LEASE_UNAVAILABLE",
+]);
+export function collectorHandoffFailureCode(error: unknown): string | undefined {
+  return error instanceof CollectorCheckpointHandoffError && allowedCollectorHandoffCodes.has(error.code) ? error.code : undefined;
+}
+/** The gateway receives a safe result union, never a domain Error/cause/message. */
+export async function captureCollectorHandoffResult<T>(operation: () => Promise<T>) {
+  try { return { ok: true as const, value: await operation() }; }
+  catch (error) {
+    const code = collectorHandoffFailureCode(error);
+    if (code) return { ok: false as const, code };
+    throw error; // Unknown failures retain the gateway's existing generic redaction.
+  }
+}
 
 export function parseCollectorHandoffArguments(args: readonly string[]) {
-  const allowed = new Set(["--operation-id", "--old-worker-pid", "--expected-worker-owner", "--review-digest"]);
+  const allowed = new Set(["--operation-id", "--old-worker-pid", "--expected-worker-owner", "--review-digest", "--entry"]);
   const modes = ["--check-only", "--pause", "--prepare", "--resume"] as const;
   const mode = args[0];
   if (!modes.includes(mode as typeof modes[number]) || (args.length - 1) % 2 !== 0) refuseHandoff("HANDOFF_ARGUMENTS_INVALID");
@@ -32,17 +67,22 @@ export function parseCollectorHandoffArguments(args: readonly string[]) {
   }
   const operationId = values.get("--operation-id") ?? "";
   handoffId(operationId, "validate");
+  const entry = values.get("--entry") ?? "clean-pause";
+  if (entry !== "clean-pause" && entry !== "terminal-timeout") refuseHandoff("HANDOFF_ARGUMENTS_INVALID");
   const pid = values.get("--old-worker-pid") ?? "";
   const expectedOwner = values.get("--expected-worker-owner") ?? "";
-  if (!/^[1-9][0-9]{0,9}$/u.test(pid) || Number(pid) > 2_147_483_647 ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u.test(expectedOwner)) refuseHandoff("HANDOFF_ARGUMENTS_INVALID");
+  if (entry === "terminal-timeout" ? pid !== "" || expectedOwner !== ""
+    : !/^[1-9][0-9]{0,9}$/u.test(pid) || Number(pid) > 2_147_483_647 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u.test(expectedOwner)) refuseHandoff("HANDOFF_ARGUMENTS_INVALID");
   const reviewDigest = values.get("--review-digest");
   if ((mode !== "--check-only" && !reviewDigest) || (reviewDigest && !/^[a-f0-9]{64}$/u.test(reviewDigest))) {
     refuseHandoff("HANDOFF_REVIEW_REQUIRED");
   }
-  return { mode, operationId, oldWorkerPid: Number(pid), expectedOwner, reviewDigest };
+  return { mode, operationId, entry, oldWorkerPid: Number(pid), expectedOwner, reviewDigest };
 }
 type Arguments = ReturnType<typeof parseCollectorHandoffArguments>;
+type EntryReceipt = CollectorPauseReceipt | CollectorTimeoutReceipt;
+const isTimeoutReceipt = (receipt: EntryReceipt): receipt is CollectorTimeoutReceipt => "kind" in receipt;
 export const collectorHandoffGatewayBounds = Object.freeze({ connectionLimitPerProvider: 1,
   maximumCachedProviders: 1, connectionTimeoutMs: 5000, operationTimeoutMs: 60_000 });
 export function collectorResumeReviewAvailable(input: Readonly<{
@@ -73,9 +113,10 @@ async function assertRuntimeConfiguration(database: ProviderPrismaClient | Provi
   }
 }
 
-function assertReceiptAuthority(receipt: CollectorPauseReceipt, authority: CollectorHandoffAuthority, args: Arguments) {
-  if (receipt.authorityDigest !== authority.authorityDigest || receipt.oldWorkerPid !== args.oldWorkerPid ||
-    receipt.owner !== args.expectedOwner || receipt.operatorId !== authority.operatorId ||
+function assertReceiptAuthority(receipt: EntryReceipt, authority: CollectorHandoffAuthority, args: Arguments) {
+  const entryMatches = isTimeoutReceipt(receipt) ? args.entry === "terminal-timeout"
+    : args.entry === "clean-pause" && receipt.oldWorkerPid === args.oldWorkerPid && receipt.owner === args.expectedOwner;
+  if (!entryMatches || receipt.authorityDigest !== authority.authorityDigest || receipt.operatorId !== authority.operatorId ||
     receipt.previousConfigId !== authority.previous.id || receipt.nextConfigId !== authority.nextConfigId) {
     refuseHandoff("HANDOFF_PAUSE_RECEIPT_CHANGED");
   }
@@ -101,25 +142,36 @@ export async function runCollectorHandoff(args: Arguments) {
       providerRowVersion: authority.provider.row_version, topologyVersion: authority.provider.topology_version,
       nodeId: authority.node.id, nodeRowVersion: authority.node.row_version, databaseCredentialVersionId: authority.node.credential.id,
       host: "127.0.0.1", port: pins.port, databaseName: pins.databaseName, sslMode: "disable" });
-    const result = await gateway.runWithCachedProviderDatabase(route.route, async (database) => {
-      let receipt = await readPauseReceipt(database, args.operationId);
+    const result = await gateway.runWithCachedProviderDatabase(route.route, async (database) => captureCollectorHandoffResult(async () => {
+      const cleanReceipt = await readPauseReceipt(database, args.operationId);
+      const timeoutReceipt = await readCollectorTimeoutReceipt(database, args.operationId);
+      if (cleanReceipt && timeoutReceipt) refuseHandoff("HANDOFF_ENTRY_RECEIPT_CONFLICT");
+      let receipt: EntryReceipt | null = cleanReceipt ?? timeoutReceipt;
       const read = (client: ProviderPrismaClient | ProviderTransactionClient = database) => readCollectorHandoffCheckpoint(client,
-        { oldProcessAlive: oldWorkerIsAlive(args.oldWorkerPid), ...(receipt ? { runId: receipt.runId } : {}) });
+        { oldProcessAlive: args.entry === "terminal-timeout" ? false : oldWorkerIsAlive(args.oldWorkerPid),
+          ...(receipt ? { runId: receipt.runId } : {}) });
       let snapshot = await read();
       await assertRuntimeConfiguration(database, authority);
       if (receipt) assertReceiptAuthority(receipt, authority, args);
-      const pauseCommand = receipt ? await database.control_commands.findUnique({ where: { id: handoffId(args.operationId, "pause-command") } }) : null;
+      const pauseLabel = args.entry === "terminal-timeout" ? "terminal-timeout-pause-command" : "pause-command";
+      const pauseCommand = receipt ? await database.control_commands.findUnique({ where: { id: handoffId(args.operationId, pauseLabel) } }) : null;
       if (!receipt || args.mode === "--pause" || !pauseCommand) {
-        const intent = receipt ?? pauseReceipt({ authority, snapshot, operationId: args.operationId,
-          oldWorkerPid: args.oldWorkerPid, expectedOwner: args.expectedOwner });
+        const intent = receipt ?? (args.entry === "terminal-timeout"
+          ? collectorTimeoutReceipt({ authority, snapshot, operationId: args.operationId })
+          : pauseReceipt({ authority, snapshot, operationId: args.operationId,
+            oldWorkerPid: args.oldWorkerPid, expectedOwner: args.expectedOwner }));
         const reviewDigest = handoffDigest(intent);
-        if (args.mode === "--check-only") return { phase: "pause_review", reviewDigest,
+        if (args.mode === "--check-only") return { phase: isTimeoutReceipt(intent) ? "terminal_timeout_pause_review" : "pause_review", reviewDigest,
           providerId: pins.providerId, runId: intent.runId, runFence: intent.runFence, generation: intent.generation };
         if (args.mode !== "--pause") refuseHandoff("HANDOFF_PAUSE_REQUIRED");
         requireReview(reviewDigest, args.reviewDigest);
-        return submitCollectorPause(database, intent);
+        return isTimeoutReceipt(intent) ? submitCollectorTimeoutPause(database, intent, authority) : submitCollectorPause(database, intent);
       }
-      receipt = receipt as CollectorPauseReceipt;
+      receipt = receipt as EntryReceipt;
+      const assertProvenance = (client: ProviderPrismaClient | ProviderTransactionClient, current: CollectorHandoffCheckpoint) =>
+        isTimeoutReceipt(receipt) ? assertCollectorTimeoutProvenance(client, receipt, current)
+          : assertCollectorPauseProvenance(client, receipt, current);
+      const assertDrained = isTimeoutReceipt(receipt) ? assertCollectorTimeoutHandoffDrained : assertCollectorHandoffDrained;
       const pausedGeneration = (BigInt(receipt.generation) + 1n).toString();
       const migrated = reEnvelopeCollectorCursor({ cursor: snapshot.run.finalCursor, cursorHash: snapshot.run.finalCursorHash,
         previousConfigId: authority.previous.id, nextConfigId: authority.nextConfigId });
@@ -152,8 +204,8 @@ export async function runCollectorHandoff(args: Arguments) {
         return { phase: "resume_review", reviewDigest: resumeReviewDigest,
           ...checkpointEvidence(snapshot), runtimeState: snapshot.runtimeState };
       }
-      await assertCollectorPauseProvenance(database, receipt, snapshot);
-      const phase = assertCollectorHandoffDrained({ snapshot, previousConfigId: authority.previous.id,
+      await assertProvenance(database, snapshot);
+      const phase = assertDrained({ snapshot, previousConfigId: authority.previous.id,
         nextConfigId: authority.nextConfigId, expectedGeneration: pausedGeneration, ...reclaim });
       const reviewDigest = handoffDigest({ authorityDigest: authority.authorityDigest, checkpoint: checkpointEvidence(snapshot) });
       if (args.mode === "--check-only") return { phase: `${phase}_prepare_review`, reviewDigest, ...checkpointEvidence(snapshot) };
@@ -173,7 +225,7 @@ export async function runCollectorHandoff(args: Arguments) {
       }
       const fresh = await read();
       if (handoffDigest(checkpointEvidence(fresh)) !== handoffDigest(checkpointEvidence(snapshot))) refuseHandoff("HANDOFF_CHECKPOINT_CHANGED_AFTER_PROBE");
-      assertCollectorHandoffDrained({ snapshot: fresh, previousConfigId: authority.previous.id,
+      assertDrained({ snapshot: fresh, previousConfigId: authority.previous.id,
         nextConfigId: authority.nextConfigId, expectedGeneration: pausedGeneration, ...reclaim });
       await stageCollectorHandoff({ central: central.client, authority, operationId: args.operationId,
         checkpoint: fresh, sourceProof, nextCursorHash: migrated.cursorHash });
@@ -188,9 +240,9 @@ export async function runCollectorHandoff(args: Arguments) {
         await tx.$queryRaw`select id from provider_runs where id=${receipt.runId}::uuid for update`;
         await tx.$queryRaw`select singleton_key from provider_runtime where singleton_key=true for update`;
         const current = await read(tx);
-        assertCollectorHandoffDrained({ snapshot: current, previousConfigId: authority.previous.id,
+        assertDrained({ snapshot: current, previousConfigId: authority.previous.id,
           nextConfigId: authority.nextConfigId, expectedGeneration: pausedGeneration, utilityLease });
-        await assertCollectorPauseProvenance(tx, receipt, current);
+        await assertProvenance(tx, current);
         await assertRuntimeConfiguration(tx, authority);
         if (handoffDigest(retainedCollectorCheckpoint(current)) !== handoffDigest(retainedCollectorCheckpoint(snapshot))) {
           refuseHandoff("HANDOFF_RETAINED_CHECKPOINT_CHANGED");
@@ -222,9 +274,10 @@ export async function runCollectorHandoff(args: Arguments) {
         snapshot = await read();
         return { phase: "prepared_paused", operationId: args.operationId, ...checkpointEvidence(snapshot), sourceProof };
       } finally { await leases.release({ role: "import", owner, fence: acquired.lease.fence }); }
-    });
+    }));
     if (result.state !== "reachable") refuseHandoff("HANDOFF_PROVIDER_OPERATION_FAILED");
-    return result.value;
+    if (!result.value.ok) refuseHandoff(result.value.code);
+    return result.value.value;
   } finally {
     environment.credentialKey.fill(0);
     await gateway.close().catch(() => undefined);
@@ -235,7 +288,7 @@ export async function runCollectorHandoff(args: Arguments) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { console.log(JSON.stringify(await runCollectorHandoff(parseCollectorHandoffArguments(process.argv.slice(2))))); }
   catch (error) {
-    console.error(JSON.stringify({ outcome: "refused", code: error instanceof CollectorCheckpointHandoffError ? error.code : "HANDOFF_OPERATION_FAILED" }));
+    console.error(JSON.stringify({ outcome: "refused", code: collectorHandoffFailureCode(error) ?? "HANDOFF_OPERATION_FAILED" }));
     process.exitCode = 1;
   }
 }

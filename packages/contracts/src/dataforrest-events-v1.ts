@@ -21,6 +21,7 @@ import {
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -40,6 +41,7 @@ export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
 export {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -177,6 +179,7 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
     | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
@@ -272,6 +275,18 @@ export const dataforrestCollectorCryptDistributedSourceAdapterManifest =
     },
   );
 
+/** Courtyard-only native-card interpretation; shared launch-v1 stays immutable. */
+export const dataforrestCourtyardDistributedSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "courtyard",
+      ),
+    },
+  );
+
 /** Phygitals-only native-card interpretation; shared launch-v1 stays immutable. */
 export const dataforrestPhygitalsDistributedSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
@@ -303,6 +318,7 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 ]);
@@ -390,6 +406,7 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION

@@ -5,6 +5,7 @@ import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import type { CentralQueryClient } from "@packscout/database";
@@ -205,7 +206,7 @@ describe("central DataForrest source authority", () => {
   });
 
   for (const [providerKey, manifest] of [
-    ["courtyard", dataforrestLaunchDistributedSourceAdapterManifest],
+    ["courtyard", dataforrestCourtyardDistributedSourceAdapterManifest],
     ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
   ] as const) {
@@ -252,6 +253,16 @@ describe("central DataForrest source authority", () => {
 
   test("rejects crossed installed provider-adapter tuples before querying central", async () => {
     const crossed = [
+      {
+        ...request,
+        providerKey: "courtyard",
+        adapterKey: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+        adapterKey: dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion,
+      },
       {
         ...request,
         providerKey: "courtyard",

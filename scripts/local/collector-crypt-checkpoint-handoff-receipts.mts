@@ -12,6 +12,8 @@ const receiptSchema = z.object({ operationId: z.string().uuid(), authorityDigest
   operatorId: z.string().uuid(), previousConfigId: z.string().uuid(), nextConfigId: z.string().uuid(),
 }).strict();
 export type CollectorPauseReceipt = z.infer<typeof receiptSchema>;
+export type CollectorResumeReceipt = Pick<CollectorPauseReceipt,
+  "operationId" | "generation" | "operatorId" | "nextConfigId">;
 
 export function pauseReceipt(input: Readonly<{ authority: CollectorHandoffAuthority;
   snapshot: CollectorHandoffCheckpoint; operationId: string; oldWorkerPid: number; expectedOwner: string }>): CollectorPauseReceipt {
@@ -85,7 +87,7 @@ export async function assertCollectorPauseProvenance(database: ProviderPrismaCli
 
 /** Durable resume/queue recognition precedes paused guards, including after the new worker starts. */
 export async function resumeCollectorHandoff(input: Readonly<{ database: ProviderPrismaClient;
-  receipt: CollectorPauseReceipt; cursorHash: string; assertPrepared: (resumed: boolean) => Promise<void>;
+  receipt: CollectorResumeReceipt; cursorHash: string; assertPrepared: (resumed: boolean) => Promise<void>;
   commands?: Pick<PrismaAdminProviderRuntimeRepository, "submitRuntimeCommand" | "requestRunNow"> }>) {
   const { database, receipt } = input;
   const commands = input.commands ?? new PrismaAdminProviderRuntimeRepository(database);
@@ -123,6 +125,7 @@ export async function resumeCollectorHandoff(input: Readonly<{ database: Provide
   // resume receipt; repeat this exact operation to queue once, never issue another resume.
   const queued = await commands.requestRunNow({ providerId: pins.providerId,
     operatorId: receipt.operatorId, expectedConfigVersionId: receipt.nextConfigId, expectedConfigVersionNumber: 3n,
+    expectedCursorFingerprint: input.cursorHash, requireNoActiveRun: true,
     expectedGeneration: generation, commandId, runId, correlationId: receipt.operationId,
     idempotencyKey: `collector-handoff/${receipt.operationId}/run` });
   if (!["created", "deduplicated"].includes(queued.kind) || !("run" in queued) || queued.run.id !== runId) {

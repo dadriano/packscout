@@ -9,6 +9,7 @@ import {
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -900,7 +901,156 @@ test("live DataForrest records map directly without leaking native actors or pro
   assert.equal(durableSurface.includes(actorMarker), false);
 });
 
-test("Courtyard maps with the live-census 100-record manifest and unchanged 8 MiB cap", async () => {
+function courtyardNativeCard(recordId: string, data: DataforrestEventRecordV1["data"]): DataforrestEventRecordV1 {
+  return { ...courtyardUnlabeledCard(), record_id: recordId, data };
+}
+
+function courtyardNativeFixture(
+  pages: readonly DataforrestEventsPageV1[],
+  manifest = dataforrestCourtyardDistributedSourceAdapterManifest,
+) {
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration("courtyard", manifest),
+      resolvedAuthority: {
+        ...courtyardResolvedAuthority,
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+      },
+    }),
+    captureAuthority: {
+      ...courtyardAuthority,
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
+test("versioned Courtyard native cards map reviewed wrappers and quarantine malformed or absent names", async () => {
+  const invalidAssets: DataforrestEventRecordV1["data"][string][] = [
+    null, [], { title: 42 }, { title: " " }, {},
+  ];
+  const fixture = courtyardNativeFixture([sourcePage({
+    cursor: "courtyard-native-next", continuation: "continue", records: [
+      courtyardNativeCard("native-asset", { asset: {
+        title: "Asset title", imageUrl: "https://example.test/asset.png",
+        objectID: "native-id-must-not-escape", owner: actorMarker,
+        estimatedValueUsd: 500, price: { amountUsd: 500, currency: "USD" },
+      } }),
+      courtyardNativeCard("native-reveal", { reveal: {
+        title: "Reveal title", image: "https://example.test/reveal.png",
+        collectible_id: "native-id-must-not-escape", fmv_estimate_usd: 500,
+      } }),
+      courtyardNativeCard("native-precedence", {
+        asset: { title: "Selected asset" },
+        reveal: { title: "Unselected reveal", image: "https://example.test/not-selected.png" },
+      }),
+      courtyardNativeCard("native-unsafe-image", { asset: { title: "Safe name", imageUrl: "javascript:unsafe" } }),
+      ...invalidAssets.map((asset, index) =>
+        courtyardNativeCard(`native-invalid-${index}`, { asset, reveal: { title: "Do not fallback" } })),
+      courtyardNativeCard("native-absent", {
+        provider_label: "Do not infer", prices: { priceHistory: [{ title: rawMarker }] },
+      }),
+    ],
+  })]);
+  const page = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })));
+  const accepted = page.records.filter(({ disposition }) => disposition !== "quarantine");
+  const quarantines = page.records.filter(({ disposition }) => disposition === "quarantine");
+  assert.equal(accepted.length, 4);
+  assert.equal(quarantines.length, 6);
+  assert.equal(quarantines.every(({ reasonCode }) => reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+  assert.deepEqual(accepted.map(({ candidate }) => candidate.displayName),
+    ["Asset title", "Selected asset", "Reveal title", "Safe name"]);
+  assert.deepEqual(accepted.map(({ candidate }) => candidate.collectibleKey),
+    ["card:native-asset", "card:native-precedence", "card:native-reveal", "card:native-unsafe-image"]);
+  for (const record of accepted) {
+    assert.equal(record.entityType, "collectible");
+    assert.equal(record.candidate.valuationAmount, null);
+    assert.equal(record.candidate.valuationCurrency, null);
+  }
+  const serialized = JSON.stringify(page.records);
+  for (const forbidden of ["native-id-must-not-escape", actorMarker, rawMarker,
+    "Unselected reveal", "not-selected.png", "javascript:unsafe", "Do not fallback"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("Courtyard native profile requests 100 and enforces exact cursor tuple before continuation", async () => {
+  const manifest = dataforrestCourtyardDistributedSourceAdapterManifest;
+  const fixture = courtyardNativeFixture([
+    sourcePage({ cursor: "courtyard-native-checkpoint", continuation: "continue",
+      records: Array.from({ length: 100 }, (_, index) => courtyardNativeCard(`native-${index}`, {
+        asset: { title: `Card ${index}` },
+      })), }),
+    sourcePage({ cursor: "courtyard-native-head", continuation: "head", records: [] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })));
+  assert.equal(first.records.length, 100);
+  assert.equal(first.records.every(({ disposition }) => disposition !== "quarantine"), true);
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  const cursor = first.nextCursor as Record<string, CanonicalJsonValue>;
+  assert.equal(cursor.adapterVersion, manifest.adapterVersion);
+  assert.equal(cursor.cursorCodecKey, manifest.cursorCodecKey);
+  const crossedPins: Record<string, CanonicalJsonValue>[] = [
+    { adapterVersion: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion },
+    { adapterVersion: dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion },
+    { cursorCodecKey: "unsupported-codec" },
+    { sourceRevisionId: "55555555-5555-4555-8555-555555555555" },
+    { sourceInstanceId: "66666666-6666-4666-8666-666666666666" },
+  ];
+  for (const changed of crossedPins) {
+    const crossed = { ...cursor, ...changed };
+    await assert.rejects(fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority, pageNumber: 2,
+      checkpoint: crossed, checkpointFingerprint: providerMixedCursorFingerprint(crossed),
+    })), (error: unknown) => error instanceof ProviderDataforrestSourceError
+      && error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID");
+  }
+  assert.equal(fixture.requestedUrls.length, 1);
+  const second = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority, pageNumber: 2,
+    checkpoint: first.nextCursor, checkpointFingerprint: first.nextCursorFingerprint,
+  })));
+  assert.equal(second.continuation, "head");
+  assert.equal(fixture.requestedUrls[1]?.searchParams.get("cursor"), "courtyard-native-checkpoint");
+});
+
+test("Courtyard native profile refuses 101 records and over-8-MiB bodies before translation", async () => {
+  for (const [records, code] of [
+    [Array.from({ length: 101 }, (_, index) => courtyardNativeCard(`over-count-${index}`, {
+      asset: { title: "Card" },
+    })), "PROVIDER_DATAFORREST_INVALID_RESPONSE"],
+    [[courtyardNativeCard("over-bytes", { asset: { title: "Card" }, native_padding: "x".repeat(8_388_608) })],
+      "PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE"],
+  ] as const) {
+    const fixture = courtyardNativeFixture([sourcePage({ cursor: "rejected", continuation: "head", records })]);
+    await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+      (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === code);
+    assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+    assert.equal(fixture.translations.length, 0);
+  }
+});
+
+test("Courtyard native profile preserves canonical pull and event identity and historical card behavior", async () => {
+  const pages = [];
+  for (const manifest of [dataforrestLaunchDistributedSourceAdapterManifest, dataforrestCourtyardDistributedSourceAdapterManifest]) {
+    const fixture = courtyardNativeFixture([sourcePage({ cursor: "parity", continuation: "head",
+      records: courtyardRecords().filter((record) => record.stream !== "catalog"),
+    })], manifest);
+    pages.push(validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }))));
+  }
+  assert.deepEqual(pages[0]!.records, pages[1]!.records);
+  assert.equal(pages[1]!.records.some(({ kind }) => kind === "pull"), true);
+  assert.equal(pages[1]!.records.some(({ kind }) => kind === "market_event"), true);
+  const historical = courtyardNativeFixture([sourcePage({ cursor: "historical", continuation: "head", records: [
+    courtyardNativeCard("historical-native", { asset: { title: "Still not interpreted under old profile" } }),
+  ] })], dataforrestLaunchDistributedSourceAdapterManifest);
+  const page = validateProviderMixedPage(await historical.source.nextPage(sourceInput({ authority: historical.captureAuthority })));
+  assert.equal(page.records[0]?.disposition, "quarantine");
+  assert.equal(page.records[0]?.reasonCode, "SOURCE_RECORD_MAPPING_INVALID");
+});
+
+test("historical Courtyard shared-launch mapping retains the 100-record manifest and unchanged 8 MiB cap", async () => {
   const integration = createProviderDataforrestLiveIntegration(
     "courtyard",
     dataforrestLaunchDistributedSourceAdapterManifest,

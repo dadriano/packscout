@@ -3,6 +3,7 @@ import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { parseCollectorHandoffArguments, collectorHandoffGatewayBounds, collectorResumeReviewAvailable } =
   await tsImport("./handoff-collector-crypt-page-profile.mts", import.meta.url);
+const diagnostics = await tsImport("./handoff-collector-crypt-page-profile.mts", import.meta.url);
 const { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy } = await tsImport("@packscout/database", import.meta.url);
 const { readCollectorCryptDataforrestActivationEnvironment } = await import("./activate-collector-crypt-dataforrest-source-plan.mjs");
 const args = ["--check-only", "--operation-id", "721049d1-eb7c-4f5d-b7e5-bf12eaa76189",
@@ -16,6 +17,14 @@ test("Collector handoff requires explicit reviewed mutations and rejects unknown
     [...args, "--operation-id", args[2]], ["--run", ...args.slice(1)], [...args, "--review-digest", "not-a-hash"]]) {
     assert.throws(() => parseCollectorHandoffArguments(bad), (error) => !error.message.includes("secret-do-not-print"));
   }
+});
+
+test("Collector terminal-timeout entry uses explicit operation authority without unchecked PID arguments", () => {
+  const terminal = ["--check-only", "--entry", "terminal-timeout", "--operation-id", args[2]];
+  assert.equal(parseCollectorHandoffArguments(terminal).entry, "terminal-timeout");
+  assert.throws(() => parseCollectorHandoffArguments([...terminal, "--old-worker-pid", "12345"]));
+  assert.throws(() => parseCollectorHandoffArguments([...terminal, "--expected-worker-owner", "unverified"]));
+  assert.throws(() => parseCollectorHandoffArguments(["--check-only", "--entry", "any-failure", "--operation-id", args[2]]));
 });
 
 test("Collector gateway has supported bounded options and only the exact local provider destination", async () => {
@@ -49,4 +58,25 @@ test("Collector inherited local-only bootstrap rejects nonlocal DSNs and any pro
   assert.throws(() => readCollectorCryptDataforrestActivationEnvironment({ processEnvironment: {
     NODE_ENV: "development", PACKSCOUT_DATA_API_TOKEN: "secret-do-not-print" }, fileEnvironment }),
   (error) => !error.message.includes("secret-do-not-print"));
+});
+
+test("Collector gateway callback preserves only allowlisted domain refusal codes, not errors or protected data", async () => {
+  const { captureCollectorHandoffResult, collectorHandoffFailureCode, CollectorCheckpointHandoffError } = diagnostics;
+  const gateway = async (operation) => {
+    try { return { state: "reachable", value: await operation() }; }
+    catch { return { state: "unreachable" }; }
+  };
+  const protectedValue = "private-token-body-cursor";
+  const refusal = new CollectorCheckpointHandoffError("HANDOFF_CANARY_PAGE_INVALID");
+  refusal.message = protectedValue; refusal.cause = new Error(protectedValue);
+  const preserved = await gateway(() => captureCollectorHandoffResult(async () => { throw refusal; }));
+  assert.deepEqual(preserved, { state: "reachable", value: { ok: false, code: "HANDOFF_CANARY_PAGE_INVALID" } });
+  assert.equal(JSON.stringify(preserved).includes(protectedValue), false);
+  assert.deepEqual(await captureCollectorHandoffResult(async () => ({ phase: "prepared_paused" })),
+    { ok: true, value: { phase: "prepared_paused" } });
+  for (const error of [new Error(protectedValue), { code: "HANDOFF_CANARY_PAGE_INVALID", message: protectedValue },
+    new CollectorCheckpointHandoffError(`HANDOFF_${protectedValue}`), new CollectorCheckpointHandoffError("HANDOFF_UNREVIEWED_NEW_CODE")]) {
+    assert.equal(collectorHandoffFailureCode(error), undefined);
+    assert.deepEqual(await gateway(() => captureCollectorHandoffResult(async () => { throw error; })), { state: "unreachable" });
+  }
 });

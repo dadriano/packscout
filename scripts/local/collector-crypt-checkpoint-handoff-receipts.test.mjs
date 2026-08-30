@@ -52,11 +52,13 @@ function harness(_t, { failQueue = false } = {}) {
     calls.push("resume"); commands.set(input.commandId, { command_type: input.commandType, state: "completed",
       expected_generation: input.expectedGeneration, requested_by_operator_id: input.requestedByOperatorId,
       idempotency_key: input.idempotencyKey, correlation_id: input.correlationId });
-    return { outcome: "accepted", state: "idle", generation: 6n };
+    return { outcome: "accepted", state: "idle", generation: input.expectedGeneration + 1n };
   };
   let shouldFail = failQueue;
   const requestRunNow = async (input) => {
     calls.push("queue");
+    assert.equal(input.expectedCursorFingerprint, "b".repeat(64));
+    assert.equal(input.requireNoActiveRun, true);
     if (shouldFail) { shouldFail = false; throw new Error("synthetic interruption"); }
     commands.set(input.commandId, { command_type: "run", resulting_run_id: input.runId,
       expected_generation: input.expectedGeneration, requested_by_operator_id: input.operatorId,
@@ -97,4 +99,14 @@ test("Collector stale resume and changed queued lineage fail without downstream 
   const before = h.calls.length;
   await assert.rejects(resumeCollectorHandoff(h.input), /HANDOFF_QUEUED_RUN_CHANGED/u);
   assert.equal(h.calls.length, before);
+});
+
+test("Collector terminal-timeout entry reuses exact resume/queue generations without pretending to be a clean pause", async (t) => {
+  const h = harness(t, { failQueue: true });
+  h.input.receipt = { ...receipt, kind: "terminal_timeout", generation: "2" };
+  await assert.rejects(resumeCollectorHandoff(h.input), /synthetic interruption/u);
+  assert.equal((await resumeCollectorHandoff(h.input)).outcome, "queued");
+  assert.equal((await resumeCollectorHandoff(h.input)).outcome, "already_queued");
+  assert.deepEqual(h.calls, ["guard-paused", "resume", "queue", "guard-idle", "queue"]);
+  assert.equal(h.commands.get(handoffId(operationId, "run-command")).expected_generation, 4n);
 });

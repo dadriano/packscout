@@ -19,6 +19,9 @@ import {
   interpretDataforrestConnectionTest,
   interpretDataforrestPage,
   interpretDataforrestSourceTest,
+  inspectDataforrestRawResponse,
+  type DataforrestRawResponseInspectionInput,
+  type DataforrestRawResponseInspectionResult,
 } from "./dataforrest-events-page-interpreter.ts";
 import {
   ProviderEndpointPolicyError,
@@ -492,6 +495,19 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
         stableFailure("retryable", "network_interruption"),
       );
     }
+  }
+
+  /** Inspection-only data: never a durable request, completed page or commit capability. */
+  inspectRawResponse(input: DataforrestRawResponseInspectionInput): DataforrestRawResponseInspectionResult {
+    if (!(input.protectedRawResponse instanceof Uint8Array) ||
+      input.sourceTypeKey !== this.manifest.sourceTypeKey ||
+      input.adapterVersion !== this.manifest.adapterVersion ||
+      input.pageLimit > this.manifest.requestBounds.pageLimit ||
+      input.protectedRawResponse.byteLength > this.manifest.requestBounds.maximumResponseBytes ||
+      !this.manifest.supportedProviders.some(({ provider }) => provider === input.provider)) {
+      return Object.freeze({ kind: "untrusted_inspection", ok: false, code: "inspection_pins_invalid" });
+    }
+    return inspectDataforrestRawResponse(input);
   }
 
   interpretConnectionTest(

@@ -110,6 +110,8 @@ export interface CollectorHandoffCheckpoint {
   readonly cursor: unknown;
   readonly cursorHash: string | null;
   readonly activeRunCount: number;
+  readonly runCount: number;
+  readonly otherOwnedWorkerLeaseCount: number;
   readonly actionableCommandCount: number;
   readonly otherActiveTransactionCount: number;
   readonly oldProcessAlive: boolean;
@@ -136,10 +138,23 @@ export function checkpointEvidence(snapshot: CollectorHandoffCheckpoint) {
     lastPageId: snapshot.lastPage?.id ?? null };
 }
 
-export function assertCollectorHandoffDrained(input: Readonly<{
+export type CollectorHandoffDrainInput = Readonly<{
   snapshot: CollectorHandoffCheckpoint; previousConfigId: string; nextConfigId: string;
   expectedGeneration: string; utilityLease?: Readonly<{ owner: string; fence: string }>;
   reclaimableUtilityOwner?: string;
+}>;
+
+export function assertCollectorHandoffDrained(input: CollectorHandoffDrainInput): "previous" | "prepared" {
+  const run = input.snapshot.run;
+  const pauseTerminal = (run.state === "incomplete" && run.failureCode === "PROVIDER_IMPORT_RUNTIME_UNAVAILABLE") ||
+    (run.state === "failed" && run.failureCode === "PROVIDER_MIXED_PAGE_RUNTIME_NOT_RUNNING");
+  if (!pauseTerminal) refuseHandoff("HANDOFF_CHECKPOINT_NOT_DRAINED");
+  return assertCollectorHandoffCheckpoint({ ...input, expectedRuntimeState: "paused" });
+}
+
+/** Shared checkpoint invariants, not terminal admission. Each entry policy validates its own provenance. */
+export function assertCollectorHandoffCheckpoint(input: CollectorHandoffDrainInput & Readonly<{
+  expectedRuntimeState: "error" | "paused";
 }>): "previous" | "prepared" {
   const s = input.snapshot;
   const migrated = reEnvelopeCollectorCursor({ cursor: s.run.finalCursor,
@@ -152,14 +167,12 @@ export function assertCollectorHandoffDrained(input: Readonly<{
     : (s.lease.owner === null && s.lease.expiresAt === null) ||
       (input.reclaimableUtilityOwner !== undefined && s.lease.owner === input.reclaimableUtilityOwner &&
         s.lease.expiresAt !== null && Date.parse(s.lease.expiresAt) <= Date.parse(s.databaseNow));
-  const pauseTerminal = (s.run.state === "incomplete" && s.run.failureCode === "PROVIDER_IMPORT_RUNTIME_UNAVAILABLE") ||
-    (s.run.state === "failed" && s.run.failureCode === "PROVIDER_MIXED_PAGE_RUNTIME_NOT_RUNNING");
   if (s.providerId !== collectorHandoff.providerId || s.providerKey !== collectorHandoff.providerKey ||
     s.databaseRole !== "provider" || s.schemaVersion !== "distributed-provider-v1" ||
-    s.runtimeState !== "paused" || s.generation !== input.expectedGeneration ||
+    s.runtimeState !== input.expectedRuntimeState || s.generation !== input.expectedGeneration ||
     (!previous && !prepared) || s.activeRunCount !== 0 || s.actionableCommandCount !== 0 ||
     s.otherActiveTransactionCount !== 0 || s.oldProcessAlive || !leaseAllowed ||
-    !pauseTerminal || s.run.finishedAt === null || s.run.reachedHead ||
+    s.run.finishedAt === null || s.run.reachedHead ||
     s.run.configId !== input.previousConfigId || s.run.configNumber !== "2" || s.run.pageCount < 1 ||
     s.lastPage === null || s.lastPage.number !== s.run.pageCount || s.lastPage.continuation !== "more" ||
     s.lastPage.cursorHash !== s.run.finalCursorHash ||
