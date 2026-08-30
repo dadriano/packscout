@@ -1,7 +1,8 @@
 # Local provider backfill supervisor
 
 This is an explicit one-provider local operation. It never provisions, changes configuration,
-resets a cursor, or schedules ClutchPacks. Run only after the exact provider/configuration/run
+resets a cursor, or schedules future head polls. All four installed isolated providers,
+including Clutchpacks, are eligible only after explicit scoped activation. Run only after the exact provider/configuration/run
 checkpoint has been reviewed. `--initial-run-id` accepts an existing terminal transient failure
 or the exact queued run produced by a reviewed profile handoff. Do not run another worker for
 the same provider concurrently. Independent provider processes may run in parallel.

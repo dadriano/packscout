@@ -86,3 +86,35 @@ test("DataForrest terminalizer withholds a receipt after fenced authority loss",
   });
   await assert.rejects(terminalize(attempt), /authority was lost/u);
 });
+
+test("oversize failure diagnostics preserve stable error codes and distinguish partial bytes from complete capture", async () => {
+  const writes: Record<string, unknown>[] = [];
+  const terminalize = createProviderDataforrestRequestTerminalizer({ workerId: "fixture:worker",
+    audit: { async record(input) { writes.push(input); return { kind: "recorded" }; } } });
+  for (const trigger of ["declared_content_length", "streamed_body"] as const) {
+    const failed: SourceAdapterRequestTerminalizationInput = { ...attempt, outcome: {
+      ok: false, failure: { disposition: "retryable", code: "response_too_large" },
+      measurements: { durationMilliseconds: 902, responseBytes: 0 },
+      diagnostics: [{ severity: "warning", phase: "request_capture", code: `response_too_large_${trigger}`,
+        counters: { maximum_response_bytes: 4, reported_response_bytes: 6 } }],
+    } };
+    await terminalize(failed);
+    assert.equal(writes.at(-1)?.resultCode, "SOURCE_REQUEST_RESPONSE_TOO_LARGE");
+    assert.equal(writes.at(-1)?.responseBytes, 0);
+    assert.deepEqual(writes.at(-1)?.responseLimitDiagnostic, {
+      trigger, maximumResponseBytes: 4, reportedResponseBytes: 6,
+    });
+    const invalidCounters: Record<string, number>[] = [
+      { maximum_response_bytes: 4, reported_response_bytes: Number.MAX_SAFE_INTEGER + 1 },
+      { maximum_response_bytes: 4, reported_response_bytes: Number.NaN },
+      { maximum_response_bytes: 4, reported_response_bytes: 3 },
+      { maximum_response_bytes: 4, reported_response_bytes: 6, unexpected: 1 },
+    ];
+    for (const counters of invalidCounters) {
+      await assert.rejects(terminalize({ ...failed, outcome: { ...failed.outcome,
+        diagnostics: [{ ...failed.outcome.diagnostics[0]!, counters }],
+      } }), /diagnostic is invalid/);
+    }
+  }
+  assert.equal(writes.length, 2);
+});

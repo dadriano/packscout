@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { providerPackEvEvidenceV1Schema } from "@packscout/contracts";
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
 import type {
   ProviderPrismaClient,
@@ -44,6 +45,10 @@ import {
   providerWorkerLeaseIsLive,
   setProviderImportLeaseContext,
 } from "./provider-worker-lease-repository.ts";
+import {
+  resolveProviderFactReferencesBatch,
+  type ProviderResolvedFactRow,
+} from "./provider-fact-reference-reconciliation.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -63,13 +68,6 @@ interface MutableRow {
   readonly lifecycle: "active" | "retired";
   readonly row_version: bigint;
 }
-
-interface ResolvedFactRow {
-  readonly id: string;
-  readonly row_version: bigint;
-}
-
-const FACT_REFERENCE_RECONCILIATION_LIMIT = 500;
 
 function nullableText(value: string | null, field: string): string | null {
   return value === null ? null : requireNonEmptyText(value, field);
@@ -167,6 +165,90 @@ function hasSameMaterialFields(
   ));
 }
 
+interface PackEvidenceBinding {
+  readonly attributes: ProviderPrisma.InputJsonObject;
+  readonly source_updated_at: Date;
+  readonly price_amount: string | null;
+  readonly price_currency: string | null;
+  readonly buyback_rate: string | null;
+  readonly buyback_source_kind: string | null;
+}
+
+function normalizedNumberDecimal(value: number): string {
+  const decimal = value.toString();
+  return normalizeMoneyDecimal(/[eE]/u.test(decimal) ? value.toFixed(18) : decimal);
+}
+
+/** Validate retained facts against the provider database and the pack projection. */
+async function validatePackEvEvidence(
+  client: ProviderQueryClient,
+  packKey: string,
+  data: PackEvidenceBinding,
+): Promise<void> {
+  if (!Object.hasOwn(data.attributes, "evInputEvidence")) return;
+  const parsed = providerPackEvEvidenceV1Schema.safeParse(data.attributes.evInputEvidence);
+  if (!parsed.success) {
+    throw new ProviderCanonicalInputError("attributes.evInputEvidence must be normalized pack evidence.");
+  }
+  const evidence = parsed.data;
+  const identity = await client.database_identity.findUnique({
+    where: { singleton_key: true },
+    select: { provider_id: true, provider_key: true },
+  });
+  const price = evidence.price.state === "present" && evidence.price.value.amount >= 0
+    ? evidence.price.value : null;
+  const buyback = evidence.buybackPercent.state === "present"
+    && evidence.buybackPercent.value >= 0 && evidence.buybackPercent.value <= 100
+    ? evidence.buybackPercent.value : null;
+  if (
+    identity?.provider_id !== evidence.providerId || identity.provider_key !== evidence.providerKey
+    || packKey !== `pack:${evidence.providerRecordId}`
+    || data.source_updated_at.toISOString() !== evidence.effectiveAt
+    || data.price_amount !== (price === null ? null : normalizedNumberDecimal(price.amount))
+    || data.price_currency !== (price?.currency ?? null)
+    || data.buyback_rate !== (buyback === null ? null : normalizedNumberDecimal(buyback / 100))
+    || data.buyback_source_kind !== (buyback === null ? null : "provider_statement")
+  ) {
+    throw new ProviderCanonicalInputError("attributes.evInputEvidence does not match the canonical pack.");
+  }
+}
+
+/**
+ * Same-source writes may attach this one private fact set, never revise a pack.
+ * A redelivery's collection clock cannot renew evidence already retained here.
+ */
+async function sameSourcePackEvidenceChange(
+  client: ProviderQueryClient,
+  packKey: string,
+  current: { readonly attributes: ProviderPrisma.JsonValue },
+  data: PackEvidenceBinding & Readonly<Record<string, unknown>>,
+): Promise<boolean> {
+  const { attributes, ...fields } = data;
+  if (current.attributes === null || typeof current.attributes !== "object"
+    || Array.isArray(current.attributes)) throw new ProviderCanonicalWriteConflictError();
+  const previous = current.attributes;
+  const { evInputEvidence: previousEvidence, ...previousAttributes } = previous;
+  const { evInputEvidence: incomingEvidence, ...incomingAttributes } = attributes;
+  if (
+    !Object.hasOwn(attributes, "evInputEvidence")
+    || !hasSameMaterialFields(current, fields)
+    || !hasSameMaterialFields({ attributes: previousAttributes }, { attributes: incomingAttributes })
+  ) throw new ProviderCanonicalWriteConflictError();
+  try {
+    await validatePackEvEvidence(client, packKey, data);
+  } catch (error) {
+    if (error instanceof ProviderCanonicalInputError) throw new ProviderCanonicalWriteConflictError();
+    throw error;
+  }
+  if (!Object.hasOwn(previous, "evInputEvidence")) return true;
+  const parsed = providerPackEvEvidenceV1Schema.safeParse(previousEvidence);
+  if (!parsed.success || !hasSameMaterialFields(
+    { evidence: previousEvidence },
+    { evidence: { ...(incomingEvidence as ProviderPrisma.InputJsonObject), collectedAt: parsed.data.collectedAt } },
+  )) throw new ProviderCanonicalWriteConflictError();
+  return false;
+}
+
 async function appendPromotionRange(
   client: ProviderQueryClient,
   changes: readonly PromotionChangeDraft[],
@@ -196,7 +278,7 @@ async function appendPromotionRange(
 
 async function appendResolvedFactChanges(
   client: ProviderQueryClient,
-  rows: readonly (ResolvedFactRow & {
+  rows: readonly (ProviderResolvedFactRow & {
     readonly entityType: "pull" | "pull_item" | "market_event";
   })[],
 ): Promise<PromotionSequenceRange | null> {
@@ -214,78 +296,8 @@ async function appendResolvedFactChanges(
 async function reconcileFactReferencesBatch(
   client: ProviderQueryClient,
 ): Promise<FactReferenceReconciliationResult> {
-  const pulls = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM pulls AS fact
-      JOIN packs AS target ON target.pack_key = fact.pack_key
-      WHERE fact.pack_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE pulls AS fact
-    SET pack_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const pullItems = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM pull_items AS fact
-      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
-      WHERE fact.collectible_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE pull_items AS fact
-    SET collectible_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const marketEventPacks = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM market_events AS fact
-      JOIN packs AS target ON target.pack_key = fact.pack_key
-      WHERE fact.pack_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE market_events AS fact
-    SET pack_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const marketEventCollectibles = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM market_events AS fact
-      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
-      WHERE fact.collectible_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE market_events AS fact
-    SET collectible_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
+  const { pulls, pullItems, marketEventPacks, marketEventCollectibles } =
+    await resolveProviderFactReferencesBatch(client);
   const promotionRange = await appendResolvedFactChanges(client, [
     ...pulls.map((row) => ({ ...row, entityType: "pull" as const })),
     ...pullItems.map((row) => ({ ...row, entityType: "pull_item" as const })),
@@ -470,6 +482,7 @@ export class ProviderCanonicalTransaction {
     const current = await this.#client.packs.findUnique({ where: { pack_key: packKey } });
     assertExpectedVersion(input.expectedRowVersion, current?.row_version ?? null);
     if (!current) {
+      await validatePackEvEvidence(this.#client, packKey, data);
       const row = await this.#client.packs.create({ data: { id: randomUUID(), pack_key: packKey, ...data } });
       const range = await appendPromotionRange(this.#client, [{
         entityType: "pack",
@@ -484,13 +497,19 @@ export class ProviderCanonicalTransaction {
     const sourceOrder = data.source_updated_at.getTime()
       - current.source_updated_at.getTime();
     if (sourceOrder < 0 || sameMaterial) return mutableResult(current, null);
+    let changedData: Partial<typeof data> = data;
     if (sourceOrder === 0) {
-      throw new ProviderCanonicalWriteConflictError();
+      if (!await sameSourcePackEvidenceChange(this.#client, packKey, current, data)) {
+        return mutableResult(current, null);
+      }
+      changedData = { attributes: data.attributes };
+    } else {
+      await validatePackEvEvidence(this.#client, packKey, data);
     }
     const nextVersion = current.row_version + 1n;
     const update = await this.#client.packs.updateMany({
       where: { id: current.id, row_version: current.row_version, lifecycle: "active" },
-      data: { ...data, row_version: nextVersion },
+      data: { ...changedData, row_version: nextVersion },
     });
     if (update.count !== 1) throw new ProviderCanonicalWriteConflictError();
     const range = await appendPromotionRange(this.#client, [{

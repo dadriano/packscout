@@ -176,13 +176,15 @@ test("direct child SIGTERM/SIGINT disposition stops supervisor without automatic
   }, new AbortController().signal), "operator_stop");
 });
 
-test("CLI is import-side-effect-free and requires one exact installed non-Clutch provider scope", async () => {
+test("CLI is import-side-effect-free and requires one exact installed provider scope", async () => {
   const keys = ["--organization-id", "organizationId", "--provider-id", "providerId", "--provider-key", "providerKey",
     "--config-id", "configId", "--initial-run-id", "initialRunId", "--operation-id", "operationId", "--operator-id", "operatorId"];
   const args = ["--check-only"];
   for (let i = 0; i < keys.length; i += 2) args.push(keys[i], pins[keys[i + 1]]);
   assert.deepEqual(parseBackfillArguments(args).pins, pins);
-  const invalid = [...args]; invalid[6] = "clutchpacks";
+  const clutch = [...args]; clutch[6] = "clutchpacks";
+  assert.equal(parseBackfillArguments(clutch).pins.providerKey, "clutchpacks");
+  const invalid = [...args]; invalid[6] = "unknown-provider";
   assert.throws(() => parseBackfillArguments(invalid), /ARGUMENTS_INVALID/);
   assert.throws(() => parseBackfillArguments([...args, "--lanes", "2"]), /ARGUMENTS_INVALID/);
   const env = await readBackfillEnvironment({ NODE_ENV: "development",

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import { PrismaClient as ProviderPrismaClient } from "../prisma/generated/provider/index.js";
+import { Prisma, PrismaClient as ProviderPrismaClient } from "../prisma/generated/provider/index.js";
 import {
   ProviderCanonicalImmutableFactConflictError,
   ProviderCanonicalInputError,
@@ -15,9 +15,10 @@ import {
   type PackWriteInput,
 } from "./provider-canonical-contract.ts";
 import { ProviderCanonicalRepository } from "./provider-canonical-repository.ts";
-import { initializeProviderDatabaseIdentity } from "./provider-database.ts";
+import { initializeProviderDatabaseIdentity, type ProviderQueryClient } from "./provider-database.ts";
 import { PrismaProviderWorkerLeaseRepository } from
   "./provider-worker-lease-repository.ts";
+import { resolveProviderFactReferencesBatch } from "./provider-fact-reference-reconciliation.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -50,7 +51,7 @@ function resolveAdminUrl(): URL {
 function providerUrl(adminUrl: URL, databaseName: string): string {
   const result = new URL(adminUrl);
   result.pathname = `/${databaseName}`;
-  result.search = "";
+  // Preserve an explicit Unix-socket host in disposable test infrastructure.
   result.hash = "";
   return result.toString();
 }
@@ -881,6 +882,130 @@ test(
     }
   },
 );
+
+test("reconciliation skips empty catalogs and index-probes 150,000 unrelated facts in bounded batches", {
+  concurrency: false,
+  timeout: 180_000,
+}, async (context) => {
+  if (process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL === undefined) {
+    context.skip("An explicit disposable PostgreSQL test target is required.");
+    return;
+  }
+  const harness = await createProviderHarness();
+  const { client } = harness;
+  try {
+    // 501 facts span two late targets, proving the outer cap is global rather
+    // than 500 per catalog key. Another 50,000 keys never receive catalog rows.
+    await client.$transaction(async (seed) => {
+      await seed.$executeRaw`
+        INSERT INTO pulls (id, pull_key, fact_digest, pack_key, item_count, occurred_at)
+        SELECT md5('synthetic-pull-' || n)::uuid, 'synthetic-pull-' || n, repeat('a', 64),
+          CASE WHEN n <= 251 THEN 'late-pack-a' WHEN n <= 501 THEN 'late-pack-b'
+            ELSE 'missing-pack-' || n END, 1, CURRENT_TIMESTAMP
+        FROM generate_series(1, 50501) AS n
+      `;
+      await seed.$executeRaw`
+        INSERT INTO pull_items (pull_id, ordinal, collectible_key, quantity)
+        SELECT md5('synthetic-pull-' || n)::uuid, 1,
+          CASE WHEN n <= 251 THEN 'late-card-a' WHEN n <= 501 THEN 'late-card-b'
+            ELSE 'missing-card-' || n END, 1
+        FROM generate_series(1, 50501) AS n
+      `;
+      await seed.$executeRaw`
+        INSERT INTO market_events (event_key, fact_digest, event_type, pack_key, collectible_key, occurred_at)
+        SELECT 'synthetic-event-' || n, repeat('b', 64), 'sale'::market_event_type,
+          CASE WHEN n <= 251 THEN 'late-pack-a' WHEN n <= 501 THEN 'late-pack-b'
+            ELSE 'missing-pack-' || n END,
+          CASE WHEN n <= 251 THEN 'late-card-a' WHEN n <= 501 THEN 'late-card-b'
+            ELSE 'missing-card-' || n END, CURRENT_TIMESTAMP
+        FROM generate_series(1, 50501) AS n
+      `;
+      const head = await seed.promotion_ledger.update({
+        where: { singleton_key: true }, data: { last_sequence: { increment: 151_503n } },
+        select: { last_sequence: true },
+      });
+      const first = head.last_sequence - 151_503n + 1n;
+      await seed.$executeRaw`
+        INSERT INTO promotion_changes (sequence, entity_type, entity_id, entity_version, operation, changed_at)
+        SELECT ${first} + row_number() OVER (ORDER BY kind, id) - 1,
+          kind, id, 1, 'upsert'::promotion_operation, CURRENT_TIMESTAMP
+        FROM (
+          SELECT 'pull' AS kind, id FROM pulls
+          UNION ALL SELECT 'pull_item' AS kind, id FROM pull_items
+          UNION ALL SELECT 'market_event' AS kind, id FROM market_events
+        ) AS seeded
+      `;
+    }, { maxWait: 5_000, timeout: 90_000 });
+    await client.$executeRaw`ANALYZE pulls`;
+    await client.$executeRaw`ANALYZE pull_items`;
+    await client.$executeRaw`ANALYZE market_events`;
+    const repository = new ProviderCanonicalRepository(client);
+    const workerId = "integration:reconciliation-index-probe";
+    const lease = await new PrismaProviderWorkerLeaseRepository(client).acquire({
+      role: "import", owner: workerId, leaseMilliseconds: 300_000,
+    });
+    assert.notEqual(lease.kind, "held");
+    if (lease.kind === "held") throw new Error("Synthetic test lease was not acquired.");
+    const authority = { workerId, workerFence: lease.lease.fence };
+    assert.equal((await repository.reconcileFactReferences(authority))?.materialChangeCount, 0);
+    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), 50_501);
+    assert.equal(await client.promotion_changes.count(), 151_503);
+
+    const category = await repository.upsertCategory({
+      categoryKey: "synthetic", parentCategoryId: null, displayName: "Synthetic",
+    });
+    for (const suffix of ["a", "b"]) {
+      await repository.upsertPack({ ...packInput(category.id), packKey: `late-pack-${suffix}` });
+      await repository.upsertCollectible(collectibleInput(category.id, `late-card-${suffix}`, "Late Card", suffix));
+    }
+    for (const expected of [500, 1, 0]) {
+      const result = await repository.reconcileFactReferences(authority);
+      assert.ok(result);
+      assert.deepEqual([
+        result.pullPackCount, result.pullItemCollectibleCount,
+        result.marketEventPackCount, result.marketEventCollectibleCount,
+      ], [expected, expected, expected, expected]);
+      assert.equal(result.materialChangeCount, expected * 4);
+      if (expected > 0) {
+        assert.ok(result.promotionRange);
+        assert.equal(result.promotionRange.last - result.promotionRange.first + 1n, BigInt(expected * 4));
+      } else assert.equal(result.promotionRange, null);
+    }
+    assert.equal(await client.pulls.count({ where: { row_version: 2n } }), 501);
+    assert.equal(await client.pull_items.count({ where: { row_version: 2n } }), 501);
+    assert.equal(await client.market_events.count({ where: { row_version: 3n } }), 501);
+    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), 50_000);
+    assert.equal(await client.pull_items.count({ where: { row_version: 1n } }), 50_000);
+    assert.equal(await client.market_events.count({ where: { row_version: 1n } }), 50_000);
+
+    // Capture the real production statements, then EXPLAIN ANALYZE the drained
+    // no-match case. This is a disposable database, never a source/provider DB.
+    const queries: Prisma.Sql[] = [];
+    const captureClient = {
+      async $queryRaw(query: Prisma.Sql) {
+        if (query.sql.includes("SELECT EXISTS")) return [{ packs: true, collectibles: true }];
+        queries.push(query);
+        return [];
+      },
+    } as unknown as Pick<ProviderQueryClient, "$queryRaw">;
+    await resolveProviderFactReferencesBatch(captureClient);
+    const expectedIndexes = [
+      "pulls_unresolved_pack_key_idx", "pull_items_unresolved_collectible_key_idx",
+      "market_events_unresolved_pack_key_idx", "market_events_unresolved_collectible_key_idx",
+    ];
+    for (const [index, query] of queries.entries()) {
+      const rows = await client.$queryRaw<Readonly<{ "QUERY PLAN": unknown }>[]>(
+        Prisma.sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`,
+      );
+      const plan = JSON.stringify(rows[0]?.["QUERY PLAN"]);
+      assert.ok(plan.includes(expectedIndexes[index]!));
+      assert.doesNotMatch(plan, /"Node Type":"Seq Scan"[^}]*"Relation Name":"(?:pulls|pull_items|market_events)"/u);
+    }
+    context.diagnostic("All four plans used the unresolved-key index; 150,000 unrelated facts remained unchanged.");
+  } finally {
+    await harness.close();
+  }
+});
 
 test(
   "provider fact relationships allow deferred source identities and only monotonic promoted resolution",

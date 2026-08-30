@@ -78,7 +78,7 @@ function adminUrl(): URL {
 function databaseUrl(source: URL, databaseName: string): string {
   const result = new URL(source);
   result.pathname = `/${databaseName}`;
-  result.search = "";
+  // Preserve the explicitly selected Unix socket for isolated PostgreSQL tests.
   result.hash = "";
   return result.toString();
 }
@@ -924,6 +924,79 @@ test("two disposable provider databases overlap while one source failure remains
       clutch.close(),
       ...(courtyard === null ? [] : [courtyard.close()]),
     ]);
+  }
+});
+
+test("a settled reconciliation failure preserves the committed page and reports only safe database diagnostics", async (context) => {
+  if (process.env.PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION !== "1"
+    || process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL === undefined) {
+    context.skip("An explicit disposable PostgreSQL execution-test target is required.");
+    return;
+  }
+  const harness = await createHarness();
+  try {
+    const configVersionId = randomUUID();
+    await new PrismaProviderRuntimeRepository(harness.client).synchronizeConfiguration({
+      centralProviderId: harness.providerId, providerKey: harness.providerKey,
+      configVersionId, configVersionNumber: 1n,
+      configuration: { adapterKey: CLUTCHPACKS_CAPTURE_ADAPTER_KEY },
+      expiresAt: null, scheduleSeconds: 300, nextDueAt: null, synchronizedAt: new Date(),
+    });
+    const runId = await enqueue(harness, configVersionId, 1);
+    let sourceReads = 0;
+    let reconciliationQueries = 0;
+    const source = deferredCatalogSource(async () => {
+      assert.fail("A failed reconciliation must not refetch or request the next source page.");
+    });
+    const secret = "synthetic-private-query-cursor-token";
+    const faultyClient = harness.client.$extends({
+      query: {
+        async $queryRaw({ args, query }) {
+          if ("sql" in args && typeof args.sql === "string"
+            && args.sql.includes("SELECT EXISTS (SELECT 1 FROM packs)")) {
+            reconciliationQueries += 1;
+            throw Object.assign(new Error(secret), { code: "P2028", meta: { query: secret } });
+          }
+          return query(args);
+        },
+      },
+    });
+    const result = await new ProviderManualImportExecutor({
+      database: faultyClient as unknown as ProviderPrismaClient,
+      workerId: "integration:reconciliation-failure", leaseMilliseconds: 30_000,
+      source: {
+        supports: source.supports.bind(source),
+        nextPage(input) { sourceReads += 1; return source.nextPage(input); },
+      },
+    }).executeNextPage();
+    assert.deepEqual(result, {
+      kind: "failed", runId, failureCode: "PROVIDER_IMPORT_DATABASE_TRANSACTION_INVALID",
+    });
+    assert.equal(sourceReads, 1);
+    assert.equal(reconciliationQueries, 1);
+    const run = await harness.client.provider_runs.findUniqueOrThrow({ where: { id: runId } });
+    assert.equal(run.state, "failed");
+    assert.equal(run.page_count, 1);
+    assert.equal(run.accepted_count, 2);
+    assert.equal(run.failure_class, "database");
+    assert.equal(run.failure_summary,
+      "Provider import stopped; stage=fact_reference_reconciliation; category=transaction_invalid.");
+    assert.equal(JSON.stringify(result).includes(secret), false);
+    assert.equal(run.failure_summary.includes(secret), false);
+    assert.notEqual(run.final_cursor_hash, null);
+    const checkpoint = await harness.client.provider_runtime.findUniqueOrThrow({
+      where: { singleton_key: true }, select: { source_cursor: true, source_cursor_hash: true },
+    });
+    assert.deepEqual(run.final_cursor, checkpoint.source_cursor);
+    assert.equal(run.final_cursor_hash, checkpoint.source_cursor_hash);
+    assert.equal(await harness.client.pulls.count(), 1);
+    assert.equal(await harness.client.pull_items.count(), 1);
+    assert.equal(await harness.client.market_events.count(), 1);
+    assert.equal((await harness.client.provider_worker_states.findUniqueOrThrow({
+      where: { worker_role: "import" },
+    })).lease_owner, null);
+  } finally {
+    await harness.close();
   }
 });
 

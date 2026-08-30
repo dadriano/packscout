@@ -59,7 +59,9 @@ function databaseUrl(input: {
   url.pathname = `/${input.databaseName}`;
   url.username = input.roleName;
   url.password = input.password;
+  const socketHost = url.searchParams.get("host");
   url.search = "";
+  if (socketHost?.startsWith("/")) url.searchParams.set("host", socketHost);
   url.hash = "";
   return url.toString();
 }

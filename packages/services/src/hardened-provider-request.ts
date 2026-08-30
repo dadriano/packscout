@@ -1,6 +1,10 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
+  providerSourceResponseLimitDiagnosticSchema,
+  type ProviderSourceResponseLimitDiagnostic,
+} from "@packscout/contracts";
+import {
   requestPinnedProviderHttp,
   type PinnedProviderDestination,
   type PinnedProviderHttpClient,
@@ -23,12 +27,14 @@ export class HardenedProviderRequestError extends Error {
   readonly safeStatus: number | undefined;
   readonly durationMilliseconds: number;
   readonly responseBytes: number;
+  readonly responseLimitDiagnostic: ProviderSourceResponseLimitDiagnostic | undefined;
 
   constructor(
     code: HardenedProviderRequestErrorCode,
     safeStatus?: number,
     durationMilliseconds = 0,
     responseBytes = 0,
+    responseLimitDiagnostic?: ProviderSourceResponseLimitDiagnostic,
   ) {
     super(`hardened_provider_request.${code}`);
     this.name = "HardenedProviderRequestError";
@@ -36,6 +42,8 @@ export class HardenedProviderRequestError extends Error {
     this.safeStatus = safeStatus;
     this.durationMilliseconds = durationMilliseconds;
     this.responseBytes = responseBytes;
+    this.responseLimitDiagnostic = responseLimitDiagnostic === undefined ? undefined
+      : Object.freeze(providerSourceResponseLimitDiagnosticSchema.parse(responseLimitDiagnostic));
   }
 }
 
@@ -332,7 +340,10 @@ async function readBoundedBody(
     const declaredBytes = Number(contentLength);
     if (Number.isFinite(declaredBytes) && declaredBytes > maximumBytes) {
       await cancelBody(response);
-      fail("response_too_large");
+      throw new HardenedProviderRequestError("response_too_large", undefined, 0, 0, {
+        trigger: "declared_content_length", maximumResponseBytes: maximumBytes,
+        ...(Number.isSafeInteger(declaredBytes) ? { reportedResponseBytes: declaredBytes } : {}),
+      });
     }
   }
   const reader = response.body?.getReader();
@@ -346,7 +357,10 @@ async function readBoundedBody(
       receivedBytes += value.byteLength;
       if (receivedBytes > maximumBytes) {
         await reader.cancel().catch(() => undefined);
-        fail("response_too_large");
+        throw new HardenedProviderRequestError("response_too_large", undefined, 0, 0, {
+          trigger: "streamed_body", maximumResponseBytes: maximumBytes,
+          reportedResponseBytes: receivedBytes,
+        });
       }
       chunks.push(value);
     }
@@ -445,6 +459,7 @@ export async function captureHardenedProviderResponse(
         error.safeStatus,
         durationMilliseconds,
         error.responseBytes,
+        error.responseLimitDiagnostic,
       );
     }
     if (isTlsFailure(error)) {

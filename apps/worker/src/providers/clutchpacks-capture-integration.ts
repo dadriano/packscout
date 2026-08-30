@@ -483,7 +483,7 @@ export function translateClutchpacksCapture(input: {
     }));
   const records = Object.freeze([
     ...categories,
-    ...packs.map(packDraft),
+    ...packs.map((candidate) => packDraft(candidate)),
     ...cards.map(collectibleDraft),
     ...providerAccounts,
     ...pulls,

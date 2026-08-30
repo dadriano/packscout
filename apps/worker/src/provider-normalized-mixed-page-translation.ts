@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
-import type {
-  LaunchRecordIdScopeKey,
-  NormalizedProviderObservation,
-  NormalizedProviderObservationPage,
+import {
+  PROVIDER_PACK_EV_EVIDENCE_SCHEMA_VERSION,
+  providerPackEvEvidenceV1Schema,
+  type ProviderPackEvEvidenceV1,
+  type LaunchRecordIdScopeKey,
+  type NormalizedProviderObservation,
+  type NormalizedProviderObservationPage,
 } from "@packscout/contracts";
 import {
   createProviderObservationMapperRegistryFromManifest,
@@ -127,6 +130,10 @@ export function translateProviderNormalizedObservations(input: Readonly<{
     identityNamespaceKey: input.integration.mapper.identityNamespaceKey,
   });
   const packs: CanonicalObservationPackCandidate[] = [];
+  const packEvidence = new Map<
+    CanonicalObservationPackCandidate,
+    ProviderPackEvEvidenceV1
+  >();
   const cards: CanonicalCatalogAssetCandidate[] = [];
   const pulls: CanonicalPullCandidate[] = [];
   const events: CanonicalMarketEventCandidate[] = [];
@@ -158,6 +165,33 @@ export function translateProviderNormalizedObservations(input: Readonly<{
       switch (candidate.candidateKind) {
         case "pack":
           packDraft(candidate);
+          if (
+            observation.kind !== "catalog" ||
+            observation.entity !== "pack" ||
+            observation.providerFacts.kind !== "pack"
+          ) throw new TypeError("pack evidence scope mismatch");
+          packEvidence.set(candidate,
+            providerPackEvEvidenceV1Schema.parse({
+              schemaVersion: PROVIDER_PACK_EV_EVIDENCE_SCHEMA_VERSION,
+              organizationId: input.organizationId,
+              providerId: input.providerId,
+              providerKey: input.integration.providerKey,
+              providerRecordId: candidate.identity.providerRecordId,
+              recordIdScopeKey: observation.providerRecordIdentity.recordIdScopeKey,
+              sourceTypeKey: input.integration.manifest.sourceTypeKey,
+              sourceAdapterVersion: input.integration.manifest.adapterVersion,
+              normalizedContractVersion:
+                input.integration.mapper.normalizedContractVersion,
+              mapperKey: input.integration.mapper.mapperKey,
+              mapperVersion: input.integration.mapper.mapperVersion,
+              identityNamespaceKey: input.integration.mapper.identityNamespaceKey,
+              effectiveAt: observation.effectiveAt,
+              collectedAt: observation.collectedAt,
+              price: observation.providerFacts.price,
+              buybackPercent: observation.providerFacts.buybackPercent,
+              drawCount: observation.providerFacts.drawCount,
+              evInput: observation.providerFacts.evInput,
+            }));
           packs.push(candidate);
           break;
         case "catalog_asset":
@@ -202,7 +236,9 @@ export function translateProviderNormalizedObservations(input: Readonly<{
   return Object.freeze({
     records: Object.freeze([
       ...categories,
-      ...packs.map(packDraft),
+      ...packs.map((candidate) => packDraft(candidate, {
+        evInputEvidence: packEvidence.get(candidate)!,
+      })),
       ...cards.map(collectibleDraft),
       ...pullRecords,
       ...marketEvents,

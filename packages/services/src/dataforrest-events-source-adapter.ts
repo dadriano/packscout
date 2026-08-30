@@ -9,6 +9,7 @@ import {
   type SourceAdapterFailure,
   type SourceAdapterSafeDiagnostic,
   type SourceAdapterManifestV1,
+  type ProviderSourceResponseLimitDiagnostic,
 } from "@packscout/contracts";
 import {
   HardenedProviderRequestError,
@@ -75,6 +76,7 @@ function failedRequest(
   durationMilliseconds = 0,
   responseBytes = 0,
   code: string = failure.code,
+  responseLimitDiagnostic?: ProviderSourceResponseLimitDiagnostic,
 ): UnboundSourceAdapterRequestResult {
   return Object.freeze({
     ok: false,
@@ -84,7 +86,17 @@ function failedRequest(
       severity: failure.disposition === "retryable" ? "warning" : "critical",
       phase: "request_capture",
       code,
-    }) satisfies SourceAdapterSafeDiagnostic]),
+    }) satisfies SourceAdapterSafeDiagnostic, ...(responseLimitDiagnostic === undefined ? [] : [Object.freeze({
+      severity: "warning" as const,
+      phase: "request_capture",
+      code: `response_too_large_${responseLimitDiagnostic.trigger}`,
+      counters: Object.freeze({
+        maximum_response_bytes: responseLimitDiagnostic.maximumResponseBytes,
+        ...(responseLimitDiagnostic.reportedResponseBytes === undefined ? {} : {
+          reported_response_bytes: responseLimitDiagnostic.reportedResponseBytes,
+        }),
+      }),
+    })])]),
   });
 }
 
@@ -489,6 +501,7 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
           error.durationMilliseconds,
           error.responseBytes,
           error.code,
+          error.responseLimitDiagnostic,
         );
       }
       return failedRequest(

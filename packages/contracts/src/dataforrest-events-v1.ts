@@ -22,6 +22,7 @@ import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -42,6 +43,7 @@ export {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -59,6 +61,14 @@ export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
 export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
 export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS = 1_000;
 export const DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS = 100;
+// Only the reviewed Courtyard-v2 profile admits this response budget. Historical
+// profiles retain their exact 8 MiB budget and cursor-version interpretation.
+export const DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES =
+  32 * 1024 * 1024;
+export const DATAFORREST_EVENTS_V1_HISTORICAL_MAXIMUM_JSON_NODES = 480_000;
+// The exact blocked 100-record Courtyard page has 598,207 JSON values. Only
+// this capacity revision admits more; older adapter histories remain unchanged.
+export const DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES = 640_000;
 
 export const dataforrestIdentityNamespaceByProvider =
   providerIdentityNamespaceByLaunchProvider;
@@ -180,11 +190,13 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION
     | typeof DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   options: Readonly<{
     pageLimit?: number;
+    maximumResponseBytes?: number;
     supportedProviders?: typeof dataforrestProviderDeclarations;
   }> = {},
 ) {
@@ -198,7 +210,7 @@ function dataforrestEventsSourceAdapterManifest(
     operatorLabel: "DataForrest Events V1",
     requestBounds: {
       pageLimit: options.pageLimit ?? providerSourceLaunchBounds.pageTargetRecords,
-      maximumResponseBytes: providerSourceLaunchBounds.maximumResponseBytes,
+      maximumResponseBytes: options.maximumResponseBytes ?? providerSourceLaunchBounds.maximumResponseBytes,
       timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
     },
     maximumPlatformRequestCap:
@@ -287,6 +299,19 @@ export const dataforrestCourtyardDistributedSourceAdapterManifest =
     },
   );
 
+/** Larger reviewed byte/graph admission only; Courtyard-v1 native semantics are unchanged. */
+export const dataforrestCourtyardDistributedV2SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      maximumResponseBytes: DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "courtyard",
+      ),
+    },
+  );
+
 /** Phygitals-only native-card interpretation; shared launch-v1 stays immutable. */
 export const dataforrestPhygitalsDistributedSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
@@ -319,9 +344,20 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 ]);
+
+const dataforrestJsonNodeBudgets = new Map<string, number>([
+  ...dataforrestEventsV1SourceAdapterManifests.map((manifest): [string, number] =>
+    [manifest.adapterVersion, DATAFORREST_EVENTS_V1_HISTORICAL_MAXIMUM_JSON_NODES]),
+  [DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION, DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES],
+]);
+/** Exact immutable adapter admission, not a caller-selected or central mutable limit. */
+export function dataforrestEventsJsonNodeBudget(adapterVersion: string): number | null {
+  return dataforrestJsonNodeBudgets.get(adapterVersion) ?? null;
+}
 
 export type DataforrestEventRecordV1 = z.infer<
   typeof dataforrestEventRecordV1Schema
@@ -407,6 +443,7 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION

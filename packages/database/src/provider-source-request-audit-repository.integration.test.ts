@@ -44,7 +44,9 @@ function resolveAdminUrl(): URL {
 function databaseUrl(adminUrl: URL, databaseName: string): string {
   const result = new URL(adminUrl);
   result.pathname = `/${databaseName}`;
+  const socketHost = result.searchParams.get("host");
   result.search = "";
+  if (socketHost?.startsWith("/")) result.searchParams.set("host", socketHost);
   result.hash = "";
   return result.toString();
 }
