@@ -8,6 +8,15 @@ import { providerDataforrestLiveIntegrationRegistry } from "../../apps/worker/sr
 import { backfillDigest, refuseBackfill, type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
 
 export const backfillWorkspaceRoot = fileURLToPath(new URL("../../", import.meta.url));
+export const localBackfillProviderPorts = Object.freeze({ clutchpacks: 55432, courtyard: 55433, collector_crypt: 55434, phygitals: 55435 });
+export function assertLocalBackfillDestination(providerKey: BackfillPins["providerKey"], route: {
+  node: { host: string; port: number; sslMode: string }; target: { databaseName: string };
+}) {
+  if (route.node.host !== "127.0.0.1" || route.node.port !== localBackfillProviderPorts[providerKey] ||
+    route.node.sslMode !== "disable" || route.target.databaseName !== `packscout_${providerKey}`) {
+    refuseBackfill("BACKFILL_LOCAL_PROVIDER_ROUTE_REQUIRED");
+  }
+}
 export async function readBackfillEnvironment(environment: NodeJS.ProcessEnv = process.env) {
   let file: Record<string, string> = {};
   try { file = dotenv.parse(await readFile(new URL("../../.env", import.meta.url))); }
@@ -53,11 +62,7 @@ export async function readBackfillAuthority(central: CentralQueryClient, cipher:
     located.state !== "ready" || located.route.configVersionId !== pins.configId ||
     located.route.target.providerId !== pins.providerId || located.route.target.providerKey !== pins.providerKey ||
     located.route.organizationId !== pins.organizationId) refuseBackfill("BACKFILL_CENTRAL_AUTHORITY_UNAVAILABLE");
-  const localPorts = { courtyard: 55433, collector_crypt: 55434, phygitals: 55435 } as const;
-  if (located.route.node.host !== "127.0.0.1" || located.route.node.port !== localPorts[pins.providerKey] ||
-    located.route.node.sslMode !== "disable" || located.route.target.databaseName !== `packscout_${pins.providerKey}`) {
-    refuseBackfill("BACKFILL_LOCAL_PROVIDER_ROUTE_REQUIRED");
-  }
+  assertLocalBackfillDestination(pins.providerKey, located.route);
   const authority = await new CentralDataforrestSourceAuthorityResolver({ central, credentialCipher: cipher }).resolve({
     providerId: pins.providerId, providerKey: pins.providerKey, configVersionId: config.id,
     configVersionNumber: config.version_number, adapterKey: config.adapter_key,

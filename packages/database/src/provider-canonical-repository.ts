@@ -45,6 +45,10 @@ import {
   providerWorkerLeaseIsLive,
   setProviderImportLeaseContext,
 } from "./provider-worker-lease-repository.ts";
+import {
+  resolveProviderFactReferencesBatch,
+  type ProviderResolvedFactRow,
+} from "./provider-fact-reference-reconciliation.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -64,13 +68,6 @@ interface MutableRow {
   readonly lifecycle: "active" | "retired";
   readonly row_version: bigint;
 }
-
-interface ResolvedFactRow {
-  readonly id: string;
-  readonly row_version: bigint;
-}
-
-const FACT_REFERENCE_RECONCILIATION_LIMIT = 500;
 
 function nullableText(value: string | null, field: string): string | null {
   return value === null ? null : requireNonEmptyText(value, field);
@@ -281,7 +278,7 @@ async function appendPromotionRange(
 
 async function appendResolvedFactChanges(
   client: ProviderQueryClient,
-  rows: readonly (ResolvedFactRow & {
+  rows: readonly (ProviderResolvedFactRow & {
     readonly entityType: "pull" | "pull_item" | "market_event";
   })[],
 ): Promise<PromotionSequenceRange | null> {
@@ -299,78 +296,8 @@ async function appendResolvedFactChanges(
 async function reconcileFactReferencesBatch(
   client: ProviderQueryClient,
 ): Promise<FactReferenceReconciliationResult> {
-  const pulls = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM pulls AS fact
-      JOIN packs AS target ON target.pack_key = fact.pack_key
-      WHERE fact.pack_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE pulls AS fact
-    SET pack_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const pullItems = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM pull_items AS fact
-      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
-      WHERE fact.collectible_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE pull_items AS fact
-    SET collectible_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const marketEventPacks = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM market_events AS fact
-      JOIN packs AS target ON target.pack_key = fact.pack_key
-      WHERE fact.pack_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE market_events AS fact
-    SET pack_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
-  const marketEventCollectibles = await client.$queryRaw<ResolvedFactRow[]>(ProviderPrisma.sql`
-    WITH candidates AS (
-      SELECT fact.id, target.id AS target_id
-      FROM market_events AS fact
-      JOIN collectibles AS target ON target.collectible_key = fact.collectible_key
-      WHERE fact.collectible_id IS NULL
-      ORDER BY fact.id
-      LIMIT ${FACT_REFERENCE_RECONCILIATION_LIMIT}
-      FOR UPDATE OF fact SKIP LOCKED
-    )
-    UPDATE market_events AS fact
-    SET collectible_id = candidates.target_id,
-        row_version = fact.row_version + 1,
-        updated_at = CURRENT_TIMESTAMP
-    FROM candidates
-    WHERE fact.id = candidates.id
-    RETURNING fact.id, fact.row_version
-  `);
+  const { pulls, pullItems, marketEventPacks, marketEventCollectibles } =
+    await resolveProviderFactReferencesBatch(client);
   const promotionRange = await appendResolvedFactChanges(client, [
     ...pulls.map((row) => ({ ...row, entityType: "pull" as const })),
     ...pullItems.map((row) => ({ ...row, entityType: "pull_item" as const })),

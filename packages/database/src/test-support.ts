@@ -197,7 +197,9 @@ function resolveAdminDatabaseUrl(): URL {
 function databaseUrlFor(adminUrl: URL, databaseName: string): string {
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
+  const socketHost = databaseUrl.searchParams.get("host");
   databaseUrl.search = "";
+  if (socketHost?.startsWith("/")) databaseUrl.searchParams.set("host", socketHost);
   databaseUrl.hash = "";
   return databaseUrl.toString();
 }

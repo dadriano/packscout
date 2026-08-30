@@ -20,12 +20,16 @@ import {
   ProviderCaptureSourceError,
   type ProviderCapturePageSourceInput,
 } from "./provider-capture-source-contract.ts";
-import { ProviderDataforrestSourceError } from
-  "./provider-dataforrest-mixed-page-source.ts";
 import {
   PROVIDER_MANUAL_IMPORT_MAXIMUM_PAGES,
   providerManualImportPageNumberWithinBound,
 } from "./provider-manual-import-bounds.ts";
+import {
+  classifyProviderManualImportFailure,
+  providerManualImportTerminalDiagnostic,
+  type ProviderManualImportFailureDiagnostic,
+  type ProviderManualImportStage,
+} from "./provider-manual-import-diagnostics.ts";
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
@@ -57,13 +61,6 @@ export type ProviderManualImportInterruptionFailureCode =
 export interface ProviderManualImportPageSource {
   supports(adapterKey: string, providerKey: string): boolean;
   nextPage(input: ProviderCapturePageSourceInput): Promise<unknown>;
-}
-
-function safeFailureCode(error: unknown): string {
-  return error instanceof ProviderCaptureSourceError
-    || error instanceof ProviderDataforrestSourceError
-    ? error.code
-    : "PROVIDER_IMPORT_EXECUTION_FAILED";
 }
 
 /** Selects exactly one installed source implementation from cached authority. */
@@ -254,6 +251,7 @@ export class ProviderManualImportExecutor {
     const fence = acquired.lease.fence;
     let runId: string | null = null;
     let retainLeaseForNextPage = false;
+    let stage: ProviderManualImportStage = "run_preparation";
     try {
       const recovery = await runs.recoverActive({
         recoveryRunId: randomUUID(),
@@ -375,6 +373,7 @@ export class ProviderManualImportExecutor {
         if (signal.aborted) {
           return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
+        stage = "lease_renewal";
         const renewed = await leases.renew({
           role: "import",
           owner: this.#workerId,
@@ -388,6 +387,7 @@ export class ProviderManualImportExecutor {
             failureCode: "PROVIDER_IMPORT_LEASE_LOST",
           };
         }
+        stage = "source_read";
         const page = await this.dependencies.source.nextPage({
           authority: {
             providerId: runtime.providerId,
@@ -403,7 +403,9 @@ export class ProviderManualImportExecutor {
           sourceCheckpointFingerprint: checkpointFingerprint,
           signal,
         });
+        stage = "page_validation";
         const validatedPage = validateProviderMixedPage(page);
+        stage = "page_commit";
         const committed = await pages.commit({
           workerId: this.#workerId,
           page,
@@ -422,6 +424,7 @@ export class ProviderManualImportExecutor {
         if (signal.aborted) {
           return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
+        stage = "lease_renewal";
         const firstReconciliationLease = await leases.renew({
           role: "import",
           owner: this.#workerId,
@@ -435,6 +438,7 @@ export class ProviderManualImportExecutor {
             failureCode: "PROVIDER_IMPORT_LEASE_LOST",
           };
         }
+        stage = "fact_reference_reconciliation";
         let reconciliation = await canonical.reconcileFactReferences({
           workerId: this.#workerId,
           workerFence: fence,
@@ -468,6 +472,7 @@ export class ProviderManualImportExecutor {
               "PROVIDER_CAPTURE_ABORTED",
             );
           }
+          stage = "lease_renewal";
           const reconciliationLease = await leases.renew({
             role: "import",
             owner: this.#workerId,
@@ -481,6 +486,7 @@ export class ProviderManualImportExecutor {
               failureCode: "PROVIDER_IMPORT_LEASE_LOST",
             };
           }
+          stage = "fact_reference_reconciliation";
           const nextReconciliation = await canonical.reconcileFactReferences({
             workerId: this.#workerId,
             workerFence: fence,
@@ -512,6 +518,7 @@ export class ProviderManualImportExecutor {
                 "PROVIDER_CAPTURE_ABORTED",
               );
             }
+            stage = "lease_renewal";
             const quarantineLease = await leases.renew({
               role: "import",
               owner: this.#workerId,
@@ -525,6 +532,7 @@ export class ProviderManualImportExecutor {
                 failureCode: "PROVIDER_IMPORT_LEASE_LOST",
               };
             }
+            stage = "quarantine_reconciliation";
             const quarantineReconciliation =
               await historicalFactQuarantines.reconcileBatch({
                 runId,
@@ -555,6 +563,7 @@ export class ProviderManualImportExecutor {
             }
           }
         }
+        stage = "run_finish";
         const finished = await runs.finish({
           runId,
           workerId: this.#workerId,
@@ -609,10 +618,11 @@ export class ProviderManualImportExecutor {
         "PROVIDER_IMPORT_PAGE_LIMIT_EXCEEDED",
       );
     } catch (error) {
+      const diagnostic = classifyProviderManualImportFailure(error, stage);
       if (runId === null) {
-        return { kind: "failed", runId: null, failureCode: safeFailureCode(error) };
+        return { kind: "failed", runId: null, failureCode: diagnostic.failureCode };
       }
-      return await this.failRun(runs, runId, fence, safeFailureCode(error));
+      return await this.failRun(runs, runId, fence, diagnostic.failureCode, diagnostic);
     } finally {
       if (!retainLeaseForNextPage) {
         await leases.release({
@@ -629,6 +639,8 @@ export class ProviderManualImportExecutor {
     runId: string,
     fence: bigint,
     failureCode: string,
+    diagnostic: ProviderManualImportFailureDiagnostic =
+      providerManualImportTerminalDiagnostic(failureCode),
   ): Promise<ProviderManualImportExecutionResult> {
     const finished = await runs.finish({
       runId,
@@ -636,8 +648,8 @@ export class ProviderManualImportExecutor {
       workerFence: fence,
       state: "failed",
       failureCode,
-      failureClass: "source",
-      failureSummary: "The provider import stopped with a bounded source failure.",
+      failureClass: diagnostic.failureClass,
+      failureSummary: diagnostic.failureSummary,
       correlationId: randomUUID(),
       finishedAt: new Date(),
     });

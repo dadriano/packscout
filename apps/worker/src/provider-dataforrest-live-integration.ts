@@ -1,7 +1,7 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
-  dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   launchProviderKeySchema,
   sourceAdapterManifestV1Schema,
@@ -97,7 +97,7 @@ export const providerDataforrestLiveIntegrationRegistry =
     ),
     createProviderDataforrestLiveIntegration(
       "courtyard",
-      dataforrestCourtyardDistributedSourceAdapterManifest,
+      dataforrestCourtyardDistributedV2SourceAdapterManifest,
     ),
     createProviderDataforrestLiveIntegration(
       "collector_crypt",

@@ -10,6 +10,7 @@ import {
 } from "./provider-local-evidence.ts";
 import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
 import { providerMixedPageDigest } from "./provider-mixed-page-contract.ts";
+import { lockProviderWorkerLease, providerWorkerLeaseIsLive } from "./provider-worker-lease-repository.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -430,8 +431,14 @@ export class PrismaAdminProviderRuntimeRepository {
     /** Recovery callers pin the saved checkpoint; ordinary UI callers may omit it. */
     readonly expectedCursorFingerprint?: string | null;
     readonly requireNoActiveRun?: boolean;
+    /** Optional recovery authority, checked atomically with a new queue write. */
+    readonly expectedImportLease?: { readonly owner: string; readonly fence: bigint };
   }): Promise<AdminRunNowPersistenceResult> {
     return this.database.$transaction(async (transaction) => {
+      // Match worker lock ordering. The lease lock spans the runtime checks
+      // and queue write, closing expiry/foreign-owner gaps after preflight.
+      const importLease = input.expectedImportLease === undefined ? null
+        : await lockProviderWorkerLease(transaction, "import");
       const runtime = await lockRuntime(transaction);
       const [clock] = await transaction.$queryRaw<Array<{ now: Date }>>`
         select clock_timestamp() as now
@@ -486,6 +493,10 @@ export class PrismaAdminProviderRuntimeRepository {
           commandId: existingCommand.id,
           correlationId: existingCommand.correlation_id,
         };
+      }
+      if (input.expectedImportLease !== undefined && (importLease === null
+        || !providerWorkerLeaseIsLive({ ...importLease, database_now: clock.now }, input.expectedImportLease))) {
+        return conflict("runtime_unavailable");
       }
       if (runtime.state_generation !== input.expectedGeneration) {
         return conflict("generation_conflict");

@@ -10,6 +10,7 @@ import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -1031,15 +1032,62 @@ test("Courtyard native profile refuses 101 records and over-8-MiB bodies before 
   }
 });
 
+test("Courtyard v2 admits its exact larger body budget through capture, interpretation, native evidence and canonical validation", async () => {
+  const manifest = dataforrestCourtyardDistributedV2SourceAdapterManifest;
+  const paddedNative = { asset: { title: "Card 0" }, protected_padding: "" };
+  const source = sourcePage({ cursor: "larger-budget-checkpoint", continuation: "continue",
+    records: Array.from({ length: 100 }, (_, index) => courtyardNativeCard(`large-${index}`, index === 0 ? paddedNative : {
+      asset: { title: `Card ${index}` }, protected_padding: "",
+    })),
+  });
+  paddedNative.protected_padding = "x".repeat(manifest.requestBounds.maximumResponseBytes - Buffer.byteLength(JSON.stringify(source)));
+  assert.equal(Buffer.byteLength(JSON.stringify(source)), manifest.requestBounds.maximumResponseBytes);
+  const fixture = courtyardNativeFixture([source,
+    sourcePage({ cursor: "larger-budget-head", continuation: "head", records: [] }),
+  ], manifest);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })));
+  assert.equal(first.records.length, 100);
+  assert.equal(first.records.every((record) => record.disposition !== "quarantine" && record.entityType === "collectible"), true);
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  assert.equal(fixture.terminalizations[0]?.outcome.measurements.responseBytes, manifest.requestBounds.maximumResponseBytes);
+  assert.equal(JSON.stringify(first.records).includes("protected_padding"), false);
+  const cursor = first.nextCursor as Record<string, CanonicalJsonValue>;
+  assert.equal(cursor.adapterVersion, manifest.adapterVersion);
+  const crossed = { ...cursor, adapterVersion: dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion };
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority, pageNumber: 2,
+    checkpoint: crossed, checkpointFingerprint: providerMixedCursorFingerprint(crossed),
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID");
+  assert.equal(fixture.requestedUrls.length, 1);
+  const second = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority,
+    pageNumber: 2, checkpoint: first.nextCursor, checkpointFingerprint: first.nextCursorFingerprint,
+  })));
+  assert.equal(second.continuation, "head");
+  assert.equal(fixture.requestedUrls[1]?.searchParams.get("cursor"), "larger-budget-checkpoint");
+
+  paddedNative.protected_padding += "x";
+  const rejected = courtyardNativeFixture([source], manifest);
+  await assert.rejects(rejected.source.nextPage(sourceInput({ authority: rejected.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === "PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE");
+  assert.equal(rejected.translations.length, 0);
+  assert.equal(rejected.terminalizations[0]?.outcome.measurements.responseBytes, 0);
+  assert.deepEqual(rejected.terminalizations[0]?.outcome.diagnostics[1], {
+    severity: "warning", phase: "request_capture", code: "response_too_large_streamed_body",
+    counters: { maximum_response_bytes: manifest.requestBounds.maximumResponseBytes,
+      reported_response_bytes: manifest.requestBounds.maximumResponseBytes + 1 },
+  });
+});
+
 test("Courtyard native profile preserves canonical pull and event identity and historical card behavior", async () => {
   const pages = [];
-  for (const manifest of [dataforrestLaunchDistributedSourceAdapterManifest, dataforrestCourtyardDistributedSourceAdapterManifest]) {
+  for (const manifest of [dataforrestLaunchDistributedSourceAdapterManifest, dataforrestCourtyardDistributedSourceAdapterManifest,
+    dataforrestCourtyardDistributedV2SourceAdapterManifest]) {
     const fixture = courtyardNativeFixture([sourcePage({ cursor: "parity", continuation: "head",
       records: courtyardRecords().filter((record) => record.stream !== "catalog"),
     })], manifest);
     pages.push(validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }))));
   }
   assert.deepEqual(pages[0]!.records, pages[1]!.records);
+  assert.deepEqual(pages[1]!.records, pages[2]!.records);
   assert.equal(pages[1]!.records.some(({ kind }) => kind === "pull"), true);
   assert.equal(pages[1]!.records.some(({ kind }) => kind === "market_event"), true);
   const historical = courtyardNativeFixture([sourcePage({ cursor: "historical", continuation: "head", records: [
