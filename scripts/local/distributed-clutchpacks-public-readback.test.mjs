@@ -132,6 +132,49 @@ test("sold-out historical EV remains visible as history but never ranks", () => 
   assert.throws(() => verifyLocalClutchpacksPublicReadback(readback([history], [history])), refused);
 });
 
+test("restocked packs retain sold-out EV without ranking until a newer valid calculation", () => {
+  const history = row("pack-history", -100, "sold_out");
+  history.evEstimates.packScout = {
+    ...history.evEstimates.packScout, status: "sold_out_historical",
+    soldOutAt: "2026-08-30T00:20:00.000Z", expiresAt: null,
+  };
+  const prior = displayed(history);
+  const restocked = unavailable("pack-history");
+  restocked.evEstimates.packScout.calculatedAt = "2026-08-30T00:30:00.000Z";
+  const retained = { ...restocked, evEstimates: { ...restocked.evEstimates,
+    packScout: presentLastKnownPackScoutEvV3({
+      estimate: prior.evEstimates.packScout, calculationPriceUsdMinor: 10_000,
+      referenceTimeIso: new Date(NOW).toISOString(),
+      latestUnavailableReason: "SOURCE_EVIDENCE_UNAVAILABLE",
+    }) } };
+  const eligible = row("pack-eligible", -900);
+  const input = { ...readback([restocked, eligible], [eligible], [retained, eligible]),
+    previousV3Rows: [prior] };
+  assert.deepEqual(verifyLocalClutchpacksPublicReadback(input), {
+    manifestRepackCount: 2, v3RepackCount: 2, knownEstimateCount: 2,
+    agedEstimateCount: 0, dashboardOpportunityCount: 1,
+  });
+  const displayedEv = input.v3List.data.rows[0].evEstimates.packScout;
+  assert.deepEqual(displayedEv.metrics, history.evEstimates.packScout.metrics);
+  assert.equal(displayedEv.calculatedAt, history.evEstimates.packScout.calculatedAt);
+  assert.equal(displayedEv.historicalSoldOutAt, history.evEstimates.packScout.soldOutAt);
+  assert.throws(() => verifyLocalClutchpacksPublicReadback({
+    ...readback([restocked, eligible], [retained, eligible], [retained, eligible]),
+    previousV3Rows: [prior],
+  }), refused);
+
+  const recalculated = row("pack-history", -500);
+  Object.assign(recalculated.evEstimates.packScout, {
+    calculatedAt: "2026-08-30T00:45:00.000Z",
+    dataAsOf: { state: "known", observedAt: "2026-08-30T00:40:00.000Z" },
+    expiresAt: "2026-08-30T01:40:00.000Z",
+  });
+  const restored = { ...readback([recalculated, eligible], [recalculated, eligible]),
+    previousV3Rows: [retained] };
+  assert.equal(verifyLocalClutchpacksPublicReadback(restored).dashboardOpportunityCount, 2);
+  assert.equal(restored.v3List.data.rows[0].evEstimates.packScout.historicalSoldOutAt, null);
+});
+
 test("same IDs with missing or changed published EV fail readback", () => {
   const planned = row("pack-a", -100);
   for (const actual of [unavailable("pack-a"), row("pack-a", -200)]) {

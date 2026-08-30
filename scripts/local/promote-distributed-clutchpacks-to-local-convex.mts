@@ -36,6 +36,8 @@ import {
   validateProviderPromotionReceipt,
 } from "@packscout/services";
 import { api } from "../../convex/_generated/api.js";
+import { withLocalConvexEvReady } from "./local-convex-ev-migration.mts";
+import { createLocalConvexEvMigrationClient } from "./local-convex-ev-migration-client.mts";
 import {
   parseEnvironmentFile,
   readLocalConvexConfiguration,
@@ -713,6 +715,16 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
 } = {}): Promise<void> {
   dotenv.config({ path: path.join(repositoryRoot, ".env") });
   const local = await readLocalConvexConfiguration();
+  // Before any provider/manifest publication or authority installation. A
+  // legacy public snapshot being readable does not mean retention is ready.
+  return await withLocalConvexEvReady(await createLocalConvexEvMigrationClient(local),
+    () => promoteReadyDistributedClutchpacks(local, options));
+}
+
+async function promoteReadyDistributedClutchpacks(
+  local: Awaited<ReturnType<typeof readLocalConvexConfiguration>>,
+  options: { readonly checkOnly?: boolean },
+): Promise<void> {
   const baseUrl = loopbackSiteUrl(local.childEnvironment);
   const centralUrl = centralDatabaseUrl(process.env);
   const key = credentialKey(process.env);

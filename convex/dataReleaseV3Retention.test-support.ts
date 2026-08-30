@@ -48,6 +48,12 @@ export async function readRetentionDetail(t: RetentionTest, release: number,
 /** Simulates a pre-retention deployment, never changes immutable publications. */
 export async function removeDerivedRetentionForLegacyTest(t: RetentionTest): Promise<void> {
   await t.run(async (ctx) => {
+    for (const release of await ctx.db.query("dataReleaseV3Releases").collect()) {
+      await ctx.db.patch("dataReleaseV3Releases", release._id, { evFactsRequired: undefined });
+    }
+    for (const set of await ctx.db.query("dataReleaseV3EvFactSets").collect()) {
+      await ctx.db.patch("dataReleaseV3EvFactSets", set._id, { source: "backfill" });
+    }
     for (const table of ["dataReleaseV3RetainedEv", "dataReleaseV3EvRetentionChanges",
       "dataReleaseV3EvRetentionTransitions"] as const) {
       for (const row of await ctx.db.query(table).collect()) await ctx.db.delete(table, row._id);

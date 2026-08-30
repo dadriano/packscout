@@ -7,6 +7,7 @@ import { evFactsFromDetail, loadEvFactSet, loadReleaseEvFacts, sealEvFactSet } f
 import { dataReleaseV3SearchRowMatchesDetail, MAX_DATA_RELEASE_V3_REPACKS,
   MAX_ROWS_PER_DATA_RELEASE_V3_SHARD, type DataReleaseV3SearchRow } from "./dataReleaseV3Search";
 import { activateRetainedEv } from "./dataReleaseV3RetainedEv";
+import { loadEvMigrationState, usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
 import { refuseProductionDataRelease } from "./productionDataReleaseErrors";
 
 const MAX_BACKFILL_PAGE_ROWS = 32;
@@ -133,9 +134,10 @@ export const initializeActiveRetention = internalMutation({
     if (target.active !== args.publicReleaseId || state.generation !== args.expectedGeneration ||
         target.active !== args.expectedActivePublicReleaseId || target.previous !== args.expectedPreviousPublicReleaseId) return refuse();
     if (state.retainedEvTransitionId !== undefined || state.retainedEvTransitionDirection !== undefined) {
-      if (state.retainedEvTransitionId === undefined || state.retainedEvTransitionDirection === undefined) return refuse();
+      if (!(await loadEvMigrationState(ctx)).initialized) return refuse();
       return { initialized: true, publicReleaseId: args.publicReleaseId, generation: state.generation };
     }
+    if (!(await usesLegacyEvSnapshot(ctx, target.release, state))) return refuse();
     if (state.terminalOperationId === null) return refuse();
     const operation = await ctx.db.query("dataReleaseV3Operations")
       .withIndex("by_operation_id", (index) => index.eq("operationId", state.terminalOperationId!)).unique();
@@ -155,6 +157,11 @@ export const initializeActiveRetention = internalMutation({
     if (state.previousReleaseId !== null && previous === null) return refuse();
     const retained = await activateRetainedEv(ctx, { previousRelease: previous, nextRelease: target.release,
       seedPrevious: true, operationId: `last-known-ev-initialization:${state.terminalOperationId}` });
+    // Derived one-way cutover markers are outside immutable publication hashes.
+    // Losing both pointer fields later must never re-enable the legacy reader.
+    for (const release of previous === null ? [target.release] : [previous, target.release]) {
+      await ctx.db.patch("dataReleaseV3Releases", release._id, { evFactsRequired: true });
+    }
     await ctx.db.patch("activeDataReleaseV3State", state._id, retained);
     return { initialized: true, publicReleaseId: args.publicReleaseId, generation: state.generation };
   },

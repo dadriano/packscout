@@ -185,17 +185,31 @@ describe("activation-owned last valid EV", () => {
     }
   });
 
-  test("legacy active valid values are visible immediately and seed the first next activation", async () => {
+  test("legacy history seeds the next activation and rollback cannot re-enable snapshot reads after pointer loss", async () => {
     const t = convexTest(schema, modules);
     await activateRetentionRelease(t, await stageRetentionRelease(t, 1, [buildV3Detail()]), null);
     await removeDerivedRetentionForLegacyTest(t);
-    expect((await readRetentionDetail(t, 1, muchLater)).evEstimates.packScout.status).toBe("last_known");
+    expect((await readRetentionDetail(t, 1, muchLater)).evEstimates.packScout).toEqual(buildV3Detail().evEstimates.packScout);
     expect(await t.run((ctx) => ctx.db.query("dataReleaseV3RetainedEv").collect())).toEqual([]);
     await activateRetentionRelease(t, await stageRetentionRelease(t, 2, [unavailableRetentionDetail()]), 1);
+    expect(await t.run(async (ctx) => (await ctx.db.query("dataReleaseV3Releases").collect())
+      .map((release) => release.evFactsRequired))).toEqual([true, true]);
     expect((await readRetentionDetail(t, 2, muchLater)).evEstimates.packScout.status).toBe("last_known");
     await t.mutation(internal.dataReleaseV3Lifecycle.rollback,
       await v3Body(v3RollbackRequest(retentionReleaseId(2), retentionReleaseId(1))));
     expect((await readRetentionDetail(t, 1, muchLater)).evEstimates.packScout.status).toBe("last_known");
+    await t.run(async (ctx) => {
+      const state = await ctx.db.query("activeDataReleaseV3State").unique();
+      await ctx.db.patch("activeDataReleaseV3State", state!._id,
+        { retainedEvTransitionId: undefined, retainedEvTransitionDirection: undefined });
+    });
+    for (const response of await Promise.all([
+      t.query(api.publicRepacksV3.getPublicRepackV3, { publicReleaseId: retentionReleaseId(1),
+        publicRepackId: V3_REPACK_ID_A, currentTime: muchLater }),
+      t.query(api.publicRepacksV3.listPublicRepacksV3, { currentTime: muchLater }),
+      t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: muchLater }),
+    ])) expect(response).toMatchObject({ ok: false, code: "RELEASE_UNAVAILABLE" });
+    await expect(t.query(internal.dataReleaseV3EvMigrationState.migrationState, {})).rejects.toThrow();
   });
 
   test("sold-out history remains visible after expiry without becoming an opportunity", async () => {

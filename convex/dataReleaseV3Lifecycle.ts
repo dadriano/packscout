@@ -549,6 +549,7 @@ export const start = internalMutation({
     await ctx.db.insert("dataReleaseV3Releases", {
       publicReleaseId: request.publicReleaseId,
       releaseFingerprint: request.releaseFingerprint,
+      evFactsRequired: true,
       lifecycle: "staging",
       methodVersion: request.manifest.methodVersion,
       confidencePolicyVersion: request.manifest.confidencePolicyVersion,
@@ -1177,6 +1178,13 @@ export const activate = internalMutation({
       seedPrevious: state?.retainedEvTransitionId === undefined,
       operationId: request.operationId,
     });
+    // Seeding legacy history is also a one-way reader cutover. Rollback must
+    // not make this predecessor eligible for snapshot reads again.
+    if (state?.retainedEvTransitionId === undefined && previousRelease !== null &&
+        previousRelease.publicEvPolicyVersion === PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 &&
+        previousRelease.evFactsRequired === undefined) {
+      await ctx.db.patch("dataReleaseV3Releases", previousRelease._id, { evFactsRequired: true });
+    }
     const core = {
       generation: (state?.generation ?? 0) + 1,
       activeReleaseId: release._id,

@@ -33,6 +33,7 @@ import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
 import type * as dataReleaseV3DisplayedRepacks from "../dataReleaseV3DisplayedRepacks.js";
 import type * as dataReleaseV3EvFacts from "../dataReleaseV3EvFacts.js";
 import type * as dataReleaseV3EvFactsBackfill from "../dataReleaseV3EvFactsBackfill.js";
+import type * as dataReleaseV3EvMigrationState from "../dataReleaseV3EvMigrationState.js";
 import type * as dataReleaseV3Lifecycle from "../dataReleaseV3Lifecycle.js";
 import type * as dataReleaseV3Read from "../dataReleaseV3Read.js";
 import type * as dataReleaseV3RetainedEv from "../dataReleaseV3RetainedEv.js";
@@ -122,6 +123,7 @@ declare const fullApi: ApiFromModules<{
   dataReleaseV3DisplayedRepacks: typeof dataReleaseV3DisplayedRepacks;
   dataReleaseV3EvFacts: typeof dataReleaseV3EvFacts;
   dataReleaseV3EvFactsBackfill: typeof dataReleaseV3EvFactsBackfill;
+  dataReleaseV3EvMigrationState: typeof dataReleaseV3EvMigrationState;
   dataReleaseV3Lifecycle: typeof dataReleaseV3Lifecycle;
   dataReleaseV3Read: typeof dataReleaseV3Read;
   dataReleaseV3RetainedEv: typeof dataReleaseV3RetainedEv;

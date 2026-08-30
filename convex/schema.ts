@@ -1626,6 +1626,8 @@ export default defineSchema({
   dataReleaseV3Releases: defineTable({
     publicReleaseId: v.string(),
     releaseFingerprint: sha256Validator,
+    // Absent only on pre-cutover releases; new releases require compact EV facts.
+    evFactsRequired: v.optional(v.literal(true)),
     lifecycle: v.union(
       v.literal("staging"),
       v.literal("complete"),
@@ -1788,7 +1790,8 @@ export default defineSchema({
     toReleaseId: v.id("dataReleaseV3Releases"),
     changeCount: v.number(),
     changesSha256: v.string(),
-  }),
+  }).index("by_from_release_id", ["fromReleaseId"])
+    .index("by_to_release_id", ["toReleaseId"]),
 
   dataReleaseV3EvRetentionChanges: defineTable({
     transitionId: v.id("dataReleaseV3EvRetentionTransitions"),

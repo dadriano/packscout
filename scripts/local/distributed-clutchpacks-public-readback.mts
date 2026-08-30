@@ -127,8 +127,12 @@ export function verifyLocalClutchpacksPublicReadback(input: {
     canonicalJson(projection(row)) !== canonicalJson(expectedById.get(row.publicRepackId)))) {
     return refuse();
   }
-  const eligible = expectedRows.filter((row) => row.availability === "available" &&
-    row.evEstimates.packScout.status !== "unavailable");
+  const eligible = expectedRows.filter((row) => {
+    const estimate = row.evEstimates.packScout;
+    return row.availability === "available" &&
+      (estimate.status === "current" ||
+        (estimate.status === "last_known" && estimate.historicalSoldOutAt === null));
+  });
   const ranked = eligible.sort((left, right) => {
     const leftEv = left.evEstimates.packScout;
     const rightEv = right.evEstimates.packScout;

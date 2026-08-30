@@ -191,16 +191,22 @@ export async function activateRetainedEv(ctx: MutationCtx, input: {
   return { retainedEvTransitionId: transitionId, retainedEvTransitionDirection: "forward" };
 }
 
-/** Reverse exactly the immediately preceding activation, including a repeated rollback. */
-export async function rollbackRetainedEv(ctx: MutationCtx,
-  state: Doc<"activeDataReleaseV3State">): Promise<Partial<RetentionPointer>> {
-  if (state.retainedEvTransitionId === undefined && state.retainedEvTransitionDirection === undefined) return {};
+/** A strict reader may never mistake a missing or partial journal pointer for legacy state. */
+export async function loadRetainedEvPointer(ctx: Pick<QueryCtx, "db">,
+  state: Doc<"activeDataReleaseV3State">) {
   if (state.retainedEvTransitionId === undefined || state.retainedEvTransitionDirection === undefined) return refuse();
   const transition = await ctx.db.get("dataReleaseV3EvRetentionTransitions", state.retainedEvTransitionId);
   const forward = state.retainedEvTransitionDirection === "forward";
   if (transition === null ||
       state.activeReleaseId !== (forward ? transition.toReleaseId : transition.fromReleaseId) ||
       state.previousReleaseId !== (forward ? transition.fromReleaseId : transition.toReleaseId)) return refuse();
+  return { transition, forward };
+}
+
+/** Shared rollback and migration-readiness proof; only compact journal records are read. */
+export async function loadRetainedEvTransition(ctx: Pick<QueryCtx, "db">,
+  state: Doc<"activeDataReleaseV3State">) {
+  const { transition, forward } = await loadRetainedEvPointer(ctx, state);
   const rows = await ctx.db.query("dataReleaseV3EvRetentionChanges")
     .withIndex("by_transition_id", (index) => index.eq("transitionId", transition._id))
     .take(MAX_RETAINED_EV_TRANSITION_CHANGES + 1);
@@ -211,6 +217,14 @@ export async function rollbackRetainedEv(ctx: MutationCtx,
   if (changes.length !== transition.changeCount ||
       new Set(changes.map(scopeKey)).size !== changes.length ||
       await sha256CanonicalJson(HASH_DOMAIN, changes) !== transition.changesSha256) return refuse();
+  return { transition, forward, changes };
+}
+
+/** Reverse exactly the immediately preceding activation, including a repeated rollback. */
+export async function rollbackRetainedEv(ctx: MutationCtx,
+  state: Doc<"activeDataReleaseV3State">): Promise<Partial<RetentionPointer>> {
+  if (state.retainedEvTransitionId === undefined && state.retainedEvTransitionDirection === undefined) return {};
+  const { transition, forward, changes } = await loadRetainedEvTransition(ctx, state);
   for (const change of changes) {
     const stored = await loadRetainedEv(ctx, change);
     if (canonicalJson(stored?.value ?? null) !== canonicalJson(forward ? change.after : change.before)) return refuse();

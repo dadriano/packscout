@@ -9,6 +9,14 @@ import { activateRetentionRelease, removeDerivedRetentionForLegacyTest, retentio
 
 const modules = import.meta.glob("./**/*.ts");
 
+async function immutableReleases(t: RetentionTest) {
+  return t.run(async (ctx) => (await ctx.db.query("dataReleaseV3Releases").collect()).map((release) => {
+    const immutable = { ...release };
+    delete immutable.evFactsRequired;
+    return immutable;
+  }));
+}
+
 async function simulateLegacyFacts(t: RetentionTest) {
   await removeDerivedRetentionForLegacyTest(t);
   await t.run(async (ctx) => {
@@ -33,7 +41,7 @@ async function page(t: RetentionTest, status: Awaited<ReturnType<typeof progress
 }
 
 describe("one-time bounded compact EV migration", () => {
-  test("stable 32-row pages replay safely, remain private until complete, and preserve immutable releases", async () => {
+  test("stable 32-row pages preserve legacy reads and switch only after retention initialization", async () => {
     const t = convexTest(schema, modules);
     const details = Array.from({ length: 65 }, (_, index) => buildV3Detail({
       publicRepackId: `00000000-0000-5000-8000-${(40_000 + index).toString().padStart(12, "0")}`,
@@ -41,15 +49,17 @@ describe("one-time bounded compact EV migration", () => {
     const plan = await stageRetentionRelease(t, 1, details);
     await activateRetentionRelease(t, plan, null);
     await simulateLegacyFacts(t);
-    const before = await t.run((ctx) => ctx.db.query("dataReleaseV3Releases").collect());
+    const before = await immutableReleases(t);
+    const legacy = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+      { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 });
+    expect(legacy.ok).toBe(true);
     const initial = await progress(t);
     expect(initial).toMatchObject({ complete: false, count: 0, nextCursor: null });
     const first = await page(t, initial);
     expect(first).toMatchObject({ complete: false, count: 32 });
     expect(await page(t, initial)).toEqual(first);
-    const notReady = await t.query(api.publicRepacksV3.getDashboardBundleV3,
-      { currentTime: V3_FIXTURE_NOW }) as { ok: boolean; code?: string };
-    expect(notReady).toMatchObject({ ok: false, code: "RELEASE_UNAVAILABLE" });
+    expect(await t.query(api.publicRepacksV3.getDashboardBundleV3,
+      { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 })).toEqual(legacy);
     const second = await page(t, await progress(t));
     expect(second).toMatchObject({ complete: false, count: 64 });
     expect(await page(t, await progress(t))).toMatchObject({ complete: true, count: 65 });
@@ -58,9 +68,23 @@ describe("one-time bounded compact EV migration", () => {
         ok: boolean; data: { opportunities: { evEstimates: { packScout: { status: string } } }[] } };
     expect(ready.ok).toBe(true);
     expect(ready.data.opportunities).toHaveLength(6);
-    expect(ready.data.opportunities[0]!.evEstimates.packScout.status).toBe("last_known");
-    expect(await t.run((ctx) => ctx.db.query("dataReleaseV3Releases").collect())).toEqual(before);
+    expect(ready.data.opportunities[0]!.evEstimates.packScout.status).toBe("current");
+    expect(ready).toEqual(legacy);
+    expect(await immutableReleases(t)).toEqual(before);
     expect(await t.run((ctx) => ctx.db.query("dataReleaseV3RetainedEv").collect())).toEqual([]);
+    const status = await progress(t);
+    await t.mutation(internal.dataReleaseV3EvFactsBackfill.initializeActiveRetention, {
+      publicReleaseId: status.publicReleaseId, expectedGeneration: status.expectedGeneration,
+      expectedActivePublicReleaseId: status.expectedActivePublicReleaseId,
+      expectedPreviousPublicReleaseId: status.expectedPreviousPublicReleaseId,
+    });
+    const migrated = await t.query(api.publicRepacksV3.getDashboardBundleV3,
+      { currentTime: V3_FIXTURE_NOW + 24 * 60 * 60_000 });
+    expect(migrated).toMatchObject({ ok: true, data: { opportunities: [
+      { evEstimates: { packScout: { status: "last_known" } } },
+      ...Array(5).fill({}),
+    ] } });
+    expect(await immutableReleases(t)).toEqual(before);
   });
 
   test("pointer changes, out-of-scope releases, and invalid cursors cannot mutate migration state", async () => {
@@ -107,7 +131,7 @@ describe("one-time bounded compact EV migration", () => {
     await activateRetentionRelease(t, await stageRetentionRelease(t, 1, [buildV3Detail()]), null);
     await activateRetentionRelease(t, await stageRetentionRelease(t, 2, [unavailableRetentionDetail()]), 1);
     await simulateLegacyFacts(t);
-    const immutableBefore = await t.run((ctx) => ctx.db.query("dataReleaseV3Releases").collect());
+    const immutableBefore = await immutableReleases(t);
     const pointerBefore = await t.query(internal.dataReleaseV3Lifecycle.activeState, {});
     await page(t, await progress(t, 1));
     await page(t, await progress(t, 2));
@@ -118,7 +142,7 @@ describe("one-time bounded compact EV migration", () => {
     const first = await t.mutation(internal.dataReleaseV3EvFactsBackfill.initializeActiveRetention, args);
     expect(await t.mutation(internal.dataReleaseV3EvFactsBackfill.initializeActiveRetention, args)).toEqual(first);
     expect(await t.query(internal.dataReleaseV3Lifecycle.activeState, {})).toEqual(pointerBefore);
-    expect(await t.run((ctx) => ctx.db.query("dataReleaseV3Releases").collect())).toEqual(immutableBefore);
+    expect(await immutableReleases(t)).toEqual(immutableBefore);
     const dashboard = await t.query(api.publicRepacksV3.getDashboardBundleV3, { currentTime: V3_FIXTURE_NOW }) as {
       data: { opportunities: { evEstimates: { packScout: { status: string } } }[] } };
     expect(dashboard.data.opportunities[0]!.evEstimates.packScout.status).toBe("last_known");

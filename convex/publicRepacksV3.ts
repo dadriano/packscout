@@ -43,6 +43,8 @@ import {
 } from "./dataReleaseV3Search";
 import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
 import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
+import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
   createQueryFingerprint,
   decodeRepackCursor,
@@ -108,6 +110,7 @@ export type ActiveDataReleaseV3 = Readonly<{
   storedRowByPublicId: ReadonlyMap<string, DataReleaseV3SearchRow>;
   evByPublicId: ReadonlyMap<string, PackScoutDisplayedEvV3>;
   factsByPublicId: ReadonlyMap<string, DataReleaseV3EvFacts>;
+  legacyEvSnapshot: boolean;
   categoryByPublicId: ReadonlyMap<
     string,
     Readonly<{ parentPublicCategoryId: string | null; depth: number }>
@@ -202,9 +205,11 @@ async function loadActiveDataReleaseV3(
         },
       ]),
     );
-    const displayed = currentTime === undefined ? null
+    const legacyEvSnapshot = await usesLegacyEvSnapshot(ctx, release, state);
+    if (currentTime !== undefined && !legacyEvSnapshot) await loadRetainedEvPointer(ctx, state);
+    const displayed = currentTime === undefined || legacyEvSnapshot ? null
       : await loadDataReleaseV3DisplayedRepacks(ctx, release, rows, currentTime);
-    if (currentTime !== undefined && displayed === null) return null;
+    if (currentTime !== undefined && !legacyEvSnapshot && displayed === null) return null;
     const publicRows = displayed?.rows ?? rows;
     return {
       identity: identityParse.data,
@@ -214,6 +219,7 @@ async function loadActiveDataReleaseV3(
       storedRowByPublicId: new Map(rows.map((row) => [row.publicRepackId, row])),
       evByPublicId: displayed?.evByPublicId ?? new Map(),
       factsByPublicId: displayed?.factsByPublicId ?? new Map(),
+      legacyEvSnapshot,
       categoryByPublicId,
     };
   } catch {
@@ -232,12 +238,16 @@ async function hydrateRepackViews(
       .withIndex("by_release_id_and_public_repack_id", (index) => index.eq("releaseId", release.releaseDocument._id)
         .eq("publicRepackId", row.publicRepackId)).unique();
     const rawRow = release.storedRowByPublicId.get(row.publicRepackId);
-    const estimate = release.evByPublicId.get(row.publicRepackId);
+    const displayedEstimate = release.evByPublicId.get(row.publicRepackId);
     const facts = release.factsByPublicId.get(row.publicRepackId);
-    if (stored === null || rawRow === undefined || estimate === undefined || facts === undefined) return null;
+    if (stored === null || rawRow === undefined) return null;
     const parsed = publicRepackDetailV3Schema.safeParse(stored.detail);
-    if (!parsed.success || !dataReleaseV3SearchRowMatchesDetail(rawRow, parsed.data) ||
-        canonicalJson(evFactsFromDetail(parsed.data)) !== canonicalJson(facts)) return null;
+    if (!parsed.success || !dataReleaseV3SearchRowMatchesDetail(rawRow, parsed.data)) return null;
+    if (!release.legacyEvSnapshot && (displayedEstimate === undefined || facts === undefined ||
+        canonicalJson(evFactsFromDetail(parsed.data)) !== canonicalJson(facts))) return null;
+    // During the explicit one-time cutover only, keep the published snapshot
+    // unchanged. Never expire its values or switch merely because facts seal.
+    const estimate = release.legacyEvSnapshot ? parsed.data.evEstimates.packScout : displayedEstimate!;
     const view = publicRepackViewDetailV3Schema.safeParse({ ...parsed.data,
       evEstimates: { ...parsed.data.evEstimates, packScout: estimate }, heat: unavailableRepackHeat() });
     if (!view.success) return null;
