@@ -1,9 +1,10 @@
+import { failedHeadResumeGuard } from "./provider-failed-head-guard.mts";
 import { PrismaProviderCommandRepository, PrismaAdminProviderRuntimeRepository, PrismaProviderWorkerLeaseRepository, acquireProviderWorkerLease, lockProviderWorkerLease,
   providerWorkerLeaseIsLive, type CanonicalJsonValue, type ProviderPrismaClient, type ProviderQueryClient,
   type ProviderTransactionClient } from "@packscout/database";
 import { runRemoteHealthTransaction } from "./remote-provider-health-transaction.mts";
 import type { BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
-import { failedHeadAuditPins, failedHeadAction as action, failedHeadDigest as digest, failedHeadIds, failedHeadReceiptSchema,
+import { failedHeadAction as action, failedHeadDigest as digest, failedHeadIds, failedHeadReceiptSchema,
   refuseFailedHead as refuse, type FailedHeadReview, type FailedHeadReceipt } from "./provider-failed-head-policy.mts";
 import { assertFailedHeadAuthority, assertFailedHeadBoundary, failedHeadHistory,
   readFailedHeadSnapshot } from "./provider-failed-head-state.mts";
@@ -143,14 +144,7 @@ export function createFailedHeadContinuation(review: FailedHeadReview) {
           commandId: ids.resume, commandType: "resume", expectedGeneration: BigInt(review.generation),
           targetRunId: null, targetQuarantineId: null,
           idempotencyKey: ids.resumeKey, requestedByOperatorId: p.operatorId, correlationId: p.operationId, reason: null,
-          requestedAt: before.snapshot.now, expectedRuntimeGuard: { entry: "failed_zero_commit_from_head", providerId: p.providerId, configVersionId: p.configId,
-            configVersionNumber: BigInt(review.configNumber), runtimeRowVersion: BigInt(review.runtimeRowVersion),
-            checkpointHash: review.checkpointHash, checkpoint: before.runtime.source_cursor as CanonicalJsonValue,
-            parentCommandDigest: review.parentCommandDigest, failureCode: review.failureCode, finishedAt: review.finishedAt, priorHeadRunId: review.priorHeadRunId,
-            priorHeadRunDigest: review.priorHeadRunDigest, priorHeadProofDigest: review.priorHeadProofDigest,
-            provenance: failedHeadAuditPins(review), adoptionResumeId: review.provenance.adoptionResume.id,
-            adoptionResumeDigest: review.provenance.adoptionResume.digest,
-            latestRunId: p.initialRunId, latestRunDigest: review.parentDigest, expectedImportLease: held, notAfter } });
+          requestedAt: before.snapshot.now, expectedRuntimeGuard: failedHeadResumeGuard(review, before.runtime.source_cursor as CanonicalJsonValue, held, notAfter) });
         if (!["accepted", "deduplicated"].includes(result.outcome) ||
           result.generation !== BigInt(review.generation) + 1n) refuse("FAILED_HEAD_RESUME_REFUSED");
       }
