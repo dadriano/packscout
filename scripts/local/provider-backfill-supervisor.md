@@ -34,6 +34,12 @@ at 150–300 seconds; prolonged no-progress alerts do not exhaust the retry poli
 committed 50,000-page limit with a validated advancing `more` checkpoint is a separate bounded
 continuation. Other failure codes, authority drift, and checkpoint drift stop with nonzero exit.
 
+The additional `PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED` code is eligible
+only because it identifies a trusted expired query after its transaction callback
+has settled. Generic `P2028`, uncertain commit outcomes, invalid checkpoints and
+`PROVIDER_IMPORT_EXECUTION_FAILED` are not retryable. The same checkpoint,
+authority, generation, receipt and backoff requirements remain in force.
+
 A known closed child with exact persisted launch/fence/generation/checkpoint evidence uses a
 separate delayed execution-restart receipt, not a source-timeout code or a fresh command.
 The existing runner's fenced `recoverActive` preserves interrupted-run history and resumes its

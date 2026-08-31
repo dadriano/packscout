@@ -203,6 +203,11 @@ test("source-head fact reconciliation resolves exact retained facts and leaves f
         data: {
           operating_state: "running",
           state_generation: 1n,
+          cached_config_version_id: configVersionId,
+          cached_config_version_number: 2n,
+          cached_configuration: { adapterKey: "synthetic-quarantine" },
+          last_control_sync_at: now,
+          schedule_seconds: 300,
           row_version: { increment: 1n },
         },
       });

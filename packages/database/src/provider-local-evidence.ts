@@ -12,6 +12,9 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const protectedKeyPattern = /(?:authorization|bearer|candidate|credential|cursor|database[_-]?url|evidence|password|payload|secret|(?:api|access|refresh|auth|bearer)[_-]?token|api[_-]?key)/i;
 const localAuditEvidenceKeys = new Set([
   "alreadyExpiredCount",
+  "schemaVersion", "headPageId", "configVersionId", "checkpointHash", "batchNumber", "phase",
+  "packAfterId", "collectibleAfterId", "packScanDone", "collectibleScanDone",
+  "quarantineAfterId", "quarantineAfterAt",
   "commandType",
   "consumerKey",
   "durationMilliseconds",

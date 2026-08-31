@@ -1,12 +1,28 @@
 import { PrismaProviderWorkerLeaseRepository, lockProviderWorkerLease, providerWorkerLeaseIsLive,
-  type ProviderPrismaClient, type ProviderTransactionClient, type ProviderWorkerLease } from "@packscout/database";
+  type ProviderPrismaClient, type ProviderQueryClient, type ProviderTransactionClient, type ProviderWorkerLease } from "@packscout/database";
 import { assertBackfillLeaseAvailable, assertBackfillPins, backfillDigest,
   classifyBackfillCheckpoint, createBackfillIntent, refuseBackfill,
   type BackfillIntent, type BackfillPins, type BackfillSnapshot } from "./provider-backfill-supervisor-policy.mts";
-import { backfillAuditAction, readBackfillIntent, readBackfillSnapshot } from "./provider-backfill-supervisor-state.mts";
+import { backfillAuditAction, currentBackfillRunId, readBackfillIntent, readBackfillSnapshot } from "./provider-backfill-supervisor-state.mts";
 import type { BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
 
 const transactionOptions = { isolationLevel: "Serializable" as const, maxWait: 5000, timeout: 15_000 };
+/** Process death releases the local socket, not a surviving child's DB lease.
+ * Prove the exact operation's live claim before waiting; this grants no write. */
+export async function readOwnedBackfillLeaseExpiry(database: ProviderQueryClient, pins: BackfillPins,
+  authority: BackfillAuthority, snapshot: BackfillSnapshot): Promise<Date | null> {
+  const lease = snapshot.lease;
+  if (lease.owner === null || lease.expiresAt === null) return null;
+  const row = await database.local_audit_events.findFirst({ where: { correlation_id: pins.operationId,
+    action: "local.provider_backfill.execution_claim", details: { path: ["owner"], equals: lease.owner } },
+    orderBy: { sequence: "desc" } });
+  const details = row?.details;
+  if (!row || row.outcome !== "success" || row.actor_operator_id !== pins.operatorId || row.target_type !== "provider_run" ||
+    !details || typeof details !== "object" || Array.isArray(details) || details.owner !== lease.owner ||
+    details.fence !== lease.fence.toString() || details.authorityDigest !== authority.digest ||
+    await currentBackfillRunId(database, row.target_id) !== snapshot.run.id) return null;
+  return lease.expiresAt;
+}
 async function lockState(tx: ProviderTransactionClient, runId: string) {
   const lease = await lockProviderWorkerLease(tx, "import");
   await tx.$queryRaw`select id from provider_runs where id=${runId}::uuid for update`;
@@ -15,7 +31,7 @@ async function lockState(tx: ProviderTransactionClient, runId: string) {
 }
 
 export async function assertBackfillOperation(database: ProviderPrismaClient, pins: BackfillPins,
-  authority: BackfillAuthority, create: boolean): Promise<void> {
+  authority: BackfillAuthority, create: boolean, active: () => void = () => {}): Promise<void> {
   const details = { pins, authorityDigest: authority.digest };
   const inspect = async (client: ProviderPrismaClient | ProviderTransactionClient) => {
     const rows = await client.local_audit_events.findMany({ where: { correlation_id: pins.operationId,
@@ -28,14 +44,16 @@ export async function assertBackfillOperation(database: ProviderPrismaClient, pi
   if (!create) { await inspect(database); return; }
   await database.$transaction(async (tx) => {
     await tx.$queryRaw`select singleton_key from provider_runtime where singleton_key=true for update`;
-    if (!await inspect(tx)) await tx.local_audit_events.create({ data: { correlation_id: pins.operationId,
+    if (!await inspect(tx)) { active(); await tx.local_audit_events.create({ data: { correlation_id: pins.operationId,
       actor_operator_id: pins.operatorId, action: "local.provider_backfill.operation", target_type: "provider_run",
-      target_id: pins.initialRunId, outcome: "success", details, occurred_at: new Date() } });
+      target_id: pins.initialRunId, outcome: "success", details, occurred_at: new Date() } }); }
   }, transactionOptions);
 }
 
 export async function persistBackfillIntent(database: ProviderPrismaClient, pins: BackfillPins,
-  authority: BackfillAuthority, snapshot: BackfillSnapshot, previous: BackfillIntent | null, jitter: number) {
+  authority: BackfillAuthority, snapshot: BackfillSnapshot, previous: BackfillIntent | null, jitter: number,
+  active: () => void = () => {}) {
+  active();
   return database.$transaction(async (tx) => {
     await lockState(tx, snapshot.run.id);
     const current = await readBackfillSnapshot(tx, pins, authority, snapshot.run.id);
@@ -49,6 +67,7 @@ export async function persistBackfillIntent(database: ProviderPrismaClient, pins
       correlation_id: pins.operationId, action: backfillAuditAction,
       details: { path: ["checkpointHash"], equals: intent.checkpointHash },
     }, select: { sequence: true } })) refuseBackfill("BACKFILL_CHECKPOINT_CYCLE");
+    active();
     await tx.local_audit_events.create({ data: { correlation_id: pins.operationId, actor_operator_id: pins.operatorId, action: backfillAuditAction,
       target_type: "provider_run", target_id: current.run.id, outcome: "success", details: intent, occurred_at: current.now } });
     return intent;
@@ -56,7 +75,9 @@ export async function persistBackfillIntent(database: ProviderPrismaClient, pins
 }
 
 export async function claimBackfillExecution(database: ProviderPrismaClient, pins: BackfillPins,
-  authority: BackfillAuthority, snapshot: BackfillSnapshot, owner: string): Promise<ProviderWorkerLease> {
+  authority: BackfillAuthority, snapshot: BackfillSnapshot, owner: string, active: () => void = () => {},
+  requireHead = false): Promise<ProviderWorkerLease> {
+  active();
   await database.$transaction(async (tx) => {
     await lockState(tx, snapshot.run.id);
     const current = await readBackfillSnapshot(tx, pins, authority, snapshot.run.id);
@@ -73,13 +94,19 @@ export async function claimBackfillExecution(database: ProviderPrismaClient, pin
       details.fence === current.lease.fence.toString() && details.authorityDigest === authority.digest
       ? new Set([current.lease.owner!]) : new Set<string>();
     assertBackfillLeaseAvailable(current, allowed);
+    if (requireHead && (current.lease.owner === null ||
+      classifyBackfillCheckpoint({ ...current, lease: { ...current.lease, owner: null, expiresAt: null } }) !== "head")) {
+      refuseBackfill("BACKFILL_HEAD_LEASE_CHANGED");
+    }
     // Persist before acquire: a crash in the acquire→child gap is still attributable.
+    active();
     await tx.local_audit_events.create({ data: { correlation_id: pins.operationId,
       actor_operator_id: pins.operatorId, action: "local.provider_backfill.execution_claim", target_type: "provider_run",
       target_id: current.run.id, outcome: "success", details: { owner, fence: (current.lease.fence + 1n).toString(),
         authorityDigest: authority.digest }, occurred_at: current.now } });
   }, transactionOptions);
   const leases = new PrismaProviderWorkerLeaseRepository(database);
+  active();
   const acquired = await leases.acquire({ role: "import", owner, leaseMilliseconds: 300_000 });
   if (acquired.kind === "held") refuseBackfill("BACKFILL_LEASE_UNAVAILABLE");
   if (acquired.lease.fence !== snapshot.lease.fence + 1n) {
@@ -87,6 +114,20 @@ export async function claimBackfillExecution(database: ProviderPrismaClient, pin
     refuseBackfill("BACKFILL_LEASE_CHANGED");
   }
   return acquired.lease;
+}
+
+/** A terminal head may retain its own expired lease after process death. Use
+ * normal acquire/release and preserve every run/page/cursor; never force-clear. */
+export async function releaseExpiredBackfillHeadLease(database: ProviderPrismaClient, pins: BackfillPins,
+  authority: BackfillAuthority, snapshot: BackfillSnapshot, owner: string, active: () => void = () => {}) {
+  const expiry = await readOwnedBackfillLeaseExpiry(database, pins, authority, snapshot);
+  if (!expiry || expiry > snapshot.now ||
+    classifyBackfillCheckpoint({ ...snapshot, lease: { ...snapshot.lease, owner: null, expiresAt: null } }) !== "head") {
+    refuseBackfill("BACKFILL_HEAD_LEASE_CHANGED");
+  }
+  active();
+  const lease = await claimBackfillExecution(database, pins, authority, snapshot, owner, active, true);
+  await new PrismaProviderWorkerLeaseRepository(database).release(lease);
 }
 
 export async function assertBackfillRetryPinned(database: ProviderPrismaClient, authority: BackfillAuthority,

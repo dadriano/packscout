@@ -1,5 +1,5 @@
 import { opaqueCursorEnvelopeSchema } from "@packscout/contracts";
-import { providerMixedPageDigest, type ProviderQueryClient } from "@packscout/database";
+import { providerMixedPageDigest, readProviderRunHeadProof, type ProviderQueryClient } from "@packscout/database";
 import { backfillDigest, backfillId, backfillIntentSchema, refuseBackfill,
   type BackfillIntent, type BackfillPins, type BackfillSnapshot } from "./provider-backfill-supervisor-policy.mts";
 import type { BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
@@ -33,6 +33,12 @@ export async function readBackfillSnapshot(database: ProviderQueryClient, pins: 
   if (!run || !clock || identity.database_role !== "provider" || identity.provider_id !== pins.providerId ||
     identity.provider_key !== pins.providerKey) refuseBackfill("BACKFILL_PROVIDER_IDENTITY_CONFLICT");
   const last = await database.provider_run_pages.findFirst({ where: { provider_run_id: runId }, orderBy: { page_number: "desc" } });
+  const head = run.reached_source_head && (run.state === "running" || (run.state === "succeeded" && run.page_count === 0))
+    ? await readProviderRunHeadProof(database, runId) : null;
+  const headProof = head && head.runId === run.id && head.configVersionId === run.config_version_id &&
+    head.configVersionNumber === run.config_version_number && head.checkpointHash === runtime.source_cursor_hash
+    ? { runId: head.runId, sourceRunId: head.sourceRunId, checkpointHash: head.checkpointHash,
+      reconciliationComplete: head.reconciliationComplete } : null;
   const committedPageCount = run.page_count === 50_000
     ? await database.provider_run_pages.count({ where: { provider_run_id: runId } }) : run.page_count;
   const cursor = opaqueCursorEnvelopeSchema.safeParse(runtime.source_cursor);
@@ -59,6 +65,7 @@ export async function readBackfillSnapshot(database: ProviderQueryClient, pins: 
       finalHash: run.final_cursor_hash, finalMatches: fingerprint(run.final_cursor) === run.final_cursor_hash,
       reachedHead: run.reached_source_head, pageCount: run.page_count, accepted: run.accepted_count,
       failureCode: run.failure_code, finishedAt: run.finished_at, committedPageCount },
+    headProof,
     lastPage: last ? { number: last.page_number, continuation: last.continuation, hash: last.next_cursor_hash,
       matches: fingerprint(last.next_cursor) === last.next_cursor_hash } : null };
 }
