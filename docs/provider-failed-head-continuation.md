@@ -122,6 +122,17 @@ claims, changed generation/row version/fence, changed source authority or missin
 reconciliation refuse. The prior claim fence and child's execution fence must
 agree, and the previous guard digest is recomputed from the preserved review.
 
+The prior operation must contain the exact normal queued-run startup lifecycle:
+the operator's error-to-idle Resume transition and terminal command audit, then
+the runner's idle-to-running transition, the operator-attributed run-start audit,
+and the completed Run-now command audit. Only the runner transition has a null
+operator and command. Each action binds its command/run/provider target, exact
+generation or lease fence, timestamp and sequence relative to the completed queue
+handoff. Missing, duplicate, unknown or misbound rows refuse admission; the null
+actor is not a general exemption. Those rows are included in the immutable history
+digest. The original Resume and queue utilities retain their narrower pre-execution
+replay rules.
+
 Apply uses the same atomic lease/claim, audited Resume and fenced Run-now path.
 Only the newly reviewed operation can replay its receipt/Resume/queue crash gaps;
 it queues at most one new independent child. Later holds, changed history or an
@@ -134,7 +145,7 @@ is promoted. Existing runtime holds for all other providers remain untouched.
 ## Verification
 
 Focused tooling tests use synthetic repository fixtures and execute the real
-command, lease and Run-now repository methods. They cover preserved parent/history,
+command, lease, Run-now, queued-start and terminal repository methods. They cover preserved parent/history,
 zero-commit and provenance refusals, same-transaction Resume races, claim-audit
 rollback, all three crash boundaries, exact replay, later operator holds and queue
 lease/deadline expiry. Shared paused-head/CLI tests protect the existing admission,
@@ -147,5 +158,8 @@ The depth-two acceptance map is automated by
 preservation; unchanged v1 refusal; bounded depth/uniqueness; every zero counter
 and full-cursor boundary; forged/missing actor/action/target/command evidence;
 atomic drift and deadline refusal; claim rollback; exact public replay; and all
-three crash boundaries without a second queued child. No test connects to a
-provider source, real database, or Convex.
+three crash boundaries without a second queued child. The independent
+`scripts/local/provider-failed-head-chain-postgres.test.mjs` exercises normal
+run and lease methods against an owned disposable PostgreSQL fixture, including
+startup-audit tampering. No test connects to a provider source, deployed database,
+or Convex.
