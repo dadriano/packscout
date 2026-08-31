@@ -1,3 +1,7 @@
+import {
+  applyProviderCollectibleBatch, isProviderCollectibleUpsert, PROVIDER_COLLECTIBLE_BATCH_SIZE,
+} from "./provider-collectible-batch-repository.ts";
+import { providerBatchRecordConstraint } from "./provider-canonical-batch-constraint.ts";
 import { randomUUID } from "node:crypto";
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
 import {
@@ -181,6 +185,21 @@ function knownRecordFailure(error: unknown): {
   return null;
 }
 
+async function applyCollectibleChunk(transaction: ProviderTransactionClient,
+  records: readonly ProviderMixedPageRecord[]): Promise<readonly boolean[] | null> {
+  await transaction.$executeRawUnsafe("SAVEPOINT packscout_collectible_chunk");
+  try {
+    const result = await applyProviderCollectibleBatch(transaction, records);
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_collectible_chunk");
+    return result;
+  } catch (error) {
+    if (knownRecordFailure(error) === null && !providerBatchRecordConstraint(error)) throw error;
+    await transaction.$executeRawUnsafe("ROLLBACK TO SAVEPOINT packscout_collectible_chunk");
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_collectible_chunk");
+    return null;
+  }
+}
+
 async function applyRecordWithSavepoint(
   transaction: ProviderTransactionClient,
   record: ProviderMixedPageRecord,
@@ -331,7 +350,29 @@ export class PrismaProviderMixedPageRepository {
       let materialChanges = 0;
       const quarantines: QuarantineDraft[] = [];
       const sourceQuarantineKeys = await readExistingSourceQuarantineKeys(transaction, page.records);
-      for (const record of page.records) {
+      let fallbackThrough = 0;
+      for (let recordIndex = 0; recordIndex < page.records.length; recordIndex += 1) {
+        const record = page.records[recordIndex]!;
+        if (recordIndex >= fallbackThrough && isProviderCollectibleUpsert(record)) {
+          const chunk: ProviderMixedPageRecord[] = [];
+          for (let index = recordIndex; index < page.records.length && chunk.length < PROVIDER_COLLECTIBLE_BATCH_SIZE; index += 1) {
+            const candidate = page.records[index]!;
+            if (!isProviderCollectibleUpsert(candidate)) break;
+            chunk.push(candidate);
+          }
+          if (chunk.length > 1) {
+            const batch = await applyCollectibleChunk(transaction, chunk);
+            if (batch !== null) {
+              accepted += batch.filter(Boolean).length;
+              duplicate += batch.filter(value => !value).length;
+              materialChanges += batch.filter(Boolean).length;
+              recordIndex += chunk.length - 1;
+              continue;
+            }
+            // Prevent retrying the same failed batch on each shrinking suffix.
+            fallbackThrough = recordIndex + chunk.length;
+          }
+        }
         const result = await applyRecordWithSavepoint(
           transaction,
           record,

@@ -1,3 +1,10 @@
+import {
+  nullableText, nullableMoney, nullableRate, nullableCurrency, nullableDate, nullableJson,
+  toPrismaJson, requireNonnegativeBigInt, requirePositiveBigInt,
+  assertExpectedVersion, hasSameMaterialFields,
+} from "./provider-canonical-mutable-helpers.ts";
+import { normalizeProviderCollectibleWrite, planProviderCollectibleWrite } from "./provider-canonical-collectible-write.ts";
+import { normalizeProviderPackContentWrite } from "./provider-canonical-pack-content-write.ts";
 import { randomUUID } from "node:crypto";
 import { providerPackEvEvidenceV1Schema } from "@packscout/contracts";
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
@@ -7,22 +14,17 @@ import type {
   ProviderTransactionClient,
 } from "./provider-database.ts";
 import {
-  confidenceBand,
-  normalizeEvidenceKinds,
   normalizeJsonObject,
   normalizeMoneyDecimal,
-  normalizeRateDecimal,
   ProviderCanonicalImmutableFactConflictError,
   ProviderCanonicalInputError,
   ProviderCanonicalRetiredError,
   ProviderCanonicalWriteConflictError,
   requireAccountKey,
-  requireCurrency,
   requireDate,
   requireDigest,
   requireNonEmptyText,
   requirePairedValues,
-  type CanonicalJsonObject,
   type CanonicalWriteResult,
   type CategoryWriteInput,
   type CollectibleInstanceWriteInput,
@@ -68,102 +70,6 @@ interface MutableRow {
   readonly id: string;
   readonly lifecycle: "active" | "retired";
   readonly row_version: bigint;
-}
-
-function nullableText(value: string | null, field: string): string | null {
-  return value === null ? null : requireNonEmptyText(value, field);
-}
-
-function nullableMoney(value: string | null, field: string): string | null {
-  return value === null ? null : normalizeMoneyDecimal(value, field);
-}
-
-function nullableRate(value: string | null, field: string): string | null {
-  return value === null ? null : normalizeRateDecimal(value, field);
-}
-
-function nullableCurrency(value: string | null, field: string): string | null {
-  return value === null ? null : requireCurrency(value, field);
-}
-
-function nullableDate(value: Date | null, field: string): Date | null {
-  return value === null ? null : requireDate(value, field);
-}
-
-function nullableJson(
-  value: CanonicalJsonObject | null,
-  field: string,
-): ProviderPrisma.InputJsonObject | typeof ProviderPrisma.DbNull {
-  return value === null
-    ? ProviderPrisma.DbNull
-    : toPrismaJson(normalizeJsonObject(value, field));
-}
-
-function toPrismaJson(value: CanonicalJsonObject): ProviderPrisma.InputJsonObject {
-  return value as unknown as ProviderPrisma.InputJsonObject;
-}
-
-function requireNonnegativeBigInt(value: bigint | null, field: string): bigint | null {
-  if (value !== null && (typeof value !== "bigint" || value < 0n)) {
-    throw new ProviderCanonicalInputError(`${field} must be a non-negative bigint or null.`);
-  }
-  return value;
-}
-
-function requirePositiveBigInt(value: bigint, field: string): bigint {
-  if (typeof value !== "bigint" || value <= 0n) {
-    throw new ProviderCanonicalInputError(`${field} must be a positive bigint.`);
-  }
-  return value;
-}
-
-function requireNonnegativeInteger(value: number, field: string): number {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new ProviderCanonicalInputError(`${field} must be a non-negative safe integer.`);
-  }
-  return value;
-}
-
-function requireNullableYear(value: number | null): number | null {
-  if (value !== null && (!Number.isInteger(value) || value < 1_000 || value > 9_999)) {
-    throw new ProviderCanonicalInputError("year must be a four-digit integer or null.");
-  }
-  return value;
-}
-
-function assertExpectedVersion(expected: bigint | undefined, actual: bigint | null): void {
-  if (expected === undefined) return;
-  if (actual === null ? expected !== 0n : expected !== actual) {
-    throw new ProviderCanonicalWriteConflictError();
-  }
-}
-
-function comparable(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (value === ProviderPrisma.DbNull) return null;
-  if (value instanceof Date) return ["date", value.toISOString()];
-  if (typeof value === "bigint") return ["bigint", value.toString()];
-  if (ProviderPrisma.Decimal.isDecimal(value)) {
-    return normalizeMoneyDecimal(value.toFixed());
-  }
-  if (Array.isArray(value)) return value.map(comparable);
-  if (typeof value === "object") {
-    const object = value as Record<string, unknown>;
-    return Object.fromEntries(
-      Object.keys(object).sort().map((key) => [key, comparable(object[key])]),
-    );
-  }
-  return value;
-}
-
-function hasSameMaterialFields(
-  row: object,
-  next: Readonly<Record<string, unknown>>,
-): boolean {
-  const current = row as unknown as Record<string, unknown>;
-  return Object.entries(next).every(([key, value]) => (
-    JSON.stringify(comparable(current[key])) === JSON.stringify(comparable(value))
-  ));
 }
 
 interface PackEvidenceBinding {
@@ -528,41 +434,12 @@ export class ProviderCanonicalTransaction {
   }
 
   async upsertCollectible(input: CollectibleWriteInput): Promise<CanonicalWriteResult> {
-    const collectibleKey = requireNonEmptyText(input.collectibleKey, "collectibleKey");
-    requirePairedValues(input.valuationAmount, input.valuationCurrency, "valuation");
-    requirePairedValues(input.primaryImageUrl, input.primaryImageAlt, "primaryImage");
-    const data = {
-      category_id: input.categoryId,
-      collectible_type: input.collectibleType,
-      display_name: requireNonEmptyText(input.displayName, "displayName"),
-      normalized_name: requireNonEmptyText(input.normalizedName, "normalizedName"),
-      year: requireNullableYear(input.year),
-      brand: nullableText(input.brand, "brand"),
-      set_or_series: nullableText(input.setOrSeries, "setOrSeries"),
-      card_number: nullableText(input.cardNumber, "cardNumber"),
-      reference_number: nullableText(input.referenceNumber, "referenceNumber"),
-      subject: nullableText(input.subject, "subject"),
-      grade: nullableText(input.grade, "grade"),
-      grader: nullableText(input.grader, "grader"),
-      primary_image_url: nullableText(input.primaryImageUrl, "primaryImageUrl"),
-      primary_image_alt: nullableText(input.primaryImageAlt, "primaryImageAlt"),
-      valuation_amount: nullableMoney(input.valuationAmount, "valuationAmount"),
-      valuation_currency: nullableCurrency(input.valuationCurrency, "valuationCurrency"),
-      valuation_usd_amount: nullableMoney(input.valuationUsdAmount, "valuationUsdAmount"),
-      valuation_unavailable_reason: nullableText(
-        input.valuationUnavailableReason,
-        "valuationUnavailableReason",
-      ),
-      valuation_type: nullableText(input.valuationType, "valuationType"),
-      valuation_observed_at: nullableDate(input.valuationObservedAt, "valuationObservedAt"),
-      data_as_of: requireDate(input.dataAsOf, "dataAsOf"),
-      attributes: toPrismaJson(normalizeJsonObject(input.attributes, "attributes")),
-    };
+    const { collectibleKey, data } = normalizeProviderCollectibleWrite(input);
     const current = await this.#client.collectibles.findUnique({
       where: { collectible_key: collectibleKey },
     });
-    assertExpectedVersion(input.expectedRowVersion, current?.row_version ?? null);
-    if (!current) {
+    const decision = planProviderCollectibleWrite(input.expectedRowVersion, current, data);
+    if (decision.kind === "create") {
       const row = await this.#client.collectibles.create({
         data: { id: randomUUID(), collectible_key: collectibleKey, ...data },
       });
@@ -574,27 +451,21 @@ export class ProviderCanonicalTransaction {
       }]);
       return mutableResult(row, range);
     }
-    if (current.lifecycle === "retired") throw new ProviderCanonicalRetiredError();
-    const sameMaterial = hasSameMaterialFields(current, data);
-    const sourceOrder = data.data_as_of.getTime() - current.data_as_of.getTime();
-    if (sourceOrder < 0 || sameMaterial) return mutableResult(current, null);
-    if (sourceOrder === 0) {
-      throw new ProviderCanonicalWriteConflictError();
-    }
-    const nextVersion = current.row_version + 1n;
+    if (decision.kind === "unchanged") return mutableResult(decision.current, null);
+    const nextVersion = decision.current.row_version + 1n;
     const update = await this.#client.collectibles.updateMany({
-      where: { id: current.id, row_version: current.row_version, lifecycle: "active" },
+      where: { id: decision.current.id, row_version: decision.current.row_version, lifecycle: "active" },
       data: { ...data, row_version: nextVersion },
     });
     if (update.count !== 1) throw new ProviderCanonicalWriteConflictError();
     const range = await appendPromotionRange(this.#client, [{
       entityType: "collectible",
-      entityId: current.id,
+      entityId: decision.current.id,
       entityVersion: nextVersion,
       operation: "upsert",
     }]);
     return {
-      id: current.id,
+      id: decision.current.id,
       rowVersion: nextVersion,
       materialChange: true,
       promotionSequence: range.first,
@@ -701,32 +572,7 @@ export class ProviderCanonicalTransaction {
   }
 
   async upsertPackContent(input: PackContentWriteInput): Promise<CanonicalWriteResult> {
-    requirePairedValues(input.statedValueAmount, input.statedValueCurrency, "statedValue");
-    const totalQuantity = requireNonnegativeBigInt(input.totalQuantity, "totalQuantity");
-    const availableQuantity = requireNonnegativeBigInt(input.availableQuantity, "availableQuantity");
-    if (totalQuantity !== null && availableQuantity !== null && availableQuantity > totalQuantity) {
-      throw new ProviderCanonicalInputError("availableQuantity cannot exceed totalQuantity.");
-    }
-    const evidenceKinds = [...normalizeEvidenceKinds(input.evidenceKinds)];
-    const data = {
-      source_snapshot_id: input.sourceSnapshotId ?? null,
-      pack_id: input.packId,
-      collectible_id: input.collectibleId,
-      collectible_instance_id: input.collectibleInstanceId,
-      total_quantity: totalQuantity,
-      available_quantity: availableQuantity,
-      content_role: input.contentRole,
-      probability: input.probability === null
-        ? null
-        : normalizeRateDecimal(input.probability, "probability"),
-      stated_value_amount: nullableMoney(input.statedValueAmount, "statedValueAmount"),
-      stated_value_currency: nullableCurrency(input.statedValueCurrency, "statedValueCurrency"),
-      evidence_kinds: evidenceKinds,
-      match_confidence_basis_points: input.matchConfidenceBasisPoints,
-      match_confidence_band: confidenceBand(input.matchConfidenceBasisPoints),
-      observed_at: requireDate(input.observedAt, "observedAt"),
-      display_order: requireNonnegativeInteger(input.displayOrder, "displayOrder"),
-    };
+    const data = normalizeProviderPackContentWrite(input);
     const current = await this.#client.pack_contents.findFirst({
       where: {
         pack_id: input.packId,
