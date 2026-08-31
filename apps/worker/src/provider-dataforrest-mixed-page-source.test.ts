@@ -15,6 +15,7 @@ import {
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   providerSourceLaunchBounds,
+  dataforrestDistributedRequestPolicy,
   type DataforrestEventRecordV1,
   type DataforrestEventsPageV1,
 } from "@packscout/contracts";
@@ -53,6 +54,7 @@ const configVersionId = "22222222-2222-4222-8222-222222222222";
 const sourceCredentialVersionId =
   "33333333-3333-4333-8333-333333333333";
 const runId = "44444444-4444-4444-8444-444444444444";
+const requestSettingsRevisionId = "55555555-5555-4555-8555-555555555555";
 const bearerToken = "fixture-dataforrest-bearer-token";
 const rawMarker = "protected-native-value-must-not-escape";
 const actorMarker = "unapproved-native-actor-must-not-escape";
@@ -392,12 +394,18 @@ function sourceInput(input: Readonly<{
   checkpoint?: CanonicalJsonValue | null;
   checkpointFingerprint?: string | null;
   authority?: ProviderCapturePageSourceInput["authority"];
+  recordsPerRequest?: number | null;
+  requestSettingsRevisionId?: string | null;
 }> = {}): ProviderCapturePageSourceInput {
+  const selectedAuthority = input.authority ?? authority;
   return {
-    authority: input.authority ?? authority,
+    authority: selectedAuthority,
     runId,
     workerFence: 1n,
     pageNumber: input.pageNumber ?? 1,
+    recordsPerRequest: "recordsPerRequest" in input ? input.recordsPerRequest :
+      dataforrestDistributedRequestPolicy(String(selectedAuthority.configuration.adapterKey), selectedAuthority.providerKey)?.defaultRecordsPerRequest ?? 2_000,
+    requestSettingsRevisionId: "requestSettingsRevisionId" in input ? input.requestSettingsRevisionId : requestSettingsRevisionId,
     sourceCheckpoint: input.checkpoint ?? null,
     sourceCheckpointFingerprint: input.checkpointFingerprint ?? null,
     signal: new AbortController().signal,
@@ -413,7 +421,6 @@ function jsonResponse(value: unknown): Response {
 
 function sourceFixture(input: Readonly<{
   pages: readonly DataforrestEventsPageV1[];
-  pageLimit?: number;
   integration?: ProviderDataforrestLiveIntegration;
   resolvedAuthority?: ResolvedDataforrestSourceAuthority;
   workerId?: string;
@@ -435,27 +442,20 @@ function sourceFixture(input: Readonly<{
     sourceRecordCount: number;
     normalizedRecordCount: number;
   }>> = [];
+  const translationBindings: Array<Readonly<{
+    mixedPageId?: string;
+    responseDigest?: string;
+    recordsPerRequest?: number;
+    requestSettingsRevisionId?: string;
+  }>> = [];
   const pages = [...input.pages];
   const baseIntegration = input.integration
     ?? createProviderDataforrestLiveIntegration(
       "clutchpacks",
       dataforrestClutchpacksDistributedSourceAdapterManifest,
     );
-  const manifest = input.pageLimit === undefined
-    ? baseIntegration.manifest
-    : {
-        ...baseIntegration.manifest,
-        requestBounds: {
-          ...baseIntegration.manifest.requestBounds,
-          pageLimit: input.pageLimit,
-        },
-      };
-  const integration = input.pageLimit === undefined
-    ? baseIntegration
-    : createProviderDataforrestLiveIntegration(
-      baseIntegration.providerKey,
-      manifest,
-    );
+  const manifest = baseIntegration.manifest;
+  const integration = baseIntegration;
   const adapter = new DataforrestEventsSourceAdapter(
     {
       resolveHost: async () => ["198.204.245.26"],
@@ -470,6 +470,7 @@ function sourceFixture(input: Readonly<{
       },
     },
     manifest,
+    { mode: "distributed_run_pin", provider: integration.providerKey },
   );
   const terminalize = input.terminalize ?? (async (attempt) => {
     terminalizations.push(attempt);
@@ -495,6 +496,12 @@ function sourceFixture(input: Readonly<{
           sourceRecordCount: input.sourceRecordCount,
           normalizedRecordCount: input.normalizedRecordCount,
         });
+        translationBindings.push({
+          mixedPageId: input.mixedPageId,
+          responseDigest: input.responseDigest,
+          recordsPerRequest: input.recordsPerRequest,
+          requestSettingsRevisionId: input.requestSettingsRevisionId,
+        });
         return Promise.resolve({ kind: "recorded" as const });
       },
     },
@@ -508,6 +515,7 @@ function sourceFixture(input: Readonly<{
     authorizationHeaders,
     terminalizations,
     translations,
+    translationBindings,
   };
 }
 
@@ -692,6 +700,57 @@ async function phygitalsMixedPage(
     },
   })));
 }
+
+test("Phygitals uses the same run's 1,000-record request pin across checkpoint continuation and mutable setting changes", async () => {
+  const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;
+  const captureAuthority = { ...authority, providerKey: "phygitals",
+    configuration: { adapterKey: manifest.adapterVersion, settings: { recordsPerRequest: 100 } } };
+  const fixture = sourceFixture({
+    integration: createProviderDataforrestLiveIntegration("phygitals", manifest),
+    resolvedAuthority: { ...resolvedAuthority, providerKey: "phygitals", adapterKey: manifest.adapterVersion,
+      sourceAdapterVersion: manifest.adapterVersion, sourceConfiguration: { platform: "phygitals" } },
+    pages: [sourcePage({ cursor: "same-opaque-continuation", continuation: "continue",
+      records: Array.from({ length: 1_000 }, (_, index) => phygitalsCardRecord(`pinned-${index}`,
+        { inventory: { title: `Reviewed inventory ${index}` } })),
+    }), sourcePage({ cursor: "same-opaque-head", continuation: "head", records: [] })],
+  });
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: captureAuthority, recordsPerRequest: 1_000,
+  })));
+  assert.equal(first.records.length, 1_000);
+  assert.equal(first.records.some(({ disposition }) => disposition === "quarantine"), false);
+  assert.equal(first.configVersionId, configVersionId);
+  assert.equal((first.nextCursor as { adapterVersion: string }).adapterVersion, manifest.adapterVersion);
+  assert.deepEqual(fixture.translations[0], { sourceRecordCount: 1_000, normalizedRecordCount: 1_000 });
+  assert.deepEqual(fixture.translationBindings[0], { mixedPageId: first.pageId,
+    responseDigest: first.responseDigest, recordsPerRequest: 1_000, requestSettingsRevisionId });
+  await fixture.source.nextPage(sourceInput({
+    authority: { ...captureAuthority, configuration: { ...captureAuthority.configuration,
+      settings: { recordsPerRequest: 5_000 } } },
+    recordsPerRequest: 1_000, pageNumber: 2, checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  }));
+  assert.deepEqual(fixture.requestedUrls.map((url) => url.searchParams.get("limit")), ["1000", "1000"]);
+  assert.equal(fixture.requestedUrls[1]?.searchParams.get("cursor"), "same-opaque-continuation");
+  assert.equal(manifest.requestBounds.pageLimit, 100);
+});
+
+test("missing, invalid or incomplete durable request pins fail before any source HTTP request", async () => {
+  for (const patch of [
+    { recordsPerRequest: undefined }, { recordsPerRequest: null }, { recordsPerRequest: 0 },
+    { recordsPerRequest: 5_001 }, { recordsPerRequest: 1.5 },
+    { requestSettingsRevisionId: null }, { requestSettingsRevisionId: undefined },
+    { requestSettingsRevisionId: "not-a-revision" },
+  ]) {
+    const fixture = sourceFixture({ pages: [] });
+    await assert.rejects(fixture.source.nextPage({ ...sourceInput(), ...patch }),
+      (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+        error.code === "PROVIDER_DATAFORREST_REQUEST_SETTINGS_INVALID");
+    assert.equal(fixture.requestedUrls.length, 0);
+    assert.equal(fixture.terminalizations.length, 0);
+    assert.equal(fixture.translations.length, 0);
+  }
+});
 
 test("versioned Phygitals native cards reach valid collectibles without mapping quarantine", async () => {
   const page = await phygitalsMixedPage(["chase", "asset"].map((wrapper) =>
@@ -1565,7 +1624,6 @@ test("an exact 2,000-record API page can expand to the bounded 4,000-record mixe
 
 test("a validated source page that maps past 4,000 records fails closed after durable request audit", async () => {
   const fixture = sourceFixture({
-    pageLimit: 5_000,
     pages: [sourcePage({
       cursor: "clutchpacks-cursor-oversized",
       continuation: "head",
@@ -1575,7 +1633,7 @@ test("a validated source page that maps past 4,000 records fails closed after du
     })],
   });
   await assert.rejects(
-    fixture.source.nextPage(sourceInput()),
+    fixture.source.nextPage(sourceInput({ recordsPerRequest: 5_000 })),
     (error: unknown) => error instanceof ProviderDataforrestSourceError
       && error.code === "PROVIDER_DATAFORREST_PAGE_INVALID",
   );

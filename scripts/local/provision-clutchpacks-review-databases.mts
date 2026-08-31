@@ -119,6 +119,7 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "provider_state_events",
   "provider_worker_states",
   "provider_runs",
+  "provider_request_settings",
   "provider_run_pages",
   "control_commands",
   "quarantine_records",
@@ -334,6 +335,10 @@ export async function grantExplicitReviewRuntimeAccess(input: {
         to ${quoteIdentifier(input.cluster.appRoleName)}
       `);
     } else {
+      await pool.query(`
+        grant select, insert on table public.provider_request_settings_revisions
+        to ${quoteIdentifier(input.cluster.appRoleName)}
+      `);
       await pool.query(`
         grant usage, select on sequence ${qualifiedTables(PROVIDER_RUNTIME_SEQUENCES)}
         to ${quoteIdentifier(input.cluster.appRoleName)}

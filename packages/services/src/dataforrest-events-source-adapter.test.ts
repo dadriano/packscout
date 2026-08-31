@@ -14,6 +14,7 @@ import {
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
@@ -339,6 +340,85 @@ function adapterWithClient(
     resolveHost: async () => ["198.204.245.26"],
   }, manifest);
 }
+
+test("isolated run capacity admits a 1,000-record Phygitals request without changing its historical manifest", async () => {
+  const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;
+  const requests: URL[] = [];
+  const adapter = new DataforrestEventsSourceAdapter({
+    resolveHost: async () => ["198.204.245.26"],
+    httpClient: async (url) => {
+      requests.push(new URL(url));
+      return jsonResponse({ records: [], next_cursor: "retained-next", poll_after_seconds: 60 });
+    },
+  }, manifest, { mode: "distributed_run_pin", provider: "phygitals" });
+  const operation = await pageOperation(runtime(), "phygitals", "retained-exact-checkpoint",
+    { ...manifest.requestBounds, pageLimit: 1_000 }, manifest);
+  const completed = await completedPage(adapter, operation);
+  assert.equal(completed.ok, true);
+  assert.equal(requests[0]?.searchParams.get("limit"), "1000");
+  assert.equal(requests[0]?.searchParams.get("cursor"), "retained-exact-checkpoint");
+  assert.equal(manifest.requestBounds.pageLimit, 100);
+  assert.equal(adapter.manifest.requestBounds.pageLimit, 100);
+  operation.requestLease.close();
+});
+
+test("the default distributed adapter constructor still rejects above its historical manifest limit", async () => {
+  const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;
+  let requests = 0;
+  const adapter = adapterWithClient(async () => { requests += 1; return jsonResponse(null); }, manifest);
+  const operation = await pageOperation(runtime(), "phygitals", null,
+    { ...manifest.requestBounds, pageLimit: 1_000 }, manifest);
+  const result = await captureRequest(adapter, operation);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.failure.code, "invalid_source_configuration");
+  assert.equal(requests, 0);
+  operation.requestLease.close();
+});
+
+test("isolated capacity retains byte/time ceilings and refuses shared or changed manifests", async () => {
+  const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;
+  for (const changed of [
+    { maximumResponseBytes: manifest.requestBounds.maximumResponseBytes + 1 },
+    { timeoutMilliseconds: manifest.requestBounds.timeoutMilliseconds + 1 },
+    { pageLimit: 1_000 },
+  ]) {
+    assert.throws(() => new DataforrestEventsSourceAdapter({}, {
+      ...manifest, requestBounds: { ...manifest.requestBounds, ...changed },
+    }, { mode: "distributed_run_pin", provider: "phygitals" }), /capacity is invalid/);
+  }
+  assert.throws(() => new DataforrestEventsSourceAdapter({}, dataforrestEventsV1SourceAdapterManifest,
+    { mode: "distributed_run_pin", provider: "phygitals" }), /capacity is invalid/);
+  let requests = 0;
+  const adapter = new DataforrestEventsSourceAdapter({
+    resolveHost: async () => ["198.204.245.26"],
+    httpClient: async () => { requests += 1; return jsonResponse(null); },
+  }, manifest, { mode: "distributed_run_pin", provider: "phygitals" });
+  for (const changed of [{ maximumResponseBytes: 8 * 1024 * 1024 + 1 }, { timeoutMilliseconds: 10_001 }]) {
+    const operation = await pageOperation(runtime(), "phygitals", null,
+      { ...manifest.requestBounds, pageLimit: 1_000, ...changed }, manifest);
+    const result = await captureRequest(adapter, operation);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.failure.code, "profile_configuration_invalid");
+    operation.requestLease.close();
+  }
+  assert.equal(requests, 0);
+});
+
+test("isolated capacity rejects source responses above the individual run request pin", async () => {
+  const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;
+  const record = dataforestEventsV1EvidenceFixture.phygitals.initial.records[0]!;
+  const adapter = new DataforrestEventsSourceAdapter({
+    resolveHost: async () => ["198.204.245.26"],
+    httpClient: async () => jsonResponse({ records: Array.from({ length: 1_001 }, () => record),
+      next_cursor: "too-many", poll_after_seconds: 60 }),
+  }, manifest, { mode: "distributed_run_pin", provider: "phygitals" });
+  const operation = await pageOperation(runtime(), "phygitals", null,
+    { ...manifest.requestBounds, pageLimit: 1_000 }, manifest);
+  const result = await completedPage(adapter, operation);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.failure.code, "invalid_response");
+  operation.requestLease.close();
+});
 
 test("copy-free V1 envelope validation stays in parity with canonical schema bounds", () => {
   const envelope = (overrides: Record<string, unknown> = {}) => ({

@@ -3,6 +3,8 @@ import type {
   ProviderPrismaClient,
   ProviderTransactionClient,
 } from "./provider-database.ts";
+import { pinProviderRequestSettings, type ProviderRequestSettingsDefault, type ProviderRequestSettingsPolicy } from "./provider-request-settings-repository.ts";
+import { providerPageRequestSettingsFailure, providerRunRequestPinIsUsable, recoveryProviderRequestSettings, unmanagedProviderRequestSettingsAllowed } from "./provider-run-request-settings.ts";
 import type { CanonicalJsonValue } from "./provider-canonical-contract.ts";
 import {
   appendProviderActivityOutbox,
@@ -45,6 +47,8 @@ export interface ProviderRunSummary {
   readonly trigger: ProviderRunTrigger;
   readonly configVersionId: string;
   readonly configVersionNumber: bigint;
+  readonly recordsPerRequest: number | null;
+  readonly requestSettingsRevisionId: string | null;
   readonly workerFence: bigint;
   readonly attemptNumber: number;
   readonly recoveryOfRunId: string | null;
@@ -62,11 +66,11 @@ export interface ProviderRunSummary {
 export type StartProviderRunResult =
   | { readonly kind: "started"; readonly run: ProviderRunSummary }
   | { readonly kind: "deduplicated" | "active"; readonly run: ProviderRunSummary }
-  | { readonly kind: "idempotency_conflict" | "lease_lost" | "runtime_unavailable" | "config_expired" | "config_mismatch" };
+  | { readonly kind: "idempotency_conflict" | "lease_lost" | "runtime_unavailable" | "config_expired" | "config_mismatch" | "request_settings_unavailable" };
 
 export type CommitProviderRunPageResult =
   | { readonly kind: "committed" | "replayed"; readonly run: ProviderRunSummary; readonly pageId: string }
-  | { readonly kind: "immutable_conflict" | "cursor_conflict" | "lease_lost" | "run_not_running" | "runtime_not_running" };
+  | { readonly kind: "immutable_conflict" | "cursor_conflict" | "lease_lost" | "run_not_running" | "runtime_not_running" | "request_settings_unavailable" | "source_receipt_missing" };
 
 export type FinishProviderRunResult =
   | { readonly kind: "finished" | "already_terminal"; readonly run: ProviderRunSummary }
@@ -85,6 +89,7 @@ export type RecoverProviderRunResult =
         | "lease_lost"
         | "runtime_unavailable"
         | "config_expired"
+        | "request_settings_unavailable"
         | "config_mismatch";
     };
 
@@ -105,6 +110,8 @@ interface RuntimeRow {
 }
 
 interface RunRow {
+  readonly records_per_request: number | null;
+  readonly request_settings_revision_id: string | null;
   readonly id: string;
   readonly control_command_id: string | null;
   readonly recovery_of_run_id: string | null;
@@ -181,6 +188,8 @@ function toSummary(row: RunRow): ProviderRunSummary {
     trigger: row.trigger,
     configVersionId: row.config_version_id,
     configVersionNumber: row.config_version_number,
+    recordsPerRequest: row.records_per_request,
+    requestSettingsRevisionId: row.request_settings_revision_id,
     workerFence: row.worker_fence,
     attemptNumber: row.attempt_number,
     recoveryOfRunId: row.recovery_of_run_id,
@@ -224,7 +233,7 @@ async function lockRun(
   const [row] = await transaction.$queryRaw<RunRow[]>(ProviderPrisma.sql`
     select id, control_command_id, recovery_of_run_id, idempotency_key,
            trigger, state, requested_by_operator_id, config_version_id,
-           config_version_number, worker_fence, attempt_number,
+           config_version_number, records_per_request, request_settings_revision_id, worker_fence, attempt_number,
            requested_cursor, requested_cursor_hash, final_cursor_hash,
            reached_source_head, page_count,
            catalog_record_count, pull_record_count, market_event_record_count,
@@ -240,7 +249,7 @@ async function activeRun(transaction: ProviderTransactionClient): Promise<RunRow
   const [row] = await transaction.$queryRaw<RunRow[]>(ProviderPrisma.sql`
     select id, control_command_id, recovery_of_run_id, idempotency_key,
            trigger, state, requested_by_operator_id, config_version_id,
-           config_version_number, worker_fence, attempt_number,
+           config_version_number, records_per_request, request_settings_revision_id, worker_fence, attempt_number,
            requested_cursor, requested_cursor_hash, final_cursor_hash,
            reached_source_head, page_count,
            catalog_record_count, pull_record_count, market_event_record_count,
@@ -388,6 +397,8 @@ export class PrismaProviderRunRepository {
     readonly correlationId: string;
     readonly requestedAt: Date;
     readonly controlCommandId?: string | null;
+    readonly requestSettingsDefault?: ProviderRequestSettingsDefault;
+    readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
   }): Promise<StartProviderRunResult> {
     requireUuid(input.runId, "runId");
     requireUuid(input.configVersionId, "configVersionId");
@@ -408,6 +419,9 @@ export class PrismaProviderRunRepository {
         fence: input.workerFence,
       });
       const startedAt = providerWorkerLeaseDatabaseNow(lease);
+      if (input.requestSettingsPolicy === "unmanaged" && !await unmanagedProviderRequestSettingsAllowed(transaction)) {
+        return { kind: "request_settings_unavailable" as const };
+      }
       const existing = await transaction.provider_runs.findUnique({
         where: { idempotency_key: input.idempotencyKey },
       });
@@ -432,6 +446,10 @@ export class PrismaProviderRunRepository {
           && existing.requested_at.getTime() === input.requestedAt.getTime()
         );
         if (!exactReplay) return { kind: "idempotency_conflict" as const };
+        if ((existing.state === "queued" || existing.state === "running") && !await providerRunRequestPinIsUsable(transaction, {
+          recordsPerRequest: existing.records_per_request, requestSettingsRevisionId: existing.request_settings_revision_id,
+          requestSettingsPolicy: input.requestSettingsPolicy,
+        })) return { kind: "request_settings_unavailable" as const };
         if (existing.state !== "queued") {
           return { kind: "deduplicated" as const, run: toSummary(existing as RunRow) };
         }
@@ -568,6 +586,10 @@ export class PrismaProviderRunRepository {
       }
       const currentActive = await activeRun(transaction);
       if (currentActive) {
+        if (!await providerRunRequestPinIsUsable(transaction, {
+          recordsPerRequest: currentActive.records_per_request, requestSettingsRevisionId: currentActive.request_settings_revision_id,
+          requestSettingsPolicy: input.requestSettingsPolicy,
+        })) return { kind: "request_settings_unavailable" as const };
         if (input.controlCommandId !== undefined && input.controlCommandId !== null) {
           const runtime = await lockRuntime(transaction);
           const command = await transaction.control_commands.findUnique({
@@ -605,6 +627,31 @@ export class PrismaProviderRunRepository {
       if (runtime.config_expires_at !== null && runtime.config_expires_at <= startedAt) {
         return { kind: "config_expired" as const };
       }
+      const command = input.controlCommandId ? await transaction.control_commands.findUnique({
+        where: { id: input.controlCommandId },
+        select: { state: true, command_type: true, requested_by_operator_id: true, correlation_id: true, target_run_id: true },
+      }) : null;
+      if (input.controlCommandId && (
+        command?.state !== "accepted"
+        || (command.command_type !== "run" && command.command_type !== "retry_run")
+        || command.requested_by_operator_id !== input.requestedByOperatorId
+        || command.correlation_id !== input.correlationId
+      )) throw new Error("Accepted run command is unavailable.");
+      const retryParentId = command?.command_type === "retry_run" ? command.target_run_id : null;
+      if (command?.command_type === "retry_run" && retryParentId === null) {
+        return { kind: "request_settings_unavailable" as const };
+      }
+      const settings = retryParentId !== null ? await recoveryProviderRequestSettings(transaction, {
+        parentRunId: retryParentId, configVersionId: input.configVersionId, configVersionNumber: input.configVersionNumber,
+        cursor: runtime.source_cursor, cursorFingerprint: runtime.source_cursor_hash,
+        expectedCursorFingerprint: runtime.source_cursor_hash, requestSettingsPolicy: input.requestSettingsPolicy,
+      }) : await pinProviderRequestSettings(transaction, {
+        providerId: runtime.central_provider_id, configVersionId: input.configVersionId,
+        configVersionNumber: input.configVersionNumber, correlationId: input.correlationId,
+        actorOperatorId: input.requestedByOperatorId, requestSettingsDefault: input.requestSettingsDefault,
+        requestSettingsPolicy: input.requestSettingsPolicy,
+      });
+      if (settings === null) return { kind: "request_settings_unavailable" as const };
       await transaction.provider_runs.create({
         data: {
           id: input.runId,
@@ -615,6 +662,9 @@ export class PrismaProviderRunRepository {
           requested_by_operator_id: input.requestedByOperatorId,
           config_version_id: input.configVersionId,
           config_version_number: input.configVersionNumber,
+          records_per_request: settings.recordsPerRequest,
+          request_settings_revision_id: settings.id,
+          request_settings_parent_run_id: retryParentId,
           worker_fence: input.workerFence,
           requested_cursor: jsonInput(runtime.source_cursor as CanonicalJsonValue | null),
           requested_cursor_hash: runtime.source_cursor_hash,
@@ -630,15 +680,6 @@ export class PrismaProviderRunRepository {
         readonly commandType: "run" | "retry_run";
       } | null = null;
       if (input.controlCommandId) {
-        const command = await transaction.control_commands.findUnique({
-          where: { id: input.controlCommandId },
-          select: {
-            state: true,
-            command_type: true,
-            requested_by_operator_id: true,
-            correlation_id: true,
-          },
-        });
         if (
           command?.state !== "accepted"
           || (command.command_type !== "run" && command.command_type !== "retry_run")
@@ -725,6 +766,7 @@ export class PrismaProviderRunRepository {
     readonly workerId: string;
     readonly workerFence: bigint;
     readonly correlationId: string;
+    readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
   }): Promise<RecoverProviderRunResult> {
     requireUuid(input.recoveryRunId, "recoveryRunId");
     requireUuid(input.correlationId, "correlationId");
@@ -742,10 +784,17 @@ export class PrismaProviderRunRepository {
         fence: input.workerFence,
       });
       const recoveredAt = providerWorkerLeaseDatabaseNow(lease);
+      if (input.requestSettingsPolicy === "unmanaged" && !await unmanagedProviderRequestSettingsAllowed(transaction)) {
+        return { kind: "request_settings_unavailable" as const };
+      }
       const active = await activeRun(transaction);
       if (active === null || active.state === "queued") {
         return { kind: "none" as const };
       }
+      if (!await providerRunRequestPinIsUsable(transaction, {
+        recordsPerRequest: active.records_per_request, requestSettingsRevisionId: active.request_settings_revision_id,
+        requestSettingsPolicy: input.requestSettingsPolicy,
+      })) return { kind: "request_settings_unavailable" as const };
       const runtime = await lockRuntime(transaction);
       const eligibilityFailure = runtime.operating_state !== "running"
         ? "runtime_unavailable" as const
@@ -813,6 +862,9 @@ export class PrismaProviderRunRepository {
             requested_by_operator_id: active.requested_by_operator_id,
             config_version_id: active.config_version_id,
             config_version_number: active.config_version_number,
+            records_per_request: active.records_per_request,
+            request_settings_revision_id: active.request_settings_revision_id,
+            request_settings_parent_run_id: active.id,
             worker_fence: input.workerFence,
             attempt_number: attemptNumber,
             requested_cursor: jsonInput(
@@ -969,6 +1021,7 @@ export class PrismaProviderRunRepository {
     readonly counts: Omit<ProviderRunCounters, "pages"> & { readonly records: number };
     readonly committedAt: Date;
     readonly applyCanonicalWrites?: (transaction: ProviderTransactionClient) => Promise<void>;
+    readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
   }): Promise<CommitProviderRunPageResult> {
     requireUuid(input.pageId, "pageId");
     requireUuid(input.runId, "runId");
@@ -1003,6 +1056,9 @@ export class PrismaProviderRunRepository {
         fence: input.workerFence,
       });
       const committedAt = providerWorkerLeaseDatabaseNow(lease);
+      if (input.requestSettingsPolicy === "unmanaged" && !await unmanagedProviderRequestSettingsAllowed(transaction)) {
+        return { kind: "request_settings_unavailable" as const };
+      }
       const run = await lockRun(transaction, input.runId);
       if (!run || run.worker_fence !== input.workerFence) {
         return { kind: "run_not_running" as const };
@@ -1060,6 +1116,14 @@ export class PrismaProviderRunRepository {
       if (runtime.source_cursor_hash !== input.requestedCursorHash) {
         return { kind: "cursor_conflict" as const };
       }
+      const requestFailure = await providerPageRequestSettingsFailure(transaction, {
+        pageId: input.pageId, runId: input.runId, pageNumber: run.page_count + 1,
+        workerFence: input.workerFence, responseDigest: input.responseDigest,
+        normalizedRecordCount: input.counts.records, recordsPerRequest: run.records_per_request,
+        requestSettingsRevisionId: run.request_settings_revision_id,
+        requestSettingsPolicy: input.requestSettingsPolicy,
+      });
+      if (requestFailure !== null) return { kind: requestFailure };
       await input.applyCanonicalWrites?.(transaction);
       await transaction.provider_runtime.update({
         where: { singleton_key: true },

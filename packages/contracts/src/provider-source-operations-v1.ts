@@ -154,8 +154,9 @@ export const providerSourceOperationsSourceSchema = z.object({
     recordIdScopes: z.array(registrationKeySchema).min(1).max(32),
     lifecycle: z.enum(["draft", "paused", "active", "disabled", "replaced"]),
     pauseRequested: z.boolean(),
-    recordsPerRequest: providerSourceRecordsPerRequestSchema,
-    requestSizePolicy: z.enum(["schedule_revision", "adapter_profile"]),
+    recordsPerRequest: providerSourceRecordsPerRequestSchema.nullable(),
+    requestSettingsRevisionId: uuidSchema.nullable(),
+    requestSizePolicy: z.enum(["schedule_revision", "adapter_profile", "request_settings_revision"]),
     configuration: z.object({
       validated: z.literal(true),
       fields: z.array(z.object({

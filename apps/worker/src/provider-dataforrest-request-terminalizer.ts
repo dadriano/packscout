@@ -21,7 +21,7 @@ export interface ProviderSourceRequestAuditRecorder {
     responseBytes: number;
     responseLimitDiagnostic?: ProviderSourceResponseLimitDiagnostic;
   }>): Promise<Readonly<{
-    kind: "recorded" | "lease_lost" | "run_not_running";
+    kind: "recorded" | "lease_lost" | "run_not_running" | "request_settings_mismatch" | "request_limit_exceeded";
   }>>;
 }
 

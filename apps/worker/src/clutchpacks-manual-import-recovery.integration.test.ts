@@ -192,6 +192,7 @@ async function startAttempt(
   harness: ProviderHarness,
   configuration: SynchronizedConfiguration,
   workerId: string,
+  requestSettingsDefault?: Readonly<{ recordsPerRequest: number; adapterKey: string }>,
 ): Promise<Readonly<{ runId: string; fence: bigint }>> {
   const leases = new PrismaProviderWorkerLeaseRepository(harness.client);
   const acquired = await leases.acquire({
@@ -204,6 +205,9 @@ async function startAttempt(
   }
   const runId = randomUUID();
   const started = await new PrismaProviderRunRepository(harness.client).start({
+    ...(requestSettingsDefault === undefined
+      ? { requestSettingsPolicy: "unmanaged" as const }
+      : { requestSettingsDefault }),
     runId,
     idempotencyKey: `recovery-test/${runId}`,
     trigger: "scheduled",
@@ -246,6 +250,7 @@ function emptyHeadSource(input: Readonly<{
   onNextPage?: () => void;
 }> = {}): ProviderManualImportPageSource {
   return {
+    requestSettingsPolicy: () => "unmanaged",
     supports(adapterKey) {
       return adapterKey === supportedAdapterKey;
     },
@@ -284,6 +289,7 @@ async function commitCleanupContinuation(
   const committed = await new PrismaProviderRunRepository(
     harness.client,
   ).commitPage({
+    requestSettingsPolicy: "unmanaged",
     pageId: randomUUID(),
     runId: input.runId,
     workerId: input.workerId,
@@ -429,6 +435,7 @@ test("progress cleanup cannot release a contended successor or terminalize an ol
     const recoveryRunId = randomUUID();
     assert.equal((await new PrismaProviderRunRepository(harness.client)
       .recoverActive({
+        requestSettingsPolicy: "unmanaged",
         recoveryRunId,
         workerId: successorWorkerId,
         workerFence: successorFence,
@@ -485,6 +492,7 @@ test(
       const checkpointHash = "a".repeat(64);
       const runs = new PrismaProviderRunRepository(harness.client);
       assert.equal((await runs.commitPage({
+        requestSettingsPolicy: "unmanaged",
         pageId: randomUUID(),
         runId: active.runId,
         workerId,
@@ -509,6 +517,7 @@ test(
         committedAt: new Date(),
       })).kind, "committed");
       const resumed = await runs.recoverActive({
+        requestSettingsPolicy: "unmanaged",
         recoveryRunId: randomUUID(),
         workerId,
         workerFence: active.fence,
@@ -552,6 +561,7 @@ test(
       const committedCursorHash = "b".repeat(64);
       const runs = new PrismaProviderRunRepository(harness.client);
       const page = await runs.commitPage({
+        requestSettingsPolicy: "unmanaged",
         pageId: randomUUID(),
         runId: prior.runId,
         workerId: priorWorkerId,
@@ -584,6 +594,7 @@ test(
         recoveryWorkerId,
       );
       const recovered = await runs.recoverActive({
+        requestSettingsPolicy: "unmanaged",
         recoveryRunId: randomUUID(),
         workerId: recoveryWorkerId,
         workerFence: recoveryFence,
@@ -683,6 +694,7 @@ test(
         );
         const runs = new PrismaProviderRunRepository(harness.client);
         const recovered = await runs.recoverActive({
+          requestSettingsPolicy: "unmanaged",
           recoveryRunId: randomUUID(),
           workerId: recoveryWorkerId,
           workerFence: recoveryFence,
@@ -739,6 +751,7 @@ test(
         harness,
         configuration,
         priorWorkerId,
+        { recordsPerRequest: 100, adapterKey: configuration.adapterKey },
       );
       assert.equal(await new PrismaProviderWorkerLeaseRepository(
         harness.client,
@@ -793,6 +806,42 @@ test(
   },
 );
 
+test("an unmanaged historical run requires an explicit source capability before recovery", { concurrency: false }, async (context) => {
+  if (!integrationEnabled()) {
+    context.skip("Set PACKSCOUT_CLUTCHPACKS_EXECUTION_INTEGRATION=1 to run the disposable database proof.");
+    return;
+  }
+  const harness = await createHarness();
+  try {
+    const configuration = await synchronizeConfiguration(harness);
+    const priorWorkerId = "integration:unmanaged-prior";
+    const prior = await startAttempt(harness, configuration, priorWorkerId);
+    const before = await harness.client.provider_runs.findUniqueOrThrow({ where: { id: prior.runId } });
+    assert.equal(before.records_per_request, null);
+    assert.equal(before.request_settings_revision_id, null);
+    assert.equal(await new PrismaProviderWorkerLeaseRepository(harness.client).release({
+      role: "import", owner: priorWorkerId, fence: prior.fence,
+    }), true);
+    let pageCalls = 0;
+    const result = await new ProviderManualImportExecutor({
+      database: harness.client,
+      source: {
+        supports: () => true,
+        nextPage: () => { pageCalls += 1; throw new Error("Missing capability must not read a source."); },
+      },
+      workerId: "integration:unmanaged-no-capability", leaseMilliseconds: 30_000,
+    }).executeNext();
+    assert.deepEqual(result, { kind: "blocked", runId: null,
+      failureCode: "PROVIDER_RUN_RECOVERY_REQUEST_SETTINGS_UNAVAILABLE" });
+    assert.equal(pageCalls, 0);
+    assert.deepEqual(await harness.client.provider_runs.findUniqueOrThrow({ where: { id: prior.runId } }), before);
+    assert.equal(await harness.client.provider_runs.count(), 1);
+    assert.equal(await harness.client.provider_request_settings.count(), 0);
+  } finally {
+    await harness.close();
+  }
+});
+
 test(
   "an unsupported adapter leaves a new accepted command and import fence untouched",
   { concurrency: false },
@@ -814,6 +863,7 @@ test(
       const queued = await new PrismaAdminProviderRuntimeRepository(
         harness.client,
       ).requestRunNow({
+        requestSettingsPolicy: "unmanaged",
         providerId: harness.providerId,
         operatorId: "10000000-0000-4000-8000-000000000001",
         expectedConfigVersionId: configuration.id,

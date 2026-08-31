@@ -105,6 +105,7 @@ export function operationSource(
       pauseRequested: false,
       recordsPerRequest: index === 0 ? 1_000 : 500,
       requestSizePolicy: "schedule_revision",
+      requestSettingsRevisionId: null,
       configuration: {
         validated: true,
         fields: [
@@ -423,7 +424,7 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
       identityNamespaceKey: source.source!.identityNamespaceKey,
       recordIdScopes: [...source.source!.recordIdScopes],
       intervalSeconds: source.schedule!.intervalSeconds,
-      recordsPerRequest: source.source!.recordsPerRequest,
+      recordsPerRequest: source.source!.recordsPerRequest!,
       activeRunRecordsPerRequest: source.activeRun?.recordsPerRequest ?? null,
       freshnessGraceSeconds: 900 as const,
       scheduleRevisionId: source.schedule!.scheduleRevisionId,

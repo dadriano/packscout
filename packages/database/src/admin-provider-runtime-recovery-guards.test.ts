@@ -24,6 +24,7 @@ function fixture() {
     source_cursor: cursor as { opaque: string } | null, source_cursor_hash: fingerprint };
   const run = { id: request.runId, trigger: "manual", state: "queued",
     requested_by_operator_id: request.operatorId, config_version_id: request.expectedConfigVersionId,
+    records_per_request: 100, request_settings_revision_id: request.correlationId, request_settings_parent_run_id: null,
     config_version_number: 4n, worker_fence: 0n, attempt_number: 1, recovery_of_run_id: null,
     requested_cursor_hash: fingerprint, final_cursor_hash: null, reached_source_head: false,
     page_count: 0, catalog_record_count: 0, pull_record_count: 0, market_event_record_count: 0,
@@ -52,6 +53,11 @@ function fixture() {
       findUnique: async () => run, findUniqueOrThrow: async () => run,
       create: async () => { writes.push("run"); return run; },
     },
+    provider_request_settings: { findUnique: async () => ({ active_revision: {
+      id: request.correlationId, revision_number: 1n, records_per_request: 100, origin: "operator",
+      config_version_id: request.expectedConfigVersionId, config_version_number: 4n,
+      adapter_key: "test-adapter", created_by_operator_id: request.operatorId, created_at: now,
+    } }) },
     local_audit_events: { create: async () => { writes.push("audit"); } },
     provider_activity_outbox: { create: async () => { writes.push("activity"); } },
   };

@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import { DATAFORREST_EVENTS_V1_ENDPOINT } from "@packscout/contracts";
+import { DATAFORREST_EVENTS_V1_ENDPOINT, dataforrestDistributedRequestPolicy } from "@packscout/contracts";
 import {
   createProviderDatabaseLifecycle,
   initializeProviderDatabaseIdentity,
@@ -19,6 +19,7 @@ import {
   PrismaProviderActivityOutboxRepository,
   PrismaProviderCommandRepository,
   PrismaProviderRuntimeRepository,
+  PrismaProviderSourceRequestAuditRepository,
   PrismaProviderWorkerLeaseRepository,
   providerDatabaseTarget,
   type ProviderDatabaseRoute,
@@ -179,6 +180,9 @@ function isolatedClutchSource(captureRoot: string): ProviderManualImportPageSour
     supports(adapterKey) {
       return source.supports(adapterKey, "clutchpacks");
     },
+    requestSettingsPolicy(adapterKey) {
+      return source.requestSettingsPolicy(adapterKey, "clutchpacks");
+    },
     nextPage(input) {
       return source.nextPage({
         ...input,
@@ -192,6 +196,7 @@ function mixedQuarantineSource(
   includeCandidateFailure = true,
 ): ProviderManualImportPageSource {
   return {
+    requestSettingsPolicy: () => "unmanaged",
     supports(adapterKey) {
       return adapterKey === CLUTCHPACKS_CAPTURE_ADAPTER_KEY;
     },
@@ -253,6 +258,7 @@ function deferredCatalogSource(
 ): ProviderManualImportPageSource {
   let requestCount = 0;
   return {
+    requestSettingsPolicy: () => "unmanaged",
     supports(adapterKey) {
       return adapterKey === CLUTCHPACKS_CAPTURE_ADAPTER_KEY;
     },
@@ -426,6 +432,9 @@ async function enqueue(
   const runtime = await new PrismaProviderRuntimeRepository(
     harness.client,
   ).snapshot();
+  const adapterKey = runtime.cachedConfiguration?.configuration.adapterKey;
+  const requestPolicy = typeof adapterKey === "string"
+    ? dataforrestDistributedRequestPolicy(adapterKey, runtime.providerKey) : null;
   const result = await new PrismaAdminProviderRuntimeRepository(
     harness.client,
   ).requestRunNow({
@@ -438,6 +447,9 @@ async function enqueue(
     commandId: randomUUID(),
     runId: randomUUID(),
     correlationId: randomUUID(),
+    ...(requestPolicy !== null && typeof adapterKey === "string" ? {
+      requestSettingsDefault: { recordsPerRequest: requestPolicy.defaultRecordsPerRequest, adapterKey },
+    } : { requestSettingsPolicy: "unmanaged" as const }),
   });
   assert.equal(result.kind, "created");
   if (result.kind !== "created") throw new Error("Run was not queued.");
@@ -492,6 +504,8 @@ function parallelProviderSource(
   expectedAdapterKey: string,
   barrier: ParallelProviderBarrier,
   state: { calls: number },
+  database: ProviderPrismaClient,
+  workerId: string,
 ): ProviderManualImportPageSource {
   return {
     supports(adapterKey, requestedProviderKey) {
@@ -540,7 +554,18 @@ function parallelProviderSource(
         continuation: nextCursor === null ? "head" : "more",
         records: [],
       };
-      return { ...body, responseDigest: providerMixedPageDigest(body) };
+      const page = { ...body, responseDigest: providerMixedPageDigest(body) };
+      assert.equal(typeof input.recordsPerRequest, "number");
+      assert.equal(typeof input.requestSettingsRevisionId, "string");
+      // This synthetic live source models an empty wire page, not a capture.
+      assert.equal((await new PrismaProviderSourceRequestAuditRepository(database).recordPageTranslation({
+        runId: input.runId, workerId, workerFence: input.workerFence,
+        requestAttemptId: randomUUID(), pageAttemptId: randomUUID(), pageNumber: input.pageNumber,
+        sourceRecordCount: 0, normalizedRecordCount: 0, mixedPageId: page.pageId,
+        responseDigest: page.responseDigest, recordsPerRequest: input.recordsPerRequest!,
+        requestSettingsRevisionId: input.requestSettingsRevisionId!,
+      })).kind, "recorded");
+      return page;
     },
   };
 }
@@ -698,6 +723,8 @@ test("two disposable provider databases overlap while one source failure remains
         definition.integration.manifest.adapterVersion,
         barrier,
         sourceState,
+        definition.harness.client,
+        definition.workerId,
       );
       const pins = bootstrapPins.get(definition.providerKey);
       assert.ok(pins);
@@ -966,6 +993,7 @@ test("a settled reconciliation failure preserves the committed page and reports 
       workerId: "integration:reconciliation-failure", leaseMilliseconds: 30_000,
       source: {
         supports: source.supports.bind(source),
+        requestSettingsPolicy: source.requestSettingsPolicy!.bind(source),
         nextPage(input) { sourceReads += 1; return source.nextPage(input); },
       },
     }).executeNextPage();

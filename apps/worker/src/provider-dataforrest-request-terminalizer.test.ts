@@ -80,11 +80,13 @@ test("DataForrest terminalizer persists exact fenced request metadata before rec
 });
 
 test("DataForrest terminalizer withholds a receipt after fenced authority loss", async () => {
-  const terminalize = createProviderDataforrestRequestTerminalizer({
-    workerId: "preview:clutchpacks",
-    audit: { record: () => Promise.resolve({ kind: "lease_lost" as const }) },
-  });
-  await assert.rejects(terminalize(attempt), /authority was lost/u);
+  for (const kind of ["lease_lost", "run_not_running", "request_settings_mismatch", "request_limit_exceeded"] as const) {
+    const terminalize = createProviderDataforrestRequestTerminalizer({
+      workerId: "preview:clutchpacks",
+      audit: { record: () => Promise.resolve({ kind }) },
+    });
+    await assert.rejects(terminalize(attempt), /authority was lost/u);
+  }
 });
 
 test("oversize failure diagnostics preserve stable error codes and distinguish partial bytes from complete capture", async () => {

@@ -171,8 +171,14 @@ export function ProviderSourceOperationsLedger({
           const operational = sourceOperationalLabel(source);
           const isPending = pendingKey?.startsWith(`${source.providerId}:`) ?? false;
           const actionRequired = source.processor?.activity === "action_required";
+          const requestSettingsUnavailable = source.source !== null &&
+            source.source.requestSizePolicy !== "schedule_revision" &&
+            (source.source.requestSizePolicy === "adapter_profile" ||
+              source.source.requestSettingsRevisionId === null || source.source.recordsPerRequest === null);
           const runLabel = actionRequired
             ? "Resolve before run"
+            : requestSettingsUnavailable
+              ? "Request settings unavailable"
             : source.latestRun?.state === "failed"
               ? "Retry source"
               : "Run now";
@@ -219,8 +225,15 @@ export function ProviderSourceOperationsLedger({
               {actionRequired ? (
                 <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
                   <strong>Administrator recovery required.</strong>{" "}
-                  Disable this source, correct the reported cause, run Test source while disabled, Activate paused, then Resume. Run now and Resume cannot clear Action required.
+                  {source.source?.requestSizePolicy === "schedule_revision"
+                    ? "Disable this source, correct the reported cause, run Test source while disabled, Activate paused, then Resume. Run now and Resume cannot clear Action required."
+                    : "Review the recorded failure and correct its cause before an authorized recovery. Changing request size does not restart work or clear the failure."}
                 </aside>
+              ) : null}
+              {requestSettingsUnavailable ? (
+                <p className="source-config-field-help" role="note">
+                  Run now requires verified request settings and an authorized worker handoff. No new run can be requested from this page yet.
+                </p>
               ) : null}
               <footer className="source-lane__actions">
                 {source.configured ? <Link to={`/providers/${source.providerId}`}>Diagnostics</Link> : <Link to="/source-configuration">Configure source</Link>}
@@ -228,9 +241,9 @@ export function ProviderSourceOperationsLedger({
                 {source.progress.openQuarantine > 0 ? <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>Quarantine</Link> : null}
                 {canOperate && source.source ? (
                   <div>
-                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active" || actionRequired} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
-                    {source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
-                    {source.source.lifecycle === "paused" || source.source.pauseRequested ? <button type="button" className="admin-button admin-button-primary" disabled={isPending || actionRequired} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
+                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active" || actionRequired || requestSettingsUnavailable} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
+                    {source.source.requestSizePolicy === "schedule_revision" && source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
+                    {source.source.requestSizePolicy === "schedule_revision" && (source.source.lifecycle === "paused" || source.source.pauseRequested) ? <button type="button" className="admin-button admin-button-primary" disabled={isPending || actionRequired} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
                   </div>
                 ) : null}
               </footer>

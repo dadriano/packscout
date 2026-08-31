@@ -9,6 +9,8 @@ import {
   appendProviderLocalAudit,
 } from "./provider-local-evidence.ts";
 import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
+import { pinProviderRequestSettings, type ProviderRequestSettingsDefault, type ProviderRequestSettingsPolicy } from "./provider-request-settings-repository.ts";
+import { recoveryProviderRequestSettings, unmanagedProviderRequestSettingsAllowed } from "./provider-run-request-settings.ts";
 import { providerMixedPageDigest } from "./provider-mixed-page-contract.ts";
 import { lockProviderWorkerLease, providerWorkerLeaseIsLive } from "./provider-worker-lease-repository.ts";
 
@@ -37,6 +39,9 @@ export interface AdminLocalRunRecord {
   readonly requestedByOperatorId: string | null;
   readonly configVersionId: string;
   readonly configVersionNumber: bigint;
+  readonly recordsPerRequest: number | null;
+  readonly requestSettingsRevisionId: string | null;
+  readonly requestSettingsParentRunId: string | null;
   readonly workerFence: bigint;
   readonly attemptNumber: number;
   readonly recoveryOfRunId: string | null;
@@ -129,7 +134,8 @@ export type AdminRunNowPersistenceResult =
         | "configuration_expired"
         | "cursor_conflict"
         | "active_run_conflict"
-        | "runtime_unavailable";
+    | "runtime_unavailable"
+    | "request_settings_unavailable";
       readonly generation: bigint;
       readonly runtimeState: "idle" | "running" | "paused" | "stopped" | "error";
       readonly correlationId: string;
@@ -153,6 +159,9 @@ const runSelection = ProviderPrisma.validator<ProviderPrisma.provider_runsSelect
   requested_by_operator_id: true,
   config_version_id: true,
   config_version_number: true,
+  records_per_request: true,
+  request_settings_revision_id: true,
+  request_settings_parent_run_id: true,
   worker_fence: true,
   attempt_number: true,
   recovery_of_run_id: true,
@@ -186,6 +195,9 @@ function runRecord(row: RunRow): AdminLocalRunRecord {
     requestedByOperatorId: row.requested_by_operator_id,
     configVersionId: row.config_version_id,
     configVersionNumber: row.config_version_number,
+    recordsPerRequest: row.records_per_request,
+    requestSettingsRevisionId: row.request_settings_revision_id,
+    requestSettingsParentRunId: row.request_settings_parent_run_id,
     workerFence: row.worker_fence,
     attemptNumber: row.attempt_number,
     recoveryOfRunId: row.recovery_of_run_id,
@@ -433,6 +445,9 @@ export class PrismaAdminProviderRuntimeRepository {
     readonly requireNoActiveRun?: boolean;
     /** Optional recovery authority, checked atomically with a new queue write. */
     readonly expectedImportLease?: { readonly owner: string; readonly fence: bigint };
+    readonly requestSettingsDefault?: ProviderRequestSettingsDefault;
+    readonly requestSettingsRecoveryParentRunId?: string;
+    readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
   }): Promise<AdminRunNowPersistenceResult> {
     return this.database.$transaction(async (transaction) => {
       // Match worker lock ordering. The lease lock spans the runtime checks
@@ -454,6 +469,9 @@ export class PrismaAdminProviderRuntimeRepository {
       });
       if (runtime.central_provider_id !== input.providerId) {
         return conflict("configuration_conflict");
+      }
+      if (input.requestSettingsPolicy === "unmanaged" && !await unmanagedProviderRequestSettingsAllowed(transaction)) {
+        return conflict("request_settings_unavailable");
       }
       const existingCommand = await transaction.control_commands.findUnique({
         where: { idempotency_key: input.idempotencyKey },
@@ -483,6 +501,9 @@ export class PrismaAdminProviderRuntimeRepository {
           expectedConfigVersionNumber: input.expectedConfigVersionNumber,
         };
         if (!safeRunRequestMatches(replay)) return conflict("idempotency_conflict");
+        if (replay.run.request_settings_parent_run_id !== (input.requestSettingsRecoveryParentRunId ?? null)) {
+          return conflict("idempotency_conflict");
+        }
         if (input.expectedCursorFingerprint !== undefined
           && replay.run.requested_cursor_hash !== input.expectedCursorFingerprint) {
           return conflict("cursor_conflict");
@@ -522,7 +543,21 @@ export class PrismaAdminProviderRuntimeRepository {
         for update
         limit 1
       `);
-      if (active && input.requireNoActiveRun) return conflict("active_run_conflict");
+      if (active && (input.requireNoActiveRun || input.requestSettingsRecoveryParentRunId !== undefined)) return conflict("active_run_conflict");
+      const settings = active ? null : input.requestSettingsRecoveryParentRunId !== undefined
+        ? await recoveryProviderRequestSettings(transaction, {
+          parentRunId: input.requestSettingsRecoveryParentRunId,
+          configVersionId: input.expectedConfigVersionId, configVersionNumber: input.expectedConfigVersionNumber,
+          cursor: runtime.source_cursor, cursorFingerprint: runtime.source_cursor_hash,
+          expectedCursorFingerprint: input.expectedCursorFingerprint,
+          requestSettingsPolicy: input.requestSettingsPolicy,
+        }) : await pinProviderRequestSettings(transaction, {
+        providerId: input.providerId, configVersionId: input.expectedConfigVersionId,
+        configVersionNumber: input.expectedConfigVersionNumber, correlationId: input.correlationId,
+        actorOperatorId: input.operatorId, requestSettingsDefault: input.requestSettingsDefault,
+        requestSettingsPolicy: input.requestSettingsPolicy,
+      });
+      if (!active && settings === null) return conflict("request_settings_unavailable");
       await transaction.control_commands.create({
         data: {
           id: input.commandId,
@@ -567,6 +602,9 @@ export class PrismaAdminProviderRuntimeRepository {
             requested_by_operator_id: input.operatorId,
             config_version_id: input.expectedConfigVersionId,
             config_version_number: input.expectedConfigVersionNumber,
+            records_per_request: settings!.recordsPerRequest,
+            request_settings_revision_id: settings!.id,
+            request_settings_parent_run_id: input.requestSettingsRecoveryParentRunId ?? null,
             worker_fence: 0n,
             requested_cursor: inputJson(runtime.source_cursor),
             requested_cursor_hash: runtime.source_cursor_hash,

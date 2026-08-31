@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { BoundedProviderDatabaseGateway } from "@packscout/database";
+import {
+  PrismaAdminProviderRuntimeRepository, PrismaProviderRuntimeRepository,
+  type BoundedProviderDatabaseGateway, type ProviderPrismaClient,
+} from "@packscout/database";
+import { dataforrestClutchpacksDistributedSourceAdapterManifest } from "@packscout/contracts";
 import { ProviderSourceImportRequestError } from "@packscout/services";
 import { createRoutedProviderManualImportDelegate } from
   "./routed-provider-manual-import.ts";
@@ -127,4 +131,33 @@ test("routed manual delegate exposes only a bounded unavailable failure", async 
       return true;
     },
   );
+});
+
+test("routed queue uses the closed capture capability and never bootstraps live request settings", async (context) => {
+  const queued: Array<Parameters<PrismaAdminProviderRuntimeRepository["requestRunNow"]>[0]> = [];
+  context.mock.method(PrismaProviderRuntimeRepository.prototype, "synchronizeConfiguration", async () => ({
+    kind: "updated", runtime: { generation: 2n },
+  }));
+  context.mock.method(PrismaAdminProviderRuntimeRepository.prototype, "requestRunNow", async (input: Parameters<PrismaAdminProviderRuntimeRepository["requestRunNow"]>[0]) => {
+    queued.push(input);
+    return { kind: "configuration_conflict" };
+  });
+  const gateway = {
+    async runWithAdminProviderDatabase(_scope: unknown, operation: (database: ProviderPrismaClient) => Promise<unknown>) {
+      return { state: "reachable", value: await operation({} as ProviderPrismaClient) };
+    },
+  } as unknown as Pick<BoundedProviderDatabaseGateway, "runWithAdminProviderDatabase">;
+  for (const [providerKey, adapterKey, policy] of [
+    ["clutchpacks", request.authority.adapterKey, "unmanaged"],
+    ["courtyard", request.authority.adapterKey, "required"],
+    ["clutchpacks", dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion, "required"],
+    ["clutchpacks", "unknown", "required"],
+  ] as const) {
+    await assert.rejects(createRoutedProviderManualImportDelegate({ gateway }).requestManual({
+      ...request, authority: { ...request.authority, providerKey, adapterKey },
+    }), (error: unknown) => error instanceof ProviderSourceImportRequestError && error.code === "SOURCE_REVISION_CONFLICT");
+    assert.equal(queued.at(-1)?.requestSettingsPolicy, policy);
+    assert.equal(Object.hasOwn(queued.at(-1)!, "requestSettingsDefault"), false);
+  }
+  assert.equal(queued.length, 4);
 });

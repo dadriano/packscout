@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   opaqueCursorEnvelopeSchema,
+  dataforrestDistributedRunRequestPinSchema,
   type OpaqueCursorEnvelope,
   type SourceAdapterFailure,
 } from "@packscout/contracts";
@@ -53,6 +54,7 @@ export type ProviderDataforrestSourceFailureCode =
   | "PROVIDER_DATAFORREST_AUTHORITY_UNAVAILABLE"
   | "PROVIDER_DATAFORREST_CURSOR_INVALID"
   | "PROVIDER_DATAFORREST_PAGE_INVALID"
+  | "PROVIDER_DATAFORREST_REQUEST_SETTINGS_INVALID"
   | "PROVIDER_DATAFORREST_RESPONSE_INVALID"
   | "PROVIDER_DATAFORREST_TERMINALIZATION_FAILED"
   | "PROVIDER_DATAFORREST_TRANSLATION_INVALID";
@@ -81,8 +83,12 @@ export interface ProviderDataforrestPageTranslationRecorder {
     pageNumber: number;
     sourceRecordCount: number;
     normalizedRecordCount: number;
+    mixedPageId?: string;
+    responseDigest?: string;
+    recordsPerRequest?: number;
+    requestSettingsRevisionId?: string;
   }>): Promise<Readonly<{
-    kind: "recorded" | "lease_lost" | "run_not_running";
+    kind: "recorded" | "lease_lost" | "run_not_running" | "request_settings_mismatch" | "request_limit_exceeded";
   }>>;
 }
 
@@ -463,6 +469,7 @@ export class ProviderDataforrestMixedPageSource
     this.#adapter = input.adapter ?? new DataforrestEventsSourceAdapter(
       {},
       input.integration.manifest,
+      { mode: "distributed_run_pin", provider: input.integration.providerKey },
     );
     if (!adapterMatchesIntegration(this.#adapter, input.integration)) {
       throw new TypeError("DataForrest adapter does not match live integration.");
@@ -510,7 +517,14 @@ export class ProviderDataforrestMixedPageSource
       identity,
       integration: this.#integration,
     });
+    const requestPin = dataforrestDistributedRunRequestPinSchema.safeParse({
+      recordsPerRequest: input.recordsPerRequest,
+      requestSettingsRevisionId: input.requestSettingsRevisionId,
+    });
+    if (!requestPin.success) failure("PROVIDER_DATAFORREST_REQUEST_SETTINGS_INVALID");
     const manifest = this.#adapter.manifest;
+    const requestBounds = Object.freeze({ ...manifest.requestBounds,
+      pageLimit: requestPin.data.recordsPerRequest });
     const declaration = manifest.supportedProviders.find(
       ({ provider }) => provider === this.#integration.providerKey,
     );
@@ -551,7 +565,7 @@ export class ProviderDataforrestMixedPageSource
       runClaimLeaseId: `${input.runId}:${input.workerFence.toString()}`,
       pageAttemptId: randomUUID(),
       pageNumber: input.pageNumber,
-      pageLimit: manifest.requestBounds.pageLimit,
+      pageLimit: requestPin.data.recordsPerRequest,
       cursorGeneration: 1,
       requestedCursorFingerprint: input.sourceCheckpointFingerprint,
     });
@@ -576,7 +590,7 @@ export class ProviderDataforrestMixedPageSource
         connectionProfileRevisionId: identity.connectionProfileRevisionId,
         connectionConfiguration: resolved.connectionConfiguration,
         requestLease,
-        bounds: manifest.requestBounds,
+        bounds: requestBounds,
         operationKind: "page_read",
         provider: this.#integration.providerKey,
         providerId: resolved.providerId,
@@ -596,7 +610,7 @@ export class ProviderDataforrestMixedPageSource
           cursorGeneration: 1,
           requestedCursorFingerprint: input.sourceCheckpointFingerprint,
           requestedCursor: cursor,
-          pageLimit: manifest.requestBounds.pageLimit,
+          pageLimit: requestPin.data.recordsPerRequest,
         },
       });
       const request = await captureAndTerminalizeSourceAdapterRequest(
@@ -655,12 +669,19 @@ export class ProviderDataforrestMixedPageSource
         captured: completed.value,
         translation,
       });
+      if (typeof page.pageId !== "string" || typeof page.responseDigest !== "string") {
+        failure("PROVIDER_DATAFORREST_PAGE_INVALID");
+      }
       let translationReceipt: Awaited<ReturnType<
         ProviderDataforrestPageTranslationRecorder["recordPageTranslation"]
       >>;
       try {
         translationReceipt = await this.#translationRecorder
           .recordPageTranslation({
+            mixedPageId: page.pageId,
+            responseDigest: page.responseDigest,
+            recordsPerRequest: requestPin.data.recordsPerRequest,
+            requestSettingsRevisionId: requestPin.data.requestSettingsRevisionId,
             runId: input.runId,
             workerId: this.#workerId,
             workerFence: input.workerFence,

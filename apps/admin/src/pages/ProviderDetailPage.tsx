@@ -17,6 +17,7 @@ import {
   commandProviderSource,
   reviseProviderSourceInterval,
   reviseProviderSourceRecordsPerRequest,
+  reviseDistributedProviderRequestSettings,
 } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
 import { SourceDiagnosticFeed } from "../components/operations/SourceDiagnosticFeed";
@@ -70,7 +71,7 @@ function mutationError(error: unknown): string {
     return "Your role cannot perform this command. The selected provider was not changed.";
   }
   if (error.code === "SOURCE_CONFLICT" || error.code === "SOURCE_REVISION_CONFLICT") {
-    return "This source or schedule changed in another session. Refresh before using its current revision.";
+    return "This source or request setting changed in another session. Refresh before using its current revision.";
   }
   if (error.code === "SOURCE_DEPENDENCY_REQUIRED") {
     return "The shared connection must recover before this selected provider can continue.";
@@ -177,21 +178,22 @@ export function ProviderDetailPage() {
           setIntervalDraft(String(result.source.schedule?.intervalSeconds ?? ""));
         }
         const refreshedSource = result.source.source;
-        const refreshedScheduleRevisionId = result.source.schedule
-          ?.scheduleRevisionId ?? null;
+        const refreshedRequestRevisionId = refreshedSource?.requestSizePolicy === "request_settings_revision"
+          ? refreshedSource.requestSettingsRevisionId
+          : result.source.schedule?.scheduleRevisionId ?? null;
         if (
           refreshedSource &&
           (
             recordsPerRequestOwner.current !== refreshedSource.sourceInstanceId ||
             (!recordsPerRequestDirty.current &&
               recordsPerRequestOriginRevision.current !==
-                refreshedScheduleRevisionId)
+                refreshedRequestRevisionId)
           )
         ) {
           recordsPerRequestOwner.current = refreshedSource.sourceInstanceId;
-          recordsPerRequestOriginRevision.current = refreshedScheduleRevisionId;
+          recordsPerRequestOriginRevision.current = refreshedRequestRevisionId;
           recordsPerRequestDirty.current = false;
-          setRecordsPerRequestDraft(String(refreshedSource.recordsPerRequest));
+          setRecordsPerRequestDraft(refreshedSource.recordsPerRequest === null ? "" : String(refreshedSource.recordsPerRequest));
           setRecordsPerRequestError(null);
           if (recordsPerRequestReloadInFlight.current) {
             recordsPerRequestReloadInFlight.current = false;
@@ -399,8 +401,9 @@ export function ProviderDetailPage() {
   ): Promise<void> {
     event.preventDefault();
     const source = detail?.source.source;
-    const scheduleRevisionId = recordsPerRequestOriginRevision.current;
-    if (!source || !scheduleRevisionId || source.requestSizePolicy !== "schedule_revision") return;
+    const requestRevisionId = recordsPerRequestOriginRevision.current;
+    if (!source || !requestRevisionId || source.recordsPerRequest === null ||
+        source.requestSizePolicy === "adapter_profile") return;
     const recordsPerRequest = parseRecordsPerRequest(recordsPerRequestDraft);
     if (recordsPerRequest === null) {
       setRecordsPerRequestError(RECORDS_PER_REQUEST_ERROR);
@@ -411,20 +414,26 @@ export function ProviderDetailPage() {
     setRecordsPerRequestError(null);
     setRecordsPerRequestConflict(false);
     try {
-      const revised = await reviseProviderSourceRecordsPerRequest(
-        detail.source.providerId,
-        source.sourceInstanceId,
-        {
-          expectedSourceRevisionId: source.sourceRevisionId,
-          expectedScheduleRevisionId: scheduleRevisionId,
-          recordsPerRequest,
-        },
-      );
+      const revisedRevisionId = source.requestSizePolicy === "request_settings_revision"
+        ? (await reviseDistributedProviderRequestSettings(detail.source.providerId, {
+            expectedConfigVersionId: source.sourceRevisionId,
+            expectedRequestSettingsRevisionId: requestRevisionId,
+            recordsPerRequest,
+          })).requestSettingsRevisionId
+        : (await reviseProviderSourceRecordsPerRequest(
+            detail.source.providerId,
+            source.sourceInstanceId,
+            {
+              expectedSourceRevisionId: source.sourceRevisionId,
+              expectedScheduleRevisionId: requestRevisionId,
+              recordsPerRequest,
+            },
+          )).scheduleRevisionId;
       // A detail read begun before this acknowledgment cannot know about the
-      // new schedule revision. Invalidate it synchronously before React runs
+      // new request-setting revision. Invalidate it synchronously before React runs
       // the refresh effect so it cannot restore the old value or origin.
       detailRequestGeneration.current += 1;
-      recordsPerRequestOriginRevision.current = revised.scheduleRevisionId;
+      recordsPerRequestOriginRevision.current = revisedRevisionId;
       recordsPerRequestDirty.current = false;
       setAnnouncement(RECORDS_PER_REQUEST_SAVED);
       showToast(RECORDS_PER_REQUEST_SAVED, "success");
@@ -562,9 +571,9 @@ export function ProviderDetailPage() {
         <section className="source-admin-inline" aria-labelledby="source-admin-inline-title">
           <div>
             <span className="admin-kicker">Selected provider only</span>
-            <h2 id="source-admin-inline-title">Test and request settings</h2>
-            <p>These controls affect {source.displayName} only. Shared credential and destructive lifecycle controls remain in Source configuration.</p>
-            {sourceActionRequired ? (
+            <h2 id="source-admin-inline-title">{sourceRevision?.requestSizePolicy === "schedule_revision" ? "Test and request settings" : "Request settings"}</h2>
+            <p>These controls affect {source.displayName} only. A request-size edit preserves current work and its cursor.</p>
+            {sourceActionRequired && sourceRevision?.requestSizePolicy === "schedule_revision" ? (
               <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
                 <strong>Disable → Test source → Activate paused → Resume.</strong>{" "}
                 Correct the reported cause before testing. Run now, Test source while active, and Resume cannot clear Action required.
@@ -572,12 +581,12 @@ export function ProviderDetailPage() {
             ) : null}
           </div>
           <div className="source-admin-inline__actions">
-            {sourceTestAvailable ? (
+            {sourceTestAvailable && sourceRevision?.requestSizePolicy === "schedule_revision" ? (
               <button type="button" className="admin-button admin-button-secondary" disabled={pendingKey !== null} onClick={() => { void requestSourceTest(); }}>
                 {pendingKey?.endsWith(":test") ? "Requesting test…" : "Test source"}
               </button>
             ) : null}
-            <form onSubmit={(event) => { void reviseInterval(event); }}>
+            {sourceRevision?.requestSizePolicy === "schedule_revision" ? <form onSubmit={(event) => { void reviseInterval(event); }}>
               <div className="admin-field">
                 <label htmlFor="provider-source-interval">Interval seconds</label>
                 <input id="provider-source-interval" type="number" min="60" max="86400" required value={intervalDraft} onChange={(event) => setIntervalDraft(event.target.value)} />
@@ -585,11 +594,13 @@ export function ProviderDetailPage() {
               <button type="submit" className="admin-button admin-button-secondary" disabled={pendingKey !== null}>
                 {pendingKey?.endsWith(":interval") ? "Saving timing…" : "Save timing"}
               </button>
-            </form>
+            </form> : null}
             {sourceRevision?.requestSizePolicy === "adapter_profile" ? (
               <p className="source-config-field-help" role="note">
-                {`Request size is pinned by the active adapter profile (${sourceRevision.recordsPerRequest.toLocaleString("en-US")} records). Changing it requires a reviewed configuration handoff; this page does not modify that profile.`}
+                {`No configurable request setting is initialized. The verified adapter default is ${sourceRevision.recordsPerRequest?.toLocaleString("en-US") ?? "unavailable"} records. Request settings are read-only.`}
               </p>
+            ) : sourceRevision?.requestSettingsRevisionId === null && sourceRevision.requestSizePolicy === "request_settings_revision" ? (
+              <p className="source-config-field-help" role="note">Current request settings are unavailable. No changes can be saved until the provider database and configuration are verified.</p>
             ) : <form onSubmit={(event) => { void reviseRecordsPerRequest(event); }}>
               <div className="admin-field source-admin-inline__records-field">
                 <label htmlFor="provider-source-records-per-request">

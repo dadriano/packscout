@@ -8,6 +8,8 @@ import {
   providerSourceAdminCatalogSchema,
   providerSourceCursorResetPreviewSchema,
   reviseProviderSourceRecordsPerRequestRequestSchema,
+  reviseDistributedProviderRequestSettingsRequestSchema,
+  reviseDistributedProviderRequestSettingsResponseSchema,
 } from "./provider-source-admin.ts";
 
 const ids = {
@@ -19,6 +21,22 @@ const ids = {
   sourceRevision: "00000000-0000-4000-8000-000000000006",
   scheduleRevision: "00000000-0000-4000-8000-000000000007",
 } as const;
+
+test("distributed request setting command pins both revisions and rejects coercion or extra fields", () => {
+  const input = { expectedConfigVersionId: ids.revision,
+    expectedRequestSettingsRevisionId: ids.scheduleRevision, recordsPerRequest: 1_000 };
+  assert.deepEqual(reviseDistributedProviderRequestSettingsRequestSchema.parse(input), input);
+  for (const recordsPerRequest of [0, 5_001, 1.5, "1000", null]) {
+    assert.equal(reviseDistributedProviderRequestSettingsRequestSchema.safeParse({ ...input, recordsPerRequest }).success, false);
+  }
+  for (const changed of [{ expectedConfigVersionId: null },
+    { expectedRequestSettingsRevisionId: null }, { cursor: "not-accepted" }]) {
+    assert.equal(reviseDistributedProviderRequestSettingsRequestSchema.safeParse({ ...input, ...changed }).success, false);
+  }
+  assert.deepEqual(reviseDistributedProviderRequestSettingsResponseSchema.parse({
+    requestSettingsRevisionId: ids.scheduleRevision, recordsPerRequest: 1_000,
+  }), { requestSettingsRevisionId: ids.scheduleRevision, recordsPerRequest: 1_000 });
+});
 
 test("production source configuration exposes exactly one compiled source type", () => {
   assert.deepEqual(productionProviderSourceTypeKeys, ["dataforrest-events-v1"]);

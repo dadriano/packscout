@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dataforrestDistributedRequestPolicy } from "@packscout/contracts";
 import {
   PROVIDER_FACT_QUARANTINE_RECONCILIATION_MAX_BATCH,
   PrismaProviderCommandRepository,
@@ -30,6 +31,7 @@ import {
   type ProviderManualImportFailureDiagnostic,
   type ProviderManualImportStage,
 } from "./provider-manual-import-diagnostics.ts";
+import { readProviderRunRequestPin } from "./provider-run-request-pin.ts";
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
@@ -60,7 +62,17 @@ export type ProviderManualImportInterruptionFailureCode =
 
 export interface ProviderManualImportPageSource {
   supports(adapterKey: string, providerKey: string): boolean;
+  requestSettingsPolicy?(adapterKey: string, providerKey: string): "required" | "unmanaged";
   nextPage(input: ProviderCapturePageSourceInput): Promise<unknown>;
+}
+
+/** Live distributed sources cannot opt out of their immutable run request pin. */
+export function providerManualImportRequestSettingsPolicy(
+  source: ProviderManualImportPageSource, adapterKey: string, providerKey: string,
+): "required" | "unmanaged" {
+  if (dataforrestDistributedRequestPolicy(adapterKey, providerKey) !== null) return "required";
+  return source.supports(adapterKey, providerKey)
+    && source.requestSettingsPolicy?.(adapterKey, providerKey) === "unmanaged" ? "unmanaged" : "required";
 }
 
 /** Selects exactly one installed source implementation from cached authority. */
@@ -77,6 +89,13 @@ implements ProviderManualImportPageSource {
 
   supports(adapterKey: string, providerKey: string): boolean {
     return this.#matching(adapterKey, providerKey).length === 1;
+  }
+
+  requestSettingsPolicy(adapterKey: string, providerKey: string): "required" | "unmanaged" {
+    const matches = this.#matching(adapterKey, providerKey);
+    return matches.length === 1
+      ? providerManualImportRequestSettingsPolicy(matches[0]!, adapterKey, providerKey)
+      : "required";
   }
 
   nextPage(input: ProviderCapturePageSourceInput): Promise<unknown> {
@@ -218,6 +237,11 @@ export class ProviderManualImportExecutor {
     ).snapshot();
     const configuration = runtime.cachedConfiguration;
     const adapterKey = configuration?.configuration.adapterKey;
+    const requestPolicy = typeof adapterKey === "string"
+      ? dataforrestDistributedRequestPolicy(adapterKey, runtime.providerKey) : null;
+    const requestSettingsPolicy = typeof adapterKey === "string"
+      ? providerManualImportRequestSettingsPolicy(this.dependencies.source, adapterKey, runtime.providerKey)
+      : "required";
     const capabilityFailure = configuration === null
       ? "PROVIDER_CONFIGURATION_UNAVAILABLE"
       : typeof adapterKey !== "string"
@@ -258,6 +282,7 @@ export class ProviderManualImportExecutor {
         workerId: this.#workerId,
         workerFence: fence,
         correlationId: randomUUID(),
+        requestSettingsPolicy,
       });
       if (recovery.kind === "lease_lost") {
         return {
@@ -318,6 +343,11 @@ export class ProviderManualImportExecutor {
           correlationId: command.correlation_id,
           requestedAt: command.requested_at,
           controlCommandId: command.id,
+          requestSettingsPolicy,
+          ...(requestPolicy === null || typeof adapterKey !== "string" ? {} : { requestSettingsDefault: {
+            recordsPerRequest: requestPolicy.defaultRecordsPerRequest,
+            adapterKey,
+          } }),
         });
         if (
           started.kind !== "started"
@@ -340,6 +370,11 @@ export class ProviderManualImportExecutor {
           runId,
           failureCode: "PROVIDER_RUN_NOT_RUNNING",
         };
+      }
+      if (requestSettingsPolicy === "required" && readProviderRunRequestPin(runningRun, {
+        configVersionId: configuration.id, configVersionNumber: configuration.version,
+      }) === null) {
+        return await this.failRun(runs, runId, fence, "PROVIDER_DATAFORREST_REQUEST_SETTINGS_INVALID");
       }
 
       let checkpoint = recovery.kind === "resumed"
@@ -399,6 +434,8 @@ export class ProviderManualImportExecutor {
           runId,
           workerFence: fence,
           pageNumber: startingPageNumber + index,
+          recordsPerRequest: runningRun.recordsPerRequest,
+          requestSettingsRevisionId: runningRun.requestSettingsRevisionId,
           sourceCheckpoint: checkpoint,
           sourceCheckpointFingerprint: checkpointFingerprint,
           signal,
@@ -409,6 +446,7 @@ export class ProviderManualImportExecutor {
         const committed = await pages.commit({
           workerId: this.#workerId,
           page,
+          requestSettingsPolicy,
         });
         if (committed.kind !== "committed" && committed.kind !== "replayed") {
           return await this.failRun(

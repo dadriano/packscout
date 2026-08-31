@@ -408,6 +408,11 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /database\.datname::text/u);
   assert.match(runtime, /state === "nonempty"/u);
   assert.match(executor, /grant select, insert, update on table/u);
+  const providerRuntimeTables = executor.match(/const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u)?.[1];
+  assert.equal(typeof providerRuntimeTables, "string");
+  assert.match(providerRuntimeTables, /"provider_request_settings"/u);
+  assert.doesNotMatch(providerRuntimeTables, /"provider_request_settings_revisions"/u);
+  assert.match(executor, /grant select, insert on table public\.provider_request_settings_revisions/u);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);

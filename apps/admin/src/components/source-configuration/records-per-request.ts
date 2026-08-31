@@ -17,9 +17,14 @@ export function parseRecordsPerRequest(value: string): number | null {
 }
 
 export function recordsPerRequestDisplay(
-  configured: number,
+  configured: number | null,
   activeRun: number | null,
 ): string {
+  if (configured === null) {
+    return activeRun === null
+      ? "Unavailable"
+      : `Current run: ${activeRun.toLocaleString("en-US")}. Next run: unavailable.`;
+  }
   const next = configured.toLocaleString("en-US");
   if (activeRun !== null && activeRun !== configured) {
     return `Current run: ${activeRun.toLocaleString("en-US")}. Next run: ${next}.`;

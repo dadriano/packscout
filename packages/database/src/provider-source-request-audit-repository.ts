@@ -26,6 +26,8 @@ const safeCodePattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 const workerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
 
 interface LockedRun {
+  readonly records_per_request: number | null;
+  readonly request_settings_revision_id: string | null;
   readonly id: string;
   readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
   readonly worker_fence: bigint;
@@ -33,7 +35,7 @@ interface LockedRun {
 
 export type ProviderSourceRequestAuditResult =
   | Readonly<{ kind: "recorded"; occurredAt: Date }>
-  | Readonly<{ kind: "lease_lost" | "run_not_running" }>;
+  | Readonly<{ kind: "lease_lost" | "run_not_running" | "request_settings_mismatch" | "request_limit_exceeded" }>;
 
 function requireUuid(value: string, field: string): string {
   if (!uuidPattern.test(value)) throw new TypeError(`${field} must be a UUID.`);
@@ -52,7 +54,7 @@ async function lockRun(
   runId: string,
 ): Promise<LockedRun | null> {
   const [row] = await transaction.$queryRaw<LockedRun[]>(ProviderPrisma.sql`
-    select id, state, worker_fence
+    select id, state, worker_fence, records_per_request, request_settings_revision_id
     from provider_runs
     where id = cast(${runId} as uuid)
     for update
@@ -78,7 +80,8 @@ export class PrismaProviderSourceRequestAuditRepository {
     append: (
       transaction: ProviderTransactionClient,
       occurredAt: Date,
-    ) => Promise<void>,
+      run: LockedRun,
+    ) => Promise<void | "request_settings_mismatch" | "request_limit_exceeded">,
   ): Promise<ProviderSourceRequestAuditResult> {
     return this.database.$transaction(async (transaction) => {
       const lease = await lockProviderWorkerLease(transaction, "import");
@@ -96,7 +99,8 @@ export class PrismaProviderSourceRequestAuditRepository {
         || run.worker_fence !== input.workerFence
       ) return { kind: "run_not_running" as const };
       const occurredAt = providerWorkerLeaseDatabaseNow(lease);
-      await append(transaction, occurredAt);
+      const failure = await append(transaction, occurredAt, run);
+      if (failure !== undefined) return { kind: failure };
       return { kind: "recorded" as const, occurredAt };
     }, TRANSACTION_OPTIONS);
   }
@@ -181,6 +185,10 @@ export class PrismaProviderSourceRequestAuditRepository {
     pageNumber: number;
     sourceRecordCount: number;
     normalizedRecordCount: number;
+    mixedPageId?: string;
+    responseDigest?: string;
+    recordsPerRequest?: number;
+    requestSettingsRevisionId?: string;
   }>): Promise<ProviderSourceRequestAuditResult> {
     requireUuid(input.runId, "runId");
     requireUuid(input.requestAttemptId, "requestAttemptId");
@@ -193,15 +201,27 @@ export class PrismaProviderSourceRequestAuditRepository {
     }
     requireMeasurement(input.sourceRecordCount, "sourceRecordCount");
     requireMeasurement(input.normalizedRecordCount, "normalizedRecordCount");
+    if (input.mixedPageId !== undefined) requireUuid(input.mixedPageId, "mixedPageId");
+    if (input.requestSettingsRevisionId !== undefined) requireUuid(input.requestSettingsRevisionId, "requestSettingsRevisionId");
+    if (input.responseDigest !== undefined && !/^[a-f0-9]{64}$/u.test(input.responseDigest)) {
+      throw new TypeError("Source page response digest is invalid.");
+    }
 
     return this.#recordWithLiveImportAuthority(
       input,
-      async (transaction, occurredAt) => {
+      async (transaction, occurredAt, run) => {
+        const pinned = run.records_per_request !== null;
+        if (pinned && (input.recordsPerRequest !== run.records_per_request
+          || input.requestSettingsRevisionId !== run.request_settings_revision_id
+          || input.mixedPageId === undefined || input.responseDigest === undefined)) return "request_settings_mismatch";
+        if (pinned && input.sourceRecordCount > run.records_per_request!) return "request_limit_exceeded";
         await appendProviderLocalAudit(transaction, {
-          correlationId: input.requestAttemptId,
+          // New receipts use the existing correlation index for exact page
+          // admission without adding an index over historical audit rows.
+          correlationId: pinned ? input.mixedPageId! : input.requestAttemptId,
           action: "provider.source.page.translated",
-          targetType: "source_page_attempt",
-          targetId: input.pageAttemptId,
+          targetType: pinned ? "provider_mixed_page" : "source_page_attempt",
+          targetId: pinned ? input.mixedPageId! : input.pageAttemptId,
           outcome: "success",
           details: {
             leaseFence: input.workerFence.toString(),
@@ -209,6 +229,8 @@ export class PrismaProviderSourceRequestAuditRepository {
             pageNumber: input.pageNumber,
             runId: input.runId,
             sourceRecordCount: input.sourceRecordCount,
+            ...(pinned ? { requestAttemptId: input.requestAttemptId, pageAttemptId: input.pageAttemptId, responseDigest: input.responseDigest!,
+              recordsPerRequest: run.records_per_request!, requestSettingsRevisionId: run.request_settings_revision_id! } : {}),
           },
           occurredAt,
         });

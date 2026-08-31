@@ -12,6 +12,7 @@ import {
 } from "@packscout/contracts";
 import {
   PrismaAdminProviderRuntimeRepository,
+  PrismaProviderRequestSettingsRepository,
   type AdminLocalProviderOverview,
   type AdminLocalRunDetailRecord,
   type AdminLocalRunRecord,
@@ -37,9 +38,11 @@ interface CentralSourceProvider {
   readonly lifecycle: "draft" | "active" | "disabled" | "archived";
   readonly activeConfig: null | Readonly<{
     id: string;
+    version: bigint;
     adapterKey: string;
     scheduleSeconds: number;
     staleAfterSeconds: number;
+    expiresAt: Date | null;
   }>;
 }
 
@@ -47,6 +50,8 @@ interface LocalSourceEvidence {
   readonly overview: AdminLocalProviderOverview;
   readonly runs: readonly AdminLocalRunRecord[];
   readonly details: readonly AdminLocalRunDetailRecord[];
+  readonly configurationCurrent: boolean;
+  readonly requestSettings: Readonly<{ id: string; recordsPerRequest: number }> | null;
 }
 
 function safeCode(value: string | null, fallback: string): string | null {
@@ -54,10 +59,7 @@ function safeCode(value: string | null, fallback: string): string | null {
   return safeCodePattern.test(value) ? value : fallback;
 }
 
-function runSummary(
-  run: AdminLocalRunRecord | null,
-  currentProfile: Readonly<{ configId: string; pageLimit: number }> | null,
-) {
+function runSummary(run: AdminLocalRunRecord | null) {
   if (run === null) return null;
   return {
     id: run.id,
@@ -69,11 +71,9 @@ function runSummary(
     lastProgressAt: (run.lastProgressAt ?? run.requestedAt).toISOString(),
     reachedHead: run.reachedSourceHead,
     failureCode: safeCode(run.failureCode, "IMPORT_FAILURE_UNAVAILABLE"),
-    // Historical configurations may have different immutable profiles. Do not
-    // report the current limit as the limit used by an older run.
-    recordsPerRequest: run.configVersionId === currentProfile?.configId
-      ? currentProfile.pageLimit
-      : null,
+    // Settings can change independently of source configuration. Only the
+    // immutable run pin says what this run actually requested.
+    recordsPerRequest: run.recordsPerRequest,
   };
 }
 
@@ -192,9 +192,8 @@ function configuredSource(input: Readonly<{
     ? input.evidence?.runs.find((run) => run.id === overview.activeRun?.id) ?? null
     : null;
   const elapsed = elapsedMilliseconds(latest, input.now);
-  const currentProfile = config && manifest
-    ? { configId: config.id, pageLimit: manifest.requestBounds.pageLimit }
-    : null;
+  const requestSettingsAvailable = input.evidence?.configurationCurrent === true;
+  const requestSettings = requestSettingsAvailable ? input.evidence?.requestSettings : null;
   const totalRecords = latest === null
     ? 0
     : latest.catalogCount + latest.pullCount + latest.marketEventCount;
@@ -219,8 +218,13 @@ function configuredSource(input: Readonly<{
           ),
           lifecycle: sourceLifecycle(input.provider),
           pauseRequested: false,
-          recordsPerRequest: manifest!.requestBounds.pageLimit,
-          requestSizePolicy: "adapter_profile",
+          recordsPerRequest: requestSettingsAvailable
+            ? requestSettings?.recordsPerRequest ?? manifest!.requestBounds.pageLimit
+            : null,
+          requestSizePolicy: requestSettingsAvailable && !requestSettings
+            ? "adapter_profile"
+            : "request_settings_revision",
+          requestSettingsRevisionId: requestSettings?.id ?? null,
           configuration: {
             validated: true,
             fields: [
@@ -290,8 +294,8 @@ function configuredSource(input: Readonly<{
       openQuarantine: overview?.openQuarantineCount ?? 0,
       total: { kind: "unknown", label: "Total unknown" },
     },
-    activeRun: runSummary(active, currentProfile),
-    latestRun: runSummary(latest, currentProfile),
+    activeRun: runSummary(active),
+    latestRun: runSummary(latest),
     connectionImpact: {
       state: "none",
       safeCode: null,
@@ -350,9 +354,11 @@ export function createDistributedProviderSourceOperationsRuntime(
         active_config_version: {
           select: {
             id: true,
+            version_number: true,
             adapter_key: true,
             schedule_seconds: true,
             stale_after_seconds: true,
+            expires_at: true,
           },
         },
       },
@@ -366,9 +372,11 @@ export function createDistributedProviderSourceOperationsRuntime(
         ? null
         : {
             id: row.active_config_version.id,
+            version: row.active_config_version.version_number,
             adapterKey: row.active_config_version.adapter_key,
             scheduleSeconds: row.active_config_version.schedule_seconds,
             staleAfterSeconds: row.active_config_version.stale_after_seconds,
+            expiresAt: row.active_config_version.expires_at,
           },
     }));
   }
@@ -382,15 +390,38 @@ export function createDistributedProviderSourceOperationsRuntime(
       { organizationId, providerId: provider.id },
       async (database) => {
         const repository = new PrismaAdminProviderRuntimeRepository(database);
-        const [overview, page] = await Promise.all([
+        const [overview, page, requestSettings, runtime] = await Promise.all([
           repository.overview(),
           repository.listRuns({ snapshotAt: now(), limit: 25 }),
+          new PrismaProviderRequestSettingsRepository(database).current({ providerId: provider.id }),
+          database.provider_runtime.findUnique({
+            where: { singleton_key: true },
+            select: {
+              central_provider_id: true,
+              provider_key: true,
+              cached_config_version_id: true,
+              cached_config_version_number: true,
+              cached_configuration: true,
+              config_expires_at: true,
+            },
+          }),
         ]);
+        const observedAt = now().getTime();
+        const config = provider.activeConfig;
+        const cached = runtime?.cached_configuration;
+        const configurationCurrent = !!config && !!runtime &&
+          runtime.central_provider_id === provider.id && runtime.provider_key === provider.key &&
+          runtime.cached_config_version_id === config.id &&
+          runtime.cached_config_version_number === config.version &&
+          typeof cached === "object" && cached !== null && !Array.isArray(cached) &&
+          cached.adapterKey === config.adapterKey &&
+          (runtime.config_expires_at === null || runtime.config_expires_at.getTime() > observedAt) &&
+          (config.expiresAt === null || config.expiresAt.getTime() > observedAt);
         const details = includeDetails
           ? (await Promise.all(page.items.map((run) => repository.getRun(run.id))))
               .filter((detail): detail is AdminLocalRunDetailRecord => detail !== null)
           : [];
-        return { overview, runs: page.items, details };
+        return { overview, runs: page.items, details, requestSettings, configurationCurrent };
       },
     );
     return result.state === "reachable" ? result.value : null;
@@ -476,10 +507,7 @@ export function createDistributedProviderSourceOperationsRuntime(
         refreshedAt: now().toISOString(),
         connection: null,
         source: view.source,
-        runHistory: (view.evidence?.runs ?? []).map((run) => runSummary(run, {
-          configId: view.source.source!.sourceRevisionId,
-          pageLimit: view.source.source!.recordsPerRequest,
-        })),
+        runHistory: (view.evidence?.runs ?? []).map(runSummary),
         pageProgress: pages,
         sourceTest: null,
       });

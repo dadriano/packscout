@@ -73,6 +73,7 @@ type ProviderAppDependencies = Pick<
   | "canonical"
   | "parity"
   | "providerSources"
+  | "providerRequestSettings"
   | "providerSourceOperations"
 >;
 

@@ -13,6 +13,8 @@ import type {
   ProviderTransactionClient,
 } from "./provider-database.ts";
 import { appendProviderActivityOutbox } from "./provider-local-evidence.ts";
+import { providerPageRequestSettingsFailure, unmanagedProviderRequestSettingsAllowed } from "./provider-run-request-settings.ts";
+import type { ProviderRequestSettingsPolicy } from "./provider-request-settings-repository.ts";
 import {
   type ProviderMixedPageRecord,
   PROVIDER_MIXED_PAGE_MAX_QUARANTINES,
@@ -74,10 +76,14 @@ export type CommitProviderMixedPageResult = ProviderMixedPageCommittedResult | {
     | "cursor_conflict"
     | "lease_lost"
     | "run_not_running"
-    | "runtime_not_running";
+    | "runtime_not_running"
+    | "request_settings_unavailable"
+    | "source_receipt_missing";
 };
 
 interface RunRow {
+  readonly records_per_request: number | null;
+  readonly request_settings_revision_id: string | null;
   readonly id: string;
   readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
   readonly config_version_id: string;
@@ -133,7 +139,7 @@ function jsonEqual(left: unknown, right: unknown): boolean {
 async function lockRun(transaction: ProviderTransactionClient, runId: string): Promise<RunRow | null> {
   const [row] = await transaction.$queryRaw<RunRow[]>(ProviderPrisma.sql`
     select id, state, config_version_id, config_version_number, worker_fence,
-           page_count, reached_source_head
+           page_count, reached_source_head, records_per_request, request_settings_revision_id
     from provider_runs where id = cast(${runId} as uuid) for update
   `);
   return row ?? null;
@@ -300,6 +306,7 @@ export class PrismaProviderMixedPageRepository {
   async commit(input: {
     readonly workerId: string;
     readonly page: unknown;
+    readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
   }): Promise<CommitProviderMixedPageResult> {
     const workerId = requireProviderMixedPageWorkerId(input.workerId);
     const page = validateProviderMixedPage(input.page);
@@ -310,6 +317,9 @@ export class PrismaProviderMixedPageRepository {
       }
       await setProviderImportLeaseContext(transaction, { owner: workerId, fence: page.leaseFence });
       const committedAt = providerWorkerLeaseDatabaseNow(lease);
+      if (input.requestSettingsPolicy === "unmanaged" && !await unmanagedProviderRequestSettingsAllowed(transaction)) {
+        return { kind: "request_settings_unavailable" as const };
+      }
       const identity = await transaction.database_identity.findUnique({
         where: { singleton_key: true },
         select: { provider_id: true },
@@ -343,6 +353,14 @@ export class PrismaProviderMixedPageRepository {
         || runtime.source_cursor_hash !== page.inputCursorFingerprint
         || !jsonEqual(runtime.source_cursor, page.inputCursor)
       ) return { kind: "cursor_conflict" as const };
+      const requestFailure = await providerPageRequestSettingsFailure(transaction, {
+        pageId: page.pageId, runId: page.runId, pageNumber: page.pageNumber,
+        workerFence: page.leaseFence, responseDigest: page.responseDigest,
+        normalizedRecordCount: page.records.length, recordsPerRequest: run.records_per_request,
+        requestSettingsRevisionId: run.request_settings_revision_id,
+        requestSettingsPolicy: input.requestSettingsPolicy,
+      });
+      if (requestFailure !== null) return { kind: requestFailure };
 
       let accepted = 0;
       let duplicate = 0;
