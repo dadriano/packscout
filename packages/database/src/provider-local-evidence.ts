@@ -24,6 +24,8 @@ const localAuditEvidenceKeys = new Set([
   "lastConfirmedSequence",
   "leaseFence",
   "normalizedRecordCount",
+  "catalogRecordCount", "collectibleRecordCount", "packContentSnapshotCount",
+  "pullRecordCount", "marketEventRecordCount", "rejectedRecordCount",
   "pageNumber",
   "quarantineId",
   "reasonCode",

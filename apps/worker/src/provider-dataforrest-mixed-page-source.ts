@@ -3,6 +3,7 @@ import {
   opaqueCursorEnvelopeSchema,
   type OpaqueCursorEnvelope,
   type SourceAdapterFailure,
+  countProviderPageRecords, type ProviderPageRecordCounts,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
@@ -81,6 +82,7 @@ export interface ProviderDataforrestPageTranslationRecorder {
     pageNumber: number;
     sourceRecordCount: number;
     normalizedRecordCount: number;
+    recordCounts: ProviderPageRecordCounts;
   }>): Promise<Readonly<{
     kind: "recorded" | "lease_lost" | "run_not_running";
   }>>;
@@ -669,6 +671,7 @@ export class ProviderDataforrestMixedPageSource
             pageNumber: input.pageNumber,
             sourceRecordCount: completed.value.normalizedPage.outcomes.length,
             normalizedRecordCount: translation.records.length,
+            recordCounts: countProviderPageRecords(translation.records),
           });
       } catch {
         failure("PROVIDER_DATAFORREST_TERMINALIZATION_FAILED");
