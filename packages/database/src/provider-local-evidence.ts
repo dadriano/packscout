@@ -146,21 +146,21 @@ export async function appendProviderLocalAudit(
   });
 }
 
-export async function appendProviderActivityOutbox(
-  transaction: ProviderTransactionClient,
-  input: {
-    readonly eventType: string;
-    readonly severity: ProviderLocalSeverity;
-    readonly dedupeKey: string;
-    readonly recoveryKey: string;
-    readonly localRunId?: string | null;
-    readonly localQuarantineId?: string | null;
-    readonly title: string;
-    readonly summary: string;
-    readonly evidence?: ProviderSafeEvidence;
-    readonly eventAt: Date;
-  },
-): Promise<string> {
+export interface ProviderActivityOutboxInput {
+  readonly eventType: string;
+  readonly severity: ProviderLocalSeverity;
+  readonly dedupeKey: string;
+  readonly recoveryKey: string;
+  readonly localRunId?: string | null;
+  readonly localQuarantineId?: string | null;
+  readonly title: string;
+  readonly summary: string;
+  readonly evidence?: ProviderSafeEvidence;
+  readonly eventAt: Date;
+}
+
+/** The same validated, digest-bound payload is used by single and batched writes. */
+export function buildProviderActivityOutboxRow(input: ProviderActivityOutboxInput) {
   if (
     input.localRunId !== undefined
     && input.localRunId !== null
@@ -191,21 +191,27 @@ export async function appendProviderActivityOutbox(
   const eventDigest = createHash("sha256")
     .update(JSON.stringify(identity), "utf8")
     .digest("hex");
-  await transaction.provider_activity_outbox.create({
-    data: {
-      id,
-      event_digest: eventDigest,
-      event_type: identity.eventType,
-      severity: input.severity,
-      dedupe_key: identity.dedupeKey,
-      recovery_key: identity.recoveryKey,
-      local_run_id: identity.localRunId,
-      local_quarantine_id: identity.localQuarantineId,
-      title,
-      summary,
-      evidence,
-      event_at: input.eventAt,
-    },
-  });
-  return id;
+  return {
+    id,
+    event_digest: eventDigest,
+    event_type: identity.eventType,
+    severity: input.severity,
+    dedupe_key: identity.dedupeKey,
+    recovery_key: identity.recoveryKey,
+    local_run_id: identity.localRunId,
+    local_quarantine_id: identity.localQuarantineId,
+    title,
+    summary,
+    evidence,
+    event_at: input.eventAt,
+  };
+}
+
+export async function appendProviderActivityOutbox(
+  transaction: ProviderTransactionClient,
+  input: ProviderActivityOutboxInput,
+): Promise<string> {
+  const data = buildProviderActivityOutboxRow(input);
+  await transaction.provider_activity_outbox.create({ data });
+  return data.id;
 }
