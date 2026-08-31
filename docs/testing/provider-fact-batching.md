@@ -26,6 +26,7 @@ promotion range remain in one fenced transaction, including deferred constraints
 | Insert counts disagree or provider/fence pins differ; partial identities cannot escape and unauthorized pages cannot write. | `packages/database/src/provider-fact-batch.integration.test.ts` |
 | Pulls have multiple ordered items or exceed the batch item limit; ordinals and promotion order remain exact without rejecting admitted input. | `packages/database/src/provider-fact-batch-boundaries.integration.test.ts` |
 | Accounts and instances are active, retired, missing or bound to another collectible; original reference and foreign-key validation is retained. | `packages/database/src/provider-fact-batch-boundaries.integration.test.ts` |
+| A disposable membership fixture completes setup; its admin backend has already disconnected before provider work, and repeated create/write/shutdown cycles have no idle-pool teardown race. | `packages/database/src/provider-pack-content-harness.integration.test.ts` |
 
 The PostgreSQL tests require an explicit disposable
 `PACKSCOUT_TEST_ADMIN_DATABASE_URL`; they never load a runtime `.env`.

@@ -3,7 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { Pool } from "pg";
+import { Client } from "pg";
 import { PrismaClient } from "../prisma/generated/provider/index.js";
 import { ProviderCanonicalRepository } from "./provider-canonical-repository.ts";
 import { initializeProviderDatabaseIdentity } from "./provider-database.ts";
@@ -37,7 +37,7 @@ export async function createMembershipHarness(binDirectory: string, providerId: 
   const user = "packscout_membership_test";
   let started = false;
   let client: PrismaClient | undefined;
-  let admin: Pool | undefined;
+  let admin: Client | undefined;
   async function close() {
     await client?.$disconnect();
     await admin?.end();
@@ -56,8 +56,13 @@ export async function createMembershipHarness(binDirectory: string, providerId: 
       "-o", `-F -k ${directory} -c listen_addresses='' -c unix_socket_permissions=0700`,
     ]);
     started = true;
-    admin = new Pool({ host: directory, user, database: "postgres", port: 5432, max: 1 });
+    admin = new Client({ host: directory, user, database: "postgres", port: 5432 });
+    await admin.connect();
     await admin.query('create database "packscout_clutchpacks"');
+    // Client.end waits for the socket to close. Pool.end can resolve while an
+    // idle backend is still disconnecting, racing the owned cluster shutdown.
+    await admin.end();
+    admin = undefined;
     const databaseUrl = new URL(`postgresql://${user}@localhost:5432/packscout_clutchpacks`);
     databaseUrl.searchParams.set("host", directory);
     await execFileAsync(process.execPath, [
@@ -73,4 +78,3 @@ export async function createMembershipHarness(binDirectory: string, providerId: 
     throw error;
   }
 }
-
