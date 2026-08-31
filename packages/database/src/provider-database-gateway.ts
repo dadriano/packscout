@@ -4,6 +4,7 @@ import type {
 } from "@packscout/contracts";
 import { isIP } from "node:net";
 import type { CentralDatabaseLifecycle } from "./central-database.ts";
+import { normalizeNativePrismaTlsUrl } from "./native-prisma-tls.ts";
 import {
   assertDatabaseUuid,
   providerDatabaseTarget,
@@ -194,7 +195,7 @@ function databaseUrl(
   url.pathname = `/${route.target.databaseName}`;
   url.searchParams.set("sslmode", route.node.sslMode);
   url.searchParams.set("connect_timeout", String(Math.max(1, Math.ceil(connectionTimeoutMs / 1_000))));
-  return url.toString();
+  return normalizeNativePrismaTlsUrl(url).toString();
 }
 
 function assertCachedRoute(route: ProviderDatabaseRoute): void {

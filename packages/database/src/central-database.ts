@@ -3,6 +3,7 @@ import {
   PrismaClient as CentralPrismaClient,
 } from "../prisma/generated/central/index.js";
 import { centralDatabaseTarget } from "./database-topology.ts";
+import { normalizeNativePrismaTlsUrl } from "./native-prisma-tls.ts";
 import {
   createRoleAwareDatabaseLifecycle,
   type RoleAwareDatabaseLifecycle,
@@ -46,7 +47,7 @@ function boundedConnectionUrl(databaseUrl: string, connectionLimit: number): str
     throw new TypeError("Central database URL is invalid.");
   }
   parsed.searchParams.set("connection_limit", String(connectionLimit));
-  return parsed.toString();
+  return normalizeNativePrismaTlsUrl(parsed).toString();
 }
 
 /**

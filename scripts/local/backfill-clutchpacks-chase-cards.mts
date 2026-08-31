@@ -10,7 +10,7 @@ import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, Pris
   createCentralDatabaseLifecycle, type ProviderPrismaClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver,
   captureClutchpacksPublicPackMembershipV1 } from "@packscout/services";
-import { readBackfillAuthority, readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+import { readBackfillAuthority, readLocalBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
 import { packContentBackfillDigest, packContentBackfillManifestSchema, MAX_PACK_CONTENT_BACKFILL_BYTES,
   type PackContentBackfillManifest } from "./pack-content-backfill-contract.mts";
 import { applyPackContentBackfill, readPackContentBackfillBoundary, assertPackContentBackfillBoundary } from "./pack-content-backfill-persistence.mts";
@@ -71,7 +71,7 @@ async function reserveLocalWriter() {
 }
 
 export async function runChaseBackfill(args: ReturnType<typeof parseChaseBackfillArguments>, environment = process.env) {
-  const config = await readBackfillEnvironment(environment);
+  const config = await readLocalBackfillEnvironment(environment);
   const cipher = new AesGcmProviderCredentialCipher({ primaryVersion: config.version, keys: new Map([[config.version, config.key]]) });
   const central = createCentralDatabaseLifecycle({ databaseUrl: config.centralDatabaseUrl, connectionLimit: 2 });
   const gateway = new BoundedProviderDatabaseGateway({ central,

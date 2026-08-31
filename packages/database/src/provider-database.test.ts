@@ -31,3 +31,17 @@ test("provider lifecycle validates identity and connection bounds before connect
     /Provider key is invalid/,
   );
 });
+
+test("provider lifecycle rejects unsupported and contradictory TLS policies before connecting", () => {
+  for (const query of ["sslmode=verify-ca", "sslmode=unknown", "sslmode=verify-full&sslaccept=accept_invalid_certs"]) {
+    assert.throws(() => createProviderDatabaseLifecycle({
+      databaseUrl: `postgresql://test:synthetic-password@database.example/packscout_beezie?${query}`,
+      providerId,
+      providerKey: "beezie",
+    }), (error: unknown) => {
+      assert.ok(error instanceof TypeError);
+      assert.equal(error.message.includes("synthetic-password"), false);
+      return true;
+    });
+  }
+});

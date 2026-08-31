@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, createCentralDatabaseLifecycle } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
-import { readBackfillAuthority, readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+import { readBackfillAuthority, readLocalBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
 import { backfillDigest } from "./provider-backfill-supervisor-policy.mts";
 import { collectorRepair as pins, collectorRepairId, CollectorRepairRetryError, refuseCollectorRepair as refuse } from "./collector-reconciliation-retry-plan.mts";
 import { inspectCollectorRepair, executeCollectorRepair } from "./collector-reconciliation-retry-control.mts";
@@ -16,7 +16,7 @@ export function parseCollectorRepairArguments(args: readonly string[]) {
   return refuse("COLLECTOR_REPAIR_ARGUMENTS_INVALID");
 }
 export async function runCollectorRepair(args: ReturnType<typeof parseCollectorRepairArguments>) {
-  const environment = await readBackfillEnvironment();
+  const environment = await readLocalBackfillEnvironment();
   const cipher = new AesGcmProviderCredentialCipher({ primaryVersion: environment.version, keys: new Map([[environment.version, environment.key]]) });
   const central = createCentralDatabaseLifecycle({ databaseUrl: environment.centralDatabaseUrl, connectionLimit: 1 });
   const gateway = new BoundedProviderDatabaseGateway({ central, credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),

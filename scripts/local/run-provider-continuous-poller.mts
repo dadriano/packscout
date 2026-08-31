@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, createCentralDatabaseLifecycle,
+import { BoundedProviderDatabaseGateway, createCentralDatabaseLifecycle,
   type ProviderPrismaClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
 import { readBackfillEnvironment, readBackfillAuthority, type BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
@@ -32,10 +32,9 @@ export async function runContinuousPoller(args: ReturnType<typeof parseContinuou
   const central = createCentralDatabaseLifecycle({ databaseUrl: environment.centralDatabaseUrl, connectionLimit: 1 });
   const gateway = new BoundedProviderDatabaseGateway({ central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
-    destinationPolicy: new ProviderDatabaseDestinationPolicy({ allowedHosts: ["127.0.0.1"],
-      allowedPorts: [55432, 55433, 55434, 55435], allowedSslModes: ["disable"] }),
+    destinationPolicy: environment.runtimePolicy.destinationPolicy,
     connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000 });
-  const readAuthority = () => readBackfillAuthority(central.client, cipher, args.pins);
+  const readAuthority = () => readBackfillAuthority(central.client, cipher, args.pins, environment.runtimePolicy);
   const withDatabase = async <T,>(operation: (db: ProviderPrismaClient, authority: BackfillAuthority, active: () => void) => Promise<T>): Promise<T> => {
     const authority = await readAuthority();
     const result = await withResidentOperation(async (db: ProviderPrismaClient, active) => {

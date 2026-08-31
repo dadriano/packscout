@@ -5,7 +5,7 @@ import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, Pris
   createCentralDatabaseLifecycle, locateProviderDatabase, lockProviderWorkerLease, providerWorkerLeaseIsLive,
   setProviderImportLeaseContext, type ProviderPrismaClient, type ProviderTransactionClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
-import { readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+import { readLocalBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
 import { assertProviderReviewActivationDatabaseRoute } from "./provider-review-activation-database-proof.mts";
 import { handoffDigest } from "./collector-crypt-checkpoint-handoff-plan.mts";
 import { CourtyardHandoffError, courtyardHandoff as pins, courtyardHandoffId as id, refuseCourtyardHandoff as refuse,
@@ -18,7 +18,7 @@ import { courtyardTerminalReceipt, readCourtyardReceipt, pauseCourtyardTerminal,
 import { probeCourtyardHandoff } from "./courtyard-response-budget-handoff-canary.mts";
 
 export { CourtyardHandoffError };
-export const readCourtyardHandoffEnvironment = readBackfillEnvironment;
+export const readCourtyardHandoffEnvironment = readLocalBackfillEnvironment;
 const allowedCourtyardHandoffCodes = new Set([
   "COURTYARD_HISTORY_BOUND_EXCEEDED", "COURTYARD_CANARY_ADMISSION_FAILED", "COURTYARD_CANARY_AUTHORITY_INVALID", "COURTYARD_CANARY_COLLECTIBLE_REJECTED",
   "COURTYARD_CANARY_MAPPING_REJECTED", "COURTYARD_CANARY_NORMALIZATION_REJECTED", "COURTYARD_CANARY_PARSER_REJECTED",

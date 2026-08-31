@@ -1,6 +1,7 @@
 import {
   BoundedProviderDatabaseGateway,
-  ProviderDatabaseDestinationPolicy,
+  readDatabaseRuntimePolicy,
+  type ProviderDatabaseDestinationPolicy,
   type CentralDatabaseLifecycle,
 } from "@packscout/database";
 import {
@@ -32,41 +33,11 @@ import type {
   AdminProviderRuntimeFactoryContext,
 } from "./runtime.ts";
 
-const PRODUCTION_HOST_VARIABLE =
-  "PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS" as const;
-const LOCAL_REVIEW_PROVIDER_DATABASE_PORTS = Object.freeze([
-  55_432,
-  55_433,
-  55_434,
-  55_435,
-]);
-
-function productionHosts(value: string | undefined): readonly string[] {
-  const hosts = value?.split(",").map((host) => host.trim()).filter(Boolean) ?? [];
-  if (hosts.length === 0 || hosts.length > 64 || new Set(hosts).size !== hosts.length) {
-    throw new Error(
-      `${PRODUCTION_HOST_VARIABLE} must contain 1 to 64 unique provider database hosts.`,
-    );
-  }
-  return hosts;
-}
-
 /** Server-owned destination policy; provider rows can only narrow this set. */
 export function readAdminProviderDestinationPolicy(
   environment: NodeJS.ProcessEnv,
 ): ProviderDatabaseDestinationPolicy {
-  const development = environment.NODE_ENV !== "production";
-  return development
-    ? new ProviderDatabaseDestinationPolicy({
-        allowedHosts: ["127.0.0.1"],
-        allowedPorts: LOCAL_REVIEW_PROVIDER_DATABASE_PORTS,
-        allowedSslModes: ["disable"],
-      })
-    : new ProviderDatabaseDestinationPolicy({
-        allowedHosts: productionHosts(environment[PRODUCTION_HOST_VARIABLE]),
-        allowedPorts: [5_432],
-        allowedSslModes: ["verify-full"],
-      });
+  return readDatabaseRuntimePolicy(environment).destinationPolicy;
 }
 
 function alreadyStartedCentral(
