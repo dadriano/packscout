@@ -82,6 +82,7 @@ export interface AcceptanceSourceDefinition {
   readonly mapperKey: string;
   readonly identityNamespaceKey: string;
   readonly intervalSeconds: number;
+  readonly recordsPerRequest?: number;
   readonly hashCharacter: string;
   readonly createdAt?: Date;
 }
@@ -106,6 +107,7 @@ export async function createAcceptanceSourceInstance(
     cursorCodecVersion: ACCEPTANCE_CURSOR_CODEC_VERSION,
     revisionNumber: 1,
     intervalSeconds: input.definition.intervalSeconds,
+    recordsPerRequest: input.definition.recordsPerRequest,
     configuration: { provider: input.definition.platformKey },
     configurationHash: input.definition.hashCharacter.repeat(64),
     recordIdScopes: [
@@ -167,6 +169,7 @@ export async function createPinnedSourceRun(
     leaseToken?: string;
     claimLeaseId?: string;
     leaseExpiresAt?: Date;
+    recordsPerRequest?: number;
   }>,
 ) {
   return database.import_runs.create({
@@ -191,6 +194,8 @@ export async function createPinnedSourceRun(
       mapper_key: source.mapperKey,
       mapper_version: "1",
       identity_namespace_key: source.identityNamespaceKey,
+      records_per_request:
+        input.recordsPerRequest ?? providerSourceLaunchBounds.pageTargetRecords,
       connection_profile_id: fixture.connectionProfileId,
       connection_revision_id: fixture.connectionRevisionId,
       cursor_codec_version: ACCEPTANCE_CURSOR_CODEC_VERSION,

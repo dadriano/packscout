@@ -7,6 +7,7 @@ import {
   providerSourceAdminAuditReceiptSchema,
   providerSourceAdminCatalogSchema,
   providerSourceCursorResetPreviewSchema,
+  reviseProviderSourceRecordsPerRequestRequestSchema,
 } from "./provider-source-admin.ts";
 
 const ids = {
@@ -29,6 +30,66 @@ test("production source configuration exposes exactly one compiled source type",
       mapperKey: "courtyard-provider-observation",
       mapperVersion: "1",
       intervalSeconds: 60,
+    }).success,
+    false,
+  );
+});
+
+test("source records per request defaults to 500 and stays within 1 through 5,000", () => {
+  const base = {
+    providerId: ids.provider,
+    connectionProfileId: ids.profile,
+    sourceTypeKey: "dataforrest-events-v1",
+    mapperKey: "courtyard-provider-observation",
+    mapperVersion: "1",
+    intervalSeconds: 60,
+  } as const;
+  assert.equal(
+    createProviderSourceRequestSchema.parse(base).recordsPerRequest,
+    500,
+  );
+  for (const recordsPerRequest of [1, 500, 5_000]) {
+    assert.equal(
+      createProviderSourceRequestSchema.parse({
+        ...base,
+        recordsPerRequest,
+      }).recordsPerRequest,
+      recordsPerRequest,
+    );
+  }
+  for (const recordsPerRequest of [
+    0,
+    1.5,
+    5_001,
+    "not-a-number",
+    "1000",
+    "",
+    true,
+  ]) {
+    assert.equal(
+      createProviderSourceRequestSchema.safeParse({
+        ...base,
+        recordsPerRequest,
+      }).success,
+      false,
+    );
+  }
+
+  const revisionBase = {
+    expectedSourceRevisionId: ids.sourceRevision,
+    expectedScheduleRevisionId: ids.scheduleRevision,
+  } as const;
+  assert.equal(
+    reviseProviderSourceRecordsPerRequestRequestSchema.parse({
+      ...revisionBase,
+      recordsPerRequest: 1_000,
+    }).recordsPerRequest,
+    1_000,
+  );
+  assert.equal(
+    reviseProviderSourceRecordsPerRequestRequestSchema.safeParse({
+      ...revisionBase,
+      recordsPerRequest: 5_001,
     }).success,
     false,
   );

@@ -10,6 +10,7 @@ import {
   publicReadError,
   publicRepackListPageV3Schema,
   publicRepackDetailV3Schema,
+  publicShellStatusV3Schema,
   publicRepackViewDetailV3Schema,
   unavailableRepackHeat,
   type PackScoutDisplayedEvV3,
@@ -23,11 +24,18 @@ import {
   type PublicRepackChase,
   type PublicRepackFilters,
   type PublicRepackViewDetailV3,
+  type PublicShellStatusV3,
   type PublicPackAvailability,
 } from "@packscout/contracts";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { query, type QueryCtx } from "./_generated/server";
+import {
+  action,
+  internalQuery,
+  query,
+  type QueryCtx,
+} from "./_generated/server";
 import { canonicalJson } from "./dataReleaseCanonicalHash";
 import {
   catalogReadAuthorized,
@@ -35,7 +43,6 @@ import {
 } from "./publicCatalogReadAccess";
 import {
   loadActiveDataReleaseV3State,
-  loadDataReleaseV3ByPublicReleaseId,
 } from "./dataReleaseV3Lifecycle";
 import {
   dataReleaseV3SearchRowMatchesDetail,
@@ -46,11 +53,19 @@ import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepac
 import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
 import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
-  createQueryFingerprint,
-  decodeRepackCursor,
-  encodeRepackCursor,
-  validateCursorSet,
-} from "./publicRepackValidation";
+  encodeDataReleaseV3Cursor,
+  isDataReleaseV3EvaluationTime,
+  resolveDataReleaseV3Pagination,
+} from "./dataReleaseV3Pagination";
+import {
+  loadDataReleaseV3ProviderHealthSnapshot,
+  missingDataReleaseV3ProviderHealth,
+  type DataReleaseV3ProviderHealthSnapshot,
+} from "./dataReleaseV3ProviderObservation";
+import {
+  dataReleaseV3ProviderHealthContext,
+  dataReleaseV3PresentationContext,
+} from "./dataReleaseV3PublicPresentation";
 
 /**
  * data_release_v3 public reads (task buyback-adjusted-ev/008).
@@ -61,6 +76,8 @@ import {
  * remain visible as last-known EV, with confidence evaluated at the request
  * clock. The activation-owned retained projection also survives later
  * unavailable releases; all rankings and details use that same projection.
+ * Public actions mint the trusted clock; cursor-pinned confidence never uses
+ * a caller-controlled clock. Provider health is informational only.
  *
  * Heat republication against v3 releases belongs to task 009; until a heat
  * frame targets a v3 release, every view carries the explicit unavailable
@@ -82,9 +99,7 @@ function directArgs(args: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
-function currentTimeIsValid(currentTime: number): boolean {
-  return Number.isSafeInteger(currentTime) && currentTime >= 0;
-}
+const currentTimeIsValid = isDataReleaseV3EvaluationTime;
 
 /**
  * The one pack-availability state a repack may be ranked, counted, or acted on
@@ -115,6 +130,10 @@ export type ActiveDataReleaseV3 = Readonly<{
     string,
     Readonly<{ parentPublicCategoryId: string | null; depth: number }>
   >;
+  vendors: readonly Readonly<{
+    publicVendorId: string;
+    vendorKey: string;
+  }>[];
 }>;
 
 async function loadActiveDataReleaseV3(
@@ -188,6 +207,12 @@ async function loadActiveDataReleaseV3(
         index === 0 || rows[index - 1]!.publicRepackId < row.publicRepackId,
     );
     if (!sorted) return null;
+    const vendorKeyByPublicId = new Map<string, string>();
+    for (const row of rows) {
+      const existing = vendorKeyByPublicId.get(row.publicVendorId);
+      if (existing !== undefined && existing !== row.vendorKey) return null;
+      vendorKeyByPublicId.set(row.publicVendorId, row.vendorKey);
+    }
 
     const categories = await ctx.db
       .query("dataReleaseV3Categories")
@@ -206,7 +231,7 @@ async function loadActiveDataReleaseV3(
       ]),
     );
     const legacyEvSnapshot = await usesLegacyEvSnapshot(ctx, release, state);
-    if (currentTime !== undefined && !legacyEvSnapshot) await loadRetainedEvPointer(ctx, state);
+    if (!legacyEvSnapshot) await loadRetainedEvPointer(ctx, state);
     const displayed = currentTime === undefined || legacyEvSnapshot ? null
       : await loadDataReleaseV3DisplayedRepacks(ctx, release, rows, currentTime);
     if (currentTime !== undefined && !legacyEvSnapshot && displayed === null) return null;
@@ -221,6 +246,10 @@ async function loadActiveDataReleaseV3(
       factsByPublicId: displayed?.factsByPublicId ?? new Map(),
       legacyEvSnapshot,
       categoryByPublicId,
+      vendors: [...vendorKeyByPublicId].map(([publicVendorId, vendorKey]) => ({
+        publicVendorId,
+        vendorKey,
+      })),
     };
   } catch {
     return null;
@@ -231,6 +260,7 @@ async function hydrateRepackViews(
   ctx: QueryCtx,
   release: ActiveDataReleaseV3,
   rows: readonly DataReleaseV3SearchRow[],
+  health: DataReleaseV3ProviderHealthSnapshot,
 ): Promise<PublicRepackViewDetailV3[] | null> {
   const views: PublicRepackViewDetailV3[] = [];
   for (const row of rows) {
@@ -249,7 +279,11 @@ async function hydrateRepackViews(
     // unchanged. Never expire its values or switch merely because facts seal.
     const estimate = release.legacyEvSnapshot ? parsed.data.evEstimates.packScout : displayedEstimate!;
     const view = publicRepackViewDetailV3Schema.safeParse({ ...parsed.data,
-      evEstimates: { ...parsed.data.evEstimates, packScout: estimate }, heat: unavailableRepackHeat() });
+      evEstimates: { ...parsed.data.evEstimates, packScout: estimate },
+      heat: unavailableRepackHeat(),
+      providerHealth: health.byPublicVendorId.get(parsed.data.publicVendorId) ??
+        missingDataReleaseV3ProviderHealth(),
+    });
     if (!view.success) return null;
     views.push(view.data);
   }
@@ -704,23 +738,39 @@ async function loadDesiredChases(
  * model protecting nothing.
  */
 
-export const getPublicShellStatusV3 = query({
-  args: { ...catalogReadTokenArg },
+export const getPublicShellStatusV3AtTime = internalQuery({
+  args: { currentTime: v.number(), ...catalogReadTokenArg },
   handler: async (
     ctx,
     args,
-  ): Promise<PublicResult<{ release: DataReleaseV3Identity }>> => {
+  ): Promise<PublicResult<PublicShellStatusV3>> => {
     if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
+    if (!currentTimeIsValid(args.currentTime)) {
+      return publicReadError("INVALID_QUERY");
+    }
     const active = await loadActiveDataReleaseV3(ctx);
-    return active === null
-      ? publicReadError("RELEASE_UNAVAILABLE")
-      : success({ release: active.identity });
+    if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx,
+      active.releaseDocument,
+      active.vendors,
+      args.currentTime,
+    );
+    const shell = publicShellStatusV3Schema.safeParse({
+      release: active.identity,
+      ...dataReleaseV3PresentationContext(args.currentTime),
+      ...dataReleaseV3ProviderHealthContext(args.currentTime),
+      providerHealthSummary: health.summary,
+    });
+    return shell.success
+      ? success(shell.data)
+      : publicReadError("RELEASE_UNAVAILABLE");
   },
 });
 
-export const getDashboardBundleV3 = query({
+export const getDashboardBundleV3AtTime = internalQuery({
   args: {
     filters: v.optional(v.any()),
     selectedPublicRepackId: v.optional(v.any()),
@@ -741,6 +791,9 @@ export const getDashboardBundleV3 = query({
     }
     const active = await loadActiveDataReleaseV3(ctx, currentTime);
     if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, currentTime,
+    );
     const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
@@ -766,7 +819,7 @@ export const getDashboardBundleV3 = query({
         }),
       )
       .slice(0, 6);
-    const details = await hydrateRepackViews(ctx, active, opportunityRows);
+    const details = await hydrateRepackViews(ctx, active, opportunityRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -776,6 +829,9 @@ export const getDashboardBundleV3 = query({
       null;
     const bundle = publicDashboardBundleV3Schema.safeParse({
       release: active.identity,
+      ...dataReleaseV3PresentationContext(currentTime),
+      ...dataReleaseV3ProviderHealthContext(currentTime),
+      providerHealthSummary: health.summary,
       opportunities: details.map(publicRepackViewSummaryV3FromDetail),
       details,
       selectedRepack,
@@ -798,72 +854,7 @@ export const getDashboardBundleV3 = query({
   },
 });
 
-async function resolveDataReleaseV3Pagination(
-  ctx: QueryCtx,
-  input: ListPublicRepacksInput,
-  activePublicReleaseId: string,
-  activeFingerprint: string,
-): Promise<
-  | { readonly ok: false; readonly code: "INVALID_QUERY" | "CURSOR_EXPIRED" }
-  | {
-      readonly ok: true;
-      readonly offset: number;
-      readonly paginationReset: "release_changed" | null;
-    }
-> {
-  if (input.cursor === null) {
-    const stack = validateCursorSet({
-      cursor: null,
-      cursorStack: input.cursorStack,
-      expectedFingerprint: activeFingerprint,
-      expectedReleaseId: activePublicReleaseId,
-      pageSize: input.pageSize,
-    });
-    if (!stack.ok || stack.value.stack.length > 0) {
-      return { ok: false, code: "INVALID_QUERY" };
-    }
-    return {
-      ok: true,
-      offset: 0,
-      paginationReset:
-        input.queryFingerprint !== null &&
-        input.queryFingerprint !== activeFingerprint
-          ? "release_changed"
-          : null,
-    };
-  }
-  const cursor = decodeRepackCursor(input.cursor);
-  if (cursor === null || input.queryFingerprint !== cursor.queryFingerprint) {
-    return { ok: false, code: "INVALID_QUERY" };
-  }
-  const expectedFingerprint = await createQueryFingerprint(
-    cursor.publicReleaseId,
-    input,
-  );
-  if (expectedFingerprint !== cursor.queryFingerprint) {
-    return { ok: false, code: "INVALID_QUERY" };
-  }
-  const cursorSet = validateCursorSet({
-    cursor: input.cursor,
-    cursorStack: input.cursorStack,
-    expectedFingerprint,
-    expectedReleaseId: cursor.publicReleaseId,
-    pageSize: input.pageSize,
-  });
-  if (!cursorSet.ok) return { ok: false, code: "INVALID_QUERY" };
-  if (cursor.publicReleaseId === activePublicReleaseId) {
-    return { ok: true, offset: cursor.offset, paginationReset: null };
-  }
-  const retained = await loadDataReleaseV3ByPublicReleaseId(
-    ctx,
-    cursor.publicReleaseId,
-  ).catch(() => null);
-  return retained !== null && retained.lifecycle === "complete"
-    ? { ok: true, offset: 0, paginationReset: "release_changed" }
-    : { ok: false, code: "CURSOR_EXPIRED" };
-}
-
-export const listPublicRepacksV3 = query({
+export const listPublicRepacksV3AtTime = internalQuery({
   args: {
     search: v.optional(v.any()),
     filters: v.optional(v.any()),
@@ -893,8 +884,27 @@ export const listPublicRepacksV3 = query({
     if (!sortIsSupported(request.sort)) {
       return publicReadError("INVALID_QUERY");
     }
-    const active = await loadActiveDataReleaseV3(ctx, currentTime);
-    if (active === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const storedActive = await loadActiveDataReleaseV3(ctx);
+    if (storedActive === null) return publicReadError("RELEASE_UNAVAILABLE");
+    const pagination = await resolveDataReleaseV3Pagination(
+      ctx, request, storedActive.identity.publicReleaseId, currentTime,
+    );
+    if (!pagination.ok) return publicReadError(pagination.code);
+    const confidenceEvaluatedAtMillis = pagination.confidenceEvaluatedAtMillis;
+    const displayed = storedActive.legacyEvSnapshot ? null
+      : await loadDataReleaseV3DisplayedRepacks(
+          ctx, storedActive.releaseDocument, storedActive.rows, confidenceEvaluatedAtMillis,
+        ).catch(() => null);
+    if (!storedActive.legacyEvSnapshot && displayed === null) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
+    const active = displayed === null ? storedActive : {
+      ...storedActive, ...displayed,
+      rowByPublicId: new Map(displayed.rows.map(row => [row.publicRepackId, row])),
+    };
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, currentTime,
+    );
     const allRows = active.rows;
     if (!selectionsAreKnown(allRows, request.filters)) {
       return publicReadError("INVALID_QUERY");
@@ -928,18 +938,6 @@ export const listPublicRepacksV3 = query({
         ? allRows
         : allRows.filter((row) => desiredChases.has(row.publicRepackId));
 
-    const fingerprint = await createQueryFingerprint(
-      active.identity.publicReleaseId,
-      request,
-    );
-    const pagination = await resolveDataReleaseV3Pagination(
-      ctx,
-      request,
-      active.identity.publicReleaseId,
-      fingerprint,
-    );
-    if (!pagination.ok) return publicReadError(pagination.code);
-
     const matchingRows = eligibleRows
       .filter(
         (row) =>
@@ -954,7 +952,7 @@ export const listPublicRepacksV3 = query({
       pagination.offset,
       pagination.offset + request.pageSize,
     );
-    const details = await hydrateRepackViews(ctx, active, pageRows);
+    const details = await hydrateRepackViews(ctx, active, pageRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const selectedRepack =
       details.find(
@@ -964,6 +962,9 @@ export const listPublicRepacksV3 = query({
       null;
     const page = publicRepackListPageV3Schema.safeParse({
       release: active.identity,
+      ...dataReleaseV3PresentationContext(confidenceEvaluatedAtMillis),
+      ...dataReleaseV3ProviderHealthContext(currentTime),
+      providerHealthSummary: health.summary,
       rows: details.map(publicRepackViewSummaryV3FromDetail),
       details,
       selectedRepack,
@@ -979,6 +980,22 @@ export const listPublicRepacksV3 = query({
     });
     if (!page.success) return publicReadError("RELEASE_UNAVAILABLE");
     const pageEnd = pagination.offset + pageRows.length;
+    let nextCursor: string | null = null;
+    if (pageEnd < matchingRows.length) {
+      if (pagination.cursorSigningKey === null) {
+        return publicReadError("RELEASE_UNAVAILABLE");
+      }
+      nextCursor = await encodeDataReleaseV3Cursor(
+        {
+          version: 3,
+          publicReleaseId: active.identity.publicReleaseId,
+          queryFingerprint: pagination.queryFingerprint,
+          offset: pageEnd,
+          confidenceEvaluatedAtMillis,
+        },
+        pagination.cursorSigningKey,
+      );
+    }
     return success({
       ...page.data,
       facets: contextualFacets(
@@ -996,16 +1013,8 @@ export const listPublicRepacksV3 = query({
         pageSize: request.pageSize,
         desiredPublicCollectibleId: request.desiredPublicCollectibleId,
       },
-      queryFingerprint: fingerprint,
-      nextCursor:
-        pageEnd < matchingRows.length
-          ? encodeRepackCursor({
-              version: 2,
-              publicReleaseId: active.identity.publicReleaseId,
-              queryFingerprint: fingerprint,
-              offset: pageEnd,
-            })
-          : null,
+      queryFingerprint: pagination.queryFingerprint,
+      nextCursor,
       hasPrevious: pagination.offset > 0,
       range:
         matchingRows.length === 0
@@ -1020,7 +1029,7 @@ export const listPublicRepacksV3 = query({
   },
 });
 
-export const getPublicRepackV3 = query({
+export const getPublicRepackV3AtTime = internalQuery({
   args: {
     publicRepackId: v.any(),
     publicReleaseId: v.any(),
@@ -1047,7 +1056,10 @@ export const getPublicRepackV3 = query({
     }
     const row = active.rowByPublicId.get(args.publicRepackId);
     if (row === undefined) return publicReadError("REPACK_NOT_FOUND");
-    const views = await hydrateRepackViews(ctx, active, [row]);
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, args.currentTime,
+    );
+    const views = await hydrateRepackViews(ctx, active, [row], health);
     if (views === null || views[0] === undefined) {
       return publicReadError("RELEASE_UNAVAILABLE");
     }
@@ -1118,7 +1130,7 @@ export const searchPublicCollectiblesV3 = query({
   },
 });
 
-export const findRepacksByDesiredCollectibleV3 = query({
+export const findRepacksByDesiredCollectibleV3AtTime = internalQuery({
   args: {
     publicCollectibleId: v.any(),
     filters: v.optional(v.any()),
@@ -1196,10 +1208,15 @@ export const findRepacksByDesiredCollectibleV3 = query({
         return compareText(left.publicRepackId, right.publicRepackId);
       });
     const visibleRows = matchingRows.slice(0, request.data.limit);
-    const details = await hydrateRepackViews(ctx, active, visibleRows);
+    const health = await loadDataReleaseV3ProviderHealthSnapshot(
+      ctx, active.releaseDocument, active.vendors, currentTime,
+    );
+    const details = await hydrateRepackViews(ctx, active, visibleRows, health);
     if (details === null) return publicReadError("RELEASE_UNAVAILABLE");
     const result = desiredCollectibleRepackResultsV3Schema.safeParse({
       release: active.identity,
+      ...dataReleaseV3PresentationContext(currentTime),
+      ...dataReleaseV3ProviderHealthContext(currentTime),
       desiredCollectible: collectibleDisplay(lookup.detail),
       matches: details.map((detail) => ({
         repack: publicRepackViewSummaryV3FromDetail(detail),
@@ -1210,4 +1227,87 @@ export const findRepacksByDesiredCollectibleV3 = query({
     if (!result.success) return publicReadError("RELEASE_UNAVAILABLE");
     return success(result.data);
   },
+});
+
+/**
+ * Buyer-facing time-sensitive reads are actions so the evaluation clock comes
+ * from Convex, never from a visitor-controlled query argument or URL. The
+ * internal `*AtTime` queries above are the deterministic test seam and are not
+ * callable by public identities.
+ */
+export const getPublicShellStatusV3 = action({
+  args: { ...catalogReadTokenArg },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(internal.publicRepacksV3.getPublicShellStatusV3AtTime, {
+      ...args,
+      currentTime: Date.now(),
+    }),
+});
+
+export const getDashboardBundleV3 = action({
+  args: {
+    filters: v.optional(v.any()),
+    selectedPublicRepackId: v.optional(v.any()),
+    ...catalogReadTokenArg,
+  },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
+      ...args,
+      currentTime: Date.now(),
+    }),
+});
+
+export const listPublicRepacksV3 = action({
+  args: {
+    search: v.optional(v.any()),
+    filters: v.optional(v.any()),
+    sort: v.optional(v.any()),
+    direction: v.optional(v.any()),
+    cursor: v.optional(v.any()),
+    cursorStack: v.optional(v.any()),
+    queryFingerprint: v.optional(v.any()),
+    pageSize: v.optional(v.any()),
+    desiredPublicCollectibleId: v.optional(v.any()),
+    selectedPublicRepackId: v.optional(v.any()),
+    ...catalogReadTokenArg,
+  },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+      ...args,
+      currentTime: Date.now(),
+    }),
+});
+
+export const getPublicRepackV3 = action({
+  args: {
+    publicRepackId: v.any(),
+    publicReleaseId: v.any(),
+    ...catalogReadTokenArg,
+  },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(internal.publicRepacksV3.getPublicRepackV3AtTime, {
+      ...args,
+      currentTime: Date.now(),
+    }),
+});
+
+export const findRepacksByDesiredCollectibleV3 = action({
+  args: {
+    publicCollectibleId: v.any(),
+    filters: v.optional(v.any()),
+    sort: v.optional(v.any()),
+    direction: v.optional(v.any()),
+    limit: v.optional(v.any()),
+    ...catalogReadTokenArg,
+  },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(
+      internal.publicRepacksV3.findRepacksByDesiredCollectibleV3AtTime,
+      { ...args, currentTime: Date.now() },
+    ),
 });

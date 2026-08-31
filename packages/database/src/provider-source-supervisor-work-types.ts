@@ -42,6 +42,8 @@ interface ClaimedSourceWorkBase extends ClaimedWorkBase {
   readonly provider: LaunchProviderKey;
   readonly sourceInstanceId: string;
   readonly sourceRevisionId: string;
+  /** Immutable source-test or import-run request-size pin. */
+  readonly recordsPerRequest: number;
   readonly normalizedContractVersion: string;
   readonly mapperKey: string;
   readonly mapperVersion: string;

@@ -77,6 +77,10 @@ const EXPECTED_MIGRATIONS = Object.freeze([
     checksum: "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
   }),
   Object.freeze({
+    name: "20260826010000_provider_source_records_per_request",
+    checksum: "222365302a3fb76001f1f9cab9b7b80f375dcc629ae7146877661420fafa0d16",
+  }),
+  Object.freeze({
     name: "20260827010000_provider_source_platform_request_lanes",
     checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
   }),

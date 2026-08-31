@@ -22,6 +22,9 @@ export const PROVIDER_SOURCE_SCHEDULE_BOUNDS = Object.freeze({
   freshnessGraceSeconds: providerSourceLaunchBounds.freshnessGraceSeconds,
 });
 
+export const PROVIDER_SOURCE_RECORDS_PER_REQUEST_BOUNDS =
+  providerSourceLaunchBounds.recordsPerRequest;
+
 export const PROVIDER_SOURCE_SUPERVISOR_TIMING = Object.freeze({
   leaseSeconds: providerSourceSingletonTiming.leaseSeconds,
   renewalSeconds: providerSourceSingletonTiming.maximumRenewalIntervalSeconds,

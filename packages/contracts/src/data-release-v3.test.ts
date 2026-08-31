@@ -4,6 +4,7 @@ import {
   buildAllAvailabilityStatesPublicRepackListPageV3,
   buildDataReleaseV3Identity,
   buildDesiredCollectibleRepackResultsV3,
+  buildHealthyPublicProviderHealthSummaryV1,
   buildNonPurchasablePublicRepackDetailV3,
   buildPackScoutPublicEvCurrentV3,
   buildPackScoutPublicEvMetricsV3,
@@ -15,9 +16,11 @@ import {
   buildPublicEvEstimatesV3,
   buildPublicRepackDetailV3,
   buildPublicRepackListPageV3,
+  buildPublicShellStatusV3,
   buildPublicRepackViewDetailV3,
   buildSoldOutPublicRepackDetailV3,
   DATA_RELEASE_V3_EXPIRES_AT,
+  DATA_RELEASE_V3_OBSERVED_AT,
   DATA_RELEASE_V3_SECONDARY_REPACK_ID,
 } from "./__fixtures__/data-release-v3.fixture.ts";
 import {
@@ -28,8 +31,9 @@ import {
   publicRepackDetailV3Schema,
   publicRepackListPageV3Schema,
   publicRepackSummaryV3FromDetail,
-  publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
+  publicRepackViewDetailV3Schema,
+  publicShellStatusV3Schema,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3MatchesDetail,
   repackEvSortRowV3Schema,
@@ -229,13 +233,10 @@ test("packs that are not available stay discoverable but never rank or act", () 
       "a frozen sold-out estimate requires the authoritative sold-out state",
     );
 
-    const view = publicRepackViewDetailV3Schema.parse({
-      ...detail,
-      heat: unavailableRepackHeat(),
-    });
+    const view = buildPublicRepackViewDetailV3(detail);
     assert.equal(
       publicDashboardBundleV3Schema.safeParse({
-        release: buildDataReleaseV3Identity(),
+        ...buildPublicDashboardBundleV3(),
         opportunities: [publicRepackViewSummaryV3FromDetail(view)],
         details: [view],
         selectedRepack: view,
@@ -295,7 +296,7 @@ test("heat, chase matching, and actions stay independent of EV confidence", () =
   };
   assert.equal(
     publicDashboardBundleV3Schema.safeParse({
-      release: buildDataReleaseV3Identity(),
+      ...buildPublicDashboardBundleV3(),
       opportunities: [publicRepackViewSummaryV3FromDetail(reheated)],
       details: [reheated],
       selectedRepack: reheated,
@@ -348,7 +349,7 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
   });
   assert.equal(
     publicDashboardBundleV3Schema.safeParse({
-      release: buildDataReleaseV3Identity(),
+      ...bundle,
       opportunities: [publicRepackViewSummaryV3FromDetail(soldOut)],
       details: [soldOut],
       selectedRepack: soldOut,
@@ -385,6 +386,125 @@ test("dashboard opportunities stay eligible, ranked, and byte-aligned", () => {
     }).success,
     false,
     "a populated dashboard requires a selected item",
+  );
+});
+
+test("dynamic views bind last-known EV and distinct confidence and health clocks", () => {
+  const confidenceEvaluatedAt = "2026-08-20T19:00:00.000Z";
+  const lastKnown = buildPublicRepackViewDetailV3(
+    {},
+    { confidenceEvaluatedAt },
+  );
+    assert.equal(lastKnown.evEstimates.packScout.status, "last_known");
+  assert.equal(
+    lastKnown.evEstimates.packScout.confidence?.scoreBasisPoints,
+    0,
+  );
+
+  const baseline = buildPublicDashboardBundleV3();
+  const oneLastKnownOpportunity = {
+    ...baseline,
+    confidenceEvaluatedAt,
+    providerHealthEvaluatedAt: "2026-08-20T19:10:00.000Z",
+    providerHealthSummary: {
+      state: "healthy" as const,
+      observedAt: "2026-08-20T19:10:00.000Z",
+      freshThrough: "2026-08-20T20:00:00.000Z",
+      totalProviderCount: 1,
+      delayedProviderCount: 0,
+      nextHealthEvaluationAt: "2026-08-20T20:00:00.000Z",
+    },
+    opportunities: [publicRepackViewSummaryV3FromDetail(lastKnown)],
+    details: [lastKnown],
+    selectedRepack: lastKnown,
+  };
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse(oneLastKnownOpportunity).success,
+    true,
+    "age alone does not exclude a healthy last-known estimate",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      providerHealthEvaluatedAt: "2026-08-20T18:59:59.999Z",
+    }).success,
+    false,
+    "provider health cannot be evaluated before cursor-pinned confidence",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    }).success,
+    false,
+    "response and live presentation clocks cannot diverge",
+  );
+  const tamperedPresentation = structuredClone(lastKnown);
+  if (tamperedPresentation.evEstimates.packScout.status === "unavailable") {
+    throw new Error("unexpected unavailable fixture");
+  }
+  tamperedPresentation.evEstimates.packScout.confidence.scoreBasisPoints -= 1;
+  assert.equal(
+    publicRepackViewDetailV3Schema.safeParse(tamperedPresentation).success,
+    false,
+    "the presentation overlay must remain derived from stored V3",
+  );
+
+  const delayed = buildPublicRepackViewDetailV3(
+    {},
+    {
+      confidenceEvaluatedAt,
+      providerHealth: {
+        state: "delayed",
+        observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+        statusReason: "PROVIDER_OBSERVATION_STALE",
+      },
+    },
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...oneLastKnownOpportunity,
+      opportunities: [publicRepackViewSummaryV3FromDetail(delayed)],
+      details: [delayed],
+      selectedRepack: delayed,
+    }).success,
+    true,
+    "provider delay remains informational and does not block ranking",
+  );
+  assert.equal(
+    publicDashboardBundleV3Schema.safeParse({
+      ...baseline,
+      providerHealthSummary: {
+        state: "delayed",
+        observedAt: DATA_RELEASE_V3_OBSERVED_AT,
+        freshThrough: DATA_RELEASE_V3_EXPIRES_AT,
+        totalProviderCount: 1,
+        delayedProviderCount: 1,
+        nextHealthEvaluationAt: null,
+      },
+      opportunities: [],
+      details: [],
+      selectedRepack: null,
+    }).success,
+    true,
+    "an ordinary no-match opportunity list remains valid during provider delay",
+  );
+
+  const list = buildPublicRepackListPageV3();
+  assert.equal(list.providerHealthSummary.state, "healthy");
+  assert.equal(list.publicFreshnessPolicyVersion, baseline.publicFreshnessPolicyVersion);
+  assert.equal(publicShellStatusV3Schema.safeParse(buildPublicShellStatusV3()).success, true);
+  assert.equal(
+    publicShellStatusV3Schema.safeParse({
+      release: buildDataReleaseV3Identity(),
+      publicFreshnessPolicyVersion: baseline.publicFreshnessPolicyVersion,
+      confidenceEvaluatedAt: DATA_RELEASE_V3_OBSERVED_AT,
+    }).success,
+    false,
+  );
+  assert.equal(
+    buildHealthyPublicProviderHealthSummaryV1().state,
+    "healthy",
   );
 });
 

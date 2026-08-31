@@ -11,10 +11,11 @@ import {
   dataforrestNextCursor,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   normalizeDataforrestEventRecordForAdapter,
+  providerSourceRecordsPerRequest,
   type DataforrestEventRecordV1,
 } from "./index.ts";
 
-test("Collector Crypt owns an immutable 1,000-record profile without changing historical bounds", () => {
+test("Collector Crypt keeps its immutable 1,000-record profile independent of configurable source limits", () => {
   const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;
   assert.equal(DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS, 1_000);
   assert.equal(manifest.adapterVersion, DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION);
@@ -27,7 +28,8 @@ test("Collector Crypt owns an immutable 1,000-record profile without changing hi
   assert.equal(manifest.maximumPlatformRequestCap, 2);
   assert.deepEqual(manifest.supportedProviders.map(({ provider }) => provider), ["collector_crypt"]);
   assert.equal(dataforrestEventsV1SourceAdapterManifests.includes(manifest), true);
-  assert.equal(dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit, 500);
+  assert.equal(dataforrestEventsV1SourceAdapterManifest.requestBounds.pageLimit, 5_000);
+  assert.equal(providerSourceRecordsPerRequest.default, 500);
   assert.equal(dataforrestClutchpacksDistributedSourceAdapterManifest.requestBounds.pageLimit, 2_000);
   assert.equal(dataforrestLaunchDistributedSourceAdapterManifest.requestBounds.pageLimit, 100);
   assert.equal(dataforrestPhygitalsDistributedV2SourceAdapterManifest.requestBounds.pageLimit, 100);

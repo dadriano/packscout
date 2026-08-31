@@ -133,16 +133,27 @@ function OpportunityRow({
       </td>
       <td>
         <MetricCell metric={row.packScoutEv.evPercent} />
-        <span className={styles.unavailableReason}>
+        <span
+          aria-label={row.packScoutEv.confidence.accessibleLabel}
+          className={styles.unavailableReason}
+        >
           Confidence: {row.packScoutEv.confidence.displayValue}
         </span>
         {row.packScoutEv.status !== "current" ? (
-          <span className={styles.unavailableReason} title={[
+          <span className={styles.estimateEvidence} title={[
             row.packScoutEv.freshness.dataAsOfLabel,
             row.packScoutEv.reasonCopy,
             row.packScoutEv.calculationPriceNote,
           ].filter(Boolean).join(" ")}>
             {row.packScoutEv.statusLabel}
+            {row.packScoutEv.freshness.sourceAgeLabel ? (
+              <span>{row.packScoutEv.freshness.sourceAgeLabel}</span>
+            ) : null}
+            {row.packScoutEv.freshness.dataAsOf ? (
+              <time dateTime={row.packScoutEv.freshness.dataAsOf}>
+                {row.packScoutEv.freshness.dataAsOfLabel}
+              </time>
+            ) : null}
           </span>
         ) : null}
       </td>

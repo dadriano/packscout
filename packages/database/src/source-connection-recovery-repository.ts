@@ -686,9 +686,27 @@ export class SourceConnectionRecoveryRepository {
           const prior = await transaction.import_runs.findUnique({
             where: { id: runId },
           });
-          const recoveryRun =
-            prior ??
-            (await transaction.import_runs.create({
+          let recoveryRun = prior;
+          if (!recoveryRun) {
+            const schedulePins = await transaction.$queryRaw<Array<{
+              recordsPerRequest: number;
+            }>>(Prisma.sql`
+              select revision.records_per_request as "recordsPerRequest"
+              from public.provider_source_schedules schedule
+              join public.provider_source_schedule_revisions revision
+                on revision.id = schedule.active_schedule_revision_id
+               and revision.organization_id = schedule.organization_id
+               and revision.provider_id = schedule.provider_id
+               and revision.source_instance_id = schedule.source_instance_id
+              where schedule.source_instance_id = cast(${source.id} as uuid)
+                and schedule.organization_id = cast(${input.organizationId} as uuid)
+                and schedule.provider_id = cast(${source.provider_id} as uuid)
+              for share of schedule
+            `);
+            if (!schedulePins[0]) {
+              this.#fenced("Recovery source request settings are unavailable.");
+            }
+            recoveryRun = await transaction.import_runs.create({
               data: {
                 id: runId,
                 organization_id: input.organizationId,
@@ -706,6 +724,7 @@ export class SourceConnectionRecoveryRepository {
                 mapper_key: preservedRun.mapper_key,
                 mapper_version: preservedRun.mapper_version,
                 identity_namespace_key: preservedRun.identity_namespace_key,
+                records_per_request: schedulePins[0].recordsPerRequest,
                 connection_profile_id: input.connectionProfileId,
                 connection_revision_id: preservedConnection.id,
                 cursor_codec_version: cursor.cursor_codec_version,
@@ -734,7 +753,8 @@ export class SourceConnectionRecoveryRepository {
                 },
                 created_at: input.activatedAt,
               },
-            }));
+            });
+          }
           this.#requireExactRecoveryRun(recoveryRun, {
             ...input,
             connectionRevisionId: preservedConnection.id,

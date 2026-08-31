@@ -38,7 +38,7 @@ export async function activateRetentionRelease(t: RetentionTest, plan: V3Fixture
 
 export async function readRetentionDetail(t: RetentionTest, release: number,
   currentTime = V3_FIXTURE_NOW, publicRepackId = V3_REPACK_ID_A): Promise<PublicRepackViewDetailV3> {
-  const result = await t.query(api.publicRepacksV3.getPublicRepackV3, {
+  const result = await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
     publicReleaseId: retentionReleaseId(release), publicRepackId, currentTime,
   }) as { ok: boolean; data?: PublicRepackViewDetailV3 };
   if (!result.ok || result.data === undefined) throw new Error("expected public detail");

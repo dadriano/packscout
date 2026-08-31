@@ -1,4 +1,5 @@
 import {
+  PACKSCOUT_BUYBACK_EV_CONFIDENCE_PENALTIES_V1,
   normalizePublicSearchText,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3Schema,
@@ -100,6 +101,13 @@ export const dataReleaseV3SearchRowValidator = v.object({
   vendorReportedEvUsdMinor: nullableNumberValidator,
   vendorReportedEvUsdNullRank: nullRankValidator,
   packScoutExpiresAtMillis: nullableNumberValidator,
+  // Optional only for retained V6 rows written before dynamic confidence.
+  // Every new row writer below emits the exact derived value. Remove the
+  // optional compatibility after active and previous releases both report
+  // zero rows without this field (owner: V3 rollout maintainers).
+  packScoutStaticConfidencePenaltyBasisPoints: v.optional(
+    nullableNumberValidator,
+  ),
 });
 
 export type DataReleaseV3SearchRow = RepackEvSortRowV3 &
@@ -127,7 +135,26 @@ export type DataReleaseV3SearchRow = RepackEvSortRowV3 &
       | "VALUATION_UNAVAILABLE"
       | null;
     packScoutExpiresAtMillis: number | null;
+    packScoutStaticConfidencePenaltyBasisPoints?: number | null;
   }>;
+
+function packScoutStaticConfidencePenaltyBasisPoints(
+  detail: PublicRepackDetailV3,
+): number | null {
+  const estimate = detail.evEstimates.packScout;
+  if (estimate.status === "unavailable") return null;
+  return estimate.confidence.limitationCodes.reduce((total, limitation) => {
+    if (limitation === "closed_range_midpoint") {
+      return total +
+        PACKSCOUT_BUYBACK_EV_CONFIDENCE_PENALTIES_V1.closedRangeMidpoint;
+    }
+    if (limitation === "platform_published_odds") {
+      return total +
+        PACKSCOUT_BUYBACK_EV_CONFIDENCE_PENALTIES_V1.platformPublishedOdds;
+    }
+    return total;
+  }, 0);
+}
 
 export function dataReleaseV3SearchRowFromDetail(
   detail: PublicRepackDetailV3,
@@ -185,6 +212,8 @@ export function dataReleaseV3SearchRowFromDetail(
     topChaseReason,
     packScoutExpiresAtMillis:
       packScout.status === "current" ? Date.parse(packScout.expiresAt) : null,
+    packScoutStaticConfidencePenaltyBasisPoints:
+      packScoutStaticConfidencePenaltyBasisPoints(detail),
   };
 }
 
@@ -217,9 +246,15 @@ export function dataReleaseV3SearchRowMatchesDetail(
   row: DataReleaseV3SearchRow,
   detail: PublicRepackDetailV3,
 ): boolean {
-  return (
-    canonicalJson(row) === canonicalJson(dataReleaseV3SearchRowFromDetail(detail))
-  );
+  const derived = dataReleaseV3SearchRowFromDetail(detail);
+  if (row.packScoutStaticConfidencePenaltyBasisPoints === undefined) {
+    const {
+      packScoutStaticConfidencePenaltyBasisPoints: _retainedMetadata,
+      ...retainedShape
+    } = derived;
+    return canonicalJson(row) === canonicalJson(retainedShape);
+  }
+  return canonicalJson(row) === canonicalJson(derived);
 }
 
 export function isValidDataReleaseV3SearchRow(

@@ -8,10 +8,9 @@ import {
 import {
   buildV3CurrentEv,
   buildV3DelayedEv,
-  buildV3ExpiredEv,
+  buildV3SoldOutEv,
   buildV3LastKnownEv,
   buildV3Price,
-  buildV3SoldOutEv,
   buildV3UnavailableEv,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import { PackScoutEvMetrics } from "./PackScoutEvMetrics";
@@ -69,15 +68,19 @@ test("unavailable estimates show the stable reason and never a zero", () => {
   assert.ok(markup.includes("$100.00"));
 });
 
-test("stale evidence without retained values is unavailable", () => {
-  const markup = render(buildV3ExpiredEv());
-  assert.ok(markup.includes("Unavailable"));
-  assert.ok(markup.includes("Source data is older than 60 minutes."));
-  assert.match(markup, /data-status="unavailable"/);
+test("last-known estimates keep values, observed time, and decayed confidence", () => {
+  const markup = render(buildV3LastKnownEv());
+  assert.ok(markup.includes("Last-known estimate"));
+  assert.ok(markup.includes("$85.00"));
+  assert.ok(markup.includes("Medium · 50%"));
+  assert.ok(markup.includes("Source evidence last observed"));
+  assert.match(markup, /data-status="last_known"/);
 });
 
 test("sold-out historical estimates keep values with sold-out wording", () => {
-  const markup = render(buildV3SoldOutEv(8_500), { availability: "sold_out" });
+  const markup = render(buildV3SoldOutEv(8_500), {
+    availability: "sold_out",
+  });
   assert.ok(markup.includes("Sold out · historical estimate"));
   assert.ok(markup.includes("$85.00"));
   assert.match(markup, /Sold out Aug 19, 2026/);
@@ -87,7 +90,7 @@ test("delayed source age renders the delayed freshness text", () => {
   const markup = render(buildV3DelayedEv(8_500));
   assert.ok(markup.includes("Source data delayed (15–30 minutes old)"));
   assert.ok(markup.includes("Calculated "));
-  assert.ok(markup.includes("Source data as of "));
+  assert.ok(markup.includes("Source evidence last observed "));
 });
 
 test("a valid zero payout renders $0.00 with the explicit note", () => {
@@ -112,7 +115,7 @@ test("last known values remain rendered with zero confidence, failure reason, an
   const markup = render(buildV3LastKnownEv(8_500, { latestUnavailableReason: "BUYBACK_UNAVAILABLE" }), {
     price: buildV3Price(20_000),
   });
-  for (const text of ["Last known estimate", "$85.00", "-$15.00", "Low · 0%",
+  for (const text of ["Last-known estimate", "$85.00", "-$15.00", "Low · 0%",
     "Fresh calculation unavailable", "calculation-time Pack Price of $100.00", "$200.00"]) {
     assert.ok(markup.includes(text), text);
   }

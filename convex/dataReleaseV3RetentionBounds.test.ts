@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { V3_FIXTURE_NOW } from "./dataReleaseV3Fixture.test-support";
 import type { MutationCtx } from "./_generated/server";
 import { buildV3Detail } from "./dataReleaseV3Fixture.test-support";
@@ -103,7 +103,7 @@ describe("bounded EV retention transactions", () => {
     }));
     const first = await stageRetentionRelease(t, 1, details);
     await activateRetentionRelease(t, first, null);
-    const detail = await t.query(api.publicRepacksV3.getPublicRepackV3, {
+    const detail = await t.query(internal.publicRepacksV3.getPublicRepackV3AtTime, {
       publicReleaseId: first.publicReleaseId, publicRepackId: details[0]!.publicRepackId,
       currentTime: V3_FIXTURE_NOW,
     }) as { ok: boolean; data: { description: string; evEstimates: { packScout: { status: string } } } };

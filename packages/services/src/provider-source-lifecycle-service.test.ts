@@ -56,6 +56,7 @@ function snapshot(
     ],
     scheduleRevisionId,
     intervalSeconds: 60,
+    recordsPerRequest: 500,
     cursorGeneration: 3n,
     cursorFingerprint: "a".repeat(64),
     hasActiveRun: false,
@@ -70,6 +71,9 @@ class MemoryLifecycleRepository
   activeRevisionSourceAdapterVersion: string | null =
     DATAFORREST_EVENTS_V1_ADAPTER_VERSION;
   createInput: Parameters<ProviderSourceLifecycleAdminRepository["createSource"]>[0] | null = null;
+  reviseRecordsInput: Parameters<
+    ProviderSourceLifecycleAdminRepository["reviseRecordsPerRequest"]
+  >[0] | null = null;
   resetInput: Parameters<ProviderSourceLifecycleAdminRepository["resetCursor"]>[0] | null = null;
 
   async loadProvider(input: { organizationId: string; providerId: string }) {
@@ -124,6 +128,13 @@ class MemoryLifecycleRepository
 
   async reviseInterval() {
     return { scheduleRevisionId: "00000000-0000-4000-8000-000000000010" };
+  }
+
+  async reviseRecordsPerRequest(input: Parameters<
+    ProviderSourceLifecycleAdminRepository["reviseRecordsPerRequest"]
+  >[0]) {
+    this.reviseRecordsInput = input;
+    return { scheduleRevisionId: "00000000-0000-4000-8000-000000000011" };
   }
 
   async requestPause() {
@@ -204,11 +215,53 @@ test("source creation derives the immutable platform filter and contract-only ma
     "pull-v1",
     "trade-v1",
   ]);
+  assert.equal(repository.createInput?.recordsPerRequest, 500);
 
   await assert.rejects(
     service.createSource(
       { organizationId, actorKey: "operator-admin" },
       { ...sourceRequest, mapperKey: "collector-crypt-provider-observation" },
+    ),
+    /invalid_source_configuration/u,
+  );
+});
+
+test("records per request revision validates the guarded pin and changes only the schedule setting", async () => {
+  const { repository, service } = fixture();
+  const result = await service.reviseRecordsPerRequest(
+    { organizationId, actorKey: "operator-admin" },
+    providerId,
+    sourceId,
+    {
+      expectedSourceRevisionId: sourceRevisionId,
+      expectedScheduleRevisionId: scheduleRevisionId,
+      recordsPerRequest: 1_000,
+    },
+  );
+
+  assert.deepEqual(repository.reviseRecordsInput, {
+    organizationId,
+    providerId,
+    sourceInstanceId: sourceId,
+    expectedSourceRevisionId: sourceRevisionId,
+    expectedScheduleRevisionId: scheduleRevisionId,
+    recordsPerRequest: 1_000,
+    actorKey: "operator-admin",
+    effectiveAt: now,
+  });
+  assert.equal(result.scheduleRevisionId, "00000000-0000-4000-8000-000000000011");
+  assert.equal(result.audit.action, "source_records_per_request_revised");
+
+  await assert.rejects(
+    service.reviseRecordsPerRequest(
+      { organizationId, actorKey: "operator-admin" },
+      providerId,
+      sourceId,
+      {
+        expectedSourceRevisionId: sourceRevisionId,
+        expectedScheduleRevisionId: scheduleRevisionId,
+        recordsPerRequest: 5_001,
+      },
     ),
     /invalid_source_configuration/u,
   );

@@ -513,6 +513,7 @@ async function writeSourceNativeV1Page(input: {
         mapper_key: "heat-v1-provider-observation",
         mapper_version: "1",
         identity_namespace_key: "heat-v1-records",
+        records_per_request: 500,
         connection_profile_id: input.fixture.connectionProfileId,
         connection_revision_id: input.fixture.connectionRevisionId,
         cursor_codec_version: "dataforrest-cursor-v1",

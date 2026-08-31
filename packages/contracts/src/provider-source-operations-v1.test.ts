@@ -17,6 +17,17 @@ test("unmeasured insert and revision counts stay explicitly unavailable", () => 
   assert.equal(schema.safeParse({ ...dispositions, revised: 0 }).success, false);
 });
 
+test("request-size authority and unknown historical run limits are explicit", () => {
+  const source = providerSourceOperationsSourceSchema.shape.source.unwrap();
+  assert.equal(source.shape.requestSizePolicy.safeParse("adapter_profile").success, true);
+  assert.equal(source.shape.requestSizePolicy.safeParse("schedule_revision").success, true);
+  assert.equal(source.shape.requestSizePolicy.safeParse(undefined).success, false);
+  const run = providerSourceOperationsSourceSchema.shape.activeRun.unwrap();
+  assert.equal(run.shape.recordsPerRequest.safeParse(null).success, true);
+  assert.equal(run.shape.recordsPerRequest.safeParse(1_000).success, true);
+  assert.equal(run.shape.recordsPerRequest.safeParse(5_001).success, false);
+});
+
 test("an organization without providers receives a valid empty source overview", () => {
   const overview = {
     version: PROVIDER_SOURCE_OPERATIONS_VERSION,

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { publicRepackViewSummaryV3FromDetail } from "@packscout/contracts";
 import {
-  buildV3ListPage,
+  buildV3DelayedProviderHealth,
   buildV3LastKnownEv,
+  buildV3ListPage,
   buildV3PastDeadlineCurrentEv,
   buildV3ReleaseIdentity,
   buildV3SoldOutViewDetail,
@@ -34,13 +35,17 @@ function withProviders(element: ReactElement): ReactElement {
   );
 }
 
-function renderOpportunityTable(detail = buildV3ViewDetail()): string {
+function renderOpportunityTable(
+  detail: ReturnType<typeof buildV3ViewDetail> | null = buildV3ViewDetail(),
+): string {
   return renderStatic(
     <OpportunityTable
       onSelectOpportunity={noop}
-      opportunities={[publicRepackViewSummaryV3FromDetail(detail)]}
+      opportunities={
+        detail === null ? [] : [publicRepackViewSummaryV3FromDetail(detail)]
+      }
       repacksHref="/packs"
-      selectedPublicRepackId={detail.publicRepackId}
+      selectedPublicRepackId={detail?.publicRepackId ?? null}
     />,
   );
 }
@@ -61,6 +66,19 @@ function renderAllRepacksTable(
   );
 }
 
+function renderAllRepacksCards(
+  details = [buildV3ViewDetail()],
+): string {
+  return renderStatic(
+    <AllRepacksCards
+      controls={null}
+      onSelect={noop}
+      page={buildV3ListPage(details)}
+      selectedPublicRepackId={details[0]?.publicRepackId ?? null}
+    />,
+  );
+}
+
 function renderInspector(detail = buildV3ViewDetail()): string {
   return renderStatic(
     withProviders(
@@ -71,11 +89,12 @@ function renderInspector(detail = buildV3ViewDetail()): string {
 
 const EXPECTED_METRIC_VALUES = ["$85.00", "85.00%", "-$15.00", "-15.00%"] as const;
 
-test("all three surfaces render the same four metrics from the shared boundary", () => {
+test("all four catalog surfaces render the same values from the shared boundary", () => {
   const detail = buildV3ViewDetail();
   const surfaces = {
     opportunities: renderOpportunityTable(detail),
     allRepacks: renderAllRepacksTable([detail]),
+    cards: renderAllRepacksCards([detail]),
     inspector: renderInspector(detail),
   };
 
@@ -155,30 +174,71 @@ test("sold-out historical rows stay visible with no outbound action", () => {
 });
 
 test("server render keeps a current estimate before hydration even past its deadline", () => {
-  // This estimate's public deadline is firmly in the past relative to the
-  // real test clock, yet the server snapshot must still render the served
-  // values so hydration never disagrees with the server HTML. Confidence
-  // ages in the browser after hydration through the shared clock.
   const detail = buildV3ViewDetail({
     evEstimates: {
-      packScout: buildV3PastDeadlineCurrentEv(8_500),
-      vendorReported: {
-        status: "unavailable",
-        sourceMoney: null,
-        usdComparison: null,
-        observedAt: null,
-        reason: "NOT_REPORTED",
-      },
+      ...buildV3ViewDetail().evEstimates,
+      packScout: buildV3PastDeadlineCurrentEv(),
     },
   });
-  assert.ok(
-    Date.parse("2026-08-18T11:00:00.000Z") < Date.now(),
-    "fixture deadline must be in the past for this proof",
-  );
-  const markup = renderAllRepacksTable([detail]);
-  assert.ok(markup.includes("-$15.00"));
-  assert.ok(markup.includes("$85.00"));
-  assert.equal(markup.includes("Expired"), false);
+  for (const markup of [
+    renderOpportunityTable(detail), renderAllRepacksTable([detail]),
+    renderAllRepacksCards([detail]), renderInspector(detail),
+  ]) {
+    assert.ok(markup.includes("High · 100%"));
+    assert.ok(markup.includes("-$15.00"));
+    assert.equal(markup.includes("Last-known estimate"), false);
+  }
+  assert.ok(renderInspector(detail).includes("Current estimate"));
+});
+
+test("last-known EV stays visible and sortable after the former 60-minute boundary", () => {
+  const detail = buildV3ViewDetail({
+    evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
+  });
+  for (const markup of [
+    renderOpportunityTable(detail),
+    renderAllRepacksTable([detail]),
+    renderAllRepacksCards([detail]),
+    renderInspector(detail),
+  ]) {
+    assert.ok(markup.includes("Last-known estimate"));
+    assert.ok(
+      markup.includes(
+        "Source data over 60 minutes old; last known values retained",
+      ),
+    );
+    assert.ok(markup.includes("Source evidence last observed"));
+    assert.ok(markup.includes("Medium · 50%"));
+    assert.ok(markup.includes("-$15.00"));
+    assert.equal(markup.includes("Expired"), false);
+  }
+  assert.ok(renderAllRepacksTable([detail]).includes("$85.00"));
+  assert.ok(renderInspector(detail).includes("$85.00"));
+});
+
+test("provider delay is informational and last-known EV remains rankable", () => {
+  const detail = buildV3ViewDetail({
+    evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
+    providerHealth: buildV3DelayedProviderHealth(),
+  });
+  for (const markup of [
+    renderAllRepacksTable([detail]),
+    renderAllRepacksCards([detail]),
+    renderInspector(detail),
+  ]) {
+    assert.ok(
+      markup.includes(
+        "Provider feed delayed; displaying the latest available data.",
+      ),
+    );
+    assert.ok(markup.includes("Last-known estimate"));
+    assert.ok(markup.includes("-$15.00"));
+  }
+
+  const opportunities = renderOpportunityTable(detail);
+  assert.ok(opportunities.includes("Last-known estimate"));
+  assert.ok(opportunities.includes("-$15.00"));
+  assert.equal(opportunities.includes("excluded from Top Opportunities"), false);
 });
 
 test("tables expose sortable headers with aria-sort and glossary help", () => {
@@ -213,9 +273,12 @@ test("the inspector names the release data-as-of time and keeps focusable close 
 });
 
 
-test("all four catalog surfaces retain aged values and a visible zero-confidence state", () => {
+test("all four catalog surfaces retain aged values with delayed feeds, failed updates, and changed listing price", () => {
   const original = buildV3ViewDetail();
   const detail = buildV3ViewDetail({
+    price: { displayMoney: { minorUnits: 20_000, currency: "USD" },
+      usdComparison: { status: "available", value: { minorUnits: 20_000, currency: "USD" } } },
+    providerHealth: buildV3DelayedProviderHealth(),
     evEstimates: { ...original.evEstimates, packScout: buildV3LastKnownEv(8_500, {
       referenceTimeIso: "2026-08-20T12:00:00.000Z",
       latestUnavailableReason: "ODDS_UNAVAILABLE",
@@ -230,8 +293,11 @@ test("all four catalog surfaces retain aged values and a visible zero-confidence
     assert.ok(markup.includes("-$15.00"));
     assert.ok(markup.includes("-15.00%"));
     assert.ok(markup.includes("Low · 0%"));
-    assert.ok(markup.includes("Last known estimate"));
+    assert.ok(markup.includes("Last-known estimate"));
     assert.ok(markup.includes("Fresh calculation unavailable"));
+    assert.ok(markup.includes("$200.00"));
+    assert.ok(markup.includes("calculation-time Pack Price of $100.00"));
+    assert.equal(markup.includes("excluded from Top Opportunities"), false);
     assert.equal(markup.includes("Expired"), false);
   }
 });

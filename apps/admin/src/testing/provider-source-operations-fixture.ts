@@ -103,6 +103,8 @@ export function operationSource(
       recordIdScopes: ["catalog-pack-v1", "pull-v1", "trade-v1"],
       lifecycle: index === 2 ? "paused" : "active",
       pauseRequested: false,
+      recordsPerRequest: index === 0 ? 1_000 : 500,
+      requestSizePolicy: "schedule_revision",
       configuration: {
         validated: true,
         fields: [
@@ -172,6 +174,7 @@ export function operationSource(
       lastProgressAt: now,
       reachedHead: false,
       failureCode: null,
+      recordsPerRequest: 500,
     } : null,
     latestRun: index === 3 ? {
       id: operationsFixtureIds.runs[index]!,
@@ -183,6 +186,7 @@ export function operationSource(
       lastProgressAt: now,
       reachedHead: false,
       failureCode: "SOURCE_ACTION_REQUIRED",
+      recordsPerRequest: 500,
     } : null,
     connectionImpact: { state: "none", safeCode: null, healthGeneration: null },
   };
@@ -257,6 +261,7 @@ export function operationsDetail(index = 0): ProviderSourceOperationsDetail {
     lastProgressAt: now,
     reachedHead: true,
     failureCode: null,
+    recordsPerRequest: source.source?.recordsPerRequest ?? 500,
   };
   return {
     version: overview.version,
@@ -418,6 +423,8 @@ export function sourceAdminCatalog(): ProviderSourceAdminCatalog {
       identityNamespaceKey: source.source!.identityNamespaceKey,
       recordIdScopes: [...source.source!.recordIdScopes],
       intervalSeconds: source.schedule!.intervalSeconds,
+      recordsPerRequest: source.source!.recordsPerRequest,
+      activeRunRecordsPerRequest: source.activeRun?.recordsPerRequest ?? null,
       freshnessGraceSeconds: 900 as const,
       scheduleRevisionId: source.schedule!.scheduleRevisionId,
       cursor: {

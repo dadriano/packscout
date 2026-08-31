@@ -288,13 +288,6 @@ function expectedStateFor(
       reason: "SOURCE_DATA_STALE",
     };
   }
-  if (eligibility.readState.state === "expired_since_calculation") {
-    return {
-      classification: "deterministic_unavailable",
-      status: "unavailable",
-      reason: "SOURCE_DATA_STALE",
-    };
-  }
   if (violatesPublicEvPolicy) {
     return {
       classification: "deterministic_unavailable",
@@ -528,13 +521,13 @@ export class PackScoutBuybackEvBackfillReconciliationRunnerV1 {
             ? null
             : packScout.confidence.band,
         sourceAgeBucket:
-          packScout.status === "unavailable"
-            ? packScout.dataAsOf.state === "known"
+          packScout.status === "sold_out_historical"
+            ? sourceAgeBucket(packScout.sourceAge.milliseconds)
+            : packScout.dataAsOf.state === "known"
               ? sourceAgeBucket(
                 readAtMillis - Date.parse(packScout.dataAsOf.observedAt),
               )
-              : sourceAgeBucket(null)
-            : sourceAgeBucket(packScout.sourceAge.milliseconds),
+              : sourceAgeBucket(null),
         calculatedAt: eligibility?.projection.calculatedAt ?? null,
       });
     }

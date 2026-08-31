@@ -41,6 +41,7 @@ interface RunRecord {
   readonly lastProgressAt: Date;
   readonly reachedHead: boolean;
   readonly failureCode: string | null;
+  readonly recordsPerRequest: number;
   readonly counters: CountersRecord;
 }
 
@@ -206,6 +207,7 @@ function runSummary(run: RunRecord | null) {
     lastProgressAt: run.lastProgressAt.toISOString(),
     reachedHead: run.reachedHead,
     failureCode: safeCode(run.failureCode),
+    recordsPerRequest: run.recordsPerRequest,
   };
 }
 
@@ -467,6 +469,8 @@ function sourceSummary(input: Readonly<{
           recordIdScopes: [...input.source.recordIdScopes],
           lifecycle: input.source.state,
           pauseRequested: input.source.pauseRequested,
+          recordsPerRequest: input.source.recordsPerRequest,
+          requestSizePolicy: "schedule_revision",
           configuration: {
             validated: true,
             fields: [

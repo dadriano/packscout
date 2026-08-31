@@ -18,6 +18,13 @@ import {
   packScoutPublicEvPolicyVersionV3Schema,
 } from "./data-release-v3-ev-estimates.ts";
 import {
+  publicEvPresentationResponseContextV1Schema,
+  publicProviderHealthResponseContextV1Schema,
+  publicProviderHealthSummaryV1Schema,
+  publicProviderHealthV1Schema,
+  type PublicProviderHealthV1,
+} from "./public-ev-presentation-v1.ts";
+import {
   packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
   publicRepackDetailDisplayedV3Schema,
@@ -30,6 +37,7 @@ export * from "./data-release-v3-ev-estimates.ts";
 export * from "./data-release-v3-entities.ts";
 export * from "./data-release-v3-search.ts";
 export * from "./data-release-v3-last-known-ev.ts";
+export * from "./public-ev-presentation-v1.ts";
 
 /**
  * The active release identity carried by every data_release_v3 result
@@ -57,18 +65,22 @@ export const dataReleaseV3IdentitySchema = z
 export type DataReleaseV3Identity = z.infer<typeof dataReleaseV3IdentitySchema>;
 
 export type PublicRepackViewSummaryV3 = PublicRepackSummaryDisplayedV3 &
-  Readonly<{ heat: PublicRepackHeat }>;
+  Readonly<{ heat: PublicRepackHeat; providerHealth: PublicProviderHealthV1 }>;
 export type PublicRepackViewDetailV3 = PublicRepackDetailDisplayedV3 &
-  Readonly<{ heat: PublicRepackHeat }>;
+  Readonly<{ heat: PublicRepackHeat; providerHealth: PublicProviderHealthV1 }>;
 
 /**
  * Heat travels beside EV and stays independent of EV confidence: any heat
  * state may pair with any PackScout EV state.
  */
 export const publicRepackViewSummaryV3Schema: z.ZodType<PublicRepackViewSummaryV3> =
-  publicRepackSummaryDisplayedV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+  publicRepackSummaryDisplayedV3Schema.safeExtend({
+    heat: publicRepackHeatSchema, providerHealth: publicProviderHealthV1Schema,
+  });
 export const publicRepackViewDetailV3Schema: z.ZodType<PublicRepackViewDetailV3> =
-  publicRepackDetailDisplayedV3Schema.safeExtend({ heat: publicRepackHeatSchema });
+  publicRepackDetailDisplayedV3Schema.safeExtend({
+    heat: publicRepackHeatSchema, providerHealth: publicProviderHealthV1Schema,
+  });
 
 export function publicRepackViewSummaryV3FromDetail(
   detail: PublicRepackViewDetailV3,
@@ -119,7 +131,9 @@ function validateSelectedRepackV3(
   );
   if (
     matching === undefined ||
-    !packScoutEvProjectionsAreByteEquivalentV3(selectedRepack, matching)
+    !packScoutEvProjectionsAreByteEquivalentV3(selectedRepack, matching) ||
+    JSON.stringify(selectedRepack.providerHealth) !==
+      JSON.stringify(matching.providerHealth)
   ) {
     context.addIssue({
       code: "custom",
@@ -127,6 +141,73 @@ function validateSelectedRepackV3(
       message: "data_release_v3.selected_item_divergence",
     });
   }
+}
+
+export const publicShellStatusV3Schema = z
+  .object({
+    release: dataReleaseV3IdentitySchema,
+    ...publicEvPresentationResponseContextV1Schema.shape,
+    ...publicProviderHealthResponseContextV1Schema.shape,
+    providerHealthSummary: publicProviderHealthSummaryV1Schema,
+  })
+  .strict()
+  .superRefine((status, context) => {
+    validateProviderHealthResponseClockV3(status, context);
+  });
+
+function validateProviderHealthResponseClockV3(
+  response: {
+    readonly confidenceEvaluatedAt: string;
+    readonly providerHealthEvaluatedAt: string;
+    readonly providerHealthSummary?: z.infer<
+      typeof publicProviderHealthSummaryV1Schema
+    >;
+  },
+  context: z.RefinementCtx,
+): void {
+  const confidenceEvaluatedAt = Date.parse(response.confidenceEvaluatedAt);
+  const providerHealthEvaluatedAt = Date.parse(
+    response.providerHealthEvaluatedAt,
+  );
+  if (providerHealthEvaluatedAt < confidenceEvaluatedAt) {
+    context.addIssue({
+      code: "custom",
+      path: ["providerHealthEvaluatedAt"],
+      message: "data_release_v3.provider_health_clock_precedes_confidence",
+    });
+  }
+  const nextHealthEvaluationAt =
+    response.providerHealthSummary?.nextHealthEvaluationAt ?? null;
+  if (
+    nextHealthEvaluationAt !== null &&
+    Date.parse(nextHealthEvaluationAt) <= providerHealthEvaluatedAt
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["providerHealthSummary", "nextHealthEvaluationAt"],
+      message: "data_release_v3.provider_health_deadline_not_future",
+    });
+  }
+}
+
+function validateResponsePresentationClockV3(
+  confidenceEvaluatedAt: string,
+  views: readonly PublicRepackViewSummaryV3[],
+  context: z.RefinementCtx,
+): void {
+  views.forEach((view, index) => {
+    const presentation = view.evEstimates.packScout;
+    // Raw snapshots are admitted only during the existing one-time migration;
+    // retained displayed values (including sold-out history) share one clock.
+    if (presentation.status === "last_known" &&
+        presentation.confidenceEvaluatedAt !== confidenceEvaluatedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["details", index, "evEstimates", "packScout", "confidenceEvaluatedAt"],
+        message: "data_release_v3.presentation_clock_mismatch",
+      });
+    }
+  });
 }
 
 /**
@@ -137,20 +218,31 @@ function validateSelectedRepackV3(
 export const publicDashboardBundleV3Schema = z
   .object({
     release: dataReleaseV3IdentitySchema,
+    ...publicEvPresentationResponseContextV1Schema.shape,
+    ...publicProviderHealthResponseContextV1Schema.shape,
+    providerHealthSummary: publicProviderHealthSummaryV1Schema,
     opportunities: z.array(publicRepackViewSummaryV3Schema).max(6),
     details: z.array(publicRepackViewDetailV3Schema).max(6),
     selectedRepack: publicRepackViewDetailV3Schema.nullable(),
   })
   .strict()
   .superRefine((bundle, context) => {
+    validateProviderHealthResponseClockV3(bundle, context);
     validateSummaryDetailPairsV3(bundle.opportunities, bundle.details, context);
+    validateResponsePresentationClockV3(
+      bundle.confidenceEvaluatedAt,
+      bundle.details,
+      context,
+    );
     bundle.opportunities.forEach((repack, index) => {
       // The listing must still be purchasable. A validated last-known
       // estimate remains eligible even after its confidence reaches zero.
       if (
         !packAvailabilityIsPurchasableV3(repack.availability) ||
         (repack.evEstimates.packScout.status !== "current" &&
-          repack.evEstimates.packScout.status !== "last_known")
+          repack.evEstimates.packScout.status !== "last_known") ||
+        (repack.evEstimates.packScout.status === "last_known" &&
+          repack.evEstimates.packScout.historicalSoldOutAt !== null)
       ) {
         context.addIssue({
           code: "custom",
@@ -205,6 +297,9 @@ export const desiredChasePageMatchV3Schema = z
 export const publicRepackListPageV3Schema = z
   .object({
     release: dataReleaseV3IdentitySchema,
+    ...publicEvPresentationResponseContextV1Schema.shape,
+    ...publicProviderHealthResponseContextV1Schema.shape,
+    providerHealthSummary: publicProviderHealthSummaryV1Schema,
     rows: z.array(publicRepackViewSummaryV3Schema).max(50),
     details: z.array(publicRepackViewDetailV3Schema).max(50),
     selectedRepack: publicRepackViewDetailV3Schema.nullable(),
@@ -214,7 +309,13 @@ export const publicRepackListPageV3Schema = z
   })
   .strict()
   .superRefine((page, context) => {
+    validateProviderHealthResponseClockV3(page, context);
     validateSummaryDetailPairsV3(page.rows, page.details, context);
+    validateResponsePresentationClockV3(
+      page.confidenceEvaluatedAt,
+      page.details,
+      context,
+    );
     if (
       page.selectedRepackEligible !== (page.selectedRepack !== null) ||
       (page.selectedRepack !== null &&
@@ -279,12 +380,20 @@ export const desiredCollectibleRepackMatchV3Schema = z
 export const desiredCollectibleRepackResultsV3Schema = z
   .object({
     release: dataReleaseV3IdentitySchema,
+    ...publicEvPresentationResponseContextV1Schema.shape,
+    ...publicProviderHealthResponseContextV1Schema.shape,
     desiredCollectible: publicCollectibleDisplaySchema,
     matches: z.array(desiredCollectibleRepackMatchV3Schema).max(50),
     total: z.number().int().safe().min(0),
   })
   .strict()
   .superRefine((result, context) => {
+    validateProviderHealthResponseClockV3(result, context);
+    validateResponsePresentationClockV3(
+      result.confidenceEvaluatedAt,
+      result.matches.map(({ repack }) => repack),
+      context,
+    );
     if (result.total < result.matches.length) {
       context.addIssue({
         code: "custom",
@@ -312,6 +421,7 @@ export const desiredCollectibleRepackResultsV3Schema = z
 export type PublicDashboardBundleV3 = z.infer<
   typeof publicDashboardBundleV3Schema
 >;
+export type PublicShellStatusV3 = z.infer<typeof publicShellStatusV3Schema>;
 export type PublicRepackListPageV3 = z.infer<
   typeof publicRepackListPageV3Schema
 >;

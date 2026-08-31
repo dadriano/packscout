@@ -1,3 +1,5 @@
+import { providerSourceLaunchBounds } from "@packscout/contracts";
+
 export const PROVIDER_SOURCE_CAPACITY_FORECAST_VERSION =
   "provider-source-capacity-forecast-v2" as const;
 export const PROVIDER_SOURCE_CAPACITY_PREFLIGHT_VERSION =
@@ -88,6 +90,17 @@ export class ProviderSourceCapacityInputError extends TypeError {
     super("provider_source_capacity.invalid_input");
     this.name = "ProviderSourceCapacityInputError";
   }
+}
+
+export function providerSourceCapacityModelMatchesLaunchBounds(
+  input: Pick<
+    ProviderSourceCapacityModelInput,
+    "pageRecordLimit" | "incrementalRecordsPerPollAttempt"
+  >,
+): boolean {
+  return input.pageRecordLimit === providerSourceLaunchBounds.pageTargetRecords &&
+    input.incrementalRecordsPerPollAttempt ===
+      providerSourceLaunchBounds.recordsPerRequest.maximum;
 }
 
 function positiveInteger(value: number): number {

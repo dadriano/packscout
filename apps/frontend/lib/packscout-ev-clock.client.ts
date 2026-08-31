@@ -8,7 +8,6 @@ import {
 } from "@packscout/contracts";
 
 const CLOCK_INTERVAL_MS = 60_000;
-const CLOCK_SETTLE_MS = 25;
 type PublicPrice = PublicRepackSummaryV3["price"];
 
 function confidenceReferenceMillis(estimate: PackScoutDisplayedEvV3): number | null {
@@ -55,8 +54,7 @@ let clockTimer: number | null = null;
 function scheduleClock() {
   if (clockTimer !== null) window.clearTimeout(clockTimer);
   for (const listener of clockListeners) listener();
-  clockTimer = window.setTimeout(scheduleClock,
-    CLOCK_INTERVAL_MS - Date.now() % CLOCK_INTERVAL_MS + CLOCK_SETTLE_MS);
+  clockTimer = window.setTimeout(scheduleClock, CLOCK_INTERVAL_MS);
 }
 
 function checkVisibleClock() {
@@ -90,7 +88,9 @@ function subscribeClock(onStoreChange: () => void): () => void {
  */
 export function createPackScoutEvClockStore(
   referenceMillis: number | null,
+  monotonicNow: () => number = () => performance.now(),
 ): PackScoutEvClockStore {
+  const mountedAt = referenceMillis === null ? 0 : monotonicNow();
   let latestSnapshot = referenceMillis ?? 0;
   return Object.freeze({
     subscribe(onStoreChange: () => void) {
@@ -99,8 +99,12 @@ export function createPackScoutEvClockStore(
     },
     getSnapshot: () => {
       if (referenceMillis === null) return null;
+      // Advance only by monotonic elapsed browser time from the trusted served
+      // clock. A skewed local wall clock must neither age nor rejuvenate EV.
+      const elapsed = Math.max(0, monotonicNow() - mountedAt);
       latestSnapshot = Math.max(
-        latestSnapshot, Math.floor(Date.now() / CLOCK_INTERVAL_MS) * CLOCK_INTERVAL_MS,
+        latestSnapshot,
+        referenceMillis + Math.floor(elapsed / CLOCK_INTERVAL_MS) * CLOCK_INTERVAL_MS,
       );
       return latestSnapshot;
     },

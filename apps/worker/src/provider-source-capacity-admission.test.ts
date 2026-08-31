@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { providerSourceLaunchBounds } from "@packscout/contracts";
+import {
+  providerSourceLaunchBounds,
+  providerSourceRecordsPerRequest,
+} from "@packscout/contracts";
 import type { PackscoutPrismaClient } from "@packscout/database";
 import {
   buildProviderSourceCapacityForecast,
@@ -14,22 +17,27 @@ import {
   providerSourceMaximumPageCommitBytes,
 } from "./provider-source-capacity-admission.ts";
 
-test("capacity evidence must match the active launch page target", () => {
+test("capacity evidence must match the initial and ongoing launch limits", () => {
   const current = loadCommittedProviderSourceCapacityArtifact();
-  const staleInput = {
-    ...current.forecastInput,
-    pageRecordLimit: providerSourceLaunchBounds.fallbackPageTargetRecords,
-  };
-  assert.throws(
-    () => parseProviderSourceCapacityArtifact({
-      version: "provider-source-capacity-measurement-v1",
-      forecastInput: staleInput,
-      forecast: buildProviderSourceCapacityForecast(staleInput),
-    }),
-    (error: unknown) =>
-      error instanceof ProviderSourceCapacityAdmissionConfigurationError &&
-      error.code === "CAPACITY_ARTIFACT_INVALID",
-  );
+  for (const patch of [
+    { pageRecordLimit: providerSourceLaunchBounds.pageTargetRecords - 1 },
+    {
+      incrementalRecordsPerPollAttempt:
+        providerSourceRecordsPerRequest.maximum - 1,
+    },
+  ]) {
+    const staleInput = { ...current.forecastInput, ...patch };
+    assert.throws(
+      () => parseProviderSourceCapacityArtifact({
+        version: "provider-source-capacity-measurement-v1",
+        forecastInput: staleInput,
+        forecast: buildProviderSourceCapacityForecast(staleInput),
+      }),
+      (error: unknown) =>
+        error instanceof ProviderSourceCapacityAdmissionConfigurationError &&
+        error.code === "CAPACITY_ARTIFACT_INVALID",
+    );
+  }
 });
 
 test("committed capacity evidence remains admitted after one planned page", () => {
@@ -84,9 +92,14 @@ test("ongoing capacity reserves four commits and blocks at the default 80 percen
 test("one maximum commit reserves independent raw and protected-evidence copies", () => {
   const artifact = loadCommittedProviderSourceCapacityArtifact();
   const model = artifact.forecastInput;
+  const maximumPageRecords = Math.max(
+    model.pageRecordLimit,
+    model.incrementalRecordsPerPollAttempt,
+    providerSourceRecordsPerRequest.maximum,
+  );
   const bytesWithoutProtectedNativeEvidence =
     providerSourceLaunchBounds.maximumResponseBytes +
-    model.pageRecordLimit * (
+    maximumPageRecords * (
       model.measuredStructuredPhysicalBytesPerRecord +
       model.measuredPreExpiryNormalizedPayloadPhysicalBytesPerRecord +
       model.measuredQuarantinePhysicalBytes
@@ -99,7 +112,13 @@ test("one maximum commit reserves independent raw and protected-evidence copies"
   assert.equal(
     providerSourceMaximumPageCommitBytes(artifact) -
       bytesWithoutProtectedNativeEvidence,
-    providerSourceLaunchBounds.maximumResponseBytes,
+    Math.max(
+      providerSourceLaunchBounds.maximumResponseBytes,
+      maximumPageRecords * Math.max(
+        model.measuredAverageRawRecordBytes,
+        model.measuredQuarantineEvidencePhysicalBytes,
+      ),
+    ),
   );
 });
 

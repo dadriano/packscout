@@ -35,6 +35,10 @@ interface TestRecord {
   readonly testedAt: Date | null;
 }
 
+interface SourceTestRecord extends TestRecord {
+  readonly recordsPerRequest: number | null;
+}
+
 interface ConnectionRevisionRecord {
   readonly id: string;
   readonly revisionNumber: number;
@@ -80,6 +84,7 @@ export interface ProviderSourceAdminSourceRecord {
   readonly connectionRevisionId: string | null;
   readonly connectionHealthGeneration: bigint | null;
   readonly state: "draft" | "paused" | "active" | "disabled" | "replaced";
+  readonly disabledAt: Date | null;
   readonly pauseRequested: boolean;
   readonly normalizedContractVersion: string;
   readonly mapperKey: string;
@@ -87,11 +92,13 @@ export interface ProviderSourceAdminSourceRecord {
   readonly identityNamespaceKey: string;
   readonly recordIdScopes: readonly string[];
   readonly intervalSeconds: number;
+  readonly recordsPerRequest: number;
+  readonly activeRunRecordsPerRequest: number | null;
   readonly freshnessGraceSeconds: number;
   readonly scheduleRevisionId: string;
   readonly cursorGeneration: bigint;
   readonly cursorFingerprint: string | null;
-  readonly test: TestRecord;
+  readonly test: SourceTestRecord;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -125,17 +132,28 @@ function testSummary(
   test: TestRecord,
   currentConnectionRevisionId: string | null,
   currentHealthGeneration: bigint | null,
+  sourceFence?: Readonly<{
+    testedRecordsPerRequest: number | null;
+    currentRecordsPerRequest: number;
+    disabledAt: Date | null;
+  }>,
 ) {
   const generationIsCurrent = currentHealthGeneration !== null &&
     test.expectedHealthGeneration === currentHealthGeneration &&
     (test.state !== "succeeded" ||
       test.resultingHealthGeneration === currentHealthGeneration);
+  const sourceFenceIsCurrent = sourceFence === undefined ||
+    (sourceFence.testedRecordsPerRequest ===
+        sourceFence.currentRecordsPerRequest &&
+      (sourceFence.disabledAt === null ||
+        (test.requestedAt !== null &&
+          test.requestedAt.getTime() >= sourceFence.disabledAt.getTime())));
   return {
     jobId: test.jobId,
     connectionRevisionId: test.connectionRevisionId,
     current: test.jobId !== null &&
       test.connectionRevisionId === currentConnectionRevisionId &&
-      generationIsCurrent,
+      generationIsCurrent && sourceFenceIsCurrent,
     state: test.state === null
       ? "not_requested" as const
       : test.state === "queued"
@@ -396,6 +414,8 @@ export class ProviderSourceAdminCatalogService {
         identityNamespaceKey: record.identityNamespaceKey,
         recordIdScopes: record.recordIdScopes,
         intervalSeconds: record.intervalSeconds,
+        recordsPerRequest: record.recordsPerRequest,
+        activeRunRecordsPerRequest: record.activeRunRecordsPerRequest,
         freshnessGraceSeconds: record.freshnessGraceSeconds,
         scheduleRevisionId: record.scheduleRevisionId,
         cursor: {
@@ -409,6 +429,11 @@ export class ProviderSourceAdminCatalogService {
           record.test,
           record.connectionRevisionId,
           record.connectionHealthGeneration,
+          {
+            testedRecordsPerRequest: record.test.recordsPerRequest,
+            currentRecordsPerRequest: record.recordsPerRequest,
+            disabledAt: record.disabledAt,
+          },
         ),
         createdAt: record.createdAt.toISOString(),
         updatedAt: record.updatedAt.toISOString(),

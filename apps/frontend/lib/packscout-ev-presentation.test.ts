@@ -19,11 +19,10 @@ import {
 import {
   buildV3CurrentEv,
   buildV3DelayedEv,
-  buildV3ExpiredEv,
+  buildV3SoldOutEv,
   buildV3LastKnownEv,
   buildV3Price,
   buildV3ReleaseIdentity,
-  buildV3SoldOutEv,
   buildV3UnavailableEv,
   buildV3UnknownTimeUnavailableEv,
 } from "./packscout-ev-fixtures.test-support";
@@ -41,7 +40,9 @@ function input(
 }
 
 test("renders the approved $100 / 85% example with all four exact metrics", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3CurrentEv(8_500)));
+  const presentation = presentPackScoutEvV3(
+    input(buildV3CurrentEv(8_500)),
+  );
 
   assert.equal(presentation.availability, "available");
   assert.equal(presentation.status, "current");
@@ -89,7 +90,9 @@ test("a forged positive estimate fails closed at the presentation boundary", () 
 });
 
 test("break-even estimates present a neutral state without invented signs", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3CurrentEv(10_000)));
+  const presentation = presentPackScoutEvV3(
+    input(buildV3CurrentEv(10_000)),
+  );
 
   assert.equal(presentation.evDollars.displayValue, "$0.00");
   assert.equal(presentation.evPercent.displayValue, "0.00%");
@@ -99,7 +102,9 @@ test("break-even estimates present a neutral state without invented signs", () =
 });
 
 test("a valid zero payout renders $0.00 with an explicit zero-payout note", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3CurrentEv(0)));
+  const presentation = presentPackScoutEvV3(
+    input(buildV3CurrentEv(0)),
+  );
 
   assert.equal(presentation.availability, "available");
   assert.equal(presentation.grossEvDollars.displayValue, "$0.00");
@@ -160,20 +165,40 @@ test("every bounded unavailable reason has stable public copy", () => {
 });
 
 test("stale data without any retained value remains explicitly unavailable", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3ExpiredEv()));
-
+  const presentation = presentPackScoutEvV3(input(buildV3UnavailableEv("SOURCE_DATA_STALE")));
   assert.equal(presentation.status, "unavailable");
-  assert.equal(presentation.statusLabel, "Unavailable");
   assert.equal(presentation.reason, "SOURCE_DATA_STALE");
-  assert.equal(
-    presentation.reasonCopy,
-    "Source data is older than 60 minutes.",
+  assert.equal(presentation.reasonCopy, "Unavailable: supported source evidence was not retained.");
+  assert.equal(presentation.evDollars.displayValue, "Unavailable");
+  assert.equal(presentation.confidence.availability, "unavailable");
+});
+
+test("last-known estimates retain metrics while confidence decays", () => {
+  const presentation = presentPackScoutEvV3(
+    input(buildV3LastKnownEv()),
   );
-  assert.equal(presentation.availability, "unavailable");
+
+  assert.equal(presentation.status, "last_known");
+  assert.equal(presentation.statusLabel, "Last-known estimate");
+  assert.equal(presentation.availability, "available");
+  assert.equal(presentation.grossEvDollars.displayValue, "$85.00");
+  assert.equal(presentation.evDollars.displayValue, "-$15.00");
+  assert.equal(presentation.confidence.scoreBasisPoints, 5_000);
+  assert.equal(presentation.confidence.band, "medium");
+  assert.deepEqual(presentation.confidence.limitations, [
+    "Source evidence is over 60 minutes old; confidence continues to decay while the last-known estimate remains visible.",
+  ]);
+  assert.match(
+    presentation.freshness.dataAsOfLabel,
+    /^Source evidence last observed /,
+  );
+  assert.match(presentation.accessibleLabel, /Last-known estimate/);
 });
 
 test("delayed source age is a limitation with copy, never a hidden state", () => {
-  const presentation = presentPackScoutEvV3(input(buildV3DelayedEv(8_500)));
+  const presentation = presentPackScoutEvV3(
+    input(buildV3DelayedEv(8_500)),
+  );
 
   assert.equal(presentation.availability, "available");
   assert.equal(presentation.freshness.delayed, true);
@@ -215,14 +240,18 @@ test("only an available pack exposes an outbound action across the four-state ma
     assert.equal(current.outboundActionAllowed, false, availability);
 
     const unavailableEstimate = presentPackScoutEvV3(
-      input(buildV3UnavailableEv("BUYBACK_UNAVAILABLE"), { availability }),
+      input(buildV3UnavailableEv("BUYBACK_UNAVAILABLE"), {
+        availability,
+      }),
     );
     assert.equal(unavailableEstimate.outboundActionAllowed, false, availability);
   }
 
   assert.equal(
     presentPackScoutEvV3(
-      input(buildV3CurrentEv(8_500), { availability: "available" }),
+      input(buildV3CurrentEv(8_500), {
+        availability: "available",
+      }),
     ).outboundActionAllowed,
     true,
   );
@@ -463,7 +492,7 @@ test("presentation output never carries protected calculation evidence", () => {
     buildV3DelayedEv(8_500),
     buildV3SoldOutEv(8_500),
     buildV3UnavailableEv("BUYBACK_UNAVAILABLE"),
-    buildV3ExpiredEv(),
+    buildV3LastKnownEv(),
   ]) {
     const presentation = presentPackScoutEvV3(
       input(estimate, {
@@ -495,7 +524,7 @@ test("last known estimates retain numbers at zero confidence and original timest
   const estimate = buildV3LastKnownEv(8_500, { referenceTimeIso: "2026-08-20T12:00:00.000Z" });
   const presentation = presentPackScoutEvV3(input(estimate));
   assert.equal(presentation.status, "last_known");
-  assert.equal(presentation.statusLabel, "Last known estimate");
+  assert.equal(presentation.statusLabel, "Last-known estimate");
   assert.equal(presentation.availability, "available");
   assert.equal(presentation.evDollars.displayValue, "-$15.00");
   assert.equal(presentation.grossEvDollars.displayValue, "$85.00");

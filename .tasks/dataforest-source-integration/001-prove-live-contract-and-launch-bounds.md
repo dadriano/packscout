@@ -123,8 +123,8 @@ PACKSCOUT_DATA_API_TOKEN='<ignored local secret>' \
   safety tests, reviewed evidence report, synthetic structural fixture, launch
   scorecard update, storage forecast, and task-006 memory benchmark contract.
 - Later bounded evidence superseded the provisional transport settings: the
-  launch target is 500 under an 8 MiB bound, with a cursor-preserving 250-record
-  fallback after a bounded retryable oversized page.
+  launch target is 500 under an 8 MiB bound. Every retry keeps the exact durable
+  request pin; the runtime never silently downshifts an oversized page.
 - Rate-limit headers/thresholds remain explicitly unavailable; no harmful load
   or manufactured failure was used. Their safe
   retry classifications are documented without inventing an envelope.

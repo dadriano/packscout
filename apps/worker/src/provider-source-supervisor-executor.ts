@@ -255,20 +255,16 @@ export class ProviderSourceSupervisorWorkExecutor
   ): Promise<SourceSupervisorExecutionResult> {
     context.runtimeFence.assertActive();
     const adapter = this.#adapterFor(work);
-    const pageLimit = work.kind === "page_read"
-      ? work.retryAttempt === 0
-        ? adapter.manifest.requestBounds.pageLimit
-        : Math.min(
-            adapter.manifest.requestBounds.pageLimit,
-            providerSourceLaunchBounds.fallbackPageTargetRecords,
-          )
-      : null;
-    const operationRequestBounds = pageLimit === null
-      ? adapter.manifest.requestBounds
-      : Object.freeze({
-          ...adapter.manifest.requestBounds,
-          pageLimit,
-        });
+    const pageLimit = work.kind === "connection_test"
+      ? Math.min(
+          providerSourceLaunchBounds.pageTargetRecords,
+          adapter.manifest.requestBounds.pageLimit,
+        )
+      : work.recordsPerRequest;
+    const operationRequestBounds = Object.freeze({
+      ...adapter.manifest.requestBounds,
+      pageLimit,
+    });
     const requestAttemptId = this.#ids.id();
     const requestLeaseId = this.#ids.id();
     const pageId = work.kind === "page_read" ? this.#ids.id() : null;
@@ -349,7 +345,7 @@ export class ProviderSourceSupervisorWorkExecutor
             runClaimLeaseId: work.claimLeaseId,
             pageAttemptId: pageId!,
             pageNumber: work.pageNumber,
-            pageLimit: pageLimit!,
+            pageLimit,
             cursorGeneration: cursor!.cursorGeneration,
             requestedCursorFingerprint: work.requestedCursorFingerprint,
           };
@@ -645,7 +641,7 @@ export class ProviderSourceSupervisorWorkExecutor
                 requestedCursorFingerprint:
                   work.requestedCursorFingerprint,
                 requestedCursor: cursor!,
-                pageLimit: pageLimit!,
+                pageLimit,
               },
             });
       try {

@@ -153,6 +153,32 @@ export type DataReleaseV3RollbackRequest = DataReleaseV3OperationEnvelope &
     targetPublicReleaseId: string;
   }>;
 
+/**
+ * One independently refreshed provider-health observation for the active
+ * immutable catalog release. The publication boundary authenticates this
+ * envelope exactly like the release lifecycle; Convex then proves that the
+ * vendor belongs to the named active release and that every sequence moves
+ * monotonically.
+ */
+export type DataReleaseV3RefreshProviderObservationRequest =
+  DataReleaseV3OperationEnvelope &
+    Readonly<{
+      publicReleaseId: string;
+      releaseFingerprint: string;
+      publicVendorId: string;
+      vendorKey: string;
+      observationSequence: number;
+      observedAt: string;
+      freshThrough: string;
+      lastHeadReachedAt: string | null;
+      sourceHeadSequence: string;
+      settledSequence: string;
+      sourceLifecycle: "active" | "paused" | "disabled";
+      connectionState: "healthy" | "degraded" | "unhealthy" | "unknown";
+      qualityState: "healthy" | "degraded" | "unhealthy" | "unknown";
+      releaseAlignment: "aligned" | "behind";
+    }>;
+
 export interface DataReleaseV3Receipt {
   readonly schemaVersion: typeof DATA_RELEASE_V3_PUBLICATION_SCHEMA_VERSION;
   readonly operationKind: string;
@@ -244,6 +270,13 @@ export interface DataReleaseV3PublicationPort {
   finalize(request: DataReleaseV3FinalizeRequest): Promise<DataReleaseV3Receipt>;
   activate(request: DataReleaseV3ActivateRequest): Promise<DataReleaseV3Receipt>;
   rollback(request: DataReleaseV3RollbackRequest): Promise<DataReleaseV3Receipt>;
+}
+
+/** Kept separate so immutable release publishers do not acquire a live-health write. */
+export interface DataReleaseV3ProviderObservationPort {
+  refreshProviderObservation(
+    request: DataReleaseV3RefreshProviderObservationRequest,
+  ): Promise<DataReleaseV3Receipt>;
 }
 
 export class DataReleaseV3PublicationPortError extends Error {

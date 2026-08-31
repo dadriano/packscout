@@ -44,6 +44,7 @@ export class ProviderSourceAdminLifecycleRepository
     configurationHash: string;
     recordIdScopes: readonly string[];
     intervalSeconds: number;
+    recordsPerRequest: number;
     actorKey: string;
     createdAt: Date;
   }>) {
@@ -146,6 +147,7 @@ export class ProviderSourceAdminLifecycleRepository
       recordIdScopes: scopes,
       scheduleRevisionId: schedule.active_schedule_revision_id,
       intervalSeconds: scheduleRevision.interval_seconds,
+      recordsPerRequest: scheduleRevision.records_per_request,
       cursorGeneration: cursor.cursor_generation,
       cursorFingerprint: cursor.cursor_fingerprint,
       hasActiveRun: activeRun !== null,
@@ -196,7 +198,28 @@ export class ProviderSourceAdminLifecycleRepository
         },
         select: { health_generation: true },
       });
-      if (!sources[0] || !profiles[0] || !revision) {
+      const schedule = sources[0]
+        ? await transaction.provider_source_schedules.findFirst({
+            where: {
+              source_instance_id: input.sourceInstanceId,
+              organization_id: input.organizationId,
+              provider_id: input.providerId,
+            },
+            select: { active_schedule_revision_id: true },
+          })
+        : null;
+      const scheduleRevision = schedule
+        ? await transaction.provider_source_schedule_revisions.findFirst({
+            where: {
+              id: schedule.active_schedule_revision_id,
+              organization_id: input.organizationId,
+              provider_id: input.providerId,
+              source_instance_id: input.sourceInstanceId,
+            },
+            select: { records_per_request: true },
+          })
+        : null;
+      if (!sources[0] || !profiles[0] || !revision || !scheduleRevision) {
         this.#fenced("Source test pins changed.");
       }
       const existing = await transaction.provider_source_test_jobs.findFirst({
@@ -207,6 +230,7 @@ export class ProviderSourceAdminLifecycleRepository
           connection_revision_id: input.connectionRevisionId,
           expected_health_generation: revision.health_generation,
           state: { in: ["queued", "running"] },
+          records_per_request: scheduleRevision.records_per_request,
         },
         select: { id: true },
       });
@@ -227,6 +251,7 @@ export class ProviderSourceAdminLifecycleRepository
           connection_profile_id: input.connectionProfileId,
           connection_revision_id: input.connectionRevisionId,
           expected_health_generation: revision.health_generation,
+          records_per_request: scheduleRevision.records_per_request,
           requested_by_actor_key: input.requestedByActorKey,
           created_at: input.requestedAt,
         },
@@ -268,7 +293,7 @@ export class ProviderSourceAdminLifecycleRepository
             organization_id: input.organizationId,
             source_instance_id: input.sourceInstanceId,
           },
-          select: { revision_number: true },
+          select: { revision_number: true, records_per_request: true },
         });
       if (!previous) this.#fenced("Source timing revision is missing.");
       const created = await transaction.provider_source_schedule_revisions.create({
@@ -279,6 +304,7 @@ export class ProviderSourceAdminLifecycleRepository
           revision_number: previous.revision_number + 1,
           interval_seconds: input.intervalSeconds,
           freshness_grace_seconds: 900,
+          records_per_request: previous.records_per_request,
           created_by_actor_key: input.actorKey,
           effective_at: input.effectiveAt,
           created_at: input.effectiveAt,
@@ -310,6 +336,75 @@ export class ProviderSourceAdminLifecycleRepository
         },
       });
       await this.#audit(transaction, input, "provider_source.revise_interval");
+      return { scheduleRevisionId: created.id };
+    }, PACKSCOUT_TRANSACTION_OPTIONS);
+  }
+
+  async reviseRecordsPerRequest(input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    sourceInstanceId: string;
+    expectedSourceRevisionId: string;
+    expectedScheduleRevisionId: string;
+    recordsPerRequest: number;
+    actorKey: string;
+    effectiveAt: Date;
+  }>): Promise<{ readonly scheduleRevisionId: string }> {
+    return this.database.$transaction(async (transaction) => {
+      const locked = await this.#lockSource(transaction, input);
+      const schedule = await transaction.provider_source_schedules.findFirst({
+        where: {
+          source_instance_id: input.sourceInstanceId,
+          organization_id: input.organizationId,
+          active_schedule_revision_id: input.expectedScheduleRevisionId,
+        },
+      });
+      if (
+        !locked ||
+        !["draft", "paused", "active", "disabled"].includes(locked.state) ||
+        !schedule
+      ) this.#fenced("Source request settings changed or are no longer configurable.");
+      const previous =
+        await transaction.provider_source_schedule_revisions.findFirst({
+          where: {
+            id: schedule.active_schedule_revision_id,
+            organization_id: input.organizationId,
+            source_instance_id: input.sourceInstanceId,
+          },
+        });
+      if (!previous) this.#fenced("Source request settings revision is missing.");
+      const created = await transaction.provider_source_schedule_revisions.create({
+        data: {
+          organization_id: input.organizationId,
+          provider_id: input.providerId,
+          source_instance_id: input.sourceInstanceId,
+          revision_number: previous.revision_number + 1,
+          interval_seconds: previous.interval_seconds,
+          freshness_grace_seconds: previous.freshness_grace_seconds,
+          records_per_request: input.recordsPerRequest,
+          created_by_actor_key: input.actorKey,
+          effective_at: input.effectiveAt,
+          created_at: input.effectiveAt,
+        },
+        select: { id: true },
+      });
+      await transaction.provider_source_schedules.update({
+        where: { source_instance_id: input.sourceInstanceId },
+        data: {
+          active_schedule_revision_id: created.id,
+          updated_at: input.effectiveAt,
+        },
+      });
+      await this.#audit(
+        transaction,
+        input,
+        "provider_source.revise_records_per_request",
+        {
+          previousScheduleRevisionId: previous.id,
+          scheduleRevisionId: created.id,
+          recordsPerRequest: input.recordsPerRequest,
+        },
+      );
       return { scheduleRevisionId: created.id };
     }, PACKSCOUT_TRANSACTION_OPTIONS);
   }
@@ -728,6 +823,7 @@ export class ProviderSourceAdminLifecycleRepository
       disabledAt?: Date;
     }>,
     action: string,
+    metadata: Readonly<Record<string, string | number>> = {},
   ): Promise<string> {
     const actorKey = input.actorKey ?? input.requestedByActorKey;
     const revisionId = input.expectedSourceRevisionId ?? input.sourceRevisionId;
@@ -744,7 +840,7 @@ export class ProviderSourceAdminLifecycleRepository
         subject_type: "provider_source",
         subject_id: input.sourceInstanceId,
         outcome: "success",
-        metadata_json: { sourceRevisionId: revisionId },
+        metadata_json: { sourceRevisionId: revisionId, ...metadata },
         occurred_at: occurredAt,
       },
       select: { id: true },

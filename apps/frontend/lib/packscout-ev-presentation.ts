@@ -82,7 +82,8 @@ export type PackScoutEvFreshnessPresentation = Readonly<{
   calculatedLabel: string;
   dataAsOf: string | null;
   dataAsOfLabel: string;
-  expiresAt: string | null;
+  confidenceEvaluatedAt: string;
+  confidenceEvaluatedLabel: string;
   soldOutAt: string | null;
   soldOutLabel: string | null;
 }>;
@@ -449,6 +450,8 @@ function presentFreshness(
     estimate.dataAsOf.state === "known" ? estimate.dataAsOf.observedAt : null;
   const soldOutAt = estimate.status === "sold_out_historical" ? estimate.soldOutAt
     : estimate.status === "last_known" ? estimate.historicalSoldOutAt : null;
+  const confidenceEvaluatedAt = estimate.status === "last_known"
+    ? estimate.confidenceEvaluatedAt : estimate.calculatedAt;
   return Object.freeze({
     sourceAgeState,
     sourceAgeLabel:
@@ -461,8 +464,9 @@ function presentFreshness(
     dataAsOfLabel:
       dataAsOf === null
         ? ESTIMATE_STATUS_COPY.unknownSourceTime
-        : `Source data as of ${formatPublicTimestamp(dataAsOf)}`,
-    expiresAt: estimate.status === "current" ? estimate.expiresAt : null,
+        : `Source evidence last observed ${formatPublicTimestamp(dataAsOf)}`,
+    confidenceEvaluatedAt,
+    confidenceEvaluatedLabel: `Confidence evaluated ${formatPublicTimestamp(confidenceEvaluatedAt)}`,
     soldOutAt,
     soldOutLabel: soldOutAt === null ? null : `Sold out ${formatPublicTimestamp(soldOutAt)}`,
   });
@@ -550,7 +554,6 @@ function packPurchaseActionsAllowed(
 function unavailableStatus(): Readonly<{ status: PackScoutEvStatusKind; statusLabel: string }> {
   return { status: "unavailable", statusLabel: ESTIMATE_STATUS_COPY.unavailable };
 }
-
 function unavailablePackScoutPresentation(
   reason: PublicMetricReason,
   input: PackScoutEvV3PresentationInput,
@@ -708,6 +711,8 @@ export function presentPackScoutEvV3(
       ...(reasonCopy ? [reasonCopy] : []),
       ...(calculationPriceNote ? [calculationPriceNote] : []),
       ...(freshness.sourceAgeLabel ? [`${freshness.sourceAgeLabel}.`] : []),
+      `${freshness.dataAsOfLabel}.`,
+      `${freshness.confidenceEvaluatedLabel}.`,
       METRIC_TRUST_COPY.sourceLine + ".",
       METRIC_TRUST_COPY.adviceLine + ".",
     ].join(" "),

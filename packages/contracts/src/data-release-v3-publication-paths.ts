@@ -8,12 +8,15 @@
  */
 export const PRODUCTION_DATA_RELEASE_V3_PATHS = Object.freeze({
   activeState: "/internal/data-release/v3/active-state",
+  retainedEvWitness: "/internal/data-release/v3/retained-ev-witness",
   start: "/internal/data-release/v3/start",
   applyBatch: "/internal/data-release/v3/apply-batch",
   finalize: "/internal/data-release/v3/finalize",
   activate: "/internal/data-release/v3/activate",
   rollback: "/internal/data-release/v3/rollback",
   status: "/internal/data-release/v3/status",
+  refreshProviderObservation:
+    "/internal/data-release/v3/refresh-provider-observation",
 });
 
 /**

@@ -5,6 +5,8 @@ import {
   MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES,
   MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
   MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
+  PRODUCTION_DATA_RELEASE_V3_PATHS,
+  dataReleaseV3RetainedEvWitnessWithinByteLimit,
   PRODUCTION_AUTH_HEADER_NAMES,
   PRODUCTION_AUTH_KEY_ID_PATTERN,
   PRODUCTION_AUTH_NONCE_HASH_DOMAIN,
@@ -452,15 +454,17 @@ async function handleAuthenticatedRequest(
         bodyJson: authenticated.bodyJson,
         requestDigest: authenticated.bodyDigest,
       });
-    return jsonResponse(
-      await signReceipt(
+    const signedReceipt = await signReceipt(
         authenticated.key,
         authenticated.keyId,
         receipt,
         surface,
-      ),
-      200,
-    );
+      );
+    if (new URL(request.url).pathname === PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness &&
+        !dataReleaseV3RetainedEvWitnessWithinByteLimit(signedReceipt)) {
+      throw new HttpRefusal("PUBLICATION_BODY_TOO_LARGE", 413);
+    }
+    return jsonResponse(signedReceipt, 200);
   } catch (error) {
     const code = errorCode(error);
     if (code === null) {

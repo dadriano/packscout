@@ -8,6 +8,8 @@ import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { createLocalConvexEvMigrationClient } = await tsImport("./local-convex-ev-migration-client.mts", import.meta.url);
 const { migrateLocalConvexEv, withLocalConvexEvReady } = await tsImport("./local-convex-ev-migration.mts", import.meta.url);
+const { buildPublicRepackListPageV3 } = await tsImport(
+  "../../packages/contracts/src/__fixtures__/data-release-v3.fixture.ts", import.meta.url);
 
 const deploymentName = "local-migration-test";
 const adminKey = "fixture-local-admin-key";
@@ -16,6 +18,20 @@ const pointer = { publicReleaseId: releaseId, releaseFingerprint: "a".repeat(64)
   completedAt: "2026-08-30T00:00:00.000Z", counts: { repacks: 1 } };
 const legacyState = { expectedGeneration: 1, expectedActivePublicReleaseId: releaseId,
   expectedPreviousPublicReleaseId: null, activeRelease: pointer, previousRelease: null, initialized: false };
+
+function publicReadback() {
+  const page = buildPublicRepackListPageV3();
+  return { ok: true, data: { ...page,
+    release: { ...page.release, publicReleaseId: releaseId },
+    rows: page.rows.slice(0, 1), details: page.details.slice(0, 1),
+    facets: { vendors: [], categories: [], collectibleTypes: [] },
+    activeQuery: { search: "", filters: { vendors: [], categories: [], collectibleTypes: [],
+      price: { mode: "full", minMinor: 1_000, maxMinor: 1_200_000 }, availability: "all" }, sort: "packscout_ev_dollars", direction: "desc",
+    pageSize: 1, desiredPublicCollectibleId: null },
+    queryFingerprint: "a".repeat(64), nextCursor: null, hasPrevious: false,
+    range: { start: 1, end: 1, total: 1 }, paginationReset: null,
+  } };
+}
 
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "packscout-ev-client-"));
@@ -76,19 +92,54 @@ test("direct HTTP calls pin the instance, wire format, authority and four operat
   assert.equal(h.calls.length, count);
 });
 
-test("public readback uses the pinned endpoint and catalog token without admin authority", async (t) => {
-  const h = await fixture(t, { respond: () => ({ ok: true, data: { release: { publicReleaseId: releaseId } } }) });
+test("public readback uses the trusted action clock and catalog token without admin authority", async (t) => {
+  const h = await fixture(t, { respond: publicReadback });
   const token = "fixture-catalog-read-token-".repeat(2);
   h.configuration.childEnvironment.PACKSCOUT_CATALOG_READ_TOKEN = token;
   await (await h.client()).verifyPublicRead(releaseId);
   const request = h.calls.at(-1);
-  assert.equal(request.url, "/api/query");
+  assert.equal(request.url, "/api/action");
   assert.equal(request.headers.authorization, undefined);
   assert.equal(request.body.path, "publicRepacksV3:listPublicRepacksV3");
   assert.equal(request.body.args[0].catalogReadToken, token);
   assert.equal(request.body.args[0].pageSize, 1);
+  assert.equal(Object.hasOwn(request.body.args[0], "currentTime"), false);
+  assert.equal(Object.hasOwn(request.body.args[0], "cursor"), false);
+  assert.deepEqual(request.body.args[0].filters, { availability: "all" });
   h.setRespond(() => ({ ok: true, data: { release: { publicReleaseId: "wrong" } } }));
   await assert.rejects((await h.client()).verifyPublicRead(releaseId), /READBACK_FAILED/u);
+});
+
+test("public readback rejects incomplete pages, pointer drift and inconsistent trusted clocks", async (t) => {
+  const h = await fixture(t, { respond: publicReadback });
+  const client = await h.client();
+  for (const mutate of [
+    (page) => { delete page.publicFreshnessPolicyVersion; },
+    (page) => { page.release.publicReleaseId = "00000000-0000-4000-8000-000000000002"; },
+    (page) => { page.confidenceEvaluatedAt = "not-a-timestamp"; },
+    (page) => { page.providerHealthEvaluatedAt = "2026-08-19T18:29:59.999Z"; },
+    (page) => { page.providerHealthEvaluatedAt = "2026-08-19T18:30:00.001Z"; },
+    (page) => { page.details[0].evEstimates.packScout.confidenceEvaluatedAt = "2026-08-19T18:30:00.001Z"; },
+    (page) => { page.activeQuery.pageSize = 25; },
+    (page) => { page.range.end = 0; },
+  ]) {
+    const response = publicReadback();
+    mutate(response.data);
+    h.setRespond(() => response);
+    await assert.rejects(client.verifyPublicRead(releaseId), /READBACK_FAILED/u);
+  }
+  h.setRespond(() => ({ ok: true, data: { release: { publicReleaseId: releaseId } } }));
+  await assert.rejects(client.verifyPublicRead(releaseId), /READBACK_FAILED/u);
+  assert.ok(h.calls.every(({ method, url }) => method !== "POST" || url === "/api/action"));
+});
+
+test("ready check-only proves a clocked public page without migration or publication writes", async (t) => {
+  const h = await fixture(t, { respond: (body) => body.path.endsWith(":migrationState")
+    ? { ...legacyState, initialized: true } : publicReadback() });
+  assert.equal((await migrateLocalConvexEv(await h.client(), { checkOnly: true })).status, "ready");
+  const posts = h.calls.filter(({ method }) => method === "POST");
+  assert.deepEqual(posts.map(({ url }) => url), ["/api/query", "/api/query", "/api/action", "/api/query"]);
+  assert.equal(posts.find(({ url }) => url === "/api/action").headers.authorization, undefined);
 });
 
 test("poisoned dotenv files cannot alter deployment selection or become credentials", async (t) => {

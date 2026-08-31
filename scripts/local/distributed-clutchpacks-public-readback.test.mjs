@@ -23,6 +23,12 @@ const { verifyLocalClutchpacksPublicReadback } = await tsImport(
 const { presentLastKnownPackScoutEvV3 } = await tsImport(
   "../../packages/contracts/src/data-release-v3.ts", import.meta.url,
 );
+const { PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION, dataReleaseV3RetainedEvWitnessSchema } = await tsImport("@packscout/contracts", import.meta.url);
+const uuid = (label) => /^[0-9a-f-]{36}$/u.test(label) ? label :
+  `00000000-0000-5000-8000-${Buffer.from(label).toString("hex").slice(-12).padStart(12, "0")}`;
+const RELEASE_ID = uuid("release");
+const VENDOR_ID = uuid("vendor");
+const FINGERPRINT = "a".repeat(64);
 const NOW = Date.parse("2026-08-30T01:00:00.000Z");
 const OBSERVED_AT = "2026-08-30T00:10:00.000Z";
 const EXPIRES_AT = "2026-08-30T01:10:00.000Z";
@@ -34,7 +40,7 @@ const usd = (minorUnits) => ({ minorUnits, currency: "USD" });
 
 function row(publicRepackId, evMinor = -2_000, availability = "available") {
   return {
-    publicRepackId,
+    publicRepackId: uuid(publicRepackId), vendorKey: "clutchpacks", publicVendorId: VENDOR_ID,
     availability,
     price: {displayMoney:usd(10_000), usdComparison:{status:"available",value:usd(10_000)}},
     evEstimates: {
@@ -70,22 +76,45 @@ function displayed(row, currentTime = NOW) {
       calculationPriceUsdMinor:10_000, referenceTimeIso:new Date(currentTime).toISOString()})}};
 }
 function readback(expectedRows, opportunities, actualRows = expectedRows, currentTime = NOW) {
-  return {
-    currentTime,
+  const context = { confidenceEvaluatedAt: new Date(currentTime).toISOString(),
+    providerHealthEvaluatedAt: new Date(currentTime).toISOString(),
+    publicFreshnessPolicyVersion: PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION };
+  const scopes = expectedRows.map(({ vendorKey, publicVendorId, publicRepackId }) => ({ vendorKey, publicVendorId, publicRepackId }));
+  const result = {
+    witnessRequest: { expectedGeneration: 3, expectedActivePublicReleaseId: RELEASE_ID,
+      expectedActiveReleaseFingerprint: FINGERPRINT, scopes },
+    witness: { generation: 3, activePublicReleaseId: RELEASE_ID, activeReleaseFingerprint: FINGERPRINT,
+      retention: { operationId: "fixture-retention", direction: "forward", changesSha256: "b".repeat(64) },
+      entries: expectedRows.map((row, index) => ({ ...scopes[index], activeFacts: {
+        availability: row.availability, estimate: row.evEstimates.packScout,
+        calculationPriceUsdMinor: row.price.usdComparison.value.minorUnits },
+        retained: row.evEstimates.packScout.status === "unavailable" ? null : {
+          estimate: row.evEstimates.packScout, calculationPriceUsdMinor: 10_000,
+          sourcePublicReleaseId: RELEASE_ID, latestUnavailableAttempt: null } })), witnessSha256: "c".repeat(64) },
     expectedRepackIds: expectedRows.map(({ publicRepackId }) => publicRepackId),
     expectedV3Rows: expectedRows,
     manifestPublicReleaseId: "manifest-release",
-    v3PublicReleaseId: "v3-release",
+    v3PublicReleaseId: RELEASE_ID,
     manifestShell: { ok: true, data: { metadata: { publicReleaseId: "manifest-release" } } },
     manifestList: { ok: true, data: { metadata: { publicReleaseId: "manifest-release" },
       range: { total: expectedRows.length },
       rows: expectedRows.map(({ publicRepackId }) => ({ publicRepackId })) } },
-    v3Shell: { ok: true, data: { release: { publicReleaseId: "v3-release" } } },
-    v3List: { ok: true, data: { release: { publicReleaseId: "v3-release" },
+    v3Shell: { ok: true, data: { ...context, release: { publicReleaseId: RELEASE_ID } } },
+    v3List: { ok: true, data: { ...context, release: { publicReleaseId: RELEASE_ID },
       range: { total: expectedRows.length }, rows: actualRows.map(row=>displayed(row,currentTime)) } },
-    dashboard: { ok: true, data: { release: { publicReleaseId: "v3-release" },
+    dashboard: { ok: true, data: { ...context, release: { publicReleaseId: RELEASE_ID },
       opportunities: opportunities.map(row=>displayed(row,currentTime)) } },
   };
+  if (expectedRows.length > 0) dataReleaseV3RetainedEvWitnessSchema.parse(result.witness);
+  return result;
+}
+function retain(input, original, latest = null) {
+  input.witness.entries.find(({ publicRepackId }) => publicRepackId === original.publicRepackId).retained = {
+    estimate: original.evEstimates.packScout, calculationPriceUsdMinor: original.price.usdComparison.value.minorUnits,
+    sourcePublicReleaseId: uuid("prior"), latestUnavailableAttempt: latest === null ? null : {
+      calculatedAt: latest.evEstimates.packScout.calculatedAt, reason: latest.evEstimates.packScout.reason },
+  };
+  return input;
 }
 const refused = (error) => error.code === "LOCAL_CONVEX_PUBLIC_READBACK_FAILED";
 
@@ -163,8 +192,7 @@ test("restocked packs retain sold-out EV without ranking until a newer valid cal
       latestUnavailableReason: "SOURCE_EVIDENCE_UNAVAILABLE",
     }) } };
   const eligible = row("pack-eligible", -900);
-  const input = { ...readback([restocked, eligible], [eligible], [retained, eligible]),
-    previousV3Rows: [prior] };
+  const input = retain(readback([restocked, eligible], [eligible], [retained, eligible]), history, restocked);
   assert.deepEqual(verifyLocalClutchpacksPublicReadback(input), {
     manifestRepackCount: 2, v3RepackCount: 2, knownEstimateCount: 2,
     agedEstimateCount: 0, dashboardOpportunityCount: 1,
@@ -173,10 +201,8 @@ test("restocked packs retain sold-out EV without ranking until a newer valid cal
   assert.deepEqual(displayedEv.metrics, history.evEstimates.packScout.metrics);
   assert.equal(displayedEv.calculatedAt, history.evEstimates.packScout.calculatedAt);
   assert.equal(displayedEv.historicalSoldOutAt, history.evEstimates.packScout.soldOutAt);
-  assert.throws(() => verifyLocalClutchpacksPublicReadback({
-    ...readback([restocked, eligible], [retained, eligible], [retained, eligible]),
-    previousV3Rows: [prior],
-  }), refused);
+  assert.throws(() => verifyLocalClutchpacksPublicReadback(retain(
+    readback([restocked, eligible], [retained, eligible], [retained, eligible]), history, restocked)), refused);
 
   const recalculated = row("pack-history", -500);
   Object.assign(recalculated.evEstimates.packScout, {
@@ -184,8 +210,7 @@ test("restocked packs retain sold-out EV without ranking until a newer valid cal
     dataAsOf: { state: "known", observedAt: "2026-08-30T00:40:00.000Z" },
     expiresAt: "2026-08-30T01:40:00.000Z",
   });
-  const restored = { ...readback([recalculated, eligible], [recalculated, eligible]),
-    previousV3Rows: [retained] };
+  const restored = readback([recalculated, eligible], [recalculated, eligible]);
   assert.equal(verifyLocalClutchpacksPublicReadback(restored).dashboardOpportunityCount, 2);
   assert.equal(restored.v3List.data.rows[0].evEstimates.packScout.historicalSoldOutAt, null);
 });
@@ -202,7 +227,8 @@ test("same IDs with missing or changed published EV fail readback", () => {
 
 test("a later unavailable publication must retain the pinned predecessor's last valid values", () => {
   const currentTime = NOW + 24 * 60 * 60_000;
-  const prior = displayed(row("pack-a"));
+  const original = row("pack-a");
+  const prior = displayed(original);
   const latest = unavailable("pack-a");
   latest.evEstimates.packScout.calculatedAt = new Date(currentTime).toISOString();
   const retained = {...latest, evEstimates:{...latest.evEstimates,
@@ -211,12 +237,11 @@ test("a later unavailable publication must retain the pinned predecessor's last 
       referenceTimeIso:new Date(currentTime).toISOString(),
       latestUnavailableReason:"SOURCE_EVIDENCE_UNAVAILABLE",
     })}};
-  const input = {...readback([latest], [retained], [retained], currentTime), previousV3Rows:[prior]};
+  const input = retain(readback([latest], [retained], [retained], currentTime), original, latest);
   assert.equal(verifyLocalClutchpacksPublicReadback(input).knownEstimateCount,1);
   assert.equal(input.v3List.data.rows[0].evEstimates.packScout.confidence.scoreBasisPoints,0);
-  assert.throws(()=>verifyLocalClutchpacksPublicReadback({
-    ...readback([latest], [], [latest], currentTime), previousV3Rows:[prior],
-  }),refused);
+  assert.throws(()=>verifyLocalClutchpacksPublicReadback(retain(
+    readback([latest], [], [latest], currentTime), original, latest)),refused);
 });
 
 test("nonempty eligible catalog with empty, reverse-ranked, or unavailable opportunities fails", () => {
@@ -227,11 +252,8 @@ test("nonempty eligible catalog with empty, reverse-ranked, or unavailable oppor
   }
 });
 
-test("empty catalog is valid only when both catalogs and dashboard are empty", () => {
-  assert.deepEqual(verifyLocalClutchpacksPublicReadback(readback([], [])), {
-    manifestRepackCount: 0, v3RepackCount: 0, knownEstimateCount: 0,
-    agedEstimateCount: 0, dashboardOpportunityCount: 0,
-  });
+test("an empty catalog cannot replace the bounded nonempty authenticated witness", () => {
+  assert.throws(() => verifyLocalClutchpacksPublicReadback(readback([], [])), refused);
   assert.throws(() => verifyLocalClutchpacksPublicReadback(readback([], [row("unexpected-pack")])), refused);
 });
 
@@ -254,4 +276,59 @@ test("pointer races, truncated availability-filtered results, duplicate IDs, and
   duplicate.v3List.data.rows[1] = duplicate.v3List.data.rows[0];
   cases.push(duplicate);
   for (const input of cases) assert.throws(() => verifyLocalClutchpacksPublicReadback(input), refused);
+});
+
+test("list and dashboard use their own trusted confidence clocks without compounding decay", () => {
+  const planned = row("clock");
+  const input = readback([planned], [planned]);
+  const later = NOW + 15 * 60_000;
+  input.dashboard.data.confidenceEvaluatedAt = new Date(later).toISOString();
+  input.dashboard.data.providerHealthEvaluatedAt = new Date(later).toISOString();
+  input.dashboard.data.opportunities = [displayed(planned, later)];
+  assert.equal(verifyLocalClutchpacksPublicReadback(input).dashboardOpportunityCount, 1);
+  input.dashboard.data.opportunities = input.v3List.data.rows;
+  assert.throws(() => verifyLocalClutchpacksPublicReadback(input), refused);
+});
+
+test("older and equal-time candidates cannot replace retained original metrics or calculation price", () => {
+  const original = row("pack-original", -100);
+  Object.assign(original.evEstimates.packScout, { calculatedAt: "2026-08-30T00:30:00.000Z",
+    dataAsOf: { state: "known", observedAt: "2026-08-30T00:30:00.000Z" },
+    sourceAge: { milliseconds: 0, state: "fresh_within_15_minutes" }, expiresAt: "2026-08-30T01:30:00.000Z" });
+  for (const sameTime of [false, true]) {
+    const candidate = row("pack-original", -900);
+    if (sameTime) Object.assign(candidate.evEstimates.packScout, {
+      calculatedAt: original.evEstimates.packScout.calculatedAt, dataAsOf: original.evEstimates.packScout.dataAsOf,
+      sourceAge: original.evEstimates.packScout.sourceAge, expiresAt: original.evEstimates.packScout.expiresAt });
+    const before = structuredClone(candidate);
+    const input = retain(readback([candidate], [original], [original]), original);
+    assert.equal(verifyLocalClutchpacksPublicReadback(input).knownEstimateCount, 1);
+    assert.deepEqual(candidate, before);
+  }
+  const latest = unavailable("pack-original");
+  latest.price = { displayMoney: usd(20_000), usdComparison: { status: "available", value: usd(20_000) } };
+  latest.evEstimates.packScout.calculatedAt = "2026-08-30T00:40:00.000Z";
+  const retained = { ...latest, evEstimates: { ...latest.evEstimates, packScout: presentLastKnownPackScoutEvV3({
+    estimate: original.evEstimates.packScout, calculationPriceUsdMinor: 10_000,
+    referenceTimeIso: new Date(NOW).toISOString(), latestUnavailableReason: "SOURCE_EVIDENCE_UNAVAILABLE" }) } };
+  const input = retain(readback([latest], [retained], [retained]), original, latest);
+  assert.equal(verifyLocalClutchpacksPublicReadback(input).knownEstimateCount, 1);
+  assert.equal(input.v3List.data.rows[0].evEstimates.packScout.calculationPriceUsdMinor, 10_000);
+});
+
+test("unbound witnesses, mismatched active facts, and missing trusted clock policy cannot certify EV", () => {
+  for (const mutate of [
+    (input) => { input.witness.generation++; },
+    (input) => { input.witness.activeReleaseFingerprint = "f".repeat(64); },
+    (input) => { input.witness.entries[0].vendorKey = "courtyard"; },
+    (input) => { input.witness.entries[0].activeFacts.availability = "sold_out"; },
+    (input) => { input.witness.entries[0].retained.calculationPriceUsdMinor++; },
+    (input) => { input.witness.entries[0].retained = null; },
+    (input) => { delete input.v3List.data.confidenceEvaluatedAt; },
+    (input) => { input.dashboard.data.publicFreshnessPolicyVersion = "obsolete"; },
+    (input) => { input.v3Shell.data.providerHealthEvaluatedAt = "2020-01-01T00:00:00.000Z"; },
+  ]) {
+    const planned = row("pack-a"); const input = readback([planned], [planned]); mutate(input);
+    assert.throws(() => verifyLocalClutchpacksPublicReadback(input), refused);
+  }
 });

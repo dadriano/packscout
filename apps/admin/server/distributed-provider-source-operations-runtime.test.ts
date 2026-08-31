@@ -3,8 +3,8 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express from "express";
 import { PROVIDER_SOURCE_OPERATIONS_VERSION } from "@packscout/contracts";
-import type { CentralPrismaClient } from "@packscout/database";
-import { AuthServiceError, type AuthenticatedActor } from "@packscout/services";
+import type { AdminLocalProviderOverview, AdminLocalRunRecord, CentralPrismaClient } from "@packscout/database";
+import { AuthServiceError, createLaunchSourceIntegrationCapabilities, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "./auth/cookies.ts";
 import { createDistributedProviderSourceOperationsRuntime } from
   "./distributed-provider-source-operations-runtime.ts";
@@ -91,6 +91,52 @@ test("an organization with only archived providers receives an empty runtime ove
   });
   assert.equal(fixture.queries[0]?.take, 50);
   assert.equal(fixture.downstreamCalls(), 0);
+});
+
+test("distributed request sizes use the current immutable profile, never a different run's configuration", async () => {
+  const configId = uuid(22);
+  const run: AdminLocalRunRecord = {
+    id: uuid(21), trigger: "manual", state: "running", requestedByOperatorId: uuid(4),
+    configVersionId: configId, configVersionNumber: 4n, workerFence: 3n,
+    attemptNumber: 1, recoveryOfRunId: null, requestedCursorHash: null, finalCursorHash: null,
+    reachedSourceHead: false, pageCount: 1, catalogCount: 100, pullCount: 0,
+    marketEventCount: 0, acceptedCount: 100, duplicateCount: 0, quarantinedCount: 0,
+    materialChangeCount: 100, failureCode: null, failureClass: null,
+    requestedAt: new Date(now), startedAt: new Date(now), lastProgressAt: new Date(now),
+    heartbeatAt: new Date(now), finishedAt: null,
+  };
+  const overview: AdminLocalProviderOverview = {
+    runtimeState: "running", runtimeReason: null, runtimeGeneration: 4n,
+    nextDueAt: null, lastAttemptedAt: new Date(now), lastHeadReachedAt: null,
+    lastRunnerHeartbeatAt: new Date(now), freshnessState: "unknown", qualityState: "healthy",
+    consecutiveFailures: 0, latestFailureCode: null, recoveredAt: null,
+    activeRun: { id: run.id, state: "running" }, latestRun: run,
+    openQuarantineCount: 0, latestQuarantineReasonCode: null, latestRetention: null,
+  };
+  const older = { ...run, id: uuid(23), configVersionId: uuid(24), state: "succeeded" as const };
+  const runtime = createDistributedProviderSourceOperationsRuntime({
+    central: {
+      providers: { async findMany() { return [{
+        id: uuid(20), provider_key: "clutchpacks", display_name: "ClutchPacks", lifecycle: "active",
+        active_config_version: {
+          id: configId, adapter_key: "dataforrest-clutchpacks-distributed-adapter-v1",
+          schedule_seconds: 3_600, stale_after_seconds: 7_200,
+        },
+      }]; } },
+    } as unknown as CentralPrismaClient,
+    gateway: {
+      async runWithAdminProviderDatabase() {
+        return { state: "reachable", value: { overview, runs: [run, older], details: [] } };
+      },
+    } as unknown as Parameters<typeof createDistributedProviderSourceOperationsRuntime>[0]["gateway"],
+    sourceIntegrations: createLaunchSourceIntegrationCapabilities(),
+    diagnosticCursorKey: new Uint8Array(32).fill(7), now: () => new Date(now),
+  });
+  const detail = await runtime.operations.detail(organizationId, uuid(20));
+  assert.equal(detail.source.source?.requestSizePolicy, "adapter_profile");
+  assert.equal(detail.source.source?.recordsPerRequest, 2_000);
+  assert.equal(detail.source.activeRun?.recordsPerRequest, 2_000);
+  assert.deepEqual(detail.runHistory.map((value) => value.recordsPerRequest), [2_000, null]);
 });
 
 test("authorized empty-org source overview returns 200 while unauthorized reads do no work", async () => {

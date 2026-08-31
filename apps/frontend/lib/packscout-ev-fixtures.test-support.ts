@@ -1,6 +1,7 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
+  PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
   PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3,
   publicRepackViewDetailV3Schema,
   publicRepackViewSummaryV3FromDetail,
@@ -27,6 +28,8 @@ import {
 
 export const FIXTURE_OBSERVED_AT = "2026-08-19T10:00:00.000Z";
 export const FIXTURE_EXPIRES_AT = "2026-08-19T11:00:00.000Z";
+export const FIXTURE_CURRENT_EVALUATED_AT = "2026-08-19T10:10:00.000Z";
+export const FIXTURE_LAST_KNOWN_EVALUATED_AT = "2026-08-19T12:00:00.000Z";
 export const FIXTURE_SOLD_OUT_AT = "2026-08-19T10:05:00.000Z";
 export const FIXTURE_PACK_PRICE_MINOR = 10_000;
 
@@ -102,7 +105,6 @@ export function buildV3PastDeadlineCurrentEv(gross = 8_500): PackScoutPublicEvV3
     expiresAt: "2026-08-18T11:00:00.000Z",
   });
 }
-
 /** A current estimate whose evidence is 20 minutes old (delayed band). */
 export function buildV3DelayedEv(gross: number): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
@@ -169,6 +171,7 @@ export function buildV3UnavailableEv(
     | "ODDS_UNAVAILABLE"
     | "VALUE_UNAVAILABLE"
     | "BUYBACK_UNAVAILABLE"
+    | "SOURCE_DATA_STALE"
     | "CALCULATION_UNAVAILABLE" = "BUYBACK_UNAVAILABLE",
 ): PackScoutPublicEvV3 {
   return packScoutPublicEvV3Schema.parse({
@@ -177,22 +180,10 @@ export function buildV3UnavailableEv(
     confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
     metrics: null,
     confidence: null,
-    calculatedAt: FIXTURE_OBSERVED_AT,
+    calculatedAt: reason === "SOURCE_DATA_STALE"
+      ? FIXTURE_LAST_KNOWN_EVALUATED_AT : FIXTURE_OBSERVED_AT,
     dataAsOf: { state: "known", observedAt: FIXTURE_OBSERVED_AT },
     reason,
-  });
-}
-
-export function buildV3ExpiredEv(): PackScoutPublicEvV3 {
-  return packScoutPublicEvV3Schema.parse({
-    status: "unavailable",
-    methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
-    confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION,
-    metrics: null,
-    confidence: null,
-    calculatedAt: "2026-08-19T11:10:00.000Z",
-    dataAsOf: { state: "known", observedAt: FIXTURE_OBSERVED_AT },
-    reason: "SOURCE_DATA_STALE",
   });
 }
 
@@ -207,6 +198,49 @@ export function buildV3UnknownTimeUnavailableEv(): PackScoutPublicEvV3 {
     dataAsOf: { state: "unknown_source_time", observedAt: null },
     reason: "SOURCE_EVIDENCE_UNAVAILABLE",
   });
+}
+
+export function buildV3HealthyProviderHealth(): PublicRepackViewDetailV3["providerHealth"] {
+  return {
+    state: "healthy",
+    observedAt: FIXTURE_CURRENT_EVALUATED_AT,
+    statusReason: null,
+  };
+}
+
+export function buildV3DelayedProviderHealth(): PublicRepackViewDetailV3["providerHealth"] {
+  return {
+    state: "delayed",
+    observedAt: FIXTURE_OBSERVED_AT,
+    statusReason: "PROVIDER_OBSERVATION_STALE",
+  };
+}
+
+export function buildV3ProviderHealthSummary(
+  state: "healthy" | "delayed" | "unavailable" = "healthy",
+  evaluatedAt: string = FIXTURE_CURRENT_EVALUATED_AT,
+) {
+  if (state === "unavailable") {
+    return {
+      state,
+      observedAt: null,
+      freshThrough: null,
+      totalProviderCount: 0,
+      delayedProviderCount: 0,
+      nextHealthEvaluationAt: null,
+    } as const;
+  }
+  const freshThrough = new Date(
+    Date.parse(evaluatedAt) + 50 * 60_000,
+  ).toISOString();
+  return {
+    state,
+    observedAt: evaluatedAt,
+    freshThrough,
+    totalProviderCount: 1,
+    delayedProviderCount: state === "delayed" ? 1 : 0,
+    nextHealthEvaluationAt: state === "delayed" ? null : freshThrough,
+  } as const;
 }
 
 export function buildV3Price(
@@ -263,6 +297,10 @@ export function buildV3ViewDetail(
   overrides: DetailOverrides = {},
 ): PublicRepackViewDetailV3 {
   const publicRepackId = overrides.publicRepackId ?? FIXTURE_REPACK_ID;
+  const packScoutEv =
+    overrides.evEstimates?.packScout ?? buildV3LastKnownEv(8_500, {
+      referenceTimeIso: FIXTURE_CURRENT_EVALUATED_AT,
+    });
   return publicRepackViewDetailV3Schema.parse({
     publicRepackId,
     publicVendorId: FIXTURE_VENDOR_ID,
@@ -282,7 +320,7 @@ export function buildV3ViewDetail(
       alt: "Pokemon Grail Gacha",
     },
     evEstimates: {
-      packScout: buildV3CurrentEv(8_500),
+      packScout: packScoutEv,
       vendorReported: {
         status: "available",
         sourceMoney: { minorUnits: 9_000, currency: "USD" },
@@ -290,6 +328,8 @@ export function buildV3ViewDetail(
         observedAt: FIXTURE_OBSERVED_AT,
       },
     },
+    providerHealth:
+      overrides.providerHealth ?? buildV3HealthyProviderHealth(),
     topChase: buildV3Chase(publicRepackId),
     contentSummary: {
       knownCollectibleCount: 1,
@@ -362,10 +402,23 @@ export function buildV3ReleaseIdentity() {
 export function buildV3ListPage(
   details: readonly PublicRepackViewDetailV3[],
 ): ListPublicRepacksPageV3 {
+  const confidenceEvaluatedAt = new Date(Math.max(
+    Date.parse(FIXTURE_CURRENT_EVALUATED_AT),
+    ...details.map(({ evEstimates }) => Date.parse(evEstimates.packScout.status === "last_known"
+      ? evEstimates.packScout.confidenceEvaluatedAt : evEstimates.packScout.calculatedAt)),
+  )).toISOString();
   const payload = {
     ok: true,
     data: {
       release: buildV3ReleaseIdentity(),
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
+      confidenceEvaluatedAt,
+      providerHealthEvaluatedAt: confidenceEvaluatedAt,
+      providerHealthSummary: buildV3ProviderHealthSummary(
+        "healthy",
+        confidenceEvaluatedAt,
+      ),
       rows: details.map(publicRepackViewSummaryV3FromDetail),
       details,
       selectedRepack: details[0] ?? null,

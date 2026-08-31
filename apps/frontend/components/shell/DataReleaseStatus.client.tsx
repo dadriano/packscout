@@ -6,10 +6,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   presentDataReleaseStatus,
+  providerHealthRefreshDelayMilliseconds,
   DataReleaseStatusValue,
 } from "@/lib/data-release-status.client";
 
@@ -35,12 +38,25 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
   const context = useContext(DataReleaseStatusContext);
   const state = status.state;
   const updatedAt = "updatedAt" in status ? status.updatedAt : undefined;
-  const staleAt = "staleAt" in status ? status.staleAt : undefined;
+  const freshThrough = "freshThrough" in status ? status.freshThrough : undefined;
+  const evaluatedAt = "evaluatedAt" in status ? status.evaluatedAt : undefined;
+  const nextHealthEvaluationAt = "nextHealthEvaluationAt" in status
+    ? status.nextHealthEvaluationAt
+    : undefined;
   const dataSource = "dataSource" in status ? status.dataSource : undefined;
 
   useEffect(() => {
     context?.setStatus(status);
-  }, [context, dataSource, staleAt, state, status, updatedAt]);
+  }, [
+    context,
+    dataSource,
+    evaluatedAt,
+    freshThrough,
+    nextHealthEvaluationAt,
+    state,
+    status,
+    updatedAt,
+  ]);
 
   return null;
 }
@@ -48,28 +64,48 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
 export function DataReleaseStatus() {
   const context = useContext(DataReleaseStatusContext);
   const status = context?.status ?? { state: "loading" };
+  const router = useRouter();
+  const refreshedBoundary = useRef<string | null>(null);
   const [clockRevision, setClockRevision] = useState(0);
-  const staleAt = "staleAt" in status ? Date.parse(status.staleAt) : Number.NaN;
+  const refreshDelay = providerHealthRefreshDelayMilliseconds(status);
+  const refreshBoundary =
+    "evaluatedAt" in status &&
+      "nextHealthEvaluationAt" in status &&
+      status.evaluatedAt !== undefined &&
+      status.nextHealthEvaluationAt !== undefined &&
+      status.nextHealthEvaluationAt !== null
+      ? `${status.evaluatedAt}:${status.nextHealthEvaluationAt}`
+      : null;
 
   useEffect(() => {
     if (
-      status.state !== "fresh" ||
-      !Number.isFinite(staleAt) ||
-      Date.now() >= staleAt
+      refreshDelay === null ||
+      refreshBoundary === null ||
+      refreshedBoundary.current === refreshBoundary
     ) return;
     const maximumDelay = 2_147_483_647;
     const delay = Math.min(
       maximumDelay,
-      Math.max(0, staleAt - Date.now() + 25),
+      refreshDelay + 25,
     );
-    const timer = window.setTimeout(
-      () => setClockRevision((revision) => revision + 1),
-      delay,
-    );
+    const timer = window.setTimeout(() => {
+      refreshedBoundary.current = refreshBoundary;
+      setClockRevision((revision) => revision + 1);
+      router.refresh();
+    }, delay);
     return () => window.clearTimeout(timer);
-  }, [clockRevision, staleAt, status.state]);
+  }, [clockRevision, refreshBoundary, refreshDelay, router]);
 
-  const presentation = presentDataReleaseStatus(status);
+  const trustedPresentationTime =
+    "evaluatedAt" in status && status.evaluatedAt !== undefined
+    ? Date.parse(status.evaluatedAt)
+    : Number.NaN;
+  const presentation = presentDataReleaseStatus(
+    status,
+    Number.isFinite(trustedPresentationTime)
+      ? trustedPresentationTime
+      : 0,
+  );
 
   return (
     <div

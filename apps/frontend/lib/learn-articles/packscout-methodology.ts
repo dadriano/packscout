@@ -180,6 +180,10 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
           type: "paragraph",
           text: "PackScout updates its data as new information becomes available from each platform so the metrics shown reflect the latest available state of the pack.",
         },
+        {
+          type: "paragraph",
+          text: "When a previously calculable estimate has not received newer source evidence for more than 60 minutes, PackScout keeps the economics visible as a Last-known estimate and lowers its confidence over time. Provider feed health is informational and does not hide the estimate or exclude it from ranking.",
+        },
       ],
     },
     {
@@ -192,7 +196,7 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Unavailable does not mean zero. It means the necessary data is not available. We would rather show no number than fill a gap with an unsupported assumption.",
+          text: "Unavailable does not mean zero. It means required supported inputs are missing. Age alone does not make a calculable estimate unavailable; we keep it visible as Last-known instead of filling a gap with an unsupported assumption.",
         },
       ],
     },

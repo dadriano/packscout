@@ -8,6 +8,7 @@ import {
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestIdentityNamespaceByProvider,
+  providerSourceLaunchBounds,
   launchRecordIdScopeDeclarations,
 } from "@packscout/contracts";
 import {
@@ -96,7 +97,7 @@ function connectionWork(): ClaimedConnectionTestWork {
   };
 }
 
-function sourceWork(): ClaimedSourceTestWork {
+function sourceWork(recordsPerRequest = 500): ClaimedSourceTestWork {
   const persistedScopes = JSON.parse(JSON.stringify(
     launchRecordIdScopeDeclarations.map(({ recordIdScopeKey }) =>
       recordIdScopeKey
@@ -110,6 +111,7 @@ function sourceWork(): ClaimedSourceTestWork {
     provider: "courtyard",
     sourceInstanceId: "source-1",
     sourceRevisionId: "source-revision-1",
+    recordsPerRequest,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
     mapperKey: "courtyard-v1",
     mapperVersion: "v1",
@@ -120,9 +122,12 @@ function sourceWork(): ClaimedSourceTestWork {
   };
 }
 
-function pageWork(): ClaimedPageReadWork {
+function pageWork(
+  recordsPerRequest = 500,
+  retryAttempt = 0,
+): ClaimedPageReadWork {
   return {
-    ...sourceWork(),
+    ...sourceWork(recordsPerRequest),
     id: "page-run-1",
     kind: "page_read",
     runId: "page-run-1",
@@ -130,7 +135,7 @@ function pageWork(): ClaimedPageReadWork {
     runStartedAt: new Date("2026-08-21T12:00:00.000Z"),
     committedPages: 0,
     committedRecords: 0,
-    retryAttempt: 0,
+    retryAttempt,
     pageNumber: 1,
     cursorGeneration: 1n,
     requestedCursorValue: null,
@@ -147,7 +152,7 @@ function dataforrestPageWork(retryAttempt: number): ClaimedPageReadWork {
     connectionConfiguration: encryptedDataforrestConfiguration(),
     sourceConfiguration: { platform: "courtyard" },
     cursorCodecVersion: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
-    requestedCursorValue: "opaque-fallback-cursor",
+    requestedCursorValue: "opaque-retry-cursor",
     requestedCursorFingerprint: "a".repeat(64),
     retryAttempt,
   };
@@ -156,6 +161,7 @@ function dataforrestPageWork(retryAttempt: number): ClaimedPageReadWork {
 class RecordingAdapter extends AlternateBookmarkSourceAdapter {
   throwOnCapture = false;
   failRequest = false;
+  readonly capturedOperations: SourceAdapterOperation[] = [];
   readonly pageLimits: number[] = [];
   constructor(private readonly events: string[], payload?: unknown) {
     super(payload);
@@ -166,6 +172,7 @@ class RecordingAdapter extends AlternateBookmarkSourceAdapter {
     invocation: SourceAdapterCaptureInvocation,
   ) {
     this.events.push("capture");
+    this.capturedOperations.push(operation);
     if (operation.operationKind === "page_read") {
       this.pageLimits.push(operation.correlation.pageLimit);
     }
@@ -324,7 +331,7 @@ function fixture(overrides: Readonly<{
   };
 }
 
-test("a bounded page persistence timeout preserves the cursor for retry", async () => {
+test("a bounded page persistence timeout preserves the cursor and exact request pin for retry", async () => {
   const execution = fixture({
     async importPage() {
       throw new ControlPlaneTransactionError("timeout");
@@ -332,7 +339,7 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
   });
 
   const result = await execution.executor.execute(
-    pageWork(),
+    pageWork(137),
     execution.context,
   );
 
@@ -340,7 +347,7 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
     kind: "retryable",
     safeCode: "PAGE_PERSISTENCE_TIMEOUT",
   });
-  assert.deepEqual(execution.adapter.pageLimits, [250]);
+  assert.deepEqual(execution.adapter.pageLimits, [137]);
   assert.deepEqual(execution.coordinator.snapshot(), {
     maximumExecutionSlots: 4,
     activeExecutionSlots: 1,
@@ -367,20 +374,20 @@ test("a bounded page persistence timeout preserves the cursor for retry", async 
   execution.releaseRetained();
   assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
 
-  const fallback = await execution.executor.execute(
-    { ...pageWork(), retryAttempt: 1 },
+  const retry = await execution.executor.execute(
+    pageWork(137, 1),
     execution.context,
   );
-  assert.deepEqual(fallback, {
+  assert.deepEqual(retry, {
     kind: "retryable",
     safeCode: "PAGE_PERSISTENCE_TIMEOUT",
   });
-  assert.deepEqual(execution.adapter.pageLimits, [250, 250]);
+  assert.deepEqual(execution.adapter.pageLimits, [137, 137]);
   execution.releaseRetained();
   assert.equal(execution.coordinator.snapshot().activeExecutionSlots, 0);
 });
 
-test("DataForrest retries an oversized cursor at 250 after first requesting 500", async () => {
+test("DataForrest retries an oversized cursor with the exact durable request pin", async () => {
   const urls: URL[] = [];
   const bounds: Array<Readonly<{
     pageLimit: number;
@@ -418,11 +425,11 @@ test("DataForrest retries an oversized cursor at 250 after first requesting 500"
   });
   execution.releaseRetained();
 
-  const fallback = await execution.executor.execute(
+  const retry = await execution.executor.execute(
     dataforrestPageWork(1),
     execution.context,
   );
-  assert.deepEqual(fallback, {
+  assert.deepEqual(retry, {
     kind: "retryable",
     safeCode: "RESPONSE_TOO_LARGE",
   });
@@ -435,12 +442,12 @@ test("DataForrest retries an oversized cursor at 250 after first requesting 500"
       platform: url.searchParams.get("platform"),
     })),
     [{
-      cursor: "opaque-fallback-cursor",
+      cursor: "opaque-retry-cursor",
       limit: "500",
       platform: "courtyard",
     }, {
-      cursor: "opaque-fallback-cursor",
-      limit: "250",
+      cursor: "opaque-retry-cursor",
+      limit: "500",
       platform: "courtyard",
     }],
   );
@@ -449,7 +456,7 @@ test("DataForrest retries an oversized cursor at 250 after first requesting 500"
     maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
   }, {
-    pageLimit: 250,
+    pageLimit: 500,
     maximumResponseBytes: 8_388_608,
     timeoutMilliseconds: 10_000,
   }]);
@@ -514,9 +521,10 @@ test("a captured connection interpretation failure publishes its test result", a
 
 test("JSONB roundtrip preserves the canonical record-scope sequence", async () => {
   const subject = fixture();
-  const result = await subject.executor.execute(sourceWork(), subject.context);
+  const result = await subject.executor.execute(sourceWork(137), subject.context);
   assert.deepEqual(result, { kind: "test_terminal" });
   assert.equal(subject.adapter.captureCount, 1);
+  assert.equal(subject.adapter.capturedOperations[0]?.bounds.pageLimit, 137);
   assert.ok(subject.events.includes("source-test-result"));
   subject.releaseRetained();
 });
@@ -547,6 +555,23 @@ test("a failed source interpretation publishes one terminal test result", async 
     subject.events.filter((event) => event === "source-test-result").length,
     1,
   );
+  subject.releaseRetained();
+});
+
+test("profile-only connection tests do not inherit a source request-size pin", async () => {
+  const subject = fixture();
+  await subject.executor.execute(connectionWork(), subject.context);
+  const operation = subject.adapter.capturedOperations[0];
+  assert.ok(operation);
+  assert.equal(operation.operationKind, "connection_test");
+  assert.equal(
+    operation.bounds.pageLimit,
+    Math.min(
+      providerSourceLaunchBounds.pageTargetRecords,
+      alternateBookmarkSourceManifest.requestBounds.pageLimit,
+    ),
+  );
+  assert.equal("recordsPerRequest" in operation, false);
   subject.releaseRetained();
 });
 

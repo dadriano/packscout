@@ -3,6 +3,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { convexToJson, jsonToConvex, type JSONValue, type Value } from "convex/values";
+import { z } from "zod";
+import { acceptedRepackQuerySchema, contextualRepackFacetsSchema, publicOpaqueCursorSchema,
+  publicRepackListPageV3Schema, repackPageRangeSchema } from "@packscout/contracts";
 import type { LocalEvMigrationClient } from "./local-convex-ev-migration.mts";
 import { assertLocalConvexDeployment, assertNoCloudDeployKey, localCatalogReadCredential,
   requireLoopbackConvexUrl } from "./seed-convex-mock-data-release.mjs";
@@ -15,6 +18,17 @@ const operations = {
   initialize: { path: "dataReleaseV3EvFactsBackfill:initializeActiveRetention", kind: "mutation" },
 } as const;
 const MAX_RESPONSE_BYTES = 4 * 1_024 * 1_024;
+// The public action adds the accepted query and pagination envelope to the
+// canonical list projection. Preserve its clock/row/detail refinements.
+const readbackPageSchema = publicRepackListPageV3Schema.safeExtend({
+  facets: contextualRepackFacetsSchema,
+  activeQuery: acceptedRepackQuerySchema,
+  queryFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  nextCursor: publicOpaqueCursorSchema.nullable(),
+  hasPrevious: z.boolean(),
+  range: repackPageRangeSchema,
+  paginationReset: z.literal("release_changed").nullable(),
+});
 
 interface Dependencies {
   readonly projectDirectory?: string;
@@ -101,7 +115,7 @@ export async function createLocalConvexEvMigrationClient(configuration: {
       if (await boundedText(response, 256) !== saved.deploymentName) return refuse();
     };
     await requireInstance();
-    const call = async (functionName: string, kind: "query" | "mutation", args: Record<string, unknown>, admin: boolean) => {
+    const call = async (functionName: string, kind: "query" | "mutation" | "action", args: Record<string, unknown>, admin: boolean) => {
       // Recheck before each authenticated request, including after a backend restart.
       await requireInstance();
       const response = await request(`${endpoint}/api/${kind}`, {
@@ -123,11 +137,21 @@ export async function createLocalConvexEvMigrationClient(configuration: {
       },
       async verifyPublicRead(publicReleaseId) {
         try {
-          const result = object(await call("publicRepacksV3:listPublicRepacksV3", "query", {
-            currentTime: Date.now(), pageSize: 1, filters: { availability: "all" },
+          const result = object(await call("publicRepacksV3:listPublicRepacksV3", "action", {
+            pageSize: 1, filters: { availability: "all" },
             ...(catalogReadToken === null ? {} : { catalogReadToken }),
           }, false));
-          if (result.ok !== true || object(object(result.data).release).publicReleaseId !== publicReleaseId) return refuse();
+          const parsed = readbackPageSchema.safeParse(result.data);
+          if (result.ok !== true || !parsed.success) return refuse();
+          const page = parsed.data;
+          const visibleCount = page.range.total === 0 ? 0 : page.range.end - page.range.start + 1;
+          // This is a cursorless first page: both clocks must be the same
+          // trusted action time, never a caller-selected/pinned prior time.
+          if (page.release.publicReleaseId !== publicReleaseId ||
+              page.confidenceEvaluatedAt !== page.providerHealthEvaluatedAt ||
+              page.activeQuery.pageSize !== 1 || page.rows.length > 1 ||
+              visibleCount !== page.rows.length || page.hasPrevious ||
+              page.range.start > 1 || page.paginationReset !== null) return refuse();
         } catch { return refuse("LOCAL_CONVEX_EV_MIGRATION_READBACK_FAILED"); }
       },
     };

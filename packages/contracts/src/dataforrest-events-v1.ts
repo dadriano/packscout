@@ -209,7 +209,9 @@ function dataforrestEventsSourceAdapterManifest(
     cursorCodecKey: DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
     operatorLabel: "DataForrest Events V1",
     requestBounds: {
-      pageLimit: options.pageLimit ?? providerSourceLaunchBounds.pageTargetRecords,
+      // Shared source revisions pin a configurable request size below this
+      // ceiling; distributed revisions retain their explicit immutable profile.
+      pageLimit: options.pageLimit ?? providerSourceLaunchBounds.recordsPerRequest.maximum,
       maximumResponseBytes: options.maximumResponseBytes ?? providerSourceLaunchBounds.maximumResponseBytes,
       timeoutMilliseconds: providerSourceLaunchBounds.requestTimeoutMilliseconds,
     },
@@ -243,8 +245,8 @@ export const dataforrestEventsV1SourceAdapterManifest =
 
 /**
  * Provider-local request profile for the pre-launch distributed ClutchPacks
- * importer. Its distinct adapter identity preserves the shared and historical
- * 500-record manifests while allowing the approved 2,000-record API request.
+ * importer. Its distinct adapter identity fixes the approved 2,000-record API
+ * request independently of the shared source's configurable request setting.
  */
 export const dataforrestClutchpacksDistributedSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(

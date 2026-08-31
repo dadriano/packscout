@@ -11,6 +11,8 @@ import {
   buildGlobalCatalogAggregateObservationV1,
   canonicalJson,
   type ActiveCatalogManifestStateV1,
+  type DataReleaseV3RetainedEvWitness,
+  type DataReleaseV3RetainedEvWitnessRequest,
   type ProviderReleaseExpectedCompletedHeadV1,
   type ProviderReleaseImmutableProofV1,
 } from "@packscout/contracts";
@@ -33,12 +35,12 @@ import {
   validateManifestPromotionReceipt,
   validateProviderPromotionReceipt,
 } from "@packscout/services";
-import { api } from "../../convex/_generated/api.js";
 import { withLocalConvexEvReady } from "./local-convex-ev-migration.mts";
 import { createLocalConvexEvMigrationClient } from "./local-convex-ev-migration-client.mts";
 import {
   parseEnvironmentFile,
   readLocalConvexConfiguration,
+  localCatalogReadCredential,
 } from "./seed-convex-mock-data-release.mjs";
 import {
   DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
@@ -60,8 +62,11 @@ import {
   localClutchpacksPlannedV3Rows,
   verifyLocalClutchpacksPublicReadback,
   verifyLocalClutchpacksContentReadback,
-  type LocalClutchpacksEvReadbackRow,
 } from "./distributed-clutchpacks-public-readback.mts";
+import { assertLocalClutchpacksWitnessUnchanged, localClutchpacksRetainedEvWitnessRequest,
+  withLocalClutchpacksWitnessReady } from "./distributed-clutchpacks-ev-witness.mts";
+import { readLocalClutchpacksPublicSurfaces, readLocalClutchpacksV3List } from
+  "./distributed-clutchpacks-public-transport.mts";
 import {
   resolveLocalClutchpacksProviderTerminal,
   type LocalClutchpacksProviderTerminal,
@@ -453,34 +458,18 @@ async function verifyPublicReads(input: {
   readonly manifestPublicReleaseId: string;
   readonly v3PublicReleaseId: string;
   readonly v3Plan: Awaited<ReturnType<typeof buildDistributedClutchpacksPublicationArtifacts>>["v3Plan"];
-  readonly previousV3Rows: readonly LocalClutchpacksEvReadbackRow[];
+  readonly witnessRequest: DataReleaseV3RetainedEvWitnessRequest;
+  readonly witness: DataReleaseV3RetainedEvWitness;
+  readonly catalogReadToken?: string;
 }) {
   const client = new ConvexHttpClient(input.convexUrl);
-  const currentTime = Date.now();
-  const [manifestShell, manifestList, v3Shell, v3List, dashboard] = await Promise.all([
-    client.query(api.publicRepacks.getPublicShellStatus, {}),
-    client.query(api.publicRepacks.listPublicRepacks, {
-      currentTime,
-      pageSize: 50,
-      filters: { availability: "all" },
-    }),
-    client.query(api.publicRepacksV3.getPublicShellStatusV3, {}),
-    client.query(api.publicRepacksV3.listPublicRepacksV3, {
-      currentTime,
-      pageSize: 50,
-      filters: { availability: "all" },
-    }),
-    client.query(api.publicRepacksV3.getDashboardBundleV3, {
-      currentTime,
-      filters: { availability: "all" },
-    }),
-  ]);
+  const { manifestShell, manifestList, v3Shell, v3List, dashboard } =
+    await readLocalClutchpacksPublicSurfaces(client, input.catalogReadToken);
   if (!manifestList.ok || !v3List.ok) return refuse("LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
   verifyLocalClutchpacksContentReadback({ expectedRows: localClutchpacksPlannedV3Rows(input.v3Plan),
     manifestRows: manifestList.data.rows, v3Rows: v3List.data.rows });
   return verifyLocalClutchpacksPublicReadback({
     ...input,
-    currentTime,
     expectedV3Rows: localClutchpacksPlannedV3Rows(input.v3Plan),
     manifestShell,
     manifestList,
@@ -626,6 +615,22 @@ async function promoteReadyDistributedClutchpacks(
           keyId: MANIFEST_KEY_ID,
           secret: manifestSecret,
         });
+        const v3Client = new SignedConvexDataReleaseV3PublicationClient({
+          baseUrl, keyId: DATA_RELEASE_V3_KEY_ID, secret: v3Secret,
+        });
+        // Probe before any publication write, including genesis. Existing
+        // immutable public rows alone do not prove retained-witness readiness.
+        return await withLocalClutchpacksWitnessReady(v3Client, async (v3State) => {
+        const catalogReadToken = localCatalogReadCredential(local.childEnvironment) ?? undefined;
+        if (v3State.activeRelease !== null) {
+          const prior = await readLocalClutchpacksV3List(new ConvexHttpClient(local.publicUrl), catalogReadToken);
+          assertLocalClutchpacksV3Predecessor({
+            state: v3State, publicReleaseId: prior.data.release.publicReleaseId,
+            total: prior.data.range.total, rows: prior.data.rows,
+            expectedPublicRepackIds: artifacts.projection.repacks.map(({ publicRepackId }) => publicRepackId),
+            expectedPublicVendorId: artifacts.projection.vendors[0]!.publicVendorId,
+          });
+        }
         const providerHead = await failClosedPhase(
           "LOCAL_CONVEX_PROVIDER_PUBLICATION_FAILED",
           async () => await publishProvider({
@@ -655,31 +660,6 @@ async function promoteReadyDistributedClutchpacks(
           exactActive.activeManifest.manifestFingerprint !==
             activeManifest.manifest.manifestFingerprint
         ) return refuse("LOCAL_CONVEX_ACTIVE_MANIFEST_NOT_OBSERVED");
-        const v3Client = new SignedConvexDataReleaseV3PublicationClient({
-          baseUrl,
-          keyId: DATA_RELEASE_V3_KEY_ID,
-          secret: v3Secret,
-        });
-        const v3State = await v3Client.activeState();
-        let previousV3Rows: readonly LocalClutchpacksEvReadbackRow[] = [];
-        if (v3State.activeRelease !== null) {
-          const prior = await new ConvexHttpClient(local.publicUrl).query(
-            api.publicRepacksV3.listPublicRepacksV3,
-            { currentTime: Date.now(), pageSize: 50, filters: { availability: "all" } },
-          );
-          if (!prior.ok) return refuse("LOCAL_CONVEX_DATA_RELEASE_V3_SCOPE_CONFLICT");
-          previousV3Rows = prior.data.rows;
-          assertLocalClutchpacksV3Predecessor({
-            state: v3State,
-            publicReleaseId: prior.data.release.publicReleaseId,
-            total: prior.data.range.total,
-            rows: prior.data.rows,
-            expectedPublicRepackIds: artifacts.projection.repacks.map(
-              ({ publicRepackId }) => publicRepackId,
-            ),
-            expectedPublicVendorId: artifacts.projection.vendors[0]!.publicVendorId,
-          });
-        }
         const boundV3 = bindLocalClutchpacksV3Predecessor(v3Client, v3State);
         const v3Outcome = await failClosedPhase(
           "LOCAL_CONVEX_DATA_RELEASE_V3_PUBLICATION_FAILED",
@@ -702,6 +682,11 @@ async function promoteReadyDistributedClutchpacks(
         if (finalSnapshot.stabilityFingerprint !== initial.stabilityFingerprint) {
           return refuse("CLUTCHPACKS_SNAPSHOT_CHANGED_DURING_PUBLICATION");
         }
+        const witnessRequest = localClutchpacksRetainedEvWitnessRequest({
+          publicReleaseId: artifacts.v3Plan.publicReleaseId, releaseFingerprint: artifacts.v3Plan.releaseFingerprint,
+          rows: localClutchpacksPlannedV3Rows(artifacts.v3Plan), state: await v3Client.activeState(),
+        });
+        const witness = await v3Client.retainedEvWitness(witnessRequest);
         const readback = await failClosedPhase(
           "LOCAL_CONVEX_PUBLIC_READBACK_FAILED",
           async () => await verifyPublicReads({
@@ -711,9 +696,10 @@ async function promoteReadyDistributedClutchpacks(
             manifestPublicReleaseId: activeManifest.manifest.publicReleaseId,
             v3PublicReleaseId: artifacts.v3Plan.publicReleaseId,
             v3Plan: artifacts.v3Plan,
-            previousV3Rows,
+            witnessRequest, witness, catalogReadToken,
           }),
         );
+        assertLocalClutchpacksWitnessUnchanged(witness, await v3Client.retainedEvWitness(witnessRequest));
         return {
           status: "ready",
           source: {
@@ -741,6 +727,7 @@ async function promoteReadyDistributedClutchpacks(
             dashboardOpportunityCount: readback.dashboardOpportunityCount,
           },
         };
+        });
       },
         });
       },

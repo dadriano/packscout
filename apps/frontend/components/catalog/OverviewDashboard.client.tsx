@@ -110,7 +110,7 @@ export function OverviewDashboard({
               <p>
                 {selectedId
                   ? "Updating selected repack details…"
-                  : "Select an opportunity to inspect its current evidence."}
+                  : "Select an opportunity to inspect its published evidence."}
               </p>
             </aside>
           )}

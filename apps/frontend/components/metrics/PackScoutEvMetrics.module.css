@@ -46,6 +46,12 @@
   color: var(--color-text);
 }
 
+.statusChip[data-status="last_known"] {
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  color: var(--color-warning-strong);
+}
+
 .simulatedChip {
   border-style: dashed;
 }

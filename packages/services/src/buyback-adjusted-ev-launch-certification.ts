@@ -630,11 +630,11 @@ export const PACKSCOUT_BUYBACK_EV_BROWSER_EVIDENCE_PENDING_V1: readonly PackScou
             "keyboard-only walk of the catalog surfaces.",
         },
         {
-          id: "live-deadline-flip",
+          id: "live-confidence-transition",
           sourceTask: "010",
           description:
-            "A current estimate flips to the expired state in an open tab " +
-            "at its deadline without reload or aria-live chatter.",
+            "A current estimate becomes last-known with decayed confidence " +
+            "after 60 minutes without losing its metrics.",
         },
         {
           id: "glossary-hint-positioning",
@@ -1023,7 +1023,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/packscout-ev-clock.client.test.ts",
           testName:
-            "a browser clock rollback cannot increase confidence after it has aged",
+            "browser wall-clock skew cannot age or rejuvenate the trusted served confidence",
         },
         {
           file: "convex/publicRepacksV3.test.ts",

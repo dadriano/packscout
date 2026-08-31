@@ -9,6 +9,7 @@ import {
   buildPackScoutPublicEvUnavailableV3,
   buildPackScoutPublicEvZeroV3,
   buildPublicRepackViewDetailV3,
+  buildPublicDashboardBundleV3,
 } from "./__fixtures__/data-release-v3.fixture.ts";
 import {
   packScoutDisplayedEvV3Schema,
@@ -107,6 +108,11 @@ test("old known estimates remain rankable at zero confidence without treating gr
     ...original, evEstimates:{...original.evEstimates,packScout:present(24 * 60 * minute,buildPackScoutPublicEvZeroV3())},
   });
   assert.equal(publicDashboardBundleV3Schema.safeParse({
+    ...buildPublicDashboardBundleV3(),
+    confidenceEvaluatedAt: at(24 * 60 * minute),
+    providerHealthEvaluatedAt: at(24 * 60 * minute),
+    providerHealthSummary: { state: "unavailable", observedAt: null, freshThrough: null,
+      totalProviderCount: 1, delayedProviderCount: 1, nextHealthEvaluationAt: null },
     release:buildDataReleaseV3Identity(), opportunities:[publicRepackViewSummaryV3FromDetail(detail)],
     details:[detail], selectedRepack:detail,
   }).success, true);
@@ -121,6 +127,22 @@ test("historical sellout and calculation timestamps remain truthful while confid
   assert.equal(retained.historicalSoldOutAt, original.soldOutAt);
   assert.equal(retained.calculatedAt, original.calculatedAt);
   assert.equal(retained.confidence.scoreBasisPoints, 0);
+});
+
+test("restocking cannot rank retained sold-out economics before a new valid calculation", () => {
+  const original = buildPublicRepackViewDetailV3();
+  const detail = publicRepackViewDetailV3Schema.parse({
+    ...original,
+    evEstimates: { ...original.evEstimates,
+      packScout: present(45 * minute, buildPackScoutPublicEvSoldOutHistoricalV3()) },
+  });
+  assert.equal(detail.availability, "available");
+  assert.equal(publicDashboardBundleV3Schema.safeParse({
+    ...buildPublicDashboardBundleV3(), confidenceEvaluatedAt: at(45 * minute),
+    providerHealthEvaluatedAt: at(45 * minute),
+    opportunities: [publicRepackViewSummaryV3FromDetail(detail)],
+    details: [detail], selectedRepack: detail,
+  }).success, false);
 });
 
 test("retained projections reject invented confidence, timestamps, price, positive EV, and protected fields", () => {
