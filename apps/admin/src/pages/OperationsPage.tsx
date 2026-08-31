@@ -79,9 +79,13 @@ export function OperationsPage({
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const priorStates = useRef(new Map<string, string>());
   const readInFlight = useRef(false);
+  const refreshAfterRead = useRef(false);
 
-  const refresh = useCallback(() => {
-    if (readInFlight.current) return;
+  const refresh = useCallback((reason: "explicit" | "poll" = "explicit") => {
+    if (readInFlight.current) {
+      if (reason === "explicit") refreshAfterRead.current = true;
+      return;
+    }
     setRefreshIndex((value) => value + 1);
   }, []);
 
@@ -91,7 +95,7 @@ export function OperationsPage({
     readInFlight.current = true;
     void getProviderSourceOperationsOverview()
       .then((result) => {
-        if (!active) return;
+        if (!active || refreshAfterRead.current) return;
         const changes = result.sources.flatMap((source) => {
           const next = providerCatalog ? sourceOperationalLabel(source) : pulseState(source).label;
           const previous = priorStates.current.get(source.providerId);
@@ -105,21 +109,29 @@ export function OperationsPage({
         setReadFailure(null);
       })
       .catch((error: unknown) => {
-        if (active) setReadFailure(readError(error));
+        if (active && !refreshAfterRead.current) setReadFailure(readError(error));
       })
       .finally(() => {
         if (active) {
           readInFlight.current = false;
           setLoading(false);
+          if (refreshAfterRead.current) {
+            refreshAfterRead.current = false;
+            setRefreshIndex((value) => value + 1);
+          }
         }
       });
-    return () => { active = false; readInFlight.current = false; };
+    return () => {
+      active = false;
+      readInFlight.current = false;
+      refreshAfterRead.current = false;
+    };
   }, [refreshIndex, displayPaused, providerCatalog]);
 
   useEffect(() => {
     if (displayPaused) return;
     const poll = () => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "visible") refresh("poll");
     };
     const intervalId = window.setInterval(poll, REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", poll);

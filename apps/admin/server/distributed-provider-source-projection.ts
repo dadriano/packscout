@@ -280,7 +280,8 @@ export function configuredSource(input: Readonly<{
       total: { kind: "unknown", label: "Total unknown" },
     },
     measurements: input.evidence?.measurements ?? unavailableProviderSourceMeasurements(
-      configured ? "database_unreachable" : "not_configured",
+      config === null ? "not_configured"
+        : input.capability === null ? "unsupported" : "database_unreachable",
     ),
     activeRun: runSummary(active, currentProfile),
     latestRun: runSummary(latest, currentProfile),

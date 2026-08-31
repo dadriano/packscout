@@ -11,6 +11,7 @@ interface PulseState {
 
 const states: Record<string, PulseState> = {
   "Not configured": { label: "Not configured", description: "This provider has no configured source. Configure it before importing.", tone: "pending" },
+  "Unsupported adapter": { label: "Unsupported adapter", description: "This provider has a configuration, but its adapter is not supported by this admin runtime. Review the adapter in source settings; measurements are unavailable.", tone: "pending" },
   "Connection transition uncertain": { label: "Connection uncertain", description: "The source connection is changing and its current state cannot be confirmed. Local run and storage evidence remain separate.", tone: "danger" },
   "Waiting on connection recovery": { label: "Connection blocked", description: "The processor is waiting for its source connection to recover before it can continue.", tone: "danger" },
   "Pause requested": { label: "Pause requested", description: "A pause was requested. The current page may still commit before ingestion pauses.", tone: "pending" },
@@ -30,8 +31,15 @@ const states: Record<string, PulseState> = {
   Idle: { label: "Idle", description: "The processor is not reporting active work. Check its schedule and last committed page before assuming it is caught up.", tone: "neutral" },
 };
 
+export function isUnsupportedSource(source: ProviderSourceOperationsSource): boolean {
+  return !source.configured && Object.values(source.measurements).some(
+    (measurement) => measurement.state === "unavailable" && measurement.reason === "unsupported",
+  );
+}
+
 export function pulseState(source: ProviderSourceOperationsSource): PulseState {
   const activity = source.measurements.activity;
+  if (isUnsupportedSource(source)) return states["Unsupported adapter"]!;
   if (!source.configured) return states["Not configured"]!;
   if (source.source?.lifecycle === "disabled") return states.Disabled!;
   if (source.source?.lifecycle === "draft") return states.Draft!;
@@ -70,6 +78,7 @@ export function pulseIssue(source: ProviderSourceOperationsSource): string | nul
   if (status.label === "Activity unverified") return "Running is reported; current activity cannot be verified.";
   if (status.label === "Connection blocked") return "Waiting for the source connection to recover.";
   if (status.label === "Connection uncertain") return "Connection state cannot be confirmed.";
+  if (status.label === "Unsupported adapter") return "Review the configured adapter in source settings.";
   if (status.label === "Not configured") return "Configure this provider to begin importing.";
   if (status.label === "No processor state") return "Processor activity is unavailable.";
   if (source.freshness.state === "stale" && source.source?.lifecycle === "active" && !source.source.pauseRequested && source.processor?.activity !== "paused") return "Source freshness is outside its configured window.";

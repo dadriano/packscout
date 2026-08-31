@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { age, dateTime, humanize, interval } from "./OperationStatus";
 import { SourceOperationControls, type SourceOperationControlsProps } from "./SourceOperationControls";
-import { count, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
+import { count, isUnsupportedSource, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
 
 const entityLabels = {
   categories: "Categories", packs: "Packs", collectibles: "Collectibles", aliases: "Aliases",
@@ -50,6 +50,11 @@ function QualityEvidence({ source }: { source: ProviderSourceOperationsSource })
 export function ProviderPulseDetails(props: SourceOperationControlsProps & { observedAt: string }) {
   const { source, observedAt } = props;
   const { storage, records, activity } = source.measurements;
+  const unsupportedSource = isUnsupportedSource(source);
+  const runtimeUnavailable = unsupportedSource
+    || (activity.state === "unavailable" && activity.reason === "database_unreachable");
+  const nextDue = runtimeUnavailable && !source.schedule?.nextDueAt ? "Unavailable"
+    : source.schedule ? dateTime(source.schedule.nextDueAt) : "Not scheduled";
   const run = source.activeRun ?? source.latestRun;
   const runScope = source.activeRun ? "Current run" : "Latest run";
   const failure = source.processor?.actionRequiredCode ?? run?.failureCode ?? source.quality.latestFailureCode;
@@ -73,18 +78,18 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
           <h3>Run & schedule</h3>
           <dl className="provider-pulse__detail-facts">
             <div><dt>Source lifecycle</dt><dd>{source.source ? <IndicatorTooltip label={humanize(source.source.lifecycle)}
-              description="Active allows ingestion. Paused retains the cursor without starting another page. Disabled prevents ingestion. Draft has not been activated. Replaced belongs to an older source revision. Lifecycle is separate from the latest run state." /> : "Not configured"}</dd></div>
+              description="Active allows ingestion. Paused retains the cursor without starting another page. Disabled prevents ingestion. Draft has not been activated. Replaced belongs to an older source revision. Lifecycle is separate from the latest run state." /> : unsupportedSource ? "Unavailable" : "Not configured"}</dd></div>
             <div><dt><IndicatorTooltip label="Accepted operations" description="Accepted source operations across all retained runs. They may insert or update existing entities, so this is not a unique entity or stored-row count." /></dt><dd>{count(records.state === "available" ? records.accepted : null)}<span className="provider-pulse__subtext">All retained runs</span></dd></div>
-            <div><dt>{runScope}</dt><dd>{run ? <Link to={importRunDetailPath({ providerId: source.providerId, runId: run.id })}>{humanize(run.state)}</Link> : "Not recorded"}</dd></div>
+            <div><dt>{runScope}</dt><dd>{run ? <Link to={importRunDetailPath({ providerId: source.providerId, runId: run.id })}>{humanize(run.state)}</Link> : runtimeUnavailable ? "Unavailable" : "Not recorded"}</dd></div>
             <div><dt>{runScope} processed</dt><dd>{run ? count(source.progress.records.total) : "Unavailable"}<span className="provider-pulse__subtext">Source total unknown</span></dd></div>
             <div><dt><IndicatorTooltip label="Average throughput" description="Processed records divided by elapsed time for the displayed current or latest run. This is a run average, not a live rate measured between refreshes." /></dt><dd>{run && source.progress.throughputRecordsPerSecond !== null ? `${source.progress.throughputRecordsPerSecond.toLocaleString("en-US", { maximumFractionDigits: 1 })}/sec` : "Unavailable"}</dd></div>
             <div><dt>Committed pages</dt><dd>{run ? count(source.progress.pages) : "Unavailable"}</dd></div>
             <div><dt>Run elapsed</dt><dd>{run ? age(source.progress.elapsedMilliseconds) : "Unavailable"}</dd></div>
             <div><dt>Last committed page</dt><dd>{activity.state === "available" ? dateTime(activity.lastCommittedPageAt) : "Unavailable"}</dd></div>
-            <div><dt>Schedule</dt><dd>{source.schedule ? `Every ${interval(source.schedule.intervalSeconds)}` : "Not scheduled"}</dd></div>
-            <div><dt>Next due</dt><dd>{source.schedule ? dateTime(source.schedule.nextDueAt) : "Not scheduled"}</dd></div>
+            <div><dt>Schedule</dt><dd>{source.schedule ? `Every ${interval(source.schedule.intervalSeconds)}` : runtimeUnavailable ? "Unavailable" : "Not scheduled"}</dd></div>
+            <div><dt>Next due</dt><dd>{nextDue}</dd></div>
             <div><dt>Phase / wait</dt><dd>{source.processor ? humanize(source.processor.phase) : "Unavailable"}{source.processor?.waitReason ? ` / ${humanize(source.processor.waitReason)}` : ""}</dd></div>
-            <div><dt>Retries / failures</dt><dd>{source.processor ? count(source.processor.retryCount) : "Unavailable"} / {count(source.quality.consecutiveFailures)}</dd></div>
+            <div><dt>Retries / failures</dt><dd>{source.processor && !runtimeUnavailable ? count(source.processor.retryCount) : "Unavailable"} / {runtimeUnavailable ? "Unavailable" : count(source.quality.consecutiveFailures)}</dd></div>
             {failure ? <div><dt>Failure code</dt><dd><code>{failure}</code></dd></div> : null}
           </dl>
           <p className="provider-pulse__subtext">{records.state === "available" ? `Retained-run totals measured ${dateTime(records.measuredAt)}.` : `Retained-run totals unavailable: ${humanize(records.reason).toLowerCase()}.`}</p>
@@ -109,7 +114,7 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
         ) : null}
         <footer className="provider-pulse__actions">
           <nav aria-label={`${source.displayName} data links`}>
-            <Link to={source.configured ? `/providers/${source.providerId}` : "/source-configuration"}>{source.configured ? "Provider" : "Configure source"}</Link>
+            <Link to={source.configured ? `/providers/${source.providerId}` : "/source-configuration"}>{source.configured ? "Provider" : unsupportedSource ? "Source settings" : "Configure source"}</Link>
             <Link to={`/runs?providerId=${source.providerId}`}>Run history</Link>
             <Link to={`/data/canonical?provider=${source.provider}`}>Canonical data</Link>
             <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>Open quarantine</Link>

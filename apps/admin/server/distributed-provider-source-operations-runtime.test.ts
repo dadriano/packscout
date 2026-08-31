@@ -93,6 +93,40 @@ test("an organization with only archived providers receives an empty runtime ove
   assert.equal(fixture.downstreamCalls(), 0);
 });
 
+test("an unsupported configured adapter is distinct from absent configuration without querying either database", async () => {
+  let databaseReads = 0;
+  const runtime = createDistributedProviderSourceOperationsRuntime({
+    central: {
+      providers: { async findMany() { return [
+        {
+          id: uuid(20), provider_key: "clutchpacks", display_name: "ClutchPacks", lifecycle: "active",
+          active_config_version: {
+            id: uuid(22), adapter_key: "unsupported-adapter-v99",
+            schedule_seconds: 3_600, stale_after_seconds: 7_200,
+          },
+        },
+        {
+          id: uuid(30), provider_key: "courtyard", display_name: "Courtyard", lifecycle: "active",
+          active_config_version: null,
+        },
+      ]; } },
+    } as unknown as CentralPrismaClient,
+    gateway: {
+      async runWithAdminProviderDatabase() {
+        databaseReads += 1;
+        throw new Error("Unavailable source capabilities must not open provider databases.");
+      },
+    },
+    sourceIntegrations: createLaunchSourceIntegrationCapabilities(),
+    diagnosticCursorKey: new Uint8Array(32).fill(7), now: () => new Date(now),
+  });
+  const overview = await runtime.operations.overview(organizationId);
+  assert.equal(overview.sources.length, 2);
+  assert.deepEqual(overview.sources[0]!.measurements, unavailableProviderSourceMeasurements("unsupported"));
+  assert.deepEqual(overview.sources[1]!.measurements, unavailableProviderSourceMeasurements("not_configured"));
+  assert.equal(databaseReads, 0);
+});
+
 test("distributed request sizes use the current immutable profile, never a different run's configuration", async () => {
   const configId = uuid(22);
   const run: AdminLocalRunRecord = {

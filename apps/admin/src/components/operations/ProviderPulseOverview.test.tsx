@@ -66,6 +66,38 @@ test("worker indicators do not claim running from missing, expired, or unavailab
   assert.equal(pulseNeedsAttention(paused), false, "staleness alone does not alert on intentional pause");
 });
 
+test("unsupported configured adapters have distinct guidance from missing configuration", async (context) => {
+  const overview = operationsOverview();
+  const unsupported = operationSource(0, {
+    configured: false, source: null, schedule: null, processor: null, activeRun: null,
+    measurements: unavailableProviderSourceMeasurements("unsupported"),
+  });
+  const absent = operationSource(1, {
+    configured: false, source: null, schedule: null, processor: null,
+    measurements: unavailableProviderSourceMeasurements("not_configured"),
+  });
+  overview.sources = [unsupported, absent];
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={true} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const card = rendered.container.querySelector(`[data-provider-id="${unsupported.providerId}"]`)!;
+  assert.match(card.textContent!, /Unsupported adapter/u);
+  assert.match(card.textContent!, /Source settings/u);
+  assert.doesNotMatch(card.textContent!, /Not configured|Configure this provider|Configure source/u);
+  assert.equal(card.querySelector(".provider-pulse__detail-facts dd")!.textContent, "Unavailable");
+  const facts = new Map([...card.querySelectorAll(".provider-pulse__detail-facts > div")].map((fact) => [
+    fact.querySelector("dt")!.textContent, fact.querySelector("dd")!.textContent,
+  ]));
+  for (const label of ["Latest run", "Schedule", "Next due"]) assert.equal(facts.get(label), "Unavailable");
+  assert.equal(facts.get("Retries / failures"), "Unavailable / Unavailable");
+  const indicator = [...card.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Unsupported adapter"))!;
+  await act(async () => indicator.focus());
+  assert.match(rendered.dom.window.document.querySelector('[role="tooltip"]')!.textContent!, /has a configuration, but its adapter is not supported/u);
+  const absentCard = rendered.container.querySelector(`[data-provider-id="${absent.providerId}"]`)!;
+  assert.match(absentCard.textContent!, /Not configured/u);
+  assert.match(absentCard.textContent!, /Configure this provider to begin importing/u);
+  assert.equal(pulseNeedsAttention(unsupported), true);
+});
+
 test("terminal and paused state take precedence over historical retries and stale running evidence", () => {
   const source = operationSource(0);
   source.processor!.retryCount = 7;
@@ -84,6 +116,30 @@ test("terminal and paused state take precedence over historical retries and stal
   source.source!.lifecycle = "active";
   source.source!.pauseRequested = true;
   assert.equal(pulseState(source).label, "Pause requested");
+});
+
+test("unreachable runtime does not turn missing history into zero while count-only failures preserve run facts", async (context) => {
+  const overview = operationsOverview();
+  const unreachable = operationSource(0, {
+    activeRun: null, latestRun: null,
+    measurements: unavailableProviderSourceMeasurements("database_unreachable"),
+  });
+  unreachable.schedule!.nextDueAt = null;
+  const countsFailed = operationSource(3);
+  countsFailed.measurements.storage = { state: "unavailable", reason: "query_failed" };
+  countsFailed.measurements.records = { state: "unavailable", reason: "query_failed" };
+  overview.sources = [unreachable, countsFailed];
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const factsFor = (providerId: string) => new Map([...rendered.container.querySelectorAll(`[data-provider-id="${providerId}"] .provider-pulse__detail-facts > div`)].map((fact) => [fact.querySelector("dt")!.textContent, fact.querySelector("dd")!.textContent]));
+  const missingFacts = factsFor(unreachable.providerId);
+  assert.equal(missingFacts.get("Latest run"), "Unavailable");
+  assert.equal(missingFacts.get("Next due"), "Unavailable");
+  assert.equal(missingFacts.get("Retries / failures"), "Unavailable / Unavailable");
+  assert.equal(missingFacts.get("Schedule"), "Every 5m", "known central schedule remains visible");
+  const knownFacts = factsFor(countsFailed.providerId);
+  assert.equal(knownFacts.get("Latest run"), "Failed");
+  assert.equal(knownFacts.get("Retries / failures"), "0 / 2", "a totals failure does not erase independently available activity");
 });
 
 test("provider metric and state explanations are available on focus with associated tooltips", async (context) => {
