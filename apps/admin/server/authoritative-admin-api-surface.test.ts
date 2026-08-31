@@ -47,6 +47,10 @@ const AUTHORITATIVE_API_MOUNTS: readonly ApiMount[] = [
     path: "/api/provider-source-operations",
     target: "sourceAdministrationUnconfigured",
   },
+  {
+    path: "/api/provider-sources",
+    target: "createDistributedProviderRequestSettingsRouter",
+  },
   { path: "/api/provider-sources", target: "createProviderSourcesRouter" },
   {
     path: "/api/provider-sources",
