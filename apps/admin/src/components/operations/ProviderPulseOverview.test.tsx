@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import * as React from "react";
+import { act } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { unavailableProviderSourceMeasurements } from "@packscout/contracts";
+import { cleanupPage, pageText, renderPage } from "../../testing/react-page-test.tsx";
+import { operationSource, operationsOverview } from "../../testing/provider-source-operations-fixture.ts";
+import { ProviderPulseOverview } from "./ProviderPulseOverview.tsx";
+import { measurementTotal, pulseNeedsAttention, pulseState } from "./provider-pulse-presentation.ts";
+
+Object.assign(globalThis, { React });
+
+test("provider overview puts problems first, keeps details collapsed, and links the correct provider data", async (context) => {
+  const overview = operationsOverview();
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const cards = [...rendered.container.querySelectorAll(".provider-pulse__card")];
+  assert.equal(cards.length, 4);
+  assert.match(cards[0]!.querySelector("h2")!.textContent!, /ClutchPacks/u);
+  assert.deepEqual([...rendered.container.querySelectorAll("details")].map((details) => details.open), [false, false, false, false]);
+  assert.equal(rendered.container.querySelectorAll(".provider-pulse__summary > div").length, 4);
+  assert.ok(rendered.container.querySelector('a[href="/data/canonical?provider=courtyard"]'));
+  assert.match(pageText(rendered), /All retained runs/u);
+  assert.ok(![...rendered.container.querySelectorAll("button")].some((button) => button.textContent === "Run now"));
+  const firstDetails = cards[0]!.querySelector("details")!;
+  await act(async () => firstDetails.querySelector("summary")!.click());
+  assert.equal(firstDetails.open, true);
+  assert.equal(firstDetails.querySelectorAll("tbody tr").length, 10);
+});
+
+test("partial aggregates preserve available counts and missing provider data stays unavailable", async (context) => {
+  const overview = operationsOverview();
+  overview.sources = overview.sources.slice(0, 2);
+  overview.sources[1]!.measurements = unavailableProviderSourceMeasurements("database_unreachable");
+  const expected = measurementTotal(overview.sources, "storage");
+  assert.equal(expected.value, 1_001_190);
+  assert.equal(expected.coverage, "Partial · 1/2 providers");
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  assert.match(pageText(rendered), /Partial · 1\/2 providers/u);
+  const missing = rendered.container.querySelector(`[data-provider-id="${overview.sources[1]!.providerId}"]`)!;
+  assert.equal([...missing.querySelectorAll(".provider-pulse__metrics dd")].filter((value) => value.textContent?.startsWith("Unavailable")).length, 4);
+  assert.match(missing.textContent!, /Database unreachable/u);
+  assert.equal(measurementTotal([overview.sources[1]!], "records").value, null);
+  const excessive = operationSource(0);
+  if (excessive.measurements.records.state === "available") excessive.measurements.records.processed = Number.MAX_SAFE_INTEGER;
+  assert.equal(measurementTotal([excessive, excessive], "records").value, null);
+});
+
+test("worker indicators do not claim running from missing, expired, or unavailable leases", () => {
+  const source = operationSource(0);
+  assert.equal(pulseState(source).label, "Retrying");
+  assert.equal(source.measurements.activity.state, "available");
+  if (source.measurements.activity.state !== "available") return;
+  source.measurements.activity.importLease.state = "expired";
+  assert.equal(pulseState(source).label, "Lease expired");
+  assert.equal(pulseNeedsAttention(source), true);
+  source.measurements.activity.importLease.state = "unowned";
+  assert.equal(pulseState(source).label, "No import lease");
+  source.measurements.activity = { state: "unavailable", reason: "query_failed" };
+  assert.equal(pulseState(source).label, "Activity unverified");
+  const paused = operationSource(2);
+  paused.freshness.state = "stale";
+  if (paused.measurements.activity.state === "available") paused.measurements.activity.quarantine.open = 0;
+  assert.equal(pulseNeedsAttention(paused), false, "staleness alone does not alert on intentional pause");
+});
+
+test("terminal and paused state take precedence over historical retries and stale running evidence", () => {
+  const source = operationSource(0);
+  source.processor!.retryCount = 7;
+  source.processor!.activity = "action_required";
+  source.processor!.phase = "action_required";
+  if (source.measurements.activity.state === "available") source.measurements.activity.importLease.state = "expired";
+  assert.equal(pulseState(source).label, "Action required");
+  source.processor!.activity = "paused";
+  source.processor!.phase = "paused";
+  assert.equal(pulseState(source).label, "Paused");
+  source.processor!.activity = "running";
+  source.source!.lifecycle = "paused";
+  assert.equal(pulseState(source).label, "Paused");
+  source.source!.lifecycle = "disabled";
+  assert.equal(pulseState(source).label, "Disabled");
+  source.source!.lifecycle = "active";
+  source.source!.pauseRequested = true;
+  assert.equal(pulseState(source).label, "Pause requested");
+});
+
+test("provider metric and state explanations are available on focus with associated tooltips", async (context) => {
+  const overview = operationsOverview();
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const stored = [...rendered.container.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Stored rows"))!;
+  await act(async () => stored.focus());
+  const explanation = rendered.dom.window.document.getElementById(stored.getAttribute("aria-describedby")!);
+  assert.equal(explanation?.getAttribute("role"), "tooltip");
+  assert.match(explanation!.textContent!, /including child and relationship rows/u);
+  await act(async () => stored.dispatchEvent(new rendered.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  assert.equal(rendered.dom.window.document.querySelector('[role="tooltip"]'), null);
+  const action = [...rendered.container.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Action required"))!;
+  await act(async () => action.focus());
+  assert.match(rendered.dom.window.document.querySelector('[role="tooltip"]')!.textContent!, /cannot recover automatically/u);
+});

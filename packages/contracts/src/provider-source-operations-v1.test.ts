@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { unavailableProviderSourceMeasurements } from "./provider-source-measurements.ts";
 import {
   PROVIDER_SOURCE_OPERATIONS_VERSION,
   providerSourceDiagnosticEventSchema,
@@ -71,6 +72,7 @@ test("source overviews retain the fifty-row bound and validate every present row
       total: { kind: "unknown", label: "Total unknown" },
     },
     activeRun: null,
+    measurements: unavailableProviderSourceMeasurements("not_configured"),
     latestRun: null,
     connectionImpact: { state: "none", safeCode: null, healthGeneration: null },
   });

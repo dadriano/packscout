@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express from "express";
-import { PROVIDER_SOURCE_OPERATIONS_VERSION } from "@packscout/contracts";
+import { PROVIDER_SOURCE_OPERATIONS_VERSION, unavailableProviderSourceMeasurements } from "@packscout/contracts";
 import type { AdminLocalProviderOverview, AdminLocalRunRecord, CentralPrismaClient } from "@packscout/database";
 import { AuthServiceError, createLaunchSourceIntegrationCapabilities, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "./auth/cookies.ts";
@@ -126,7 +126,8 @@ test("distributed request sizes use the current immutable profile, never a diffe
     } as unknown as CentralPrismaClient,
     gateway: {
       async runWithAdminProviderDatabase() {
-        return { state: "reachable", value: { overview, runs: [run, older], details: [] } };
+        return { state: "reachable", value: { overview, runs: [run, older], details: [],
+          measurements: unavailableProviderSourceMeasurements("query_failed") } };
       },
     } as unknown as Parameters<typeof createDistributedProviderSourceOperationsRuntime>[0]["gateway"],
     sourceIntegrations: createLaunchSourceIntegrationCapabilities(),
@@ -136,6 +137,8 @@ test("distributed request sizes use the current immutable profile, never a diffe
   assert.equal(detail.source.source?.requestSizePolicy, "adapter_profile");
   assert.equal(detail.source.source?.recordsPerRequest, 2_000);
   assert.equal(detail.source.activeRun?.recordsPerRequest, 2_000);
+  assert.equal(detail.source.processor?.activity, "running", "a count failure does not hide runtime state");
+  assert.deepEqual(detail.source.measurements.storage, { state: "unavailable", reason: "query_failed" });
   assert.deepEqual(detail.runHistory.map((value) => value.recordsPerRequest), [2_000, null]);
 });
 

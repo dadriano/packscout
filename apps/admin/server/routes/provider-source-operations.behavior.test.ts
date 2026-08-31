@@ -4,6 +4,7 @@ import { test } from "node:test";
 import express from "express";
 import {
   PROVIDER_SOURCE_OPERATIONS_VERSION,
+  unavailableProviderSourceMeasurements,
   type ProviderSourceDiagnosticHistory,
   type ProviderSourceOperationsDetail,
   type ProviderSourceOperationsOverview,
@@ -73,6 +74,7 @@ function source(index: number): ProviderSourceOperationsSource {
       total: { kind: "unknown", label: "Total unknown" },
     },
     activeRun: null,
+    measurements: unavailableProviderSourceMeasurements("not_configured"),
     latestRun: null,
     connectionImpact: {
       state: "none",

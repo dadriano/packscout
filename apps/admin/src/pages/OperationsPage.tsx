@@ -9,6 +9,9 @@ import { requestManualImport } from "../api/import-operations";
 import { getProviderSourceOperationsOverview } from "../api/provider-source-operations";
 import { commandProviderSource } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
+import { IndicatorTooltip } from "../components/IndicatorTooltip";
+import { ProviderPulseOverview } from "../components/operations/ProviderPulseOverview";
+import { pulseState } from "../components/operations/provider-pulse-presentation";
 import {
   ConnectionOperationsSummary,
   ProviderSourceOperationsLedger,
@@ -75,18 +78,22 @@ export function OperationsPage({
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const priorStates = useRef(new Map<string, string>());
+  const readInFlight = useRef(false);
 
   const refresh = useCallback(() => {
+    if (readInFlight.current) return;
     setRefreshIndex((value) => value + 1);
   }, []);
 
   useEffect(() => {
+    if (displayPaused) return;
     let active = true;
+    readInFlight.current = true;
     void getProviderSourceOperationsOverview()
       .then((result) => {
         if (!active) return;
         const changes = result.sources.flatMap((source) => {
-          const next = sourceOperationalLabel(source);
+          const next = providerCatalog ? sourceOperationalLabel(source) : pulseState(source).label;
           const previous = priorStates.current.get(source.providerId);
           priorStates.current.set(source.providerId, next);
           return previous && previous !== next
@@ -101,10 +108,13 @@ export function OperationsPage({
         if (active) setReadFailure(readError(error));
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          readInFlight.current = false;
+          setLoading(false);
+        }
       });
-    return () => { active = false; };
-  }, [refreshIndex]);
+    return () => { active = false; readInFlight.current = false; };
+  }, [refreshIndex, displayPaused, providerCatalog]);
 
   useEffect(() => {
     if (displayPaused) return;
@@ -165,13 +175,13 @@ export function OperationsPage({
 
   const staleDisplay = displayPaused || readFailure !== null;
   return (
-    <div className="admin-page source-operations-page">
+    <div className={`admin-page source-operations-page${providerCatalog ? "" : " provider-pulse-page"}`}>
       <PageHeader
         eyebrow={providerCatalog ? "Data pipeline / Providers" : "Data pipeline / Status"}
-        title={providerCatalog ? "Data providers" : "Platform processors"}
+        title={providerCatalog ? "Data providers" : "Pipeline status"}
         description={providerCatalog
           ? "Canonical provider roots and their isolated source lanes. Platforms may share one connection while retaining independent cursors, runs, freshness, and quality."
-          : "One shared source connection feeds four isolated processor lanes. Local cursors, lifecycle, freshness, and quality remain distinct when the connection is affected."}
+          : "All providers. Problems first."}
         actions={
           <>
             {canConfigure ? (
@@ -210,32 +220,38 @@ export function OperationsPage({
       <p className="admin-visually-hidden" aria-live="polite" aria-atomic="true">
         {announcement}
       </p>
-      <section className="source-refresh-strip" aria-label="Display refresh status">
+      <section className={providerCatalog ? "source-refresh-strip" : "provider-pulse__refresh"} aria-label="Display refresh status">
         <div>
-          <StatusBadge
-            label={staleDisplay ? "Stale display" : "Live display"}
-            tone={staleDisplay ? "pending" : "ready"}
-          />
+          {providerCatalog ? <StatusBadge label={staleDisplay ? "Stale display" : "Live display"} tone={staleDisplay ? "pending" : "ready"} /> : (
+            <IndicatorTooltip label={displayPaused ? "Display paused" : readFailure ? "Refresh failed" : "Auto-refresh"}
+              tone={staleDisplay ? "pending" : "neutral"}
+              description={displayPaused ? "The displayed snapshot is frozen. Ingestion and scheduling continue. Resume display to fetch current evidence."
+                : readFailure ? "The latest refresh failed. Previously loaded evidence is retained and its displayed measurement times have not changed."
+                  : "Status refreshes every 5 seconds while this page is visible. Stored-row and retained-run totals are cached for up to 60 seconds. This does not imply that a worker is running."} />
+          )}
           <span>
-            {displayPaused
+            {providerCatalog ? displayPaused
               ? "Display updates are paused; ingestion and scheduling continue."
               : overview
                 ? `Visible-page refresh every 5 seconds · evidence time ${new Date(overview.refreshedAt).toLocaleString()}`
-                : "Visible-page refresh every 5 seconds"}
+                : "Visible-page refresh every 5 seconds"
+              : displayPaused ? "Snapshot paused · ingestion continues"
+                : overview ? `Updated ${new Date(overview.refreshedAt).toLocaleTimeString()} · every 5s` : "Every 5 seconds"}
           </span>
         </div>
-        {!canOperate ? <span>Read-only: processor commands require data-operator access.</span> : null}
+        {!canOperate ? <span>{providerCatalog ? "Read-only: processor commands require data-operator access." : "Read-only access"}</span> : null}
       </section>
 
       {loading && !overview ? (
         <div className="ops-loading" aria-live="polite" aria-busy="true">
-          Loading registered connection and processor state…
+          {providerCatalog ? "Loading registered connection and processor state…" : "Loading providers…"}
         </div>
       ) : null}
       {readFailure ? (
         <div className="ops-error" role="alert">
           <p>{readFailure}</p>
           <button type="button" className="admin-button admin-button-secondary" onClick={() => {
+            setDisplayPaused(false);
             setLoading(true);
             refresh();
           }}>Refresh safe evidence</button>
@@ -250,7 +266,9 @@ export function OperationsPage({
         </div>
       ) : null}
 
-      {overview ? (
+      {overview && !providerCatalog ? <ProviderPulseOverview overview={overview} canOperate={canOperate} pendingKey={pendingKey}
+        onCommand={(source, command) => { void operate(source, command); }} /> : null}
+      {overview && providerCatalog ? (
         <>
           <ConnectionOperationsSummary
             connection={overview.connection}
