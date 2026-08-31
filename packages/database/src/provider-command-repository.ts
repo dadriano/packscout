@@ -17,6 +17,8 @@ import {
   providerWorkerLeaseIsLive,
   setProviderImportLeaseContext,
 } from "./provider-worker-lease-repository.ts";
+import { appendProviderRuntimeResumeGuard, providerRuntimeResumeGuardMatches,
+  type ProviderRuntimeResumeGuard } from "./provider-runtime-resume-guard.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -245,6 +247,7 @@ export class PrismaProviderCommandRepository {
     readonly correlationId: string;
     readonly reason: string | null;
     readonly requestedAt: Date;
+    readonly expectedRuntimeGuard?: ProviderRuntimeResumeGuard;
   }): Promise<ProviderControlCommandResult> {
     requireUuid(input.commandId, "commandId");
     requireUuid(input.requestedByOperatorId, "requestedByOperatorId");
@@ -258,10 +261,16 @@ export class PrismaProviderCommandRepository {
     const reason = normalizedReason(input.commandType, input.reason);
     const normalized = { ...input, reason };
     return this.database.$transaction(async (transaction) => {
+      const guardedLease = input.expectedRuntimeGuard ? await lockProviderWorkerLease(transaction, "import") : null;
       const runtime = await lockRuntime(transaction);
       const existing = await transaction.control_commands.findUnique({
         where: { idempotency_key: input.idempotencyKey },
       }) as CommandRow | null;
+      if (input.expectedRuntimeGuard && guardedLease && !await providerRuntimeResumeGuardMatches(transaction,
+        { ...input, expectedRuntimeGuard: input.expectedRuntimeGuard }, guardedLease, existing !== null)) {
+        return { commandId: input.commandId, outcome: "conflict", code: "RUNTIME_RESUME_GUARD_CONFLICT",
+          generation: runtime.state_generation };
+      }
       if (existing) {
         if (!requestMatches(existing, normalized)) {
           return {
@@ -470,6 +479,8 @@ export class PrismaProviderCommandRepository {
         generation,
         at: input.requestedAt,
       });
+      if (input.expectedRuntimeGuard) await appendProviderRuntimeResumeGuard(transaction,
+        { ...input, expectedRuntimeGuard: input.expectedRuntimeGuard });
       return { commandId: input.commandId, outcome: "accepted", code, generation };
     }, TRANSACTION_OPTIONS);
   }

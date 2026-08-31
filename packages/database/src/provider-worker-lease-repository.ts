@@ -105,50 +105,60 @@ export async function setProviderImportLeaseContext(
   `);
 }
 
+export interface AcquireProviderWorkerLeaseInput {
+  readonly role: ProviderWorkerRole;
+  readonly owner: string;
+  readonly leaseMilliseconds: number;
+}
+
+/** Normal lease admission within a caller-owned transaction, including any required claim audit. */
+export async function acquireProviderWorkerLease(transaction: ProviderTransactionClient,
+  input: AcquireProviderWorkerLeaseInput): Promise<AcquireProviderWorkerLeaseResult> {
+  requireLeaseDuration(input.owner, input.leaseMilliseconds);
+  let row = await lockProviderWorkerLease(transaction, input.role);
+  const active = row.lease_owner !== null
+    && row.lease_expires_at !== null
+    && row.lease_expires_at > row.database_now;
+  if (active && row.lease_owner !== input.owner) {
+    return {
+      kind: "held" as const,
+      fence: row.lease_fence,
+      expiresAt: row.lease_expires_at as Date,
+    };
+  }
+  const takeover = !active || row.lease_owner === null;
+  const heartbeatAt = row.database_now;
+  const expiresAt = new Date(
+    heartbeatAt.getTime() + input.leaseMilliseconds,
+  );
+  const updated = await transaction.provider_worker_states.updateMany({
+    where: { worker_role: input.role, row_version: row.row_version },
+    data: {
+      lease_owner: input.owner,
+      lease_fence: takeover ? row.lease_fence + 1n : row.lease_fence,
+      heartbeat_at: heartbeatAt,
+      lease_expires_at: expiresAt,
+      row_version: { increment: 1n },
+      updated_at: heartbeatAt,
+    },
+  });
+  if (updated.count !== 1) throw new Error("Provider worker lease changed concurrently.");
+  row = await lockProviderWorkerLease(transaction, input.role);
+  return {
+    kind: takeover ? "acquired" as const : "renewed" as const,
+    lease: leaseFrom(row),
+  };
+}
+
 export class PrismaProviderWorkerLeaseRepository {
   constructor(private readonly database: ProviderPrismaClient) {}
 
-  async acquire(input: {
-    readonly role: ProviderWorkerRole;
-    readonly owner: string;
-    readonly leaseMilliseconds: number;
-  }): Promise<AcquireProviderWorkerLeaseResult> {
+  async acquire(input: AcquireProviderWorkerLeaseInput): Promise<AcquireProviderWorkerLeaseResult> {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
-      let row = await lockProviderWorkerLease(transaction, input.role);
-      const active = row.lease_owner !== null
-        && row.lease_expires_at !== null
-        && row.lease_expires_at > row.database_now;
-      if (active && row.lease_owner !== input.owner) {
-        return {
-          kind: "held" as const,
-          fence: row.lease_fence,
-          expiresAt: row.lease_expires_at as Date,
-        };
-      }
-      const takeover = !active || row.lease_owner === null;
-      const heartbeatAt = row.database_now;
-      const expiresAt = new Date(
-        heartbeatAt.getTime() + input.leaseMilliseconds,
-      );
-      const updated = await transaction.provider_worker_states.updateMany({
-        where: { worker_role: input.role, row_version: row.row_version },
-        data: {
-          lease_owner: input.owner,
-          lease_fence: takeover ? row.lease_fence + 1n : row.lease_fence,
-          heartbeat_at: heartbeatAt,
-          lease_expires_at: expiresAt,
-          row_version: { increment: 1n },
-          updated_at: heartbeatAt,
-        },
-      });
-      if (updated.count !== 1) throw new Error("Provider worker lease changed concurrently.");
-      row = await lockProviderWorkerLease(transaction, input.role);
-      return {
-        kind: takeover ? "acquired" as const : "renewed" as const,
-        lease: leaseFrom(row),
-      };
-    });
+    return runDrainedDatabaseTransaction(
+      callback => this.database.$transaction(callback, TRANSACTION_OPTIONS),
+      transaction => acquireProviderWorkerLease(transaction, input),
+    );
   }
 
   async renew(input: {
