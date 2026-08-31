@@ -89,6 +89,62 @@ test("a timed-out count query leaves durable page and lease evidence available w
   assert.equal(JSON.stringify(result).includes("statement timeout"), false);
 });
 
+test("a shared transient count failure retries on the next refresh before sixty seconds", async () => {
+  let now = Date.parse(measuredAt);
+  let scans = 0;
+  const reader = new ProviderPulseMeasurementReader(() => new Date(now), () => ({
+    async readTotals() {
+      scans += 1;
+      if (scans === 1) throw new Error("temporary database failure");
+      return { ...totals, measuredAt: new Date(now).toISOString() };
+    },
+    async readActivity() { return activity; },
+  }));
+  const client = database();
+  const failures = await Promise.all([reader.read(client, identity), reader.read(client, identity)]);
+  assert.equal(scans, 1, "concurrent reads share even the failing query");
+  for (const failure of failures) {
+    assert.deepEqual(failure.storage, { state: "unavailable", reason: "query_failed" });
+    assert.deepEqual(failure.records, { state: "unavailable", reason: "query_failed" });
+    assert.equal(failure.activity.state, "available");
+  }
+
+  now += 5_000;
+  const recovered = await reader.read(client, identity);
+  assert.equal(scans, 2, "the next refresh retries instead of waiting for cache expiry");
+  assert.deepEqual(recovered.storage, { state: "available", measuredAt: new Date(now).toISOString(), counts: totals.counts });
+  assert.deepEqual(recovered.records, { state: "available", measuredAt: new Date(now).toISOString(), processed: totals.processed, accepted: totals.accepted });
+  await reader.read(client, identity);
+  assert.equal(scans, 2, "successful recovery remains cached");
+});
+
+test("a late count failure cannot evict a newer scope's pending or successful query", async () => {
+  let failFirst: (error: Error) => void = () => { throw new Error("query not started"); };
+  let finishSecond: (value: ProviderPulseTotals) => void = () => { throw new Error("query not started"); };
+  const firstQuery = new Promise<ProviderPulseTotals>((_resolve, reject) => { failFirst = reject; });
+  const secondQuery = new Promise<ProviderPulseTotals>((resolve) => { finishSecond = resolve; });
+  let scans = 0;
+  const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
+    readTotals() { scans += 1; return scans === 1 ? firstQuery : secondQuery; },
+    async readActivity() { return activity; },
+  }));
+  const client = database();
+  const nextIdentity = { ...identity, configurationId: "config-b" };
+  const oldRead = reader.read(client, identity);
+  const replacement = reader.read(client, nextIdentity);
+  assert.equal(scans, 2);
+  failFirst(new Error("old query failed"));
+  assert.equal((await oldRead).storage.state, "unavailable");
+  const concurrentReplacement = reader.read(client, nextIdentity);
+  assert.equal(scans, 2, "the late failure preserves the newer in-flight entry");
+  finishSecond(totals);
+  const recovered = await Promise.all([replacement, concurrentReplacement]);
+  assert.deepEqual(recovered[0], recovered[1]);
+  assert.equal(recovered[0]!.storage.state, "available");
+  await reader.read(client, nextIdentity);
+  assert.equal(scans, 2, "the replacement remains cached after completion");
+});
+
 test("missing activity never discards exact retained counts, and malformed counts fail closed", async () => {
   const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
     async readTotals() { return totals; },

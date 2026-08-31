@@ -55,7 +55,10 @@ export class ProviderPulseMeasurementReader {
     let cached = this.#totals.get(database);
     const checkedAt = this.now().getTime();
     if (!cached || cached.scope !== scope || cached.expiresAt <= checkedAt) {
-      const result = repository.readTotals().then(measuredTotals).catch(() => {
+      const result: Promise<TotalsMeasurement> = repository.readTotals().then(measuredTotals).catch(() => {
+        // Retry transient failures on the next refresh, without evicting a
+        // newer query that replaced this entry while it was still running.
+        if (this.#totals.get(database)?.result === result) this.#totals.delete(database);
         const unavailable = unavailableProviderSourceMeasurements("query_failed");
         return { storage: unavailable.storage, records: unavailable.records };
       });
