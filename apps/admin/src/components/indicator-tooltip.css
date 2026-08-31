@@ -1,0 +1,57 @@
+.admin-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-height: 1.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: help;
+}
+
+.admin-indicator__label {
+  text-decoration: underline dotted var(--admin-border-heavy);
+  text-underline-offset: 0.25em;
+}
+
+.admin-indicator__hint {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--admin-text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.admin-indicator-tooltip {
+  position: fixed;
+  z-index: 1500;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 1.5rem));
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--admin-border-dark);
+  border-radius: 0.6rem;
+  background: var(--admin-bg-elevated);
+  color: var(--admin-text-secondary);
+  box-shadow: var(--admin-shadow-md);
+  font-family: var(--admin-font-sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .admin-indicator {
+    min-height: 2.75rem;
+  }
+}

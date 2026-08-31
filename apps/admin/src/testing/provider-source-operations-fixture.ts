@@ -6,6 +6,7 @@ import type {
   ProviderSourceOperationsDetail,
   ProviderSourceOperationsOverview,
   ProviderSourceOperationsSource,
+  ProviderSourceMeasurements,
 } from "@packscout/contracts";
 
 export const operationsFixtureIds = {
@@ -54,6 +55,24 @@ const providerKeys = [
 ] as const satisfies readonly LaunchProviderKey[];
 const providerNames = ["Courtyard", "Collector Crypt", "Phygitals", "ClutchPacks"] as const;
 
+export function operationMeasurements(index = 0): ProviderSourceMeasurements {
+  const counts = {
+    categories: 10, packs: 20 + index, collectibles: 100_000 + index,
+    aliases: 50, instances: 80, packContents: 30, accounts: 1_000,
+    pulls: 200_000 + index, pullItems: 200_000 + index, marketEvents: 500_000 + index,
+  };
+  return {
+    storage: { state: "available", measuredAt: now, counts: { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) } },
+    records: { state: "available", measuredAt: now, processed: 700_000 + index, accepted: 699_000 + index },
+    activity: {
+      state: "available", measuredAt: now, historyMeasuredAt: now, lastCommittedPageAt: "2026-08-21T11:59:56.000Z",
+      importLease: index === 0 ? { state: "active", heartbeatAt: now, expiresAt: "2026-08-21T12:00:30.000Z" } : { state: "unowned", heartbeatAt: null, expiresAt: null },
+      promotionLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
+      quarantine: { open: index, resolved: 0, expired: index * 10, retained: index * 11 },
+    },
+  };
+}
+
 export function operationsSession(
   role: "admin" | "data_operator" = "admin",
 ): AuthSessionResponse {
@@ -91,6 +110,7 @@ export function operationSource(
     provider: providerKeys[index]!,
     displayName: providerNames[index]!,
     configured: true,
+    measurements: operationMeasurements(index),
     source: {
       sourceInstanceId: operationsFixtureIds.sources[index]!,
       sourceRevisionId: operationsFixtureIds.revisions[index]!,

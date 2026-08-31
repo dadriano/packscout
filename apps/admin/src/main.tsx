@@ -19,6 +19,8 @@ import "./operations.css";
 import "./alerts.css";
 import "./source-configuration.css";
 import "./source-operations.css";
+import "./provider-pulse.css";
+import "./components/indicator-tooltip.css";
 import "./product-users.css";
 import "./data-inspection.css";
 import "./beta-allowlist.css";

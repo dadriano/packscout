@@ -96,17 +96,20 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   cleanupPage(context, renderer);
   await settlePage();
 
-  assert.equal(renderer.container.querySelectorAll(".source-lane").length, 4);
-  assert.match(pageText(renderer), /Shared DataForrest/);
+  assert.equal(renderer.container.querySelectorAll(".provider-pulse__card").length, 4);
+  assert.match(pageText(renderer), /Pipeline status/);
   assert.match(pageText(renderer), /Waiting for capacity/);
   assert.match(pageText(renderer), /Action required/);
-  assert.match(pageText(renderer), /Total unknown/);
+  assert.match(pageText(renderer), /Source total unknown/);
   assert.equal(findButton(renderer, "Resolve before run").disabled, true);
   assert.match(pageText(renderer), /Disable this source.*Test source.*Activate paused.*Resume/iu);
   assert.doesNotMatch(pageText(renderer), /Retry source/iu);
+  const runCard = renderer.container.querySelector(`[data-provider-id="${operationsFixtureIds.providers[0]}"]`)!;
+  const runButton = [...runCard.querySelectorAll("button")].find((button) => button.textContent === "Run now")!;
+  const pauseButton = [...runCard.querySelectorAll("button")].find((button) => button.textContent === "Pause")!;
 
   await act(async () => {
-    findButton(renderer, "Run now").click();
+    runButton.click();
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   await settlePage();
@@ -114,7 +117,7 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   assert.ok(renderer.container.querySelector(`a[href="/runs/${operationsFixtureIds.runs[0]}?providerId=${operationsFixtureIds.providers[0]}"]`));
 
   await act(async () => {
-    findButton(renderer, "Pause").click();
+    pauseButton.click();
     await new Promise<void>((resolve) => setImmediate(resolve));
   });
   await settlePage();
@@ -141,8 +144,8 @@ test("operations overview renders four server rows and returns exact Run, Pause,
   });
 
   await act(async () => findButton(renderer, "Pause display").click());
-  assert.match(pageText(renderer), /Display updates are paused; ingestion and scheduling continue/iu);
-  assert.match(pageText(renderer), /Stale display/);
+  assert.match(pageText(renderer), /Snapshot paused · ingestion continues/iu);
+  assert.match(pageText(renderer), /Display paused/);
 });
 
 test("provider admin lists canonical provider-source lanes without the legacy provider read model", async (context) => {
