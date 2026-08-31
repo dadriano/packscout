@@ -298,8 +298,12 @@ export function ProductUserDetailPage() {
         </header>
         <dl className="product-users__facts">
           <div>
+            <dt>Name</dt>
+            <dd>{user.profile?.name ?? "Not available"}</dd>
+          </div>
+          <div>
             <dt>Email</dt>
-            <dd>{user.email ?? "None recorded"}</dd>
+            <dd>{user.profile?.email ?? user.email ?? "Not available"}</dd>
           </div>
           <div>
             <dt>Wallet address</dt>

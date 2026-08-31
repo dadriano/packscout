@@ -30,7 +30,8 @@ const subject = "https://auth.example.test/|did:example:email-user";
 const user = {
   subject,
   authMethod: "https://auth.example.test",
-  email: "ada@example.test",
+  email: null,
+  profile: { name: "Ada Lovelace", email: "ada@example.test" },
   walletAddress: "0xWalletAddress0001",
   firstSeenAt: "2026-08-01T09:00:00.000Z",
   lastSeenAt: "2026-08-19T12:00:00.000Z",
@@ -180,6 +181,7 @@ test("a user's identity and both saved collections render, newest save first", a
   await settlePage();
 
   const text = pageText(renderer);
+  assert.match(text, /Ada Lovelace/);
   assert.match(text, /ada@example\.test/);
   assert.match(text, /0xWalletAddress0001/);
   assert.match(text, /Sign-in source/);
@@ -218,6 +220,28 @@ test("a user's identity and both saved collections render, newest save first", a
   assert.deepEqual(body(requests[0] as RecordedRequest), { subject });
 });
 
+test("missing profile details remain explicit while recorded identifiers stay available", async (context) => {
+  stubFetch(context, () =>
+    jsonResponse({
+      ...detail,
+      user: { ...user, profile: null, email: "recorded@example.test" },
+    }),
+  );
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  const identitySection = renderer.container.querySelector(
+    '[aria-labelledby="product-user-identity"]',
+  );
+  const text = identitySection?.textContent ?? "";
+  assert.match(text, /NameNot available/);
+  assert.match(text, /Emailrecorded@example\.test/);
+  assert.match(text, /0xWalletAddress0001/);
+  assert.match(text, /did:example:email-user/);
+  assert.doesNotMatch(text, /Ada Lovelace|ada@example\.test/);
+});
+
 test("the detail route addresses the user by an opaque handle, never their subject key", async (context) => {
   const entry = `/users/${productUserHandle(subject)}`;
   const requests = stubFetch(context, () => jsonResponse(detail));
@@ -229,6 +253,8 @@ test("the detail route addresses the user by an opaque handle, never their subje
   assert.match(entry, /^\/users\/[0-9a-f]{32}$/);
   assert.ok(!entry.includes(subject));
   assert.ok(!entry.includes(encodeURIComponent(subject)));
+  assert.ok(!entry.includes(encodeURIComponent(user.profile.name)));
+  assert.ok(!entry.includes(encodeURIComponent(user.profile.email)));
   assert.doesNotMatch(decodeURIComponent(entry), /did:|auth\.example\.test/);
 
   // The subject still reaches the server, in the POST body and only there.
@@ -503,6 +529,8 @@ test("reinstating from the detail view confirms first and never touches saved it
   const text = pageText(renderer);
   assert.match(text, /Active/);
   assert.match(text, /Account reinstated/);
+  assert.match(text, /Ada Lovelace/);
+  assert.match(text, /ada@example\.test/);
   // Every saved item is exactly where it was; only the standing moved.
   assert.match(text, /Mythic Pokemon Gacha/);
   assert.match(text, /Sold Out Basketball Grails/);

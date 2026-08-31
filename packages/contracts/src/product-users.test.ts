@@ -61,7 +61,34 @@ test("listing requests bound search, cursor, and unknown fields", () => {
   );
 });
 
-test("row identity prefers email, then wallet, then a bounded subject key", () => {
+test("row identity prefers profile details, then recorded email, wallet, and subject", () => {
+  const withProfile = {
+    subject,
+    email: "recorded@example.test",
+    walletAddress: "0xAbC",
+    profile: { name: "Ada Lovelace", email: "ada@example.test" },
+  };
+  assert.deepEqual(describeProductUserIdentity(withProfile), {
+    kind: "name",
+    label: "Ada Lovelace",
+    secondary: "ada@example.test",
+  });
+  assert.deepEqual(
+    describeProductUserIdentity({
+      ...withProfile,
+      profile: { name: null, email: "ada@example.test" },
+    }),
+    { kind: "email", label: "ada@example.test", secondary: "0xAbC" },
+  );
+  assert.deepEqual(
+    describeProductUserIdentity({
+      ...withProfile,
+      profile: { name: "Ada Lovelace", email: null },
+    }),
+    { kind: "name", label: "Ada Lovelace", secondary: "recorded@example.test" },
+  );
+  assert.equal(withProfile.email, "recorded@example.test");
+
   assert.deepEqual(
     describeProductUserIdentity({
       subject,
@@ -75,6 +102,7 @@ test("row identity prefers email, then wallet, then a bounded subject key", () =
       subject,
       email: null,
       walletAddress: "0xAbC",
+      profile: null,
     }),
     { kind: "wallet", label: "0xAbC", secondary: null },
   );
