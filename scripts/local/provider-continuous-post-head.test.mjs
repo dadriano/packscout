@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
-const { runContinuousPostHead, continuousPostHeadMaximumMilliseconds } = await tsImport("./provider-continuous-post-head.mts", import.meta.url);
+const { runContinuousPostHead, continuousPostHeadMaximumMilliseconds,
+  continuousPostHeadPolicyForRegistration } = await tsImport("./provider-continuous-post-head.mts", import.meta.url);
 const { residentFailureCode } = await tsImport("./provider-resident-errors.mts", import.meta.url);
 const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
   operationId: "2a333333-3333-4333-8333-333333333335", operatorId: "2a333333-3333-4333-8333-333333333336" };
+const policyFingerprint = "e".repeat(64);
 function fixture() {
   return { snapshot: { now: new Date("2026-08-31T06:01:00Z"), providerId: pins.providerId, providerKey: pins.providerKey,
     configId: pins.configId, configNumber: 4n, configurationMatches: true, state: "idle", generation: 41n, runtimeRowVersion: 64n,
@@ -17,7 +19,7 @@ function fixture() {
       failureCode: null, finishedAt: new Date("2026-08-31T06:00:00Z"), committedPageCount: 4 },
     lastPage: { number: 4, continuation: "head", hash: "a".repeat(64), matches: true } },
   cycle: null, cycleQueued: false, scheduleSeconds: 3600,
-  cadence: { kind: "operator_interval", intervalSeconds: 60 }, authorityDigest: "c".repeat(64) };
+  cadence: { kind: "operator_interval", intervalSeconds: 60 }, postHeadPolicy: { kind: "none" }, authorityDigest: "c".repeat(64) };
 }
 function deferred() {
   let resolve; let reject;
@@ -25,8 +27,39 @@ function deferred() {
   return { promise, resolve, reject };
 }
 function run(registration, view = fixture(), signal = new AbortController().signal) {
-  return runContinuousPostHead({ registration, view, pins, parentAbortSignal: signal });
+  const registered = registration === undefined ? undefined : { policyFingerprint, ...registration };
+  if (view && registered) view.postHeadPolicy = { kind: "callback", fingerprint: registered.policyFingerprint,
+    timeoutMilliseconds: registered.timeoutMilliseconds };
+  return runContinuousPostHead({ registration: registered, view, pins, parentAbortSignal: signal });
 }
+
+test("registration derives a frozen policy for startup without calling or exposing the callback", () => {
+  const registration = { policyFingerprint, timeoutMilliseconds: 60_000, run() { assert.fail("validation never invokes"); } };
+  const policy = continuousPostHeadPolicyForRegistration(registration);
+  assert.deepEqual(policy, { kind: "callback", fingerprint: policyFingerprint, timeoutMilliseconds: 60_000 });
+  assert.equal(Object.isFrozen(policy), true);
+  registration.timeoutMilliseconds = 10;
+  assert.equal(policy.timeoutMilliseconds, 60_000);
+  const none = continuousPostHeadPolicyForRegistration();
+  assert.deepEqual(none, { kind: "none" }); assert.equal(Object.isFrozen(none), true);
+});
+
+test("startup and invocation reject missing or malformed fingerprints and invalid callbacks", async () => {
+  for (const fingerprint of [undefined, null, "", "f".repeat(63), "f".repeat(65), "E".repeat(64), "g".repeat(64), 123]) {
+    const registration = { policyFingerprint: fingerprint, timeoutMilliseconds: 60_000,
+      run() { assert.fail("invalid registration never invokes"); } };
+    assert.throws(() => continuousPostHeadPolicyForRegistration(registration), hasCode("CONTINUOUS_POST_HEAD_INVALID"));
+    await assert.rejects(run(registration), hasCode("CONTINUOUS_POST_HEAD_INVALID"));
+  }
+  for (const callback of [null, undefined, "run", {}]) {
+    assert.throws(() => continuousPostHeadPolicyForRegistration({ policyFingerprint, timeoutMilliseconds: 60_000, run: callback }),
+      hasCode("CONTINUOUS_POST_HEAD_INVALID"));
+  }
+  for (const timeoutMilliseconds of [0, -1, 1.5, Infinity, 900_001, undefined]) {
+    assert.throws(() => continuousPostHeadPolicyForRegistration({ policyFingerprint, timeoutMilliseconds, run() {} }),
+      hasCode("CONTINUOUS_POST_HEAD_INVALID"));
+  }
+});
 function hasCode(code) {
   return error => {
     assert.equal(error.code, code);

@@ -11,20 +11,24 @@ const { providerHeadPeerScopeOption, verifyProviderHeadPeerProcessScope, readPro
 const digest = value => createHash("sha256").update(value).digest("hex");
 const id = n => `11111111-1111-4111-8111-${String(n).padStart(12, "0")}`;
 const now = "2026-08-31T16:00:30.000Z";
-function fixture({ active = false, peers = 1 } = {}) {
+function fixture({ active = false, peers = 1, production = false } = {}) {
   const protectedPins = { organizationId: id(1), operatorId: id(2), providerId: id(3),
-    providerKey: "clutchpacks", configId: id(4), initialRunId: id(5), operationId: id(6) };
+    providerKey: production ? "courtyard" : "clutchpacks", configId: id(4), initialRunId: id(5), operationId: id(6) };
   const scope = { schemaVersion: 1, issuedAt: "2026-08-31T16:00:00.000Z", notAfter: "2026-08-31T16:02:00.000Z", protectedPins, peers: [] };
   const files = new Map(), authorities = [], gates = [], plists = [], processes = [];
   const pin = (file, value) => { const bytes = typeof value === "string" ? value : JSON.stringify(value); files.set(file, bytes); return { path: file, sha256: digest(bytes) }; };
   for (let i = 0; i < peers; i++) {
     const checkout = `/review/peer-${i}`;
-    const pins = { ...protectedPins, providerId: id(10 + i), providerKey: ["courtyard", "collector_crypt", "phygitals"][i], configId: id(20 + i),
+    const pins = { ...protectedPins, providerId: id(10 + i), providerKey: [production ? "clutchpacks" : "courtyard", "collector_crypt", "phygitals"][i], configId: id(20 + i),
       initialRunId: id(30 + i), operationId: id(40 + i) };
     const argv = ["/usr/bin/node", "--import", "tsx", `${checkout}/scripts/local/run-provider-continuous-poller.mts`,
       "--run", "--launchd", "--bootstrap-backfill", "--organization-id", pins.organizationId, "--provider-id", pins.providerId,
       "--provider-key", pins.providerKey, "--config-id", pins.configId, "--initial-run-id", pins.initialRunId,
       "--operation-id", pins.operationId, "--operator-id", pins.operatorId];
+    if (production && i === 0) {
+      argv[3] = `${checkout}/scripts/live/run-clutchpacks-production-poller.mts`;
+      argv.splice(6, 1); argv.push("--poll-interval-seconds", "60");
+    }
     const root = { pid: 100 + i * 10, parentPid: 1, startedAt: "Sun Aug 30 10:00:00 2026", cwd: checkout, argv };
     const child = active ? { pid: root.pid + 1, parentPid: root.pid, startedAt: "Sun Aug 30 10:00:01 2026", cwd: checkout,
       argv: [argv[0], "--import", "tsx", `${checkout}/apps/worker/src/provider-manual-import-local.ts`] } : null;
@@ -82,6 +86,18 @@ test("private reviewed waiting and active peer trees pass without database or so
     assert.ok(f.state.commands.every(c => ["/bin/ps", "/usr/bin/git", "/usr/bin/plutil", "/usr/sbin/lsof"].includes(c.file)));
     assert.ok(!JSON.stringify(result).includes("never-print-this"));
   }
+});
+test("production wrapper admission still verifies reviewed files, source, full pins and exact worker claims", async () => {
+  for (const active of [false, true]) {
+    const f = fixture({ active, production: true });
+    const result = await verifyProviderHeadPeerProcessScope(f.options, f.dep);
+    assert.equal(result.acceptedProcessCount, active ? 2 : 1); assert.equal(f.state.psReads, 2);
+  }
+  const f = fixture({ active: true, production: true });
+  f.authorities[0].executionClaim.fence = "13"; f.refresh();
+  await assert.rejects(verifyProviderHeadPeerProcessScope(f.options, f.dep), code("PEER_SCOPE_UNPROVEN_LEASE"));
+  const changed = fixture({ production: true }); changed.plists[0].ProgramArguments = [...changed.plists[0].ProgramArguments, "--extra"];
+  await assert.rejects(verifyProviderHeadPeerProcessScope(changed.options, changed.dep), code("PEER_SCOPE_PLIST_CHANGED"));
 });
 test("authority identity, config, route, operation and exact lease claim are mandatory", async () => {
   const changes = [a => { a.database.providerId = id(900); }, a => { a.database.organizationId = id(901); },

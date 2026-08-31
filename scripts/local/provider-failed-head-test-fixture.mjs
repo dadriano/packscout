@@ -17,7 +17,11 @@ export async function failedHeadFixture() {
     action: "local.provider_continuous.operation", target_type: "provider_run", target_id: opPins.initialRunId,
     outcome: "success", details: { pins: opPins, authorityDigest: f.authority.digest }, occurred_at: f.now } });
   const snapshot = await readBackfillSnapshot(db, opPins, f.authority, opPins.initialRunId);
-  const cycle = makeContinuousCycle({ snapshot, authorityDigest: f.authority.digest, scheduleSeconds: 300 }, opPins);
+  // This fixture proves the immutable v1 history created before cadence policies.
+  // New v2 cycle receipts must never be reinterpreted as historical provenance.
+  const { version: _version, cadence: _cadence, postHeadPolicy: _postHead, effectiveIntervalSeconds: _interval, ...cycle } =
+    makeContinuousCycle({ snapshot, authorityDigest: f.authority.digest, scheduleSeconds: 300,
+      cadence: { kind: "central" }, postHeadPolicy: { kind: "none" }, cycle: null, cycleQueued: false }, opPins);
   const cycleRow = await db.local_audit_events.create({ data: { correlation_id: opPins.operationId, actor_operator_id: opPins.operatorId,
     action: "local.provider_continuous.cycle", target_type: "provider_run", target_id: opPins.initialRunId,
     outcome: "success", details: cycle, occurred_at: f.now } });

@@ -35,6 +35,16 @@ function fixture(peers = [peer()]) {
 }
 const refuses = (input, code) => assert.throws(() => assertProviderHeadProcessScope(input),
   error => error instanceof ProviderHeadPeerScopeError && error.code === code);
+function productionFixture() {
+  const value = peer(0, false); value.pins.providerKey = "clutchpacks";
+  value.root.argv[3] = `${value.checkout}/scripts/live/run-clutchpacks-production-poller.mts`;
+  value.root.argv.splice(value.root.argv.indexOf("--bootstrap-backfill"), 1);
+  value.root.argv[value.root.argv.indexOf("--provider-key") + 1] = value.pins.providerKey;
+  value.root.argv.push("--poll-interval-seconds", "60");
+  const input = fixture([value]); input.protectedPins.providerKey = "courtyard";
+  input.scope.protectedPins.providerKey = "courtyard";
+  return input;
+}
 
 test("exact initial-bootstrap roots and their direct worker children are the only admitted peer inventory", () => {
   const one = fixture();
@@ -45,6 +55,62 @@ test("exact initial-bootstrap roots and their direct worker children are the onl
   assert.deepEqual(assertProviderHeadProcessScope(waiting), { acceptedPeerCount: 1, acceptedProcessCount: 1 });
   waiting.processes.push(processRow(peer().child));
   refuses(waiting, "PEER_SCOPE_UNKNOWN_WRITER");
+});
+
+test("only the exact reviewed live production wrapper is admitted with its pinned continuous cadence", () => {
+  const input = productionFixture();
+  assert.deepEqual(assertProviderHeadProcessScope(input), { acceptedPeerCount: 1, acceptedProcessCount: 1 });
+  const bootstrap = productionFixture(); bootstrap.scope.peers[0].root.argv.splice(6, 0, "--bootstrap-backfill");
+  bootstrap.processes[0] = processRow(bootstrap.scope.peers[0].root);
+  refuses(bootstrap, "PEER_SCOPE_ROOT_INVALID");
+  const local = fixture(); local.scope.peers[0].root.argv.push("--poll-interval-seconds", "60");
+  local.processes[0] = processRow(local.scope.peers[0].root);
+  refuses(local, "PEER_SCOPE_ROOT_INVALID");
+  local.scope.peers[0].root.argv.splice(6, 1);
+  local.processes[0] = processRow(local.scope.peers[0].root);
+  assert.equal(assertProviderHeadProcessScope(local).acceptedPeerCount, 1);
+  for (const change of [p => { p.root.argv[3] = `${p.checkout}/scripts/local/run-clutchpacks-production-poller.mts`; },
+    p => { p.root.argv[3] = "/foreign/scripts/live/run-clutchpacks-production-poller.mts"; },
+    p => { p.root.argv[3] = `${p.checkout}/scripts/live/unreviewed-production-poller.mts`; },
+    p => { p.root.argv[p.root.argv.indexOf("--provider-key") + 1] = "phygitals"; },
+    p => { p.root.argv[p.root.argv.indexOf("--config-id") + 1] = uuid(999); },
+    p => { p.root.argv[p.root.argv.indexOf("--operation-id") + 1] = uuid(998); },
+    p => { p.root.argv[p.root.argv.indexOf("--poll-interval-seconds") + 1] = "59"; },
+    p => { p.root.argv[p.root.argv.indexOf("--poll-interval-seconds") + 1] = "86401"; },
+    p => { p.root.argv[p.root.argv.indexOf("--poll-interval-seconds") + 1] = "060"; },
+    p => { p.root.argv.push("--poll-interval-seconds", "60"); },
+    p => { p.root.argv.push("--unknown"); }, p => { p.root.argv.splice(p.root.argv.indexOf("--launchd"), 1); }]) {
+    const changed = productionFixture(); change(changed.scope.peers[0]);
+    changed.processes[0] = processRow(changed.scope.peers[0].root);
+    refuses(changed, "PEER_SCOPE_ROOT_INVALID");
+  }
+});
+
+test("production wrapper basenames cannot hide foreign or ambiguous writers behind provider flags or check-only", () => {
+  for (const entry of ["/foreign/scripts/live/run-clutchpacks-production-poller.mts",
+    "/foreign/scripts/local/run-clutchpacks-production-poller.mts", "run-clutchpacks-production-poller.mts"]) {
+    for (const flags of ["--run --provider-key courtyard", "--check-only", "--run --check-only", "--unknown"]) {
+      const input = fixture(), command = `${node} --import tsx ${entry} ${flags}`;
+      assert.equal(providerHeadWriterCommand(command), true);
+      input.processes.push({ pid: 777, parentPid: 1, startedAt: childStarted, command });
+      refuses(input, "PEER_SCOPE_UNKNOWN_WRITER");
+    }
+  }
+});
+
+test("a detached or active production publisher never becomes an implicitly admitted peer child", () => {
+  for (const parentPid of [1, 100]) for (const flags of ["--publish /private/synthetic-bundle.json", "--check-only"]) {
+    const input = productionFixture();
+    const command = `${node} --import tsx /foreign/scripts/live/promote-clutchpacks-production.mts ${flags}`;
+    assert.equal(providerHeadWriterCommand(command), true);
+    input.processes.push({ pid: 777, parentPid, startedAt: childStarted, command });
+    refuses(input, "PEER_SCOPE_UNKNOWN_WRITER");
+  }
+  const input = productionFixture(); input.scope.peers[0].child = { pid: 777, parentPid: 100, startedAt: childStarted,
+    cwd: input.scope.peers[0].checkout, argv: [node, "--import", "tsx",
+      `${input.scope.peers[0].checkout}/scripts/live/promote-clutchpacks-production.mts`, "--publish", "/private/synthetic-bundle.json"] };
+  input.processes.push(processRow(input.scope.peers[0].child));
+  refuses(input, "PEER_SCOPE_CHILD_INVALID");
 });
 
 test("scope schema rejects unbounded, unknown and malformed process evidence", () => {

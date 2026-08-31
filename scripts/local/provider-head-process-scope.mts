@@ -8,6 +8,7 @@ import { z } from "zod";
 import dotenv from "dotenv";
 import { canonicalJson } from "@packscout/contracts";
 import { backfillPinsSchema, type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
+import { continuousCadenceSchema } from "./provider-continuous-cadence.mts";
 
 const exec = promisify(execFile);
 const sha = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
@@ -55,7 +56,15 @@ export function providerHeadPeerScopeOption(environment: NodeJS.ProcessEnv) {
   if (!file || !path.isAbsolute(file) || !digest || !hash.safeParse(digest).success) refuse("PEER_SCOPE_OPTION_INVALID");
   return { file, digest };
 }
+const productionPollerEntry = "scripts/live/run-clutchpacks-production-poller.mts";
+/** The production wrapper and its publisher are always writer signals,
+ * even outside its approved directory or with an unproved check-only argument. */
+export function providerHeadProductionWriterCommand(command: string): boolean {
+  return /(?:^|\s)(?:\S*\/)?(?:node|tsx)(?:\s|$)/u.test(command) &&
+    /(?:^|\s)(?:\S*\/)?(?:run-clutchpacks-production-poller|promote-clutchpacks-production)\.mts(?:\s|$)/u.test(command);
+}
 export function providerHeadWriterCommand(command: string) {
+  if (providerHeadProductionWriterCommand(command)) return true;
   const nodeCommand = /(?:^|\s)(?:\S*\/)?(?:node|tsx)(?:\s|$)/u.test(command);
   if (nodeCommand && /(?:provider-manual-import-local|clutchpacks-manual-import-local|source-supervisor-local|start-provider-source-task010-supervisor|(?:apps\/worker\/)?src\/(?:index|main))\.(?:ts|mts)(?:\s|$)/u.test(command)) return true;
   const entry = /(provider-manual-import-local|clutchpacks-manual-import-local|source-supervisor-local|start-provider-source-task010-supervisor|(?:apps\/worker\/)?src\/(?:index|main)|run-provider-continuous-poller|run-provider-backfill-supervisor|provider-(?:paused|failed)-head-resume|provider-operator-continuation|provider-resident[^\s]*|provider[^\s]*promotion[^\s]*|promote-distributed-[a-z0-9-]+-to-local-convex)\.(?:ts|mts)(?:\s|$)/u.exec(command)?.[1];
@@ -75,10 +84,23 @@ export function parseProviderHeadProcesses(text: string): ProviderHeadProcess[] 
 }
 function expectedRootArguments(peer: Peer): string[] {
   const p = peer.pins;
-  return [peer.root.argv[0]!, "--import", "tsx", path.join(peer.checkout, "scripts/local/run-provider-continuous-poller.mts"),
-    "--run", "--launchd", "--bootstrap-backfill", "--organization-id", p.organizationId, "--provider-id", p.providerId,
+  const production = peer.root.argv[3] === path.join(peer.checkout, productionPollerEntry);
+  if (production && p.providerKey !== "clutchpacks") refuse("PEER_SCOPE_ROOT_INVALID");
+  const cadenceIndex = peer.root.argv.indexOf("--poll-interval-seconds");
+  if (peer.root.argv.includes("--bootstrap-backfill") && (production || cadenceIndex !== -1)) refuse("PEER_SCOPE_ROOT_INVALID");
+  const cadence: string[] = [];
+  if (cadenceIndex !== -1) {
+    const value = peer.root.argv[cadenceIndex + 1];
+    if (!value || !/^[1-9][0-9]*$/u.test(value) || !continuousCadenceSchema.safeParse({ kind: "operator_interval",
+      intervalSeconds: Number(value) }).success) refuse("PEER_SCOPE_ROOT_INVALID");
+    cadence.push("--poll-interval-seconds", value);
+  }
+  const entry = production ? productionPollerEntry : "scripts/local/run-provider-continuous-poller.mts";
+  return [peer.root.argv[0]!, "--import", "tsx", path.join(peer.checkout, entry),
+    "--run", "--launchd", ...(!production && cadenceIndex === -1 ? ["--bootstrap-backfill"] : []),
+    "--organization-id", p.organizationId, "--provider-id", p.providerId,
     "--provider-key", p.providerKey, "--config-id", p.configId, "--initial-run-id", p.initialRunId,
-    "--operation-id", p.operationId, "--operator-id", p.operatorId];
+    "--operation-id", p.operationId, "--operator-id", p.operatorId, ...cadence];
 }
 function assertProcess(row: ProviderHeadProcess | undefined, expected: z.infer<typeof processPin>) {
   if (!row || row.pid !== expected.pid || row.parentPid !== expected.parentPid || row.startedAt !== expected.startedAt ||

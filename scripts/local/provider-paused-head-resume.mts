@@ -14,7 +14,8 @@ import { claimContinuousResidency } from "./provider-continuous-residency.mts";
 import { operatorContinuationDirectInvocation, withContinuationDeadline } from "./provider-operator-continuation.mts";
 import { runRemoteHealthTransaction } from "./remote-provider-health-transaction.mts";
 import { createPausedHeadAdoption } from "./provider-paused-head-control.mts";
-import { providerHeadPeerScopeOption, verifyProviderHeadPeerProcessScope } from "./provider-head-process-scope.mts";
+import { providerHeadPeerScopeOption, providerHeadProductionWriterCommand,
+  verifyProviderHeadPeerProcessScope } from "./provider-head-process-scope.mts";
 import { pausedHeadDigest, pausedHeadReviewSchema, PausedHeadError, refusePausedHead as refuse,
   type PausedHeadReview } from "./provider-paused-head-policy.mts";
 
@@ -72,6 +73,7 @@ export function assertNoPausedHeadWriter(text: string, ownPid = process.pid) {
     if (!row) refuse("PAUSED_HEAD_PROCESS_INVENTORY_INVALID");
     if (Number(row[1]) === ownPid) continue;
     const command = row[3]!;
+    if (providerHeadProductionWriterCommand(command)) refuse("PAUSED_HEAD_WRITER_PRESENT");
     if (/(?:^|\s)(?:\S*\/)?(?:node|tsx)(?:\s|$)/u.test(command) &&
       /(?:provider-manual-import-local|clutchpacks-manual-import-local|source-supervisor-local|start-provider-source-task010-supervisor|(?:apps\/worker\/)?src\/index|run-provider-continuous-poller|run-provider-backfill-supervisor|provider-(?:paused|failed)-head-resume|provider-operator-continuation|provider[^\s]*promotion[^\s]*|promote-distributed-[a-z0-9-]+-to-local-convex)\.(?:ts|mts)(?:\s|$)/u.test(command) &&
       !command.includes("--check-only")) refuse("PAUSED_HEAD_WRITER_PRESENT");

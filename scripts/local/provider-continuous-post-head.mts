@@ -3,8 +3,10 @@ import { z } from "zod";
 import { assertBackfillPins, classifyBackfillCheckpoint, ProviderBackfillSupervisorError,
   refuseBackfill, type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
 import type { ContinuousView } from "./provider-continuous-policy.mts";
+import { continuousPostHeadPolicySchema, defaultContinuousPostHeadPolicy,
+  type ContinuousPostHeadPolicy } from "./provider-continuous-post-head-policy.mts";
 
-export const continuousPostHeadMaximumMilliseconds = 900_000;
+export { continuousPostHeadMaximumMilliseconds } from "./provider-continuous-post-head-policy.mts";
 const postHeadSchema = z.object({
   providerId: z.string().uuid(), configId: z.string().uuid(),
   configNumber: z.string().regex(/^[1-9][0-9]*$/u), runId: z.string().uuid(),
@@ -17,8 +19,21 @@ const postHeadSchema = z.object({
 /** Contains no source cursor, credentials, connection metadata, or mutable view. */
 export type ContinuousPostHead = z.infer<typeof postHeadSchema>;
 export interface ContinuousPostHeadRegistration {
+  readonly policyFingerprint: string;
   readonly timeoutMilliseconds: number;
   run(head: ContinuousPostHead, signal: AbortSignal): Promise<void>;
+}
+
+/** Startup and invocation share the same immutable, audit-safe callback policy. */
+export function continuousPostHeadPolicyForRegistration(
+  registration?: ContinuousPostHeadRegistration,
+): ContinuousPostHeadPolicy {
+  if (registration === undefined) return defaultContinuousPostHeadPolicy;
+  if (!registration || typeof registration.run !== "function") refuseBackfill("CONTINUOUS_POST_HEAD_INVALID");
+  const parsed = continuousPostHeadPolicySchema.safeParse({ kind: "callback", fingerprint: registration.policyFingerprint,
+    timeoutMilliseconds: registration.timeoutMilliseconds });
+  if (!parsed.success) refuseBackfill("CONTINUOUS_POST_HEAD_INVALID");
+  return Object.freeze(parsed.data);
 }
 
 function verifiedPostHead(view: ContinuousView, pins: BackfillPins): ContinuousPostHead {
@@ -46,15 +61,12 @@ export async function runContinuousPostHead(input: Readonly<{
   parentAbortSignal: AbortSignal;
 }>): Promise<void> {
   const registration = input.registration;
-  if (registration === undefined) return;
-  if (!Number.isSafeInteger(registration.timeoutMilliseconds) || registration.timeoutMilliseconds < 1 ||
-    registration.timeoutMilliseconds > continuousPostHeadMaximumMilliseconds || typeof registration.run !== "function") {
-    refuseBackfill("CONTINUOUS_POST_HEAD_INVALID");
-  }
+  const policy = continuousPostHeadPolicyForRegistration(registration);
+  if (registration === undefined || policy.kind === "none") return;
   const head = verifiedPostHead(input.view, input.pins);
   if (input.parentAbortSignal.aborted) refuseBackfill("CONTINUOUS_POST_HEAD_ABORTED");
   const controller = new AbortController();
-  const deadline = performance.now() + registration.timeoutMilliseconds;
+  const deadline = performance.now() + policy.timeoutMilliseconds;
   let stopCode: "CONTINUOUS_POST_HEAD_ABORTED" | "CONTINUOUS_POST_HEAD_TIMEOUT" | null = null;
   const stop = (code: NonNullable<typeof stopCode>) => {
     stopCode ??= code;
@@ -62,7 +74,7 @@ export async function runContinuousPostHead(input: Readonly<{
   };
   const parentStopped = () => stop("CONTINUOUS_POST_HEAD_ABORTED");
   input.parentAbortSignal.addEventListener("abort", parentStopped, { once: true });
-  const timer = setTimeout(() => stop("CONTINUOUS_POST_HEAD_TIMEOUT"), registration.timeoutMilliseconds);
+  const timer = setTimeout(() => stop("CONTINUOUS_POST_HEAD_TIMEOUT"), policy.timeoutMilliseconds);
   let failed = false;
   try {
     if (input.parentAbortSignal.aborted) parentStopped();
