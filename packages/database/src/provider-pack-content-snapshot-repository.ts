@@ -12,9 +12,12 @@ import {
   ProviderCanonicalWriteConflictError,
   normalizeMoneyDecimal,
   normalizeRateDecimal,
+  type PackContentWriteInput,
   type PromotionSequenceRange,
 } from "./provider-canonical-contract.ts";
-import { appendPromotionRange, createProviderCanonicalTransaction } from "./provider-canonical-repository.ts";
+import { normalizeProviderPackContentWrite } from "./provider-canonical-pack-content-write.ts";
+import { hasSameMaterialFields } from "./provider-canonical-mutable-helpers.ts";
+import { applySnapshotMembershipChanges, type SnapshotMembershipUpsert } from "./provider-pack-content-snapshot-batch.ts";
 
 export interface ProviderPackContentSnapshotResult {
   readonly outcome: "applied" | "replayed" | "ignored_older";
@@ -143,23 +146,16 @@ export async function applyProviderPackContentSnapshot(
     collected_at: new Date(snapshot.collectedAt), snapshot_digest: digest,
     completeness: snapshot.completeness, normalized_snapshot: snapshot as Prisma.InputJsonObject,
   } });
-  const canonical = createProviderCanonicalTransaction(transaction);
-  let firstSequence: bigint | null = null;
-  let upsertedCount = 0;
-  let retiredCount = 0;
-  for (const row of active) {
+  const retirements = active.filter(row => {
     const key = membershipKey(row.collectible_id, row.collectible_instance_id);
-    if (!explicitRemovals.has(key) && (snapshot.completeness !== "complete" || incoming.has(key))) continue;
-    const result = await canonical.retirePackContent({ id: row.id, expectedRowVersion: row.row_version, retiredAt: effectiveAt });
-    if (result.materialChange) {
-      firstSequence ??= result.promotionSequence;
-      retiredCount += 1;
-    }
-  }
+    return explicitRemovals.has(key) || (snapshot.completeness === "complete" && !incoming.has(key));
+  });
+  const upserts: SnapshotMembershipUpsert[] = [];
+  const requests: PackContentWriteInput[] = [];
   for (const row of resolved) {
     if (row.removed) continue;
     const prior = activeByKey.get(membershipKey(row.cardId, row.instanceId));
-    const result = await canonical.upsertPackContent({
+    const request: PackContentWriteInput = {
       packId: pack.id, collectibleId: row.cardId, collectibleInstanceId: row.instanceId,
       sourceSnapshotId: receipt.id,
       totalQuantity: row.item.totalQuantity === null ? null : BigInt(row.item.totalQuantity),
@@ -168,17 +164,16 @@ export async function applyProviderPackContentSnapshot(
       statedValueAmount: row.item.statedValueAmount, statedValueCurrency: row.item.statedValueCurrency,
       evidenceKinds: row.item.evidenceKinds, matchConfidenceBasisPoints: row.item.matchConfidenceBasisPoints,
       observedAt: effectiveAt, displayOrder: row.item.displayOrder, expectedRowVersion: prior?.row_version ?? 0n,
-    });
-    if (result.materialChange) {
-      firstSequence ??= result.promotionSequence;
-      upsertedCount += 1;
-    }
+    };
+    const data = normalizeProviderPackContentWrite(request);
+    requests.push(request);
+    if (prior && hasSameMaterialFields(prior, data)) continue;
+    upserts.push({ id: prior?.id ?? randomUUID(), expectedVersion: prior?.row_version ?? null, data });
   }
-  const range = await appendPromotionRange(transaction, [{
-    entityType: "pack_content_snapshot", entityId: receipt.id, entityVersion: 1n, operation: "upsert",
-  }]);
+  const changes = await applySnapshotMembershipChanges(transaction,
+    { retirements, upserts, requests, retiredAt: effectiveAt, snapshotId: receipt.id });
   return {
-    outcome: "applied", snapshotId: receipt.id, materialChange: true, upsertedCount, retiredCount,
-    promotionRange: { first: firstSequence ?? range.first, last: range.last },
+    outcome: "applied", snapshotId: receipt.id, materialChange: true,
+    ...changes,
   };
 }
