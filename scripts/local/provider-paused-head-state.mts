@@ -6,7 +6,7 @@ import { readBackfillSnapshot } from "./provider-backfill-supervisor-state.mts";
 import { pausedHeadDigest as digest, pausedHeadIds, refusePausedHead as refuse,
   type PausedHeadReview, type PausedHeadReceipt } from "./provider-paused-head-policy.mts";
 
-export function assertPausedHeadAuthority(review: PausedHeadReview, authority: BackfillAuthority) {
+export function assertPausedHeadAuthority(review: Pick<PausedHeadReview, "pins" | "authorityDigest" | "configNumber" | "provider">, authority: BackfillAuthority) {
   const r = authority.route, p = review.pins;
   if (authority.digest !== review.authorityDigest || r.organizationId !== p.organizationId || r.configVersionId !== p.configId ||
     r.target.providerId !== p.providerId || r.target.providerKey !== p.providerKey ||

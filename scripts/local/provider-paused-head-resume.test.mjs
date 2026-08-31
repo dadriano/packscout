@@ -56,7 +56,8 @@ test("exclusive process guard detects importer, generic worker, source superviso
   for (const script of ["scripts/local/promote-distributed-clutchpacks-to-local-convex.mts", "apps/worker/src/provider-manual-import-local.ts",
     "apps/worker/src/clutchpacks-manual-import-local.ts", "apps/worker/src/source-supervisor-local.ts", "apps/worker/src/index.ts", "src/index.ts",
     "scripts/local/run-provider-continuous-poller.mts", "scripts/local/run-provider-backfill-supervisor.mts",
-    "scripts/local/start-provider-source-task010-supervisor.mts"]) {
+    "scripts/local/start-provider-source-task010-supervisor.mts", "scripts/local/provider-failed-head-resume.mts",
+    "scripts/local/provider-paused-head-resume.mts", "scripts/local/provider-operator-continuation.mts"]) {
     assert.throws(() => assertNoPausedHeadWriter(`123 1 /usr/bin/node --import tsx ${script} --run`, 999), /PAUSED_HEAD_WRITER_PRESENT/);
     assert.doesNotThrow(() => assertNoPausedHeadWriter(`123 1 /usr/bin/node --import tsx ${script} --check-only`, 999));
   }

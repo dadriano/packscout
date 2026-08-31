@@ -7,9 +7,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { BoundedProviderDatabaseGateway, createCentralDatabaseLifecycle, readDatabaseReadiness,
-  type CentralTransactionClient, type ProviderTransactionClient } from "@packscout/database";
+  type CentralTransactionClient, type ProviderTransactionClient, type ProviderPrismaClient, type ProviderQueryClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
-import { readBackfillAuthority, readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+import { readBackfillAuthority, readBackfillEnvironment, type BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
 import { claimContinuousResidency } from "./provider-continuous-residency.mts";
 import { operatorContinuationDirectInvocation, withContinuationDeadline } from "./provider-operator-continuation.mts";
 import { runRemoteHealthTransaction } from "./remote-provider-health-transaction.mts";
@@ -26,7 +26,7 @@ export function parsePausedHeadArguments(args: readonly string[]) {
   }
   return refuse("PAUSED_HEAD_ARGUMENTS_INVALID");
 }
-async function privateFile(file: string, maximum: number) {
+export async function readPrivateProviderOperatorFile(file: string, maximum: number) {
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
@@ -38,22 +38,22 @@ async function privateFile(file: string, maximum: number) {
   } finally { await handle.close(); }
 }
 export async function readPausedHeadReview(file: string) {
-  const bytes = await privateFile(file, 16_384);
+  const bytes = await readPrivateProviderOperatorFile(file, 16_384);
   try { return pausedHeadReviewSchema.parse(JSON.parse(bytes.toString("utf8"))); }
   finally { bytes.fill(0); }
 }
-export async function assertPausedHeadArtifacts(review: PausedHeadReview) {
+export async function assertPausedHeadArtifacts(review: Pick<PausedHeadReview, "sourceCommit" | "migrationProofPath" | "migrationProofDigest">) {
   const cwd = fileURLToPath(new URL("../../", import.meta.url));
   const [head, status] = await Promise.all([
     exec("git", ["rev-parse", "HEAD"], { cwd, timeout: 5000 }),
     exec("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd, timeout: 5000 }),
   ]);
   if (head.stdout.trim() !== review.sourceCommit || status.stdout.trim() !== "") refuse("PAUSED_HEAD_SOURCE_REVISION_CHANGED");
-  const proof = await privateFile(review.migrationProofPath, 1_048_576);
+  const proof = await readPrivateProviderOperatorFile(review.migrationProofPath, 1_048_576);
   try { if (createHash("sha256").update(proof).digest("hex") !== review.migrationProofDigest) refuse("PAUSED_HEAD_MIGRATION_PROOF_CHANGED"); }
   finally { proof.fill(0); }
 }
-export function assertPausedHeadEnvironment(review: PausedHeadReview, environment: Awaited<ReturnType<typeof readBackfillEnvironment>>) {
+export function assertPausedHeadEnvironment(review: Pick<PausedHeadReview, "central" | "provider">, environment: Awaited<ReturnType<typeof readBackfillEnvironment>>) {
   const url = new URL(environment.centralDatabaseUrl), c = review.central;
   const strictTls = url.searchParams.getAll("sslmode").length === 1 && url.searchParams.getAll("sslaccept").length <= 1 &&
     (url.searchParams.get("sslmode") === "verify-full" ||
@@ -72,12 +72,21 @@ export function assertNoPausedHeadWriter(text: string, ownPid = process.pid) {
     if (Number(row[1]) === ownPid) continue;
     const command = row[3]!;
     if (/(?:^|\s)(?:\S*\/)?(?:node|tsx)(?:\s|$)/u.test(command) &&
-      /(?:provider-manual-import-local|clutchpacks-manual-import-local|source-supervisor-local|start-provider-source-task010-supervisor|(?:apps\/worker\/)?src\/index|run-provider-continuous-poller|run-provider-backfill-supervisor|provider[^\s]*promotion[^\s]*|promote-distributed-[a-z0-9-]+-to-local-convex)\.(?:ts|mts)(?:\s|$)/u.test(command) &&
+      /(?:provider-manual-import-local|clutchpacks-manual-import-local|source-supervisor-local|start-provider-source-task010-supervisor|(?:apps\/worker\/)?src\/index|run-provider-continuous-poller|run-provider-backfill-supervisor|provider-(?:paused|failed)-head-resume|provider-operator-continuation|provider[^\s]*promotion[^\s]*|promote-distributed-[a-z0-9-]+-to-local-convex)\.(?:ts|mts)(?:\s|$)/u.test(command) &&
       !command.includes("--check-only")) refuse("PAUSED_HEAD_WRITER_PRESENT");
   }
 }
-export async function runPausedHeadAdoption(args: ReturnType<typeof parsePausedHeadArguments>) {
-  const review = await readPausedHeadReview(args.file); await assertPausedHeadArtifacts(review);
+type RemoteHeadReview = Pick<PausedHeadReview, "pins" | "central" | "provider" | "sourceCommit" | "migrationProofPath" | "migrationProofDigest" | "checkpointHash">;
+interface ReviewedHeadControl<Receipt> {
+  inspect(db: ProviderQueryClient, authority: BackfillAuthority): Promise<{ receipt: Receipt; completed: boolean }>;
+  apply(db: ProviderPrismaClient, receipt: Receipt, readAuthority: () => Promise<BackfillAuthority>,
+    assertProcess: () => Promise<void>, active: () => void, notAfter: Date): Promise<unknown>;
+}
+/** Shared remote operator transport: policy, file/process safety, bounded reads and callback draining. */
+export async function runReviewedProviderHeadControl<Review extends RemoteHeadReview, Receipt>(
+  args: ReturnType<typeof parsePausedHeadArguments>, readReview: (file: string) => Promise<Review>,
+  createControl: (review: Review) => ReviewedHeadControl<Receipt>, completedPhase = "already_adopted") {
+  const review = await readReview(args.file); await assertPausedHeadArtifacts(review);
   const checkProcess = async () => {
     const rows = await exec("/bin/ps", ["-axo", "pid=,ppid=,command="], { timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
     assertNoPausedHeadWriter(rows.stdout);
@@ -104,8 +113,8 @@ export async function runPausedHeadAdoption(args: ReturnType<typeof parsePausedH
         if (readiness.state !== "ready") refuse("PAUSED_HEAD_CENTRAL_UNAVAILABLE");
         return readBackfillAuthority(tx, cipher, review.pins, environment.runtimePolicy);
       });
-      const authority = await readAuthority(), control = createPausedHeadAdoption(review);
-      if (args.digest !== null) residency = await claimContinuousResidency(review.pins, () => ({ state: "paused_head_adoption" }));
+      const authority = await readAuthority(), control = createControl(review);
+      if (args.digest !== null) residency = await claimContinuousResidency(review.pins, () => ({ state: "reviewed_head_control" }));
       const gatewayNotAfter = Date.now() + 55_000;
       const routed = await gateway.runWithCachedProviderDatabase(authority.route, db => {
         const notAfter = new Date(Math.min(gatewayNotAfter, Date.now() + 55_000));
@@ -118,7 +127,7 @@ export async function runPausedHeadAdoption(args: ReturnType<typeof parsePausedH
             return control.inspect(tx, authority);
           });
           const reviewDigest = pausedHeadDigest(checked.receipt);
-          if (args.digest === null) return { phase: checked.completed ? "already_adopted" : "check_only", reviewDigest,
+          if (args.digest === null) return { phase: checked.completed ? completedPhase : "check_only", reviewDigest,
             providerId: review.pins.providerId, parentRunId: review.pins.initialRunId, checkpointHash: review.checkpointHash,
             sourceRequestsPerformed: false, mutationsPerformed: false };
           if (args.digest !== reviewDigest) refuse("PAUSED_HEAD_REVIEW_STALE");
@@ -136,6 +145,9 @@ export async function runPausedHeadAdoption(args: ReturnType<typeof parsePausedH
       return routed.value.value;
     } finally { gatewayActive = false; if (pending) await pending.catch(() => undefined); await gateway.close(); await central.close(); }
   } finally { environment.key.fill(0); await residency?.close(); }
+}
+export function runPausedHeadAdoption(args: ReturnType<typeof parsePausedHeadArguments>) {
+  return runReviewedProviderHeadControl(args, readPausedHeadReview, createPausedHeadAdoption);
 }
 if (await operatorContinuationDirectInvocation(process.argv[1], import.meta.url)) {
   Promise.resolve().then(() => runPausedHeadAdoption(parsePausedHeadArguments(process.argv.slice(2))))

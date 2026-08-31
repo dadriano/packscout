@@ -9,7 +9,7 @@ import { assertPausedHeadAuthority, assertPausedHeadBoundary, pausedHeadHistory,
   readPausedHeadSnapshot } from "./provider-paused-head-state.mts";
 
 const txOptions = { isolationLevel: "Serializable" as const, maxWait: 5000, timeout: 25_000 };
-const transaction = <T>(db: ProviderPrismaClient, operation: (tx: ProviderTransactionClient) => Promise<T>) =>
+const transaction = <T,>(db: ProviderPrismaClient, operation: (tx: ProviderTransactionClient) => Promise<T>) =>
   runRemoteHealthTransaction(callback => db.$transaction(callback, txOptions), operation);
 export function createPausedHeadAdoption(review: PausedHeadReview) {
   const p = review.pins, ids = pausedHeadIds(review);
@@ -126,7 +126,7 @@ export function createPausedHeadAdoption(review: PausedHeadReview) {
           commandId: ids.resume, commandType: "resume", expectedGeneration: BigInt(review.generation),
           targetRunId: null, targetQuarantineId: null,
           idempotencyKey: ids.resumeKey, requestedByOperatorId: p.operatorId, correlationId: p.operationId, reason: null,
-          requestedAt: before.snapshot.now, expectedRuntimeGuard: { providerId: p.providerId, configVersionId: p.configId,
+          requestedAt: before.snapshot.now, expectedRuntimeGuard: { entry: "paused", providerId: p.providerId, configVersionId: p.configId,
             configVersionNumber: BigInt(review.configNumber), runtimeRowVersion: BigInt(review.runtimeRowVersion),
             checkpointHash: review.checkpointHash, checkpoint: before.runtime.source_cursor as CanonicalJsonValue,
             pauseCommandId: review.pauseCommandId, pauseCommandDigest: review.pauseCommandDigest,
