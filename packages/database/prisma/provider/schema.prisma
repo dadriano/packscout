@@ -516,6 +516,7 @@ model promotion_changes {
   ev_recomputation_requests pack_ev_recomputation_requests[]
 
   @@unique([entity_type, entity_id, entity_version, operation], map: "promotion_changes_entity_version_operation_key")
+  @@index([entity_type, sequence], map: "promotion_changes_entity_sequence_idx")
 }
 
 model provider_runtime {
