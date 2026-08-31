@@ -142,7 +142,10 @@ export async function publishClutchpacksProductionV3(input: ClutchpacksProductio
         assertNotLost();
         return { activeState, disposition };
       };
-      const write = <T,>(operation: () => Promise<T>): Promise<T> => {
+      const write = async <T,>(operation: () => Promise<T>): Promise<T> => {
+        // A renewal can start while a preceding network read is in flight.
+        // Join it before dispatch, even when the prior proof has not expired.
+        await assertLive();
         // No await may separate this latch check from the transport call.
         assertNotLost(); return operation();
       };

@@ -389,3 +389,95 @@ test("pointer movement during final source validation cannot produce a verified 
     assert.equal(f.events.at(-1), "release");
   }
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+for (const phase of ["activation", "observation", "rollback", "verified return"]) {
+  for (const succeeds of [false, true]) {
+    test(`${phase} waits for pending renewal after its final state read; renewal ${succeeds ? "success" : "failure"}`,
+      { timeout: 10_000 }, async t => {
+        const f = fixture(); const stateEntered = deferred(), stateReady = deferred();
+        const renewalEntered = deferred(), renewalReady = deferred();
+        let tick, triggered = false, armed = false, quietReads = 0, renewalSettled = false, completed = false, acquiredLease;
+        t.mock.method(globalThis, "setInterval", (callback, milliseconds) => {
+          assert.equal(milliseconds, 30_000); tick = callback; return 1;
+        });
+        t.mock.method(globalThis, "clearInterval", () => undefined);
+        const acquire = f.input.leasePort.acquire, release = f.input.leasePort.release;
+        f.input.leasePort.acquire = async request => {
+          const result = await acquire(request);
+          acquiredLease = { role: result.lease.role, owner: result.lease.owner, fence: result.lease.fence };
+          return result;
+        };
+        f.input.leasePort.release = async request => {
+          assert.deepEqual(request, acquiredLease);
+          assert.equal(renewalSettled, true, "cleanup must drain the pending renewal");
+          return release(request);
+        };
+        if (phase === "rollback") f.input.verifyPublic = async () => {
+          f.events.push("public-verification-failed"); throw new Error("synthetic failed public verification");
+        };
+        const quiet = f.input.assertSourceQuiet;
+        f.input.assertSourceQuiet = async lease => {
+          await quiet(lease);
+          const ready = phase === "activation" ? f.events.includes("prepare-observation") && !f.events.includes("activate")
+            : phase === "observation" ? f.events.includes("activate") && !f.events.includes("observation")
+              : phase === "rollback" && f.events.includes("public-verification-failed");
+          // Recovery first checks whether rollback is safe, then the rollback
+          // port makes its own final guard. Pause that last guard's state read.
+          if (!triggered && ready && ++quietReads === (phase === "rollback" ? 2 : 1)) armed = true;
+        };
+        const read = f.input.client.activeState;
+        f.input.client.activeState = async () => {
+          if (!triggered && (armed || phase === "verified return" && f.events.includes("verify-public"))) {
+            triggered = true; stateEntered.resolve(); await stateReady.promise;
+          }
+          return read();
+        };
+        const renew = f.input.leasePort.renew;
+        f.input.leasePort.renew = async request => {
+          assert.equal(request.owner, acquiredLease.owner); assert.equal(request.fence, acquiredLease.fence);
+          renewalEntered.resolve(); await renewalReady.promise;
+          const result = succeeds ? await renew(request) : null;
+          renewalSettled = true; return result;
+        };
+        const targetEvent = phase === "activation" ? "activate" : phase;
+        const result = publish(f.input).then(value => { completed = true; return { value }; },
+          error => { completed = true; return { error }; });
+        try {
+          await stateEntered.promise; tick(); await renewalEntered.promise;
+          assert.equal(renewalSettled, false); stateReady.resolve();
+          await new Promise(resolve => setImmediate(resolve));
+          assert.equal(completed, false, "publication must not return while renewal remains pending");
+          assert.equal(f.events.includes(targetEvent), false, "no visible write may dispatch while renewal remains pending");
+          assert.equal(f.events.includes("release"), false);
+          renewalReady.resolve(); const outcome = await result;
+          assert.equal(f.events.filter(event => event === "lease").length, 1);
+          assert.equal(f.events.filter(event => event === "release").length, 1);
+          assert.equal(f.events.at(-1), "release");
+          if (succeeds) {
+            if (phase === "rollback") {
+              assert.equal(outcome.error?.code, "PRODUCTION_VERIFICATION_FAILED_ROLLED_BACK");
+              assert.equal(f.events.filter(event => event === "rollback").length, 1);
+              assert.equal(f.state().activeRelease.publicReleaseId, f.before.activeRelease.publicReleaseId);
+            } else assert.equal(outcome.value?.status, "verified");
+            assert.equal(f.events.filter(event => event === "activate").length, 1);
+            assert.equal(f.events.filter(event => event === "observation").length, 1);
+          } else {
+            const expected = phase === "activation" ? "PRODUCTION_PUBLICATION_FAILED"
+              : phase === "verified return" ? "PRODUCTION_IMPORT_LEASE_LOST" : "PRODUCTION_VERIFICATION_RECOVERY_REQUIRED";
+            assert.equal(outcome.error?.code, expected); assert.equal(outcome.value, undefined);
+            assert.equal(f.events.includes(targetEvent), false);
+            assert.equal(f.events.includes("rollback"), false);
+            assert.equal(f.events.filter(event => event === "activate").length, phase === "activation" ? 0 : 1);
+          }
+        } finally {
+          stateReady.resolve(); renewalReady.resolve(); await result;
+        }
+      });
+  }
+}
