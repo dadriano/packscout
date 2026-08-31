@@ -42,6 +42,7 @@ export * from "./provider-mixed-page-contract.ts";
 export * from "./provider-mixed-page-repository.ts";
 export * from "./provider-runtime-repository.ts";
 export * from "./provider-worker-lease-repository.ts";
+export * from "./drained-database-transaction.ts";
 export * from "./provider-command-repository.ts";
 export * from "./provider-run-repository.ts";
 export * from "./provider-source-request-audit-repository.ts";
