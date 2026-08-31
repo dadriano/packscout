@@ -46,6 +46,12 @@ const evidenceSchema = z.object({ status: z.literal("verified"), headDigest: has
   receiptPath: absolute, receiptSha256: hash, operationId: z.uuid(), publicReleaseId: z.uuid(),
   releaseFingerprint: hash, generation: count, verifiedAt: iso, publicReadbackSha256: hash }).strict();
 export type ClutchpacksProductionPostHeadEvidence = z.infer<typeof evidenceSchema>;
+const journalSchema = z.object({ schemaVersion: z.literal("clutchpacks_production_post_head_v1"),
+  head: clutchpacksProductionPostHeadSchema, baseSourceConfig: optionsSchema.shape.baseSourceConfig,
+  publisherWorktree: absolute, publisherCommit: z.string().regex(/^[a-f0-9]{40}$/u),
+  residentAuthorityDigest: hash, sourceConfigSha256: hash }).strict();
+const pendingHeadSchema = z.object({ head: clutchpacksProductionPostHeadSchema,
+  publisherCommit: z.string().regex(/^[a-f0-9]{40}$/u) }).strict();
 export interface ClutchpacksProductionPostHeadDependencies {
   readonly git?: (args: readonly string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => Promise<string>;
   readonly spawn?: (file: string, args: readonly string[], options: {
@@ -65,21 +71,24 @@ async function syncDirectory(directory: string) {
   const handle = await open(directory, constants.O_RDONLY);
   try { await handle.sync(); } finally { await handle.close(); }
 }
-async function readPrivate(file: string, maximum = 64 * 1024 * 1024) {
+async function readPrivate(file: string, maximum = 64 * 1024 * 1024, minimum = 1) {
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0 || stat.size < 1 || stat.size > maximum) refuse("POST_HEAD_FILE_INVALID");
+    if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0 || stat.size < minimum || stat.size > maximum) refuse("POST_HEAD_FILE_INVALID");
     const bytes = await handle.readFile();
     if (bytes.length !== stat.size) refuse("POST_HEAD_FILE_CHANGED");
     return bytes;
   } finally { await handle.close(); }
 }
-async function writeExclusive(file: string, value: unknown) {
+async function writeBytesExclusive(file: string, bytes: Uint8Array) {
   const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try { await handle.writeFile(`${canonicalJson(value)}\n`); await handle.sync(); }
+  try { await handle.writeFile(bytes); await handle.sync(); }
   finally { await handle.close(); }
   await syncDirectory(path.dirname(file));
+}
+async function writeExclusive(file: string, value: unknown) {
+  await writeBytesExclusive(file, Buffer.from(`${canonicalJson(value)}\n`));
 }
 async function directory(file: string, create = false) {
   if (create) {
@@ -97,7 +106,8 @@ function childEnvironment(environment: NodeJS.ProcessEnv) {
   return result;
 }
 async function verifyCheckout(options: z.output<typeof optionsSchema>, env: NodeJS.ProcessEnv,
-  deps: ClutchpacksProductionPostHeadDependencies) {
+  deps: ClutchpacksProductionPostHeadDependencies,
+  trackedFiles: readonly string[] = ["scripts/live/promote-clutchpacks-production.mts"]) {
   const run = deps.git ?? (async (args, input) => (await promisify(execFile)("/usr/bin/git", [...args], {
     ...input, timeout: 10_000, maxBuffer: 1_048_576 })).stdout);
   const cwd = options.publisherWorktree;
@@ -105,8 +115,31 @@ async function verifyCheckout(options: z.output<typeof optionsSchema>, env: Node
   for (const [args, expected] of [
     [["rev-parse", "--show-toplevel"], cwd], [["rev-parse", "HEAD"], options.expectedPublisherCommit],
     [["status", "--porcelain=v1", "--untracked-files=no"], ""],
-    [["ls-files", "--error-unmatch", "scripts/live/promote-clutchpacks-production.mts"], "scripts/live/promote-clutchpacks-production.mts"],
   ] as const) if ((await run(args, { cwd, env })).trim() !== expected) refuse("POST_HEAD_CHECKOUT_INVALID");
+  for (const file of trackedFiles) if ((await run(["ls-files", "--error-unmatch", file], { cwd, env })).trim() !== file) {
+    refuse("POST_HEAD_CHECKOUT_INVALID");
+  }
+}
+function commandInvocation(options: z.output<typeof optionsSchema>, args: readonly string[]) {
+  const loader = path.join(options.publisherWorktree, "node_modules/tsx/dist/loader.mjs");
+  const cli = path.join(options.publisherWorktree, "scripts/live/promote-clutchpacks-production.mts");
+  return { file: process.execPath, args: ["--import", loader, cli, ...args] as readonly string[], loader, cli };
+}
+function postHeadContext(options: z.output<typeof optionsSchema>, baseBytes: Buffer) {
+  if (bytesHash(baseBytes) !== options.baseSourceConfig.sha256) refuse("POST_HEAD_BASE_CHANGED");
+  const base = clutchpacksProductionSourceConfigSchema.parse(json(baseBytes)); const head = options.head;
+  if (head.providerId !== base.scope.providerId || head.configId !== base.scope.configVersionId ||
+    head.configNumber !== base.scope.configVersionNumber || head.authorityDigest !== options.expectedResidentAuthorityDigest) {
+    refuse("POST_HEAD_SCOPE_CHANGED");
+  }
+  const config = clutchpacksProductionSourceConfigSchema.parse({ ...base, expected: { ...base.expected,
+    latestSucceededRunId: head.runId, checkpointHash: head.checkpointHash,
+    stateGeneration: head.generation, runtimeRowVersion: head.runtimeRowVersion } });
+  const journal = journalSchema.parse({ schemaVersion: "clutchpacks_production_post_head_v1", head,
+    baseSourceConfig: options.baseSourceConfig, publisherWorktree: options.publisherWorktree,
+    publisherCommit: options.expectedPublisherCommit, residentAuthorityDigest: options.expectedResidentAuthorityDigest,
+    sourceConfigSha256: digest(config) });
+  return { config, journal };
 }
 
 /** Always await close after TERM/KILL; output writes are bounded and drained before returning. */
@@ -121,8 +154,8 @@ async function command(args: readonly string[], options: z.output<typeof options
   try {
     stderr = await open(path.join(attempt, `${phase}.stderr`), "wx", 0o600);
     const launch = deps.spawn ?? ((file, values, spawnOptions) => spawn(file, [...values], spawnOptions));
-    const child = launch(process.execPath, ["--import", path.join(options.publisherWorktree, "node_modules/tsx/dist/loader.mjs"),
-      path.join(options.publisherWorktree, "scripts/live/promote-clutchpacks-production.mts"), ...args],
+    const invocation = commandInvocation(options, args);
+    const child = launch(invocation.file, invocation.args,
     { cwd: options.publisherWorktree, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let failure = false, stopped = false, killer: ReturnType<typeof setTimeout> | undefined;
     let pending = Promise.resolve();
@@ -164,8 +197,8 @@ async function command(args: readonly string[], options: z.output<typeof options
   return result;
 }
 
-async function boundBundle(file: string, config: z.infer<typeof clutchpacksProductionSourceConfigSchema>, head: ClutchpacksProductionPostHead) {
-  const bundle = bundleSchema.parse(json(await readPrivate(file)));
+function boundBundleBytes(bytes: Buffer, config: z.infer<typeof clutchpacksProductionSourceConfigSchema>, head: ClutchpacksProductionPostHead) {
+  const bundle = bundleSchema.parse(json(bytes));
   const { bundleSha256, ...body } = bundle;
   if (digest(body) !== bundleSha256 || digest(bundle.sourceConfig) !== bundle.sourceConfigSha256 ||
     digest(config) !== bundle.sourceConfigSha256 || digest(bundle.plan) !== bundle.intent.candidate.planSha256 ||
@@ -179,11 +212,13 @@ async function boundBundle(file: string, config: z.infer<typeof clutchpacksProdu
     bundle.intent.scope.configVersion !== config.scope.configVersionNumber) refuse("POST_HEAD_BUNDLE_INVALID");
   return bundle;
 }
-async function receiptEvidence(output: z.infer<typeof verifiedOutputSchema>, bundle: z.infer<typeof bundleSchema>,
-  bundlePath: string, head: ClutchpacksProductionPostHead): Promise<ClutchpacksProductionPostHeadEvidence> {
+async function boundBundle(file: string, config: z.infer<typeof clutchpacksProductionSourceConfigSchema>, head: ClutchpacksProductionPostHead) {
+  return boundBundleBytes(await readPrivate(file), config, head);
+}
+function receiptEvidenceBytes(output: z.infer<typeof verifiedOutputSchema>, bundle: z.infer<typeof bundleSchema>,
+  bundlePath: string, head: ClutchpacksProductionPostHead, bytes: Buffer): ClutchpacksProductionPostHeadEvidence {
   if (path.dirname(output.receiptPath) !== path.dirname(bundlePath) ||
     !new RegExp(`^bundle\\.json\\.receipt\\.[a-f0-9-]{36}\\.json$`, "u").test(path.basename(output.receiptPath))) refuse("POST_HEAD_RECEIPT_INVALID");
-  const bytes = await readPrivate(output.receiptPath, 65_536);
   const receipt = receiptSchema.parse(json(bytes)); const intent = bundle.intent;
   const expectedGeneration = intent.predecessor.generation + (intent.predecessor.publicReleaseId === intent.candidate.publicReleaseId &&
     intent.predecessor.releaseFingerprint === intent.candidate.releaseFingerprint ? 0 : 1);
@@ -201,6 +236,35 @@ async function receiptEvidence(output: z.infer<typeof verifiedOutputSchema>, bun
     publicReleaseId: intent.candidate.publicReleaseId, releaseFingerprint: intent.candidate.releaseFingerprint,
     generation: receipt.generation, verifiedAt: receipt.verifiedAt, publicReadbackSha256: receipt.publicReadbackSha256 });
 }
+async function receiptEvidence(output: z.infer<typeof verifiedOutputSchema>, bundle: z.infer<typeof bundleSchema>,
+  bundlePath: string, head: ClutchpacksProductionPostHead): Promise<ClutchpacksProductionPostHeadEvidence> {
+  const bytes = await readPrivate(output.receiptPath, 65_536);
+  return receiptEvidenceBytes(output, bundle, bundlePath, head, bytes);
+}
+
+/** Narrow, offline primitives for the one-shot failed-publication artifact migration. */
+export const clutchpacksProductionPostHeadRecoveryPrimitives = Object.freeze({
+  parseOptions: (value: unknown) => optionsSchema.parse(value),
+  parseJournal: (value: unknown) => journalSchema.parse(value),
+  parsePendingHead: (value: unknown) => pendingHeadSchema.parse(value),
+  parseSourceConfig: (value: unknown) => clutchpacksProductionSourceConfigSchema.parse(value),
+  parseReceiptBytes: (bytes: Buffer) => receiptSchema.parse(json(bytes)),
+  parseVerifiedOutput: (value: unknown) => verifiedOutputSchema.parse(value),
+  parseJsonBytes: json,
+  hashBytes: bytesHash,
+  digest,
+  readPrivate,
+  writeBytesExclusive,
+  writeExclusive,
+  directory,
+  syncDirectory,
+  verifyCheckout,
+  commandInvocation,
+  command,
+  postHeadContext,
+  boundBundleBytes,
+  receiptEvidenceBytes,
+});
 
 /** Await this hook before scheduling another import. A retained pending directory
  * means a failed/uncertain operation and requires operator reconciliation, never a new clock. */
@@ -227,22 +291,12 @@ export async function publishClutchpacksProductionPostHead(input: ClutchpacksPro
     const env = childEnvironment(process.env);
     await verifyCheckout(options, env, deps);
     const baseBytes = await readPrivate(options.baseSourceConfig.path, 1_048_576);
-    if (bytesHash(baseBytes) !== options.baseSourceConfig.sha256) refuse("POST_HEAD_BASE_CHANGED");
-    const base = clutchpacksProductionSourceConfigSchema.parse(json(baseBytes)); const head = options.head;
-    if (head.providerId !== base.scope.providerId || head.configId !== base.scope.configVersionId ||
-      head.configNumber !== base.scope.configVersionNumber || head.authorityDigest !== options.expectedResidentAuthorityDigest) refuse("POST_HEAD_SCOPE_CHANGED");
-    const config = clutchpacksProductionSourceConfigSchema.parse({ ...base, expected: { ...base.expected,
-      latestSucceededRunId: head.runId, checkpointHash: head.checkpointHash,
-      stateGeneration: head.generation, runtimeRowVersion: head.runtimeRowVersion } });
+    const { config, journal } = postHeadContext(options, baseBytes); const head = options.head;
     const runDirectory = path.join(options.artifactDirectory, head.runId);
     let first = true;
     await mkdir(runDirectory, { mode: 0o700 }).catch(error => { if (error.code === "EEXIST") first = false; else throw error; });
     if (first) await syncDirectory(options.artifactDirectory);
     await directory(runDirectory);
-    const journal = { schemaVersion: "clutchpacks_production_post_head_v1", head,
-      baseSourceConfig: options.baseSourceConfig, publisherWorktree: options.publisherWorktree,
-      publisherCommit: options.expectedPublisherCommit, residentAuthorityDigest: options.expectedResidentAuthorityDigest,
-      sourceConfigSha256: digest(config) };
     const configPath = path.join(runDirectory, "source-config.json"), bundlePath = path.join(runDirectory, "bundle.json");
     if (first) {
       await writeExclusive(path.join(runDirectory, "head.json"), journal); await writeExclusive(configPath, config);

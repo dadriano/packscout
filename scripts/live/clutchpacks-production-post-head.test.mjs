@@ -2,18 +2,35 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat, realpath, readdir, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat, lstat, realpath, readdir, rename, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
+process.env.NODE_ENV = "test";
 const { publishClutchpacksProductionPostHead: publish, clutchpacksProductionPostHeadSchema } =
   await tsImport("./clutchpacks-production-post-head.mts", import.meta.url);
+const recoveryModule = await tsImport("./clutchpacks-production-post-head-recovery.mts", import.meta.url);
+const executeRecoveryLive = recoveryModule.executeClutchpacksProductionPostHeadRecoveryPublication;
+const recoverLive = recoveryModule.recoverClutchpacksProductionPostHeadArtifacts;
+const recoveryHarness = recoveryModule.clutchpacksProductionPostHeadRecoveryTestHarness;
+assert.ok(recoveryHarness); const executeRecovery = recoveryHarness.execute, recover = recoveryHarness.recover;
 const { CLUTCHPACKS_PRODUCTION_SCOPE: scope, CLUTCHPACKS_PRODUCTION_TARGET: target, productionPublicationSha256: digest } =
   await tsImport("./clutchpacks-production-publication-policy.mts", import.meta.url);
+const { clutchpacksProductionObservationOperationId: observationId } =
+  await tsImport("./clutchpacks-production-v3-publication.mts", import.meta.url);
 const id = suffix => `11111111-1111-5111-8111-${suffix.padStart(12, "0")}`;
 const rawHash = value => createHash("sha256").update(value).digest("hex");
 const now = "2026-08-31T18:00:00.000Z";
+const fixedPublisherWorktree = "/Users/lains/Projects/packscout/.worktrees/clutchpacks-production-timeout-only-final";
+const fixedPublisherCommit = "143e954fe5eca845f33c9727652486d62885174a";
+const fixedPublisherModules = {
+  promoteCli: { path: path.join(fixedPublisherWorktree, "scripts/live/promote-clutchpacks-production.mts"), sha256: "91911ba0b8952027d97801615a0414eeaafac2d690ec0733c2e23c866c5c306a" },
+  convexRuntime: { path: path.join(fixedPublisherWorktree, "scripts/live/clutchpacks-production-convex-runtime.mts"), sha256: "b5a67cf97b435e27d78ea38211c087b542d30ce606f9c16555a0cb8383b2614a" },
+  publicationOrchestrator: { path: path.join(fixedPublisherWorktree, "scripts/live/clutchpacks-production-v3-publication.mts"), sha256: "9d9f59cea89d78fa4f56ffd996f96cb5c7476a6d73155c40603ab1478cf48ff1" },
+  publicationPolicy: { path: path.join(fixedPublisherWorktree, "scripts/live/clutchpacks-production-publication-policy.mts"), sha256: "29383064ab860e29e7d5e0380b2b6fa0468746b5ff3c69b8d50aff3faaa3bc74" },
+  genericPublisher: { path: path.join(fixedPublisherWorktree, "packages/services/src/buyback-adjusted-ev-release-publisher.ts"), sha256: "787c80bdb03cc0a93728da8ca67c2995111f96ff6b23c2f1c3c9832d2dba5f6d" },
+};
 const save = (file, value) => writeFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
 const read = async file => JSON.parse(await readFile(file, "utf8"));
 async function fixture(t) {
@@ -36,7 +53,8 @@ async function fixture(t) {
     expectedResidentAuthorityDigest: "d".repeat(64), timeoutMs: 5_000 };
   const events = [], children = [], gitCalls = [];
   const controls = { qualityState: "degraded", dirty: false, wrongCommit: false, phaseFailure: null, receiptMutation: null,
-    outputMutation: null, hang: false, terminated: false, outputBytes: 0, sourceHeadOverride: null, onSpawn: null };
+    outputMutation: null, hang: false, terminated: false, outputBytes: 0, sourceHeadOverride: null, onSpawn: null,
+    sidecarMode: null, observationOffset: 0 };
   const makeBundle = sourceConfig => {
     const approvedConfiguration = { fixtureApprovedConfiguration: true }, plan = { manifest: { counts: { repacks: 17 } } };
     const intent = { schemaVersion: "clutchpacks_production_publication_v1", operationId: id("5"), target,
@@ -63,7 +81,7 @@ async function fixture(t) {
       const [phase, first, second] = args.slice(offset); events.push(phase);
       setImmediate(async () => {
         try {
-          controls.onSpawn?.();
+          await controls.onSpawn?.();
           if (controls.hang) return;
           if (controls.outputBytes) { child.stdout.write(Buffer.alloc(controls.outputBytes)); return; }
           if (controls.phaseFailure === phase) { child.stderr.write("private-token-must-stay-private"); child.stdout.end(); child.stderr.end(); child.emit("close", 1); return; }
@@ -75,13 +93,30 @@ async function fixture(t) {
               readAt: bundle.intent.readAt, qualityState: bundle.intent.source.qualityState, quarantineCount: bundle.intent.source.quarantineCount };
           } else {
             const bundle = await read(first), intent = bundle.intent, receiptPath = `${first}.receipt.${randomUUID()}.json`;
+            const leaseAttemptId = randomUUID(), leaseRequest = { role: "import",
+              owner: `production-publication:${intent.operationId}:${leaseAttemptId}`, leaseMilliseconds: 900_000 };
+            const lease = { schemaVersion: "clutchpacks_production_lease_attempt_v1", bundleSha256: bundle.bundleSha256,
+              attemptId: leaseAttemptId, intentSha256: digest(intent), request: leaseRequest, requestSha256: digest(leaseRequest) };
+            const observedAt = new Date(Date.parse(now) + controls.observationOffset++).toISOString();
+            const observationSequence = Date.parse(observedAt), operationId = observationId(intent, observedAt);
+            const observationRequest = { operationId, idempotencyKey: operationId,
+              publicReleaseId: intent.candidate.publicReleaseId, releaseFingerprint: intent.candidate.releaseFingerprint,
+              observationSequence, observedAt };
+            const observation = { schemaVersion: "clutchpacks_production_observation_attempt_v1",
+              bundleSha256: bundle.bundleSha256, intentSha256: digest(intent), request: observationRequest,
+              requestSha256: digest(observationRequest) };
             const receipt = { schemaVersion: "clutchpacks_production_publication_receipt_v1", status: "verified",
               operationId: intent.operationId, intentSha256: digest(intent), target: intent.target, scope: intent.scope,
               readAt: intent.readAt, source: intent.source, candidate: intent.candidate,
               approvedConfigurationSha256: intent.approvedConfigurationSha256, generation: 3, verifiedAt: now,
               publicReadbackSha256: "7".repeat(64), repackCount: 17, publicationOutcome: "activated",
               observationReceiptDigest: "6".repeat(64), activateReceiptDigest: "5".repeat(64), bundleSha256: bundle.bundleSha256 };
+            if (controls.sidecarMode === "tampered-lease") lease.request.owner = "production-publication:wrong:owner";
+            if (controls.sidecarMode === "tampered-observation") observation.request.publicReleaseId = id("97");
             controls.receiptMutation?.(receipt); await save(receiptPath, receipt);
+            if (controls.sidecarMode !== "missing-lease") await save(`${first}.lease.${leaseAttemptId}.json`, lease);
+            await save(`${first}.observation.${observationSequence}.json`, observation);
+            if (controls.sidecarMode === "extra-receipt") await save(`${first}.receipt.${randomUUID()}.json`, receipt);
             output = { status: "verified", receiptPath, bundleSha256: bundle.bundleSha256, operationId: intent.operationId,
               publicReleaseId: intent.candidate.publicReleaseId, qualityState: intent.source.qualityState, quarantineCount: intent.source.quarantineCount };
           }
@@ -99,6 +134,9 @@ async function fixture(t) {
   return { directory, config, options, deps, events, children, controls, gitCalls };
 }
 const safelyBlocked = code => error => { assert.equal(error.code, code); assert.doesNotMatch(error.message, /token|secret|postgres/iu); return true; };
+const safelyRecoveryBlocked = code => error => {
+  assert.equal(error.code, code); assert.doesNotMatch(error.message, /token|secret|postgres/iu); return true;
+};
 
 test("safe head prepares once, verifies bound receipt, and same-head reentry publishes the identical bundle", async t => {
   const f = await fixture(t); const result = await publish(f.options, f.deps);
@@ -221,4 +259,272 @@ test("post-head verification retains unknown quality with465 quarantines through
   assert.equal(bundle.intent.source.qualityState, "unknown"); assert.equal(bundle.intent.source.quarantineCount, 465);
   const receipt = await read(result.receiptPath); assert.equal(receipt.source.qualityState, "unknown");
   assert.equal(receipt.source.quarantineCount, 465);
+});
+
+async function treeEvidence(root) {
+  const result = [];
+  async function visit(directory, relative = "") {
+    for (const name of (await readdir(directory)).sort()) {
+      const file = path.join(directory, name), key = path.join(relative, name), metadata = await lstat(file);
+      if (metadata.isDirectory()) { result.push([key, "directory", metadata.mode & 0o777]); await visit(file, key); }
+      else if (metadata.isSymbolicLink()) result.push([key, "symlink", await realpath(file)]);
+      else result.push([key, "file", metadata.mode & 0o777, rawHash(await readFile(file))]);
+    }
+  }
+  await visit(root); return result;
+}
+async function writeModule(worktree, relative, label) {
+  const file = path.join(worktree, relative); await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, `export const fixture = ${JSON.stringify(label)};\n`, { mode: 0o600 });
+  return { path: file, sha256: rawHash(await readFile(file)) };
+}
+async function recoveryFixture(t) {
+  const f = await fixture(t); await publish(f.options, f.deps);
+  const oldRoot = f.options.artifactDirectory, run = path.join(oldRoot, f.options.head.runId);
+  const pending = path.join(oldRoot, "pending"); await mkdir(pending, { mode: 0o700 });
+  const pendingHead = path.join(pending, "head.json");
+  await save(pendingHead, { head: f.options.head, publisherCommit: f.options.expectedPublisherCommit });
+  const blocked = path.join(pending, `blocked-${randomUUID()}.json`);
+  await save(blocked, { status: "blocked", code: "POST_HEAD_CHILD_FAILED" });
+  const attempt = path.join(run, `attempt-${randomUUID()}`); await mkdir(attempt, { mode: 0o700 });
+  const bundle = path.join(run, "bundle.json"), bundleValue = await read(bundle);
+  const publishStarted = path.join(attempt, "publish.started.json"), publishStderr = path.join(attempt, "publish.stderr");
+  await save(publishStarted, { phase: "publish", args: ["--publish", bundle] });
+  await save(publishStderr, { status: "refused", code: "PRODUCTION_PUBLICATION_FAILED" });
+  const leaseAttemptId = randomUUID(), leaseRequest = { role: "import",
+    owner: `production-publication:${bundleValue.intent.operationId}:${leaseAttemptId}`, leaseMilliseconds: 900_000 };
+  const leaseAttempt = `${bundle}.lease.${leaseAttemptId}.json`;
+  await save(leaseAttempt, { schemaVersion: "clutchpacks_production_lease_attempt_v1",
+    bundleSha256: bundleValue.bundleSha256, attemptId: leaseAttemptId, intentSha256: digest(bundleValue.intent),
+    request: leaseRequest, requestSha256: digest(leaseRequest) });
+  const pin = async file => ({ path: file, sha256: rawHash(await readFile(file)) });
+  const old = { artifactDirectory: oldRoot, publisherWorktree: f.options.publisherWorktree,
+    publisherCommit: f.options.expectedPublisherCommit, pendingHead: await pin(pendingHead),
+    journal: await pin(path.join(run, "head.json")), sourceConfig: await pin(path.join(run, "source-config.json")),
+    bundle: await pin(bundle), failure: { pendingBlocked: await pin(blocked), publishStarted: await pin(publishStarted),
+      publishStderr: await pin(publishStderr), leaseAttempt: await pin(leaseAttempt) } };
+  const publisherWorktree = path.join(f.directory, "publisher-worktree"); await mkdir(publisherWorktree, { mode: 0o700 });
+  const publisherModules = {
+    promoteCli: await writeModule(publisherWorktree, "scripts/live/promote-clutchpacks-production.mts", "promote"),
+    convexRuntime: await writeModule(publisherWorktree, "scripts/live/clutchpacks-production-convex-runtime.mts", "runtime"),
+    publicationOrchestrator: await writeModule(publisherWorktree, "scripts/live/clutchpacks-production-v3-publication.mts", "orchestrator"),
+    publicationPolicy: await writeModule(publisherWorktree, "scripts/live/clutchpacks-production-publication-policy.mts", "policy"),
+    genericPublisher: await writeModule(publisherWorktree, "packages/services/src/buyback-adjusted-ev-release-publisher.ts", "generic"),
+  };
+  await writeModule(publisherWorktree, "node_modules/tsx/dist/loader.mjs", "loader");
+  const executorWorktree = path.join(f.directory, "executor-worktree"); await mkdir(executorWorktree, { mode: 0o700 });
+  const executorModules = {
+    recovery: await writeModule(executorWorktree, "scripts/live/clutchpacks-production-post-head-recovery.mts", "recovery"),
+    postHead: await writeModule(executorWorktree, "scripts/live/clutchpacks-production-post-head.mts", "post-head"),
+  };
+  const publisherCommit = "b".repeat(40), executorCommit = "c".repeat(40);
+  const executionDirectory = path.join(f.directory, "recovery-execution");
+  const destinationDirectory = path.join(f.directory, "recovered-artifacts");
+  const executorPolicyPath = path.join(f.directory, "executor-policy.json");
+  const executorPolicyCore = {
+    schemaVersion: "clutchpacks_production_post_head_recovery_executor_policy_v1",
+    executor: { worktree: executorWorktree, commit: executorCommit, modules: executorModules },
+    importedRecoveryModule: executorModules.recovery,
+    publisher: { worktree: publisherWorktree, commit: publisherCommit, modules: publisherModules },
+    executionDirectory, destinationDirectory,
+  };
+  await save(executorPolicyPath, { ...executorPolicyCore, policySha256: digest(executorPolicyCore) });
+  const executorPolicy = await pin(executorPolicyPath);
+  const controls = { dirty: new Set(), wrongCommit: new Map() };
+  const commits = new Map([[f.options.publisherWorktree, f.options.expectedPublisherCommit],
+    [publisherWorktree, publisherCommit], [executorWorktree, executorCommit]]);
+  const git = async (args, options) => {
+    if (args[0] === "status") return controls.dirty.has(options.cwd) ? " M tracked-file\n" : "";
+    if (args[0] === "ls-files") return `${args[2]}\n`;
+    if (args[1] === "HEAD") return `${controls.wrongCommit.get(options.cwd) ?? commits.get(options.cwd)}\n`;
+    return `${options.cwd}\n`;
+  };
+  const executionInput = { schemaVersion: "clutchpacks_production_post_head_recovery_execution_v1",
+    head: structuredClone(f.options.head), old: structuredClone(old),
+    publisher: { worktree: publisherWorktree, commit: publisherCommit, modules: publisherModules },
+    executor: { worktree: executorWorktree, commit: executorCommit, modules: executorModules },
+    executorPolicy, executionDirectory, deadlineMs: 900_000 };
+  const deps = { ...f.deps, git, now: () => now };
+  const execute = () => executeRecovery(executionInput, deps);
+  const seedInput = manifest => ({ schemaVersion: "clutchpacks_production_post_head_recovery_v1",
+    head: structuredClone(f.options.head), old: { ...structuredClone(old), executionManifest: manifest },
+    destination: { artifactDirectory: destinationDirectory,
+      publisherWorktree, publisherCommit, baseSourceConfig: structuredClone(f.options.baseSourceConfig),
+      residentAuthorityDigest: f.options.expectedResidentAuthorityDigest } });
+  return { ...f, sourceControls: f.controls, oldRoot, run, attempt, old, pin, publisherWorktree, publisherCommit, publisherModules,
+    executorWorktree, executorCommit, executorModules, executorPolicyPath, controls, commits, git,
+    executionInput, deps, execute, seedInput };
+}
+async function repinJson(pin, change) {
+  const value = await read(pin.path); change(value); await writeFile(pin.path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  pin.sha256 = rawHash(await readFile(pin.path));
+}
+
+test("one-shot recovery executes a private bundle copy and seeds without changing the frozen old root", async t => {
+  const f = await recoveryFixture(t), before = await treeEvidence(f.oldRoot);
+  const executed = await f.execute();
+  assert.equal(executed.status, "verified"); assert.equal(path.basename(executed.manifest.path), "execution.completed.json");
+  assert.deepEqual(await treeEvidence(f.oldRoot), before);
+  const publishChild = f.children.at(-1), publishOffset = publishChild.args.indexOf("--publish");
+  assert.equal(publishChild.args[publishOffset + 1], path.join(f.executionInput.executionDirectory, "bundle.json"));
+  assert.notEqual(publishChild.args[publishOffset + 1], f.old.bundle.path);
+  const result = await recover(f.seedInput(executed.manifest), { git: f.git });
+  assert.equal(result.status, "recovered"); assert.deepEqual(await treeEvidence(f.oldRoot), before);
+  assert.equal((await readdir(path.dirname(result.runDirectory))).includes("pending"), false);
+  const attestation = await read(path.join(result.runDirectory, "recovery-attestation.json"));
+  assert.equal(attestation.recoveredAt, (await read(executed.manifest.path)).completedAt);
+  assert.equal(attestation.old.executionManifest.sha256, executed.manifest.sha256);
+});
+
+test("live recovery entrypoints cannot receive dependency injection to bypass fixed policy", async t => {
+  const f = await recoveryFixture(t);
+  await assert.rejects(executeRecoveryLive(f.executionInput, { ...f.deps, validateIncident: () => {} }),
+    safelyRecoveryBlocked("POST_HEAD_RECOVERY_PUBLISHER_INVALID"));
+  await assert.rejects(recoverLive(f.seedInput({ path: path.join(f.directory, "missing"), sha256: "0".repeat(64) }),
+    { git: f.git, validateIncident: () => {} }), safelyRecoveryBlocked("POST_HEAD_RECOVERY_DESTINATION_INVALID"));
+  assert.equal(f.children.length, 2); await assert.rejects(stat(f.executionInput.executionDirectory));
+});
+
+test("live executor refuses an alternate execution root even with the coherent fixed publisher", async t => {
+  const f = await recoveryFixture(t), input = structuredClone(f.executionInput);
+  input.publisher = { worktree: fixedPublisherWorktree, commit: fixedPublisherCommit,
+    modules: structuredClone(fixedPublisherModules) };
+  await assert.rejects(executeRecoveryLive(input), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_PATH_INVALID"));
+  assert.equal(f.children.length, 2); await assert.rejects(stat(input.executionDirectory));
+});
+
+test("live seed refuses an alternate destination root before reading a manifest", async t => {
+  const f = await recoveryFixture(t), input = f.seedInput({ path: path.join(f.directory, "missing"), sha256: "0".repeat(64) });
+  input.destination.publisherWorktree = fixedPublisherWorktree; input.destination.publisherCommit = fixedPublisherCommit;
+  await assert.rejects(recoverLive(input), safelyRecoveryBlocked("POST_HEAD_RECOVERY_DESTINATION_INVALID"));
+  await assert.rejects(stat(input.destination.artifactDirectory));
+});
+
+test("the recovery execution directory is an atomic one-use token", async t => {
+  const f = await recoveryFixture(t); await f.execute(); const childCount = f.children.length;
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_EXISTS"));
+  assert.equal(f.children.length, childCount);
+});
+
+test("executor policy refuses a coherent alternate executor checkout", async t => {
+  const f = await recoveryFixture(t), alternate = path.join(f.directory, "alternate-executor");
+  await mkdir(alternate, { mode: 0o700 });
+  const modules = {
+    recovery: await writeModule(alternate, "scripts/live/clutchpacks-production-post-head-recovery.mts", "alternate-recovery"),
+    postHead: await writeModule(alternate, "scripts/live/clutchpacks-production-post-head.mts", "alternate-post-head"),
+  };
+  const commit = "d".repeat(40); f.commits.set(alternate, commit);
+  f.executionInput.executor = { worktree: alternate, commit, modules };
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTOR_POLICY_INVALID"));
+  await assert.rejects(stat(f.executionInput.executionDirectory));
+});
+
+test("executor policy refuses a different currently imported recovery module", async t => {
+  const f = await recoveryFixture(t);
+  await repinJson(f.executionInput.executorPolicy, value => {
+    value.importedRecoveryModule = structuredClone(value.executor.modules.postHead);
+    const { policySha256: _prior, ...core } = value; value.policySha256 = digest(core);
+  });
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTOR_POLICY_INVALID"));
+  await assert.rejects(stat(f.executionInput.executionDirectory));
+});
+
+for (const mode of ["missing-lease", "extra-receipt", "tampered-lease", "tampered-observation"]) {
+  test(`recovery executor refuses ${mode} publication sidecars`, async t => {
+    const f = await recoveryFixture(t); f.sourceControls.sidecarMode = mode;
+    await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_SIDECAR_INVALID"));
+    assert.ok((await readdir(f.executionInput.executionDirectory)).some(name => name.startsWith("blocked-")));
+  });
+}
+
+test("old-root inventory detects mutation of an otherwise unlisted file during publication", async t => {
+  const f = await recoveryFixture(t), extra = path.join(f.oldRoot, "unlisted-proof.json"); await save(extra, { value: 1 });
+  f.sourceControls.onSpawn = () => writeFile(extra, `${JSON.stringify({ value: 2 })}\n`, { mode: 0o600 });
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_INVENTORY_CHANGED"));
+});
+
+for (const kind of ["file", "symlink"]) test(`old-root inventory detects an inserted ${kind} during publication`, async t => {
+  const f = await recoveryFixture(t), inserted = path.join(f.oldRoot, `inserted-${kind}`);
+  f.sourceControls.onSpawn = () => kind === "file"
+    ? writeFile(inserted, "new\n", { mode: 0o600 }) : symlink(f.old.bundle.path, inserted);
+  await assert.rejects(f.execute(), safelyRecoveryBlocked(kind === "file"
+    ? "POST_HEAD_RECOVERY_INVENTORY_CHANGED" : "POST_HEAD_RECOVERY_INVENTORY_INVALID"));
+});
+
+for (const [name, mutate, code] of [
+  ["wrong publisher commit", async f => f.controls.wrongCommit.set(f.publisherWorktree, "d".repeat(40)), "POST_HEAD_RECOVERY_EXECUTION_FAILED"],
+  ["wrong publisher module", async f => { f.executionInput.publisher.modules.promoteCli.sha256 = "0".repeat(64); }, "POST_HEAD_RECOVERY_EXECUTOR_POLICY_INVALID"],
+  ["wrong old bundle pin", async f => { f.executionInput.old.bundle.sha256 = "0".repeat(64); }, "POST_HEAD_RECOVERY_INPUT_CHANGED"],
+  ["wrong receipt", async f => { f.sourceControls.receiptMutation = value => { value.candidate.publicReleaseId = id("98"); }; }, "POST_HEAD_RECOVERY_EXECUTION_OUTPUT_INVALID"],
+]) test(`one-shot execution refuses ${name}`, async t => {
+  const f = await recoveryFixture(t); await mutate(f);
+  await assert.rejects(f.execute(), safelyRecoveryBlocked(code));
+});
+
+test("seed refuses a caller-provided receipt without a wrapper execution manifest", async t => {
+  const f = await recoveryFixture(t), input = f.seedInput(undefined);
+  input.old.receipt = { path: path.join(f.run, "invented-receipt.json"), sha256: "0".repeat(64) };
+  await assert.rejects(recover(input, { git: f.git }),
+    safelyRecoveryBlocked("POST_HEAD_RECOVERY_INVALID"));
+  await assert.rejects(stat(input.destination.artifactDirectory));
+});
+
+test("seed refuses a repinned but internally tampered completed execution manifest", async t => {
+  const f = await recoveryFixture(t), executed = await f.execute();
+  const manifest = await read(executed.manifest.path); manifest.completedAt = "2026-08-31T18:01:00.000Z";
+  await writeFile(executed.manifest.path, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+  const repinned = { path: executed.manifest.path, sha256: rawHash(await readFile(executed.manifest.path)) };
+  const input = f.seedInput(repinned);
+  await assert.rejects(recover(input, { git: f.git }),
+    safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_MANIFEST_INVALID"));
+  await assert.rejects(stat(input.destination.artifactDirectory));
+});
+
+test("seed final fence detects an unlisted old-root mutation and retains pending", async t => {
+  const f = await recoveryFixture(t), extra = path.join(f.oldRoot, "unlisted-final-fence.json"); await save(extra, { value: 1 });
+  const executed = await f.execute(), input = f.seedInput(executed.manifest); let oldStatuses = 0;
+  const git = async (args, options) => {
+    if (options.cwd === f.options.publisherWorktree && args[0] === "status" && ++oldStatuses === 2) {
+      await writeFile(extra, `${JSON.stringify({ value: 2 })}\n`, { mode: 0o600 });
+    }
+    return f.git(args, options);
+  };
+  await assert.rejects(recover(input, { git }), safelyRecoveryBlocked("POST_HEAD_RECOVERY_INVENTORY_CHANGED"));
+  const pending = path.join(input.destination.artifactDirectory, "pending");
+  assert.ok((await readdir(pending)).some(name => name.startsWith("blocked-")));
+});
+
+test("seed rereads the exact pending owner before unlink", async t => {
+  const f = await recoveryFixture(t), executed = await f.execute(), input = f.seedInput(executed.manifest);
+  let publisherStatuses = 0;
+  const git = async (args, options) => {
+    if (options.cwd === f.publisherWorktree && args[0] === "status" && ++publisherStatuses === 4) {
+      const pendingHead = path.join(input.destination.artifactDirectory, "pending", "head.json");
+      await writeFile(pendingHead, `${JSON.stringify({ owner: "changed" })}\n`, { mode: 0o600 });
+    }
+    return f.git(args, options);
+  };
+  await assert.rejects(recover(input, { git }), safelyRecoveryBlocked("POST_HEAD_RECOVERY_INPUT_CHANGED"));
+  assert.ok((await readdir(path.join(input.destination.artifactDirectory, "pending"))).some(name => name.startsWith("blocked-")));
+});
+
+test("executor rejects receipt verification outside its own started/completed clock", async t => {
+  const f = await recoveryFixture(t); f.deps.now = () => "2026-08-31T18:01:00.000Z";
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_TIME_INVALID"));
+  assert.ok((await readdir(f.executionInput.executionDirectory)).some(name => name.startsWith("blocked-")));
+});
+
+test("executor refuses a symlinked failed-attempt directory before launch", async t => {
+  const f = await recoveryFixture(t), moved = path.join(f.directory, "moved-attempt");
+  await rename(f.attempt, moved); await symlink(moved, f.attempt);
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_FAILED"));
+  await assert.rejects(stat(f.executionInput.executionDirectory));
+});
+
+test("executor binds the lease filename UUID to the signed lease attempt", async t => {
+  const f = await recoveryFixture(t), prior = f.executionInput.old.failure.leaseAttempt;
+  const renamed = path.join(path.dirname(prior.path), `bundle.json.lease.${randomUUID()}.json`); await rename(prior.path, renamed);
+  f.executionInput.old.failure.leaseAttempt = await f.pin(renamed);
+  await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_FAILURE_EVIDENCE_INVALID"));
+  await assert.rejects(stat(f.executionInput.executionDirectory));
 });
