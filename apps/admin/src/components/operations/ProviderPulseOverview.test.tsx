@@ -125,20 +125,32 @@ test("unreachable runtime does not turn missing history into zero while count-on
     measurements: unavailableProviderSourceMeasurements("database_unreachable"),
   });
   unreachable.schedule!.nextDueAt = null;
+  unreachable.processor!.activity = "action_required";
+  unreachable.processor!.actionRequiredCode = "PROVIDER_DATABASE_UNREACHABLE";
   const countsFailed = operationSource(3);
   countsFailed.measurements.storage = { state: "unavailable", reason: "query_failed" };
   countsFailed.measurements.records = { state: "unavailable", reason: "query_failed" };
   overview.sources = [unreachable, countsFailed];
   const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
   cleanupPage(context, rendered);
+  const unavailableCard = rendered.container.querySelector(`[data-provider-id="${unreachable.providerId}"]`)!;
+  assert.equal(pulseState(unreachable).label, "Database unavailable");
+  assert.match(unavailableCard.textContent!, /Quality unavailable/u);
+  assert.doesNotMatch(unavailableCard.textContent!, /Healthy quality|Degraded quality/u);
+  assert.doesNotMatch(unavailableCard.textContent!, /Administrator recovery required|Disable this source/u);
+  const indicator = [...unavailableCard.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Database unavailable"))!;
+  await act(async () => indicator.focus());
+  assert.match(rendered.dom.window.document.querySelector('[role="tooltip"]')!.textContent!, /ingestion may still be running/u);
   const factsFor = (providerId: string) => new Map([...rendered.container.querySelectorAll(`[data-provider-id="${providerId}"] .provider-pulse__detail-facts > div`)].map((fact) => [fact.querySelector("dt")!.textContent, fact.querySelector("dd")!.textContent]));
   const missingFacts = factsFor(unreachable.providerId);
   assert.equal(missingFacts.get("Latest run"), "Unavailable");
   assert.equal(missingFacts.get("Next due"), "Unavailable");
+  assert.equal(missingFacts.get("Phase / wait"), "Unavailable");
   assert.equal(missingFacts.get("Retries / failures"), "Unavailable / Unavailable");
   assert.equal(missingFacts.get("Schedule"), "Every 5m", "known central schedule remains visible");
   const knownFacts = factsFor(countsFailed.providerId);
   assert.equal(knownFacts.get("Latest run"), "Failed");
+  assert.match(rendered.container.querySelector(`[data-provider-id="${countsFailed.providerId}"]`)!.textContent!, /Disable this source/u, "real processor failures keep recovery guidance");
   assert.equal(knownFacts.get("Retries / failures"), "0 / 2", "a totals failure does not erase independently available activity");
 });
 

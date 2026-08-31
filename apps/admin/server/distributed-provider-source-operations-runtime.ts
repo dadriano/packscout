@@ -6,6 +6,7 @@ import {
   providerSourceOperationsDetailSchema,
   providerSourceOperationsOverviewSchema,
   type ProviderSourceDiagnosticFilter,
+  type ProviderSourceOperationsSource,
 } from "@packscout/contracts";
 import {
   PrismaAdminProviderRuntimeRepository,
@@ -28,6 +29,7 @@ import {
 import { ProviderPulseMeasurementReader } from "./provider-pulse-measurements.ts";
 
 const PROVIDER_LIMIT = 50;
+const PROVIDER_READ_CONCURRENCY = 4;
 const safeCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/u;
 const registrationKeyPattern = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u;
 
@@ -161,10 +163,19 @@ export function createDistributedProviderSourceOperationsRuntime(
   const operations = {
     async overview(organizationId: string) {
       const registered = await providers(organizationId);
-      const views = [];
-      for (const provider of registered) {
-        views.push((await sourceView(organizationId, provider, false)).source);
-      }
+      const views = new Array<ProviderSourceOperationsSource>(registered.length);
+      let next = 0;
+      // Match the bounded fleet/import readers: refill free slots while keeping
+      // central's order, without opening every provider database at once.
+      await Promise.all(Array.from(
+        { length: Math.min(PROVIDER_READ_CONCURRENCY, registered.length) },
+        async () => {
+          while (next < registered.length) {
+            const index = next++;
+            views[index] = (await sourceView(organizationId, registered[index]!, false)).source;
+          }
+        },
+      ));
       return providerSourceOperationsOverviewSchema.parse({
         version: PROVIDER_SOURCE_OPERATIONS_VERSION,
         refreshedAt: now().toISOString(),

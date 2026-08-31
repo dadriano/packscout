@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { age, dateTime, humanize, interval } from "./OperationStatus";
 import { SourceOperationControls, type SourceOperationControlsProps } from "./SourceOperationControls";
-import { count, isUnsupportedSource, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
+import { count, isDatabaseUnavailable, isUnsupportedSource, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
 
 const entityLabels = {
   categories: "Categories", packs: "Packs", collectibles: "Collectibles", aliases: "Aliases",
@@ -31,6 +31,7 @@ function LeaseEvidence({ name, lease }: { name: string; lease: Activity["importL
 }
 
 function QualityEvidence({ source }: { source: ProviderSourceOperationsSource }) {
+  const databaseUnavailable = isDatabaseUnavailable(source);
   return (
     <div className="provider-pulse__indicators">
       <IndicatorTooltip label={`${humanize(source.freshness.state)} freshness`}
@@ -38,9 +39,10 @@ function QualityEvidence({ source }: { source: ProviderSourceOperationsSource })
         description={source.freshness.state === "fresh" ? "The recorded source freshness is within its configured schedule and grace window. This is independent of worker and data-quality state."
           : source.freshness.state === "stale" ? "The source freshness is outside its configured schedule and grace window. This can coexist with a running or intentionally paused processor."
             : "There is not enough source evidence to determine freshness."} />
-      <IndicatorTooltip label={`${humanize(source.quality.state)} quality`}
-        tone={source.quality.state === "healthy" ? "ready" : source.quality.state === "degraded" ? "danger" : source.quality.state === "warning" ? "pending" : "neutral"}
-        description={source.quality.state === "healthy" ? "The source reports healthy quality based on its recorded failures and quarantine evidence. This does not certify every stored record."
+      <IndicatorTooltip label={databaseUnavailable ? "Quality unavailable" : `${humanize(source.quality.state)} quality`}
+        tone={databaseUnavailable ? "neutral" : source.quality.state === "healthy" ? "ready" : source.quality.state === "degraded" ? "danger" : source.quality.state === "warning" ? "pending" : "neutral"}
+        description={databaseUnavailable ? "Data quality cannot be assessed while the provider database is unavailable."
+          : source.quality.state === "healthy" ? "The source reports healthy quality based on its recorded failures and quarantine evidence. This does not certify every stored record."
           : source.quality.state === "unknown" ? "There is not enough evidence to assess this provider's data quality."
             : "The source reports quality concerns from failure or quarantine evidence. Review the failure code and open quarantine separately from freshness."} />
     </div>
@@ -51,8 +53,8 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
   const { source, observedAt } = props;
   const { storage, records, activity } = source.measurements;
   const unsupportedSource = isUnsupportedSource(source);
-  const runtimeUnavailable = unsupportedSource
-    || (activity.state === "unavailable" && activity.reason === "database_unreachable");
+  const databaseUnavailable = isDatabaseUnavailable(source);
+  const runtimeUnavailable = unsupportedSource || databaseUnavailable;
   const nextDue = runtimeUnavailable && !source.schedule?.nextDueAt ? "Unavailable"
     : source.schedule ? dateTime(source.schedule.nextDueAt) : "Not scheduled";
   const run = source.activeRun ?? source.latestRun;
@@ -88,7 +90,7 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
             <div><dt>Last committed page</dt><dd>{activity.state === "available" ? dateTime(activity.lastCommittedPageAt) : "Unavailable"}</dd></div>
             <div><dt>Schedule</dt><dd>{source.schedule ? `Every ${interval(source.schedule.intervalSeconds)}` : runtimeUnavailable ? "Unavailable" : "Not scheduled"}</dd></div>
             <div><dt>Next due</dt><dd>{nextDue}</dd></div>
-            <div><dt>Phase / wait</dt><dd>{source.processor ? humanize(source.processor.phase) : "Unavailable"}{source.processor?.waitReason ? ` / ${humanize(source.processor.waitReason)}` : ""}</dd></div>
+            <div><dt>Phase / wait</dt><dd>{source.processor && !runtimeUnavailable ? humanize(source.processor.phase) : "Unavailable"}{source.processor?.waitReason && !runtimeUnavailable ? ` / ${humanize(source.processor.waitReason)}` : ""}</dd></div>
             <div><dt>Retries / failures</dt><dd>{source.processor && !runtimeUnavailable ? count(source.processor.retryCount) : "Unavailable"} / {runtimeUnavailable ? "Unavailable" : count(source.quality.consecutiveFailures)}</dd></div>
             {failure ? <div><dt>Failure code</dt><dd><code>{failure}</code></dd></div> : null}
           </dl>
@@ -107,7 +109,7 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
           </dl>
           {activity.state === "available" ? <p className="provider-pulse__subtext">Activity measured {dateTime(activity.measuredAt)}. Process liveness is unverified.</p> : null}
         </section>
-        {source.processor?.activity === "action_required" ? (
+        {source.processor?.activity === "action_required" && !databaseUnavailable ? (
           <aside className="admin-note admin-note-warning" role="note">
             <strong>Administrator recovery required.</strong> Disable this source, correct the cause, run Test source, Activate paused, then Resume.
           </aside>

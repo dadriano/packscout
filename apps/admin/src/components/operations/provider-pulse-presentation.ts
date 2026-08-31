@@ -12,6 +12,7 @@ interface PulseState {
 const states: Record<string, PulseState> = {
   "Not configured": { label: "Not configured", description: "This provider has no configured source. Configure it before importing.", tone: "pending" },
   "Unsupported adapter": { label: "Unsupported adapter", description: "This provider has a configuration, but its adapter is not supported by this admin runtime. Review the adapter in source settings; measurements are unavailable.", tone: "pending" },
+  "Database unavailable": { label: "Database unavailable", description: "The provider database could not be read. Worker state and progress are unverified; ingestion may still be running. Restore database access or retry the status refresh.", tone: "danger" },
   "Connection transition uncertain": { label: "Connection uncertain", description: "The source connection is changing and its current state cannot be confirmed. Local run and storage evidence remain separate.", tone: "danger" },
   "Waiting on connection recovery": { label: "Connection blocked", description: "The processor is waiting for its source connection to recover before it can continue.", tone: "danger" },
   "Pause requested": { label: "Pause requested", description: "A pause was requested. The current page may still commit before ingestion pauses.", tone: "pending" },
@@ -37,6 +38,11 @@ export function isUnsupportedSource(source: ProviderSourceOperationsSource): boo
   );
 }
 
+export function isDatabaseUnavailable(source: ProviderSourceOperationsSource): boolean {
+  return source.measurements.activity.state === "unavailable"
+    && source.measurements.activity.reason === "database_unreachable";
+}
+
 export function pulseState(source: ProviderSourceOperationsSource): PulseState {
   const activity = source.measurements.activity;
   if (isUnsupportedSource(source)) return states["Unsupported adapter"]!;
@@ -44,6 +50,7 @@ export function pulseState(source: ProviderSourceOperationsSource): PulseState {
   if (source.source?.lifecycle === "disabled") return states.Disabled!;
   if (source.source?.lifecycle === "draft") return states.Draft!;
   if (source.source?.lifecycle === "replaced") return states.Replaced!;
+  if (isDatabaseUnavailable(source)) return states["Database unavailable"]!;
   if (source.processor?.activity === "action_required") return states["Action required"]!;
   if (source.source?.pauseRequested) return states["Pause requested"]!;
   if (source.source?.lifecycle === "paused" || source.processor?.activity === "paused") return states.Paused!;
@@ -71,6 +78,7 @@ export function pulseNeedsAttention(source: ProviderSourceOperationsSource): boo
 
 export function pulseIssue(source: ProviderSourceOperationsSource): string | null {
   const status = pulseState(source);
+  if (status.label === "Database unavailable") return "Restore database access or retry the status refresh.";
   if (status.label === "Action required") return "Administrator recovery required.";
   if (status.label === "Failed") return "Latest run failed. Review the failure in Details.";
   if (status.label === "Lease expired") return "Running is reported, but the import lease has expired.";
