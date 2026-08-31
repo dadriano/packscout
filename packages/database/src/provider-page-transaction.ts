@@ -38,12 +38,17 @@ export function providerPageQueryExpiration(error: unknown): ProviderPageTransac
 export async function runProviderPageTransaction<T>(input: {
   database: Pick<ProviderPrismaClient, "$transaction">;
   deadlineAt: number;
+  maximumTransactionMilliseconds?: number;
   operation(transaction: ProviderTransactionClient, attempt: number, timeoutMilliseconds: number): Promise<T>;
   now?: () => number;
 }): Promise<T> {
   const now = input.now ?? Date.now;
+  const maximum = input.maximumTransactionMilliseconds ?? 30_000;
+  if (!Number.isSafeInteger(maximum) || maximum < 1_000 || maximum > 480_000) {
+    throw new RangeError("The provider page transaction budget is invalid.");
+  }
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const timeout = Math.min(30_000, Math.floor(input.deadlineAt - now() - 5_000));
+    const timeout = Math.min(maximum, Math.floor(input.deadlineAt - now() - 5_000));
     if (!Number.isSafeInteger(timeout) || timeout < 1_000) throw new ProviderPageTransactionWindowError();
     let callbackFailure: unknown;
     try {

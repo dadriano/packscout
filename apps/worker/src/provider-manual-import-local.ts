@@ -28,6 +28,10 @@ import { createProviderDataforrestRequestTerminalizer } from
   "./provider-dataforrest-request-terminalizer.ts";
 import { createProviderManualImportExecutor } from
   "./provider-manual-import-executor.ts";
+import { providerManualImportExecutionBudget } from
+  "./provider-manual-import-execution-budget.ts";
+import { ProviderManualImportOperationDrain } from
+  "./provider-manual-import-operation-drain.ts";
 import {
   readProviderManualImportLaneSupervisorConfiguration,
   runProviderManualImportLanesOnce,
@@ -124,8 +128,10 @@ async function run(): Promise<ProviderManualImportProcessResult> {
     destinationPolicy: databaseConfiguration.runtimePolicy.destinationPolicy,
     connectionLimitPerProvider: 2,
     maximumCachedProviders: maximumConcurrentLanes,
-    operationTimeoutMs: 60_000,
+    operationProfile: databaseConfiguration.runtimePolicy.mode === "remote" ? "atomic_import_page" : "standard",
+    operationTimeoutMs: providerManualImportExecutionBudget(databaseConfiguration.runtimePolicy.mode).gatewayMilliseconds,
   });
+  const operations = new ProviderManualImportOperationDrain();
   try {
     await central.start();
     const centralAuthorityResolver = new CentralDataforrestSourceAuthorityResolver({
@@ -212,8 +218,9 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               integration,
             });
           },
-          runWithCachedProviderDatabase:
-            gateway.runWithCachedProviderDatabase.bind(gateway),
+          runWithCachedProviderDatabase: (route, operation) =>
+            gateway.runWithCachedProviderDatabase(route, database =>
+              operations.run(() => operation(database))),
           createExecutor(input) {
             const audit = new PrismaProviderSourceRequestAuditRepository(
               input.database,
@@ -234,6 +241,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               actorHmacKey: null,
               workerId: input.workerId,
               liveSource: source,
+              executionMode: databaseConfiguration.runtimePolicy.mode,
             });
           },
           async relayProviderActivity() {
@@ -279,6 +287,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
       runLane,
     });
   } finally {
+    await operations.drain();
     await gateway.close();
     await central.close();
   }
