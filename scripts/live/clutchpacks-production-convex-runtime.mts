@@ -142,6 +142,7 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
     };
     const publication = new SignedConvexDataReleaseV3PublicationClient({
       baseUrl: SITE_URL, keyId: ids[0], secret: ownedSecret, fetch: guardedFetch(SITE_URL, false),
+      timeoutMilliseconds: 30_000,
     });
     const publicClient = new ConvexHttpClient(PUBLIC_URL, { logger: false, fetch: guardedFetch(PUBLIC_URL, true) });
     // Drop owned references to captured immutable strings; JavaScript cannot

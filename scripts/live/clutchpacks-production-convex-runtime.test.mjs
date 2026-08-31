@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash, createHmac } from "node:crypto";
 import { promisify } from "node:util";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { openClutchpacksProductionConvexRuntime } = await tsImport("./clutchpacks-production-convex-runtime.mts", import.meta.url);
+const { canonicalJson, publicCategorySchema, sha256CanonicalJson, productionReceiptHash,
+  PRODUCTION_AUTH_HEADER_NAMES, productionPublicationReceiptSigningValue, productionPublicationRequestSigningValue } =
+  await tsImport("@packscout/contracts", import.meta.url);
+const { DATA_RELEASE_V3_BATCH_HASH_DOMAIN, DATA_RELEASE_V3_RECEIPT_HASH_DOMAIN } =
+  await tsImport("@packscout/services", import.meta.url);
 
 const secret = (n) => Buffer.alloc(32, n).toString("base64");
 const catalogToken = "private-catalog-runtime-fixture".repeat(2);
@@ -178,3 +184,102 @@ test("close aborts an already in-flight public request", async () => {
   await started; runtime.close();
   await assert.rejects(request, safeFailure);
 });
+
+async function delayedSignedBatchFixture(responseMilliseconds) {
+  const publicReleaseId = "90000000-0000-4000-8000-000000000001";
+  const categoryId = "90000000-0000-5000-8000-000000000002";
+  const records = [publicCategorySchema.parse({ publicCategoryId: categoryId, parentPublicCategoryId: null,
+    categoryKey: "cards", name: "Cards", kind: "vertical", depth: 0, pathPublicCategoryIds: [categoryId], displayOrder: 0 })];
+  const request = { schemaVersion: "data_release_v3", operationId: `${publicReleaseId}:batch:0`,
+    idempotencyKey: `${publicReleaseId}:batch:0`, publicReleaseId, batchIndex: 0, kind: "categories", records,
+    batchHash: await sha256CanonicalJson(DATA_RELEASE_V3_BATCH_HASH_DOMAIN, { kind: "categories", records }) };
+  const bodyJson = canonicalJson(request);
+  const bodyDigest = createHash("sha256").update(bodyJson).digest("hex");
+  const body = { schemaVersion: "data_release_v3", operationKind: "applyBatch", operationId: request.operationId,
+    idempotencyKey: request.idempotencyKey, publicReleaseId, result: "accepted", serverTime: new Date().toISOString(),
+    requestDigest: bodyDigest, details: { batchIndex: 0, kind: "categories", recordCount: 1, acceptedBatchChainHash: "a".repeat(64) } };
+  const receipt = { ...body, receiptDigest: await sha256CanonicalJson(DATA_RELEASE_V3_RECEIPT_HASH_DOMAIN, body) };
+  const receiptDigest = await productionReceiptHash(receipt);
+  const envelope = { ok: true, receipt, responseAuth: { signatureVersion: "v1", keyId: "v3-v1", receiptDigest,
+    signature: createHmac("sha256", Buffer.from(secret(1), "base64"))
+      .update(productionPublicationReceiptSigningValue(receiptDigest)).digest("hex") } };
+  let entered; const arrived = new Promise(resolve => { entered = resolve; });
+  let requests = 0;
+  const h = fixture({ fetch: async (url, settings) => {
+    requests++; entered(settings.signal);
+    assert.equal(new URL(url).origin, "https://shiny-newt-310.convex.site");
+    assert.equal(settings.redirect, "error"); assert.equal(settings.credentials, "omit");
+    assert.equal(settings.body, bodyJson);
+    const headers = new Headers(settings.headers);
+    assert.equal(headers.get(PRODUCTION_AUTH_HEADER_NAMES.keyId), "v3-v1");
+    assert.equal(headers.get(PRODUCTION_AUTH_HEADER_NAMES.signature), createHmac("sha256", Buffer.from(secret(1), "base64"))
+      .update(productionPublicationRequestSigningValue({ method: "POST", path: new URL(url).pathname, bodyDigest,
+        timestamp: headers.get(PRODUCTION_AUTH_HEADER_NAMES.timestamp), nonce: headers.get(PRODUCTION_AUTH_HEADER_NAMES.nonce) })).digest("hex"));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { settings.signal.removeEventListener("abort", abort); resolve(Response.json(envelope)); }, responseMilliseconds);
+      const abort = () => { clearTimeout(timer); reject(new Error(catalogToken)); };
+      if (settings.signal.aborted) abort(); else settings.signal.addEventListener("abort", abort, { once: true });
+    });
+  } });
+  return { ...h, request, receipt, arrived, requests: () => requests };
+}
+async function advance(t, milliseconds) {
+  t.mock.timers.tick(milliseconds);
+  await new Promise(resolve => setImmediate(resolve));
+}
+const outcomeOf = request => request.then(value => ({ value }), error => ({ error }));
+
+// Given a valid signed publication response, transport latency may exceed the
+// shared client's default. The production override remains bounded and cancellable.
+test("production publication accepts a signed 13.239-second batch response without retrying", async t => {
+  const h = await delayedSignedBatchFixture(13_239), runtime = await h.open();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let outcome;
+  try {
+    let settled = false;
+    outcome = outcomeOf(runtime.publication.applyBatch(h.request)).then(value => { settled = true; return value; });
+    const signal = await h.arrived;
+    await advance(t, 10_001);
+    assert.equal(signal.aborted, false); assert.equal(settled, false);
+    await advance(t, 3_238);
+    assert.deepEqual((await outcome).value, h.receipt);
+    assert.equal(signal.aborted, false); assert.equal(h.requests(), 1);
+  } finally { runtime.close(); await outcome; t.mock.timers.reset(); }
+});
+
+test("production publication aborts at 30 seconds and leaves the uncertain request unretried", async t => {
+  const h = await delayedSignedBatchFixture(30_001), runtime = await h.open();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let outcome;
+  try {
+    let settled = false;
+    outcome = outcomeOf(runtime.publication.applyBatch(h.request)).then(value => { settled = true; return value; });
+    const signal = await h.arrived;
+    await advance(t, 29_999);
+    assert.equal(signal.aborted, false); assert.equal(settled, false);
+    await advance(t, 1);
+    const result = await outcome;
+    assert.equal(result.error?.code, "PUBLICATION_TIMEOUT"); assert.equal(result.value, undefined);
+    assert.equal(result.error.message.includes(catalogToken), false); assert.equal(signal.aborted, true);
+    await advance(t, 60_000); assert.equal(h.requests(), 1);
+  } finally { runtime.close(); await outcome; t.mock.timers.reset(); }
+});
+
+for (const cancel of ["caller", "close"]) {
+  test(`${cancel} cancellation still aborts a signed publication before its 30-second timeout`, async t => {
+    const h = await delayedSignedBatchFixture(13_239), runtime = await h.open(), controller = new AbortController();
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let outcome;
+    try {
+      outcome = outcomeOf(runtime.publication.applyBatch(h.request, controller.signal));
+      const signal = await h.arrived;
+      await advance(t, 5_000);
+      if (cancel === "caller") controller.abort(); else runtime.close();
+      const result = await outcome;
+      assert.equal(signal.aborted, true); assert.equal(result.value, undefined);
+      assert.equal(result.error?.code, cancel === "caller" ? "PUBLICATION_CANCELLED" : "PUBLICATION_NETWORK_ERROR");
+      assert.equal(result.error.message.includes(catalogToken), false);
+      await advance(t, 60_000); assert.equal(h.requests(), 1);
+    } finally { runtime.close(); await outcome; t.mock.timers.reset(); }
+  });
+}
