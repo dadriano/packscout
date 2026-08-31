@@ -49,10 +49,17 @@ test("Courtyard process-only bootstrap works without an isolated .env and preser
   assert.equal(reads, 1); assert.equal(resolved.version, 4); assert.deepEqual(resolved.key, originalKey);
   assert.equal(resolved.centralDatabaseUrl, environment.PACKSCOUT_CENTRAL_DATABASE_URL);
   assert.deepEqual(Object.keys(resolved.workerEnvironment).sort(), ["NODE_ENV", "PATH", "PACKSCOUT_CENTRAL_DATABASE_URL",
+    "PACKSCOUT_DATABASE_MODE", "PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS", "PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS",
     "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64", "PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION"].sort());
+  assert.equal(resolved.workerEnvironment.PACKSCOUT_DATABASE_MODE, "local");
+  assert.equal(resolved.workerEnvironment.PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS, undefined);
+  assert.equal(resolved.workerEnvironment.PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS, undefined);
   assert.equal(JSON.stringify(resolved.workerEnvironment).includes("private-source-override"), false);
   resolved.key.fill(0); assert.deepEqual(originalKey, Buffer.alloc(32, 7)); assert.deepEqual(environment, before);
   for (const change of [{ NODE_ENV: "production" }, { PACKSCOUT_PROVIDER_LANES_JSON: "[]" },
+    { PACKSCOUT_DATABASE_MODE: "remote", PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS: "remote.test",
+      PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS: "provider.test",
+      PACKSCOUT_CENTRAL_DATABASE_URL: "postgresql://app:fixture-password@remote.test:5432/packscout?sslmode=require&sslaccept=strict" },
     { PACKSCOUT_CENTRAL_DATABASE_URL: "postgresql://app:fixture-password@remote.test/packscout" },
     { PACKSCOUT_CENTRAL_DATABASE_URL: "postgresql://app:fixture-password@127.0.0.1:55434/packscout" }]) {
     await assert.rejects(readEnvironment({ ...environment, ...change }), error => !error.message.includes("fixture-password"));

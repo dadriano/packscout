@@ -3,7 +3,7 @@ import { randomUUID, randomInt } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, PrismaProviderWorkerLeaseRepository,
+import { BoundedProviderDatabaseGateway, PrismaProviderWorkerLeaseRepository,
   createCentralDatabaseLifecycle, type ProviderPrismaClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
 import { assertBackfillPins, backfillPinsSchema, classifyBackfillCheckpoint, refuseBackfill, backfillId, safeBackfillFailureCode,
@@ -95,12 +95,11 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
   const central = createCentralDatabaseLifecycle({ databaseUrl: environment.centralDatabaseUrl, connectionLimit: 1 });
   const gateway = new BoundedProviderDatabaseGateway({ central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
-    destinationPolicy: new ProviderDatabaseDestinationPolicy({ allowedHosts: ["127.0.0.1"],
-      allowedPorts: [55432, 55433, 55434, 55435], allowedSslModes: ["disable"] }),
+    destinationPolicy: environment.runtimePolicy.destinationPolicy,
     connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000 });
   const owner = `local:backfill:${args.pins.operationId}:${randomUUID()}`;
   const withDatabase = async <T,>(operation: (db: ProviderPrismaClient, authority: BackfillAuthority, active: () => void) => Promise<T>): Promise<T> => {
-    const authority = await readBackfillAuthority(central.client, cipher, args.pins);
+    const authority = await readBackfillAuthority(central.client, cipher, args.pins, environment.runtimePolicy);
     const outcome = await withResidentOperation(async (db: ProviderPrismaClient, active) => {
       try { return { ok: true as const, value: await operation(db, authority, active) }; }
       catch (error) {

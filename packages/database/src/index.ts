@@ -32,6 +32,7 @@ export * from "./central-admin-provider-repository.ts";
 export * from "./provider-database.ts";
 export * from "./provider-database-locator.ts";
 export * from "./provider-database-destination-policy.ts";
+export * from "./database-runtime-policy.ts";
 export * from "./provider-database-gateway.ts";
 export * from "./provider-canonical-contract.ts";
 export * from "./provider-canonical-inspection-repository.ts";
