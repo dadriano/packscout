@@ -262,9 +262,18 @@ export class PrismaProviderRuntimeRepository {
   async snapshot(observedAt = new Date()): Promise<ProviderRuntimeSnapshot> {
     requireInstant(observedAt, "observedAt");
     return this.database.$transaction(async (transaction) => {
-      const row = await lockRuntime(transaction);
+      // Status reads must not wait for (or block) an import's runtime-row lock.
+      // Keep runtime, lease, and run evidence in one committed MVCC snapshot.
+      await transaction.$executeRaw(ProviderPrisma.sql`set transaction read only`);
+      const row = await transaction.provider_runtime.findUnique({
+        where: { singleton_key: true },
+      });
+      if (!row) throw new Error("Provider runtime is not initialized.");
       return projectSnapshot(transaction, row, observedAt);
-    }, TRANSACTION_OPTIONS);
+    }, {
+      ...TRANSACTION_OPTIONS,
+      isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
+    });
   }
 
   async synchronizeConfiguration(input: {
