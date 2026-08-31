@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { provisionalCollectiblePublicId, publicRepackDetailSchema } from "@packscout/contracts";
-import { projectProvisionalProviderPackContentsV1 } from "./distributed-provider-pack-contents.ts";
+import { projectApprovedProviderPackContentsV1, projectProvisionalProviderPackContentsV1 } from "./distributed-provider-pack-contents.ts";
 import { DistributedProviderPackContentsError, type DistributedProviderCollectibleRow } from "./distributed-provider-pack-contents-types.ts";
 
 const providerId = "10000000-0000-5000-8000-000000000001";
@@ -72,6 +72,36 @@ test("current membership produces truthful chase, card search, and summary witho
   });
   for (const field of ["publicRepackId", "price", "buyback", "evEstimates", "sourceUpdatedAt"] as const) {
     assert.deepEqual(result.repacks[0]![field], source.packs[0]!.detail[field]);
+  }
+});
+
+test("approved identity persists through collectible, chase, and top-chase projections", () => {
+  const source = input();
+  const provisional = projectProvisionalProviderPackContentsV1(source);
+  const approvedId = "50000000-0000-5000-8000-000000000001";
+  const categoryId = "60000000-0000-5000-8000-000000000001";
+  const result = projectApprovedProviderPackContentsV1({ ...source,
+    identityPolicy: "approved_public_catalog_v1",
+    collectibleMappings: provisional.collectibleMappings.map((mapping) => ({ ...mapping,
+      publicCollectibleId: approvedId, publicCategoryIds: [categoryId] })),
+  });
+  assert.equal(result.collectibles[0]!.publicCollectibleId, approvedId);
+  assert.deepEqual(result.collectibles[0]!.publicCategoryIds, [categoryId]);
+  assert.equal(result.repackChases[0]!.publicCollectibleId, approvedId);
+  assert.deepEqual(result.repackChases[0]!.collectible.publicCategoryIds, [categoryId]);
+  assert.equal(result.repacks[0]!.topChase!.publicCollectibleId, approvedId);
+  assert.equal(result.repacks[0]!.publicRepackId, source.packs[0]!.detail.publicRepackId);
+});
+
+test("approved projection refuses missing, cross-provider, duplicate, and type-conflicting mappings", () => {
+  const source = input();
+  const mappings = projectProvisionalProviderPackContentsV1(source).collectibleMappings;
+  const mapping = mappings[0]!;
+  for (const invalid of [[], [{ ...mapping, platformKey: "other" }], [mapping, mapping],
+    [{ ...mapping, externalId: "card:unknown" }], [{ ...mapping, collectibleType: "watch" as const }]]) {
+    assert.throws(() => projectApprovedProviderPackContentsV1({ ...source,
+      identityPolicy: "approved_public_catalog_v1", collectibleMappings: invalid,
+    }), DistributedProviderPackContentsError);
   }
 });
 

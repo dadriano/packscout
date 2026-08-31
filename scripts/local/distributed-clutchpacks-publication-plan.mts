@@ -307,7 +307,7 @@ function publicVendor(input: DistributedClutchpacksSnapshotFacts): PublicVendor 
   });
 }
 
-function money(pack: DistributedClutchpacksPackRow) {
+export function money(pack: DistributedClutchpacksPackRow) {
   const currency = nonBlank(pack.priceCurrency, "PUBLIC_PRICE_INVALID");
   if (currency !== "USD") return refuse("PUBLIC_PRICE_INVALID");
   const displayMinor = decimalTextToScaledInteger(pack.priceAmount, 2);
@@ -324,7 +324,7 @@ function money(pack: DistributedClutchpacksPackRow) {
   };
 }
 
-function buybackV2(pack: DistributedClutchpacksPackRow) {
+export function buybackV2(pack: DistributedClutchpacksPackRow) {
   if (pack.buybackRate === null) {
     if (pack.buybackSourceKind !== null) return refuse("PUBLIC_BUYBACK_INVALID");
     return {
@@ -345,7 +345,7 @@ function buybackV2(pack: DistributedClutchpacksPackRow) {
   };
 }
 
-function vendorEvV2(pack: DistributedClutchpacksPackRow) {
+export function vendorEvV2(pack: DistributedClutchpacksPackRow) {
   if (pack.vendorEvAmount === null) {
     if (pack.vendorEvCurrency !== null) return refuse("PUBLIC_EV_INVALID");
     return {
@@ -465,7 +465,7 @@ function vendorEvV3(pack: DistributedClutchpacksPackRow) {
   };
 }
 
-function v3Product(
+export function v3Product(
   input: DistributedClutchpacksSnapshotFacts,
   vendor: PublicVendor,
   pack: DistributedClutchpacksPackRow,
