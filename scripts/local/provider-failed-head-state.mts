@@ -1,5 +1,6 @@
+import { failedHeadResumeGuard } from "./provider-failed-head-guard.mts";
 import { isDeepStrictEqual } from "node:util";
-import { providerMixedPageDigest, readProviderRunHeadProof, type ProviderQueryClient } from "@packscout/database";
+import { providerMixedPageDigest, readProviderRunHeadProof, readProviderFailedHeadChainProof, type CanonicalJsonValue, type ProviderQueryClient } from "@packscout/database";
 import type { BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
 import { assertBackfillPins, backfillPinsSchema } from "./provider-backfill-supervisor-policy.mts";
 import { readBackfillSnapshot } from "./provider-backfill-supervisor-state.mts";
@@ -35,7 +36,13 @@ export async function readFailedHeadSnapshot(db: ProviderQueryClient, review: Fa
   ]);
   const parentCommand = parent.control_command_id ? await db.control_commands.findUnique({ where: { id: parent.control_command_id } }) : null;
   if (runs.length > 1024 || provenance.length > 1024 || pages.length > 50_000 || !activity) refuse("FAILED_HEAD_HISTORY_BOUND");
-  return { snapshot, runtime, parent, prior, latest, head, provenance, adoptionResume, parentCommand,
+  const rootParent = review.version === 2 ? runs.find(row => row.id === review.previousReview.pins.initialRunId) : null;
+  const rootCommand = rootParent?.control_command_id ? await db.control_commands.findUnique({ where: { id: rootParent.control_command_id } }) : null;
+  const chainGuard = failedHeadResumeGuard(review, runtime.source_cursor as CanonicalJsonValue,
+    { owner: failedHeadIds(review).owner, fence: BigInt(review.importFence) });
+  const chainProof = chainGuard.entry === "failed_zero_commit_chain_from_head" ? await readProviderFailedHeadChainProof(db,
+    chainGuard, review.pins.operatorId, review.pins.operationId, BigInt(review.generation)) : undefined;
+  return { snapshot, runtime, parent, prior, latest, head, provenance, adoptionResume, parentCommand, rootParent, rootCommand, chainProof,
     runs, pages, ledger, quarantines, otherLeases, externalActive: activity.active };
 }
 export type FailedHeadSnapshot = Awaited<ReturnType<typeof readFailedHeadSnapshot>>;
@@ -43,9 +50,14 @@ export function failedHeadHistory(s: FailedHeadSnapshot) {
   const { operating_state: _state, state_reason: _reason, state_generation: _generation,
     row_version: _version, updated_at: _updated, ...preservedRuntime } = s.runtime;
   return digest({ runs: s.runs, pages: s.pages, provenance: s.provenance, adoptionResume: s.adoptionResume,
-    parentCommand: s.parentCommand, head: s.head, ledger: s.ledger, quarantines: s.quarantines, preservedRuntime });
+    parentCommand: s.parentCommand, ...(s.chainProof !== undefined ? { chainProof: s.chainProof } : {}), head: s.head, ledger: s.ledger, quarantines: s.quarantines, preservedRuntime });
 }
 function assertProvenance(s: FailedHeadSnapshot, r: FailedHeadReview) {
+  if (r.version === 2) {
+    if (!s.chainProof || !s.rootParent || !s.rootCommand) refuse("FAILED_HEAD_CHAIN_PROVENANCE_DRIFT");
+    assertProvenance({ ...s, parent: s.rootParent, parentCommand: s.rootCommand }, r.previousReview);
+    return;
+  }
   const pins = r.pins, rows = failedHeadAuditPins(r);
   for (const expected of rows) {
     const row = s.provenance.find(item => item.sequence.toString() === expected.sequence);

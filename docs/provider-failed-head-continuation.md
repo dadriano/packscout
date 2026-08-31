@@ -91,6 +91,46 @@ worker invocation. This utility does not select or launch either strategy. Once
 execution/bootstrap starts, recovery receipt replay is no longer an admission
 path. Existing historical operation receipts remain historical.
 
+## Explicit second-failure review
+
+Version 1 still accepts only the failed original continuous cycle and rejects a
+failed continuation child. Version 2 is a separately reviewed admission with the
+literal authorization `operator_requested_two_failure_head_continuation`. It
+accepts exactly two zero-commit failed runs: the original cycle and the one child
+created by a completed version 1 continuation. `previousReview` must itself be a
+strict version 1 review. Nested version 2 reviews, skipped ancestors, repeated
+operation/run IDs and further depth are rejected. This is an operator procedure,
+not a retry policy or permission to repeat failures.
+
+The new review preserves the original head/adoption/continuous-cycle proof and
+adds five full-row audit sequence/digest pins: the prior immutable continuation
+receipt, its completed queue handoff, the last audited lease claim, the guarded
+Resume, and the Run-now request. It pins the completed prior Resume command too.
+The previous review, both failed run digests and originating commands remain
+immutable. A completed queue-handoff receipt proves only that the child was
+queued; the failed child's exact terminal state is independently checked.
+
+The shared database chain proof checks those relations during read-only review
+and again inside the public Resume transaction. Both failures must have all eight
+counters zero, no page rows, and matching complete requested/final cursors equal
+to the runtime and original reconciled head. The child must be the deterministic
+independent child of the previous operation, with the exact operator,
+configuration, completed `RUN_STARTED` command and audited prior Resume. All
+prior operation audits and commands are retained and hashed. Foreign sibling
+continuations, unexpected subsequent runs, changed action/actor/target, missing
+claims, changed generation/row version/fence, changed source authority or missing
+reconciliation refuse. The prior claim fence and child's execution fence must
+agree, and the previous guard digest is recomputed from the preserved review.
+
+Apply uses the same atomic lease/claim, audited Resume and fenced Run-now path.
+Only the newly reviewed operation can replay its receipt/Resume/queue crash gaps;
+it queues at most one new independent child. Later holds, changed history or an
+already-started child stop replay. The utility performs no source requests or
+launches. Maintenance must first finish and verify the narrow cause-specific fix,
+then separately review and start the sole queued child. It may establish a fresh
+polling operation only after that child succeeds, completes reconciliation and
+is promoted. Existing runtime holds for all other providers remain untouched.
+
 ## Verification
 
 Focused tooling tests use synthetic repository fixtures and execute the real
@@ -101,3 +141,11 @@ lease/deadline expiry. Shared paused-head/CLI tests protect the existing admissi
 strict TLS and private-file checks. Run the unchanged `npm run verify:framework`
 with no real database environment before deployment; the maintenance owner runs
 that canonical gate once the complete candidate is stable.
+
+The depth-two acceptance map is automated by
+`scripts/local/provider-failed-head-chain.test.mjs`: explicit admission and history
+preservation; unchanged v1 refusal; bounded depth/uniqueness; every zero counter
+and full-cursor boundary; forged/missing actor/action/target/command evidence;
+atomic drift and deadline refusal; claim rollback; exact public replay; and all
+three crash boundaries without a second queued child. No test connects to a
+provider source, real database, or Convex.
