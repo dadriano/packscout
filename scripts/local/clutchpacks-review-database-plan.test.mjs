@@ -408,6 +408,14 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /database\.datname::text/u);
   assert.match(runtime, /state === "nonempty"/u);
   assert.match(executor, /grant select, insert, update on table/u);
+  const providerSchema = readFileSync(new URL(
+    "../../packages/database/prisma/provider/schema.prisma", import.meta.url,
+  ), "utf8");
+  const providerTables = [...providerSchema.matchAll(/^model\s+(\w+)\s*\{/gmu)]
+    .map((match) => match[1]).filter((name) => name !== "database_identity").sort();
+  const grantList = /const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  assert.ok(grantList, "provider runtime grants must remain an explicit table allowlist");
+  assert.deepEqual([...grantList[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]).sort(), providerTables);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);

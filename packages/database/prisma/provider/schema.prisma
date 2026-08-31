@@ -253,6 +253,7 @@ model packs {
 
   category                  categories?                      @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "packs_category_id_fkey")
   contents                  pack_contents[]
+  content_snapshots         pack_content_snapshots[]
   pulls                     pulls[]
   market_events             market_events[]
   ev_recomputation_requests pack_ev_recomputation_requests[]
@@ -349,6 +350,7 @@ model pack_contents {
   pack_id                       String           @db.Uuid
   collectible_id                String           @db.Uuid
   collectible_instance_id       String?          @db.Uuid
+  source_snapshot_id            String?          @db.Uuid
   total_quantity                BigInt?
   available_quantity            BigInt?
   content_role                  content_role
@@ -369,9 +371,31 @@ model pack_contents {
   pack                 packs                  @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_pack_id_fkey")
   collectible          collectibles           @relation(fields: [collectible_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_collectible_id_fkey")
   collectible_instance collectible_instances? @relation(fields: [collectible_instance_id, collectible_id], references: [id, collectible_id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_instance_collectible_fkey")
+  source_snapshot      pack_content_snapshots? @relation(fields: [source_snapshot_id, pack_id], references: [id, pack_id], onDelete: Restrict, onUpdate: NoAction, map: "pack_contents_source_snapshot_pack_fkey")
 
   @@index([pack_id, lifecycle], map: "pack_contents_pack_lifecycle_idx")
   @@index([collectible_id, lifecycle], map: "pack_contents_collectible_lifecycle_idx")
+}
+
+/// One immutable, source-ordered membership observation for a provider pack.
+model pack_content_snapshots {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pack_id                 String   @db.Uuid
+  source_key              String
+  effective_at            DateTime @db.Timestamptz(6)
+  effective_at_basis      String
+  collected_at            DateTime @db.Timestamptz(6)
+  snapshot_digest         String   @db.Char(64)
+  completeness            String
+  normalized_snapshot     Json     @db.JsonB
+  created_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  pack packs @relation(fields: [pack_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pack_content_snapshots_pack_id_fkey")
+  contents pack_contents[]
+
+  @@unique([id, pack_id], map: "pack_content_snapshots_id_pack_key")
+  @@unique([pack_id, effective_at], map: "pack_content_snapshots_pack_effective_key")
+  @@index([pack_id, effective_at(sort: Desc)], map: "pack_content_snapshots_latest_idx")
 }
 
 model provider_accounts {

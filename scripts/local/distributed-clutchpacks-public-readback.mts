@@ -1,22 +1,29 @@
 import {
   canonicalJson,
-  presentLastKnownPackScoutEvV3,
+  publicEvPresentationResponseContextV1Schema,
+  publicProviderHealthResponseContextV1Schema,
   publicRepackDetailV3Schema,
-  type PackScoutDisplayedEvV3,
+  type DataReleaseV3RetainedEvWitness,
+  type DataReleaseV3RetainedEvWitnessRequest,
   type PublicRepackSummaryV3,
   type PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import type { DataReleaseV3PublishPlan } from "@packscout/services";
 import { DistributedClutchpacksPublicationError } from
   "./distributed-clutchpacks-publication-plan.mts";
+import { localClutchpacksExpectedEv, type LocalClutchpacksPlannedEvRow } from
+  "./distributed-clutchpacks-ev-witness.mts";
 
 type ReadResult<T> = { readonly ok: true; readonly data: T } | { readonly ok: false };
 type ReleaseIdentity = { readonly publicReleaseId: string };
 type RepackIdentity = { readonly publicRepackId: string };
 export type LocalClutchpacksEvReadbackRow = Pick<PublicRepackViewSummaryV3,
   "publicRepackId" | "availability" | "evEstimates">;
-type PlannedRow = Pick<PublicRepackSummaryV3,
-  "publicRepackId" | "availability" | "evEstimates" | "price">;
+type PlannedRow = LocalClutchpacksPlannedEvRow;
+type Clock = { readonly confidenceEvaluatedAt: string; readonly publicFreshnessPolicyVersion: string;
+  readonly providerHealthEvaluatedAt: string };
+type ContentRow = Pick<PublicRepackSummaryV3,
+  "publicRepackId" | "topChase" | "contentSummary" | "collectibleTypes">;
 
 function refuse(): never {
   throw new DistributedClutchpacksPublicationError("LOCAL_CONVEX_PUBLIC_READBACK_FAILED");
@@ -24,34 +31,34 @@ function refuse(): never {
 
 export function localClutchpacksPlannedV3Rows(
   plan: DataReleaseV3PublishPlan,
-): readonly PlannedRow[] {
+): readonly (PlannedRow & ContentRow)[] {
   return plan.batches.filter(({ kind }) => kind === "repacks")
     .flatMap(({ records }) => records.map((record) => publicRepackDetailV3Schema.parse(record)));
 }
 
-/** Model display confidence without changing the immutable planned EV. */
-function expectedEvAtRead(
-  row: PlannedRow,
-  currentTime: number,
-  prior: LocalClutchpacksEvReadbackRow | undefined,
-): PackScoutDisplayedEvV3 {
-  const estimate = row.evEstimates.packScout;
-  const previous = prior?.evEstimates.packScout;
-  if (estimate.status === "unavailable") {
-    if (previous?.status !== "last_known") return estimate;
-    return presentLastKnownPackScoutEvV3({
-      estimate: previous,
-      calculationPriceUsdMinor: previous.calculationPriceUsdMinor,
-      referenceTimeIso: new Date(currentTime).toISOString(),
-      latestUnavailableReason: Date.parse(estimate.calculatedAt) > Date.parse(previous.calculatedAt)
-        ? estimate.reason : previous.latestUnavailableReason,
-    });
-  }
-  if (row.price.usdComparison.status !== "available") return refuse();
-  return presentLastKnownPackScoutEvV3({
-    estimate, calculationPriceUsdMinor: row.price.usdComparison.value.minorUnits,
-    referenceTimeIso: new Date(currentTime).toISOString(),
+/** Both public list projections must expose the exact staged current contents. */
+export function verifyLocalClutchpacksContentReadback(input: {
+  readonly expectedRows: readonly ContentRow[];
+  readonly manifestRows: readonly ContentRow[];
+  readonly v3Rows: readonly ContentRow[];
+}): void {
+  const normalize = (rows: readonly ContentRow[]) => rows.map((row) => ({
+    publicRepackId: row.publicRepackId, topChase: row.topChase,
+    contentSummary: row.contentSummary, collectibleTypes: row.collectibleTypes,
+  })).sort((left, right) => left.publicRepackId < right.publicRepackId ? -1 : left.publicRepackId > right.publicRepackId ? 1 : 0);
+  const expected = canonicalJson(normalize(input.expectedRows));
+  if (canonicalJson(normalize(input.manifestRows)) !== expected || canonicalJson(normalize(input.v3Rows)) !== expected) return refuse();
+}
+
+function trustedClock(data: Clock): string {
+  const confidence = publicEvPresentationResponseContextV1Schema.safeParse({
+    confidenceEvaluatedAt: data.confidenceEvaluatedAt,
+    publicFreshnessPolicyVersion: data.publicFreshnessPolicyVersion,
   });
+  const health = publicProviderHealthResponseContextV1Schema.safeParse({ providerHealthEvaluatedAt: data.providerHealthEvaluatedAt });
+  if (!confidence.success || !health.success ||
+      Date.parse(data.providerHealthEvaluatedAt) < Date.parse(data.confidenceEvaluatedAt)) return refuse();
+  return confidence.data.confidenceEvaluatedAt;
 }
 
 function projection(row: LocalClutchpacksEvReadbackRow): LocalClutchpacksEvReadbackRow {
@@ -68,10 +75,10 @@ function sortedIdentities(rows: readonly RepackIdentity[]): string[] {
 
 /** Verify the exact public release and its currently actionable EV ranking. */
 export function verifyLocalClutchpacksPublicReadback(input: {
-  readonly currentTime: number;
   readonly expectedRepackIds: readonly string[];
   readonly expectedV3Rows: readonly PlannedRow[];
-  readonly previousV3Rows?: readonly LocalClutchpacksEvReadbackRow[];
+  readonly witnessRequest: DataReleaseV3RetainedEvWitnessRequest;
+  readonly witness: DataReleaseV3RetainedEvWitness;
   readonly manifestPublicReleaseId: string;
   readonly v3PublicReleaseId: string;
   readonly manifestShell: ReadResult<{ readonly metadata: ReleaseIdentity }>;
@@ -80,13 +87,13 @@ export function verifyLocalClutchpacksPublicReadback(input: {
     readonly range: { readonly total: number };
     readonly rows: readonly RepackIdentity[];
   }>;
-  readonly v3Shell: ReadResult<{ readonly release: ReleaseIdentity }>;
-  readonly v3List: ReadResult<{
+  readonly v3Shell: ReadResult<Clock & { readonly release: ReleaseIdentity }>;
+  readonly v3List: ReadResult<Clock & {
     readonly release: ReleaseIdentity;
     readonly range: { readonly total: number };
     readonly rows: readonly LocalClutchpacksEvReadbackRow[];
   }>;
-  readonly dashboard: ReadResult<{
+  readonly dashboard: ReadResult<Clock & {
     readonly release: ReleaseIdentity;
     readonly opportunities: readonly LocalClutchpacksEvReadbackRow[];
   }>;
@@ -99,7 +106,6 @@ export function verifyLocalClutchpacksPublicReadback(input: {
 } {
   const { manifestShell, manifestList, v3Shell, v3List, dashboard } = input;
   if (
-    !Number.isSafeInteger(input.currentTime) || input.currentTime < 0 ||
     !manifestShell.ok || !manifestList.ok || !v3Shell.ok || !v3List.ok || !dashboard.ok ||
     manifestShell.data.metadata.publicReleaseId !== input.manifestPublicReleaseId ||
     manifestList.data.metadata.publicReleaseId !== input.manifestPublicReleaseId ||
@@ -114,20 +120,26 @@ export function verifyLocalClutchpacksPublicReadback(input: {
   if ([manifestList.data.rows, v3List.data.rows, input.expectedV3Rows]
     .some((rows) => canonicalJson(sortedIdentities(rows)) !== expectedIds)) return refuse();
 
-  const previousById = new Map((input.previousV3Rows ?? []).map(row => [row.publicRepackId, row]));
-  const expectedRows = input.expectedV3Rows.map((row) => ({
+  trustedClock(v3Shell.data);
+  const listClock = trustedClock(v3List.data);
+  const dashboardClock = trustedClock(dashboard.data);
+  if (input.witnessRequest.expectedActivePublicReleaseId !== input.v3PublicReleaseId) return refuse();
+  const expectedEv = localClutchpacksExpectedEv({ rows: input.expectedV3Rows,
+    request: input.witnessRequest, witness: input.witness });
+  const atClock = (clock: string) => input.expectedV3Rows.map((row) => ({
     ...projection(row),
     evEstimates: {
       ...row.evEstimates,
-      packScout: expectedEvAtRead(row, input.currentTime, previousById.get(row.publicRepackId)),
+      packScout: expectedEv(row, clock),
     },
   }));
+  const expectedRows = atClock(listClock);
   const expectedById = new Map(expectedRows.map((row) => [row.publicRepackId, row]));
   if (v3List.data.rows.some((row) =>
     canonicalJson(projection(row)) !== canonicalJson(expectedById.get(row.publicRepackId)))) {
     return refuse();
   }
-  const eligible = expectedRows.filter((row) => {
+  const eligible = atClock(dashboardClock).filter((row) => {
     const estimate = row.evEstimates.packScout;
     return row.availability === "available" &&
       (estimate.status === "current" ||

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
+import { contentCatalogFixture, CONTENT_CARD_ID } from "./distributed-clutchpacks-content.test-support.mjs";
 
 const {
   publicRepackDetailV3Schema,
@@ -82,6 +83,10 @@ function facts(overrides = {}) {
       "40000000-0000-5000-8000-000000000001",
     latestSourceHeadConfigVersionNumber: 4n,
     latestSourceHeadFinishedAt: HEAD_AT,
+    catalogSettledAt: HEAD_AT,
+    catalogBackfillProofDigest: null,
+    approvedPublicAssetOrigins: ["https://assets.example.test", "https://cdn.example.test"],
+    contentCatalog: { memberships: [], collectibles: [], instances: [], snapshots: [], aliasRows: [] },
     promotionSequence: 78_502n,
     promotionChangeCount: 78_502n,
     minimumPromotionSequence: 1n,
@@ -253,7 +258,7 @@ for (const [name, override] of [
   ["running import", { runningRunCount: 1 }],
   ["active import lease", { activeImportLeaseCount: 1 }],
   ["non-contiguous promotion ledger", { promotionChangeCount: 78_501n }],
-  ["pack contents requiring correlations", { activePackContentCount: 1 }],
+  ["pack content count without retained membership rows", { activePackContentCount: 1 }],
   ["changing pack after source head", {
     maximumPackSourceUpdatedAt: new Date("2026-08-29T21:38:00.000Z"),
   }],
@@ -397,4 +402,65 @@ test("snapshot confirmation detects a central public-provider rename", () => {
   const before = assertDistributedClutchpacksStableSnapshot(facts());
   const after = assertDistributedClutchpacksStableSnapshot(facts({ providerDisplayName: "Renamed ClutchPacks" }));
   assert.notEqual(after.stabilityFingerprint, before.stabilityFingerprint);
+});
+
+test("current membership populates both public releases and top chases while preserving pack identity and EV", async () => {
+  const source = packWithEvEvidence();
+  const before = await build({ packs: [source] });
+  const contentCatalog = contentCatalogFixture(source.packKey);
+  const after = await build({ packs: [source], activePackContentCount: 1, contentCatalog });
+  const [beforeDetail] = v3RepackDetails(before.v3Plan);
+  const [detail] = v3RepackDetails(after.v3Plan);
+  assert.equal(after.providerPlan.counts.collectibles, 1);
+  assert.equal(after.providerPlan.counts.repackChases, 1);
+  assert.equal(after.v3Plan.manifest.counts.collectibles, 1);
+  assert.equal(after.v3Plan.manifest.counts.chases, 1);
+  assert.equal(after.v3Plan.manifest.topChaseCount, 1);
+  assert.equal(detail.publicRepackId, beforeDetail.publicRepackId);
+  assert.deepEqual(detail.evEstimates, beforeDetail.evEstimates);
+  assert.equal(detail.topChase.collectible.name, "Charizard PSA 10");
+  assert.equal(detail.topChase.probabilityBasisPoints, null);
+  assert.equal(detail.topChase.observedAt, contentCatalog.memberships[0].observedAt.toISOString());
+  assert.equal(detail.contentSummary.knownCollectibleCount, 1);
+  assert.deepEqual(after.projection.repacks[0].topChase, detail.topChase);
+  assert.match(after.projection.collectibles[0].searchText, /charizard/);
+  assert.equal(after.approvedConfiguration.revision, 3);
+  assert.equal(after.approvedConfiguration.collectibles.length, 1);
+  assert.equal(JSON.stringify(after.v3Plan).includes(CONTENT_CARD_ID), false);
+  assert.equal(after.projection.collectibles[0].dataAsOf, contentCatalog.collectibles[0].dataAsOf.toISOString());
+});
+
+test("membership/card row versions and approved origins participate in snapshot confirmation", () => {
+  const catalog = contentCatalogFixture();
+  const first = assertDistributedClutchpacksStableSnapshot(facts({ activePackContentCount: 1, contentCatalog: catalog }));
+  const changed = structuredClone(catalog); changed.collectibles[0].rowVersion += 1n;
+  const second = assertDistributedClutchpacksStableSnapshot(facts({ activePackContentCount: 1, contentCatalog: changed }));
+  assert.notEqual(first.stabilityFingerprint, second.stabilityFingerprint);
+  const third = assertDistributedClutchpacksStableSnapshot(facts({ activePackContentCount: 1, contentCatalog: catalog,
+    approvedPublicAssetOrigins: ["https://cdn.example.test"] }));
+  assert.notEqual(first.stabilityFingerprint, third.stabilityFingerprint);
+});
+
+test("unknown image origins stop publication even when the provider URL is valid HTTPS", async () => {
+  await assert.rejects(build({ approvedPublicAssetOrigins: ["https://other.example.test"] }),
+    (error) => error.code === "PUBLIC_IMAGE_UNAPPROVED");
+  await assert.rejects(build({ activePackContentCount: 1, contentCatalog: {
+    ...contentCatalogFixture(), collectibles: [{ ...contentCatalogFixture().collectibles[0],
+      primaryImageUrl: "https://unapproved.example.test/card.png" }],
+  } }), (error) => error.code === "DISTRIBUTED_CONTENT_IMAGE_UNAPPROVED");
+});
+
+test("an audited catalog settlement can advance membership without renewing pack source or EV observation clocks", async () => {
+  const source = packWithEvEvidence();
+  const contentCatalog = contentCatalogFixture(source.packKey);
+  const settledAt = new Date("2026-08-29T21:39:00.000Z");
+  const artifacts = await build({ packs: [source], activePackContentCount: 1, contentCatalog,
+    catalogSettledAt: settledAt, catalogBackfillProofDigest: "b".repeat(64),
+    maximumPromotionChangedAt: new Date("2026-08-29T21:38:30.000Z"),
+  }, "2026-08-29T21:39:01.000Z");
+  assert.equal(artifacts.providerPlan.providerCheckpoint.settledAt, settledAt.toISOString());
+  const [detail] = v3RepackDetails(artifacts.v3Plan);
+  assert.equal(detail.sourceUpdatedAt, source.sourceUpdatedAt.toISOString());
+  assert.equal(detail.evEstimates.packScout.dataAsOf.observedAt, source.evInputEvidence.collectedAt);
+  assert.equal(detail.topChase.observedAt, contentCatalog.memberships[0].observedAt.toISOString());
 });

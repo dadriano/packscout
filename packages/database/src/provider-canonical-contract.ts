@@ -50,6 +50,7 @@ export type ProviderCanonicalEntityType =
   | "collectible_name_alias"
   | "collectible_instance"
   | "pack_content"
+  | "pack_content_snapshot"
   | "provider_account"
   | "pull"
   | "pull_item"
@@ -173,6 +174,8 @@ export interface CollectibleInstanceWriteInput extends MutableWriteControl {
 }
 
 export interface PackContentWriteInput extends MutableWriteControl {
+  /** Omission invalidates prior proof; only the snapshot reconciler supplies it. */
+  readonly sourceSnapshotId?: string | null;
   readonly packId: string;
   readonly collectibleId: string;
   readonly collectibleInstanceId: string | null;

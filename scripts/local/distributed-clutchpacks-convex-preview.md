@@ -24,11 +24,14 @@ correlation, or restore the retired Postgres-backed frontend schema.
    EV dollars; source age changes confidence, not the stored values.
 
 ClutchPacks currently has no approved central public profile or public
-category/collectible correlations. The projection therefore exposes the real
-pack identities, prices, availability, provider EV, buyback statements,
-descriptions, and images, while publishing no listing actions, categories,
-collectibles, or chases. The V3 frontend receives a PackScout EV estimate when
-the retained odds, documented buyback terms, and freshness support one.
+category/collectible correlations. Local configuration revision 3 preserves that
+explicit bootstrap guard and adds deterministic provisional collectible IDs for
+source-proven pack memberships. It publishes referenced collectibles, chase
+records, top chase and content summaries together, using configured HTTPS image
+origins. It still publishes no direct listing actions or invented categories.
+See [the chase backfill workflow](../../docs/clutchpacks-chase-card-backfill.md).
+The V3 frontend receives a PackScout EV estimate when the retained odds and
+documented buyback terms support one; age lowers confidence without hiding values.
 
 The importer retains a strict, normalized `attributes.evInputEvidence` object;
 it does not compute EV or retain raw response bytes there. Promotion binds
@@ -50,8 +53,8 @@ them; a later failed calculation keeps the old values with zero confidence.
 
 The older manifest read model retains its existing EV semantics. The
 buyback-adjusted calculation is published through V3; no conversion between
-the two EV contracts is introduced. Public configuration revision 2 records
-this change. A new provider release still requires a genuinely newer settled
+the two EV contracts is introduced. Public configuration revision 3 also records
+the membership projection. A new provider release still requires a genuinely newer settled
 promotion ledger sequence. Changing the configuration alone cannot invent a
 new checkpoint.
 

@@ -61,6 +61,7 @@ const PROVIDER_TABLES = [
   "collectible_name_aliases",
   "collectible_instances",
   "pack_contents",
+  "pack_content_snapshots",
   "provider_accounts",
   "pulls",
   "pull_items",
@@ -501,7 +502,7 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
   assert.equal(centralModels.size, 42);
-  assert.equal(providerModels.size, 31);
+  assert.equal(providerModels.size, 32);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 
@@ -682,6 +683,54 @@ test("provider facts preserve source identities while local relationships resolv
     assert.match(migration, new RegExp(`THEN '${stableKey}'`, "u"));
   }
   assert.match(migration, /MESSAGE = TG_TABLE_NAME \|\| '_stable_key_immutable'/u);
+});
+
+test("provider pack membership receipts retain source proof and require same-pack references", () => {
+  const providerModels = modelMap(readFileSync(providerSchemaPath, "utf8"));
+  const snapshots = providerModels.get("pack_content_snapshots");
+  const contents = providerModels.get("pack_contents");
+  assert.ok(snapshots);
+  assert.ok(contents);
+  const fields = fieldsIn(snapshots);
+  for (const fieldName of [
+    "source_key", "effective_at_basis", "completeness",
+  ]) assert.match(fields.get(fieldName) ?? "", new RegExp(`^${fieldName}\\s+String$`, "u"));
+  for (const fieldName of ["effective_at", "collected_at", "created_at"]) {
+    assert.match(fields.get(fieldName) ?? "", /DateTime\s+(?:@default\(now\(\)\)\s+)?@db\.Timestamptz\(6\)/u);
+  }
+  assert.match(fields.get("snapshot_digest") ?? "", /String\s+@db\.Char\(64\)/u);
+  assert.match(fields.get("normalized_snapshot") ?? "", /Json\s+@db\.JsonB/u);
+  assert.ok(!fields.has("source_adapter_version"));
+  assert.ok(!fields.has("mapper_version"));
+  assert.match(fields.get("pack_id") ?? "", /String\s+@db\.Uuid/u);
+  assert.match(snapshots.body, /pack\s+packs\s+@relation\(fields:\s*\[pack_id\],\s*references:\s*\[id\],\s*onDelete:\s*Restrict/u);
+  assert.match(snapshots.body, /@@unique\(\[id, pack_id\]/u);
+  assert.match(snapshots.body, /@@unique\(\[pack_id, effective_at\]/u);
+  assert.match(snapshots.body, /@@index\(\[pack_id, effective_at\(sort: Desc\)\]/u);
+  assert.match(fieldsIn(contents).get("source_snapshot_id") ?? "", /String\?\s+@db\.Uuid/u);
+  assert.match(contents.body, /source_snapshot\s+pack_content_snapshots\?\s+@relation\(fields:\s*\[source_snapshot_id, pack_id\],\s*references:\s*\[id, pack_id\],\s*onDelete:\s*Restrict/u);
+
+  const migration = migrationContents("provider", "20260831010000_provider_pack_content_snapshots");
+  assert.match(migration, /^BEGIN;/u);
+  assert.match(migration, /CREATE UNIQUE INDEX "pack_contents_active_identity_key"\s+ON "pack_contents" \("pack_id", "collectible_id", "collectible_instance_id"\)\s+NULLS NOT DISTINCT WHERE "lifecycle" = 'active'/u);
+  assert.ok(migration.indexOf("CREATE UNIQUE INDEX") < migration.indexOf("CREATE TABLE"));
+  assert.doesNotMatch(migration, /(?:DELETE FROM|TRUNCATE)\s+"?pack_contents"?/iu);
+  assert.match(migration, /FOREIGN KEY \("source_snapshot_id", "pack_id"\) REFERENCES "pack_content_snapshots" \("id", "pack_id"\) ON DELETE RESTRICT/u);
+  assert.match(migration, /"pack_content_snapshots_time_check" CHECK \("collected_at" >= "effective_at"\)/u);
+  assert.match(migration, /"effective_at_basis" IN \('provider_updated_at', 'response_observed_at'\)/u);
+  assert.match(migration, /"completeness" IN \('complete', 'partial'\)/u);
+  assert.match(migration, /"pack_content_snapshots_version_identity_check" CHECK \(coalesce\(/u);
+  for (const fieldName of ["sourceAdapterVersion", "mapperVersion"]) {
+    assert.ok(migration.includes(`jsonb_typeof("normalized_snapshot"->'${fieldName}') = 'string'`));
+    assert.ok(migration.includes(`length("normalized_snapshot"->>'${fieldName}') BETWEEN 1 AND 256`));
+  }
+  assert.match(migration, /jsonb_array_length\("normalized_snapshot"->'items'\) <= 1000/u);
+  assert.match(migration, /octet_length\("normalized_snapshot"::text\) <= 262144/u);
+  assert.match(migration, /CREATE TRIGGER "pack_content_snapshots_append_only_trigger"\s+BEFORE UPDATE OR DELETE ON "pack_content_snapshots"\s+FOR EACH ROW EXECUTE FUNCTION "packscout_reject_append_only_change"\(\)/u);
+  assert.match(migration, /CREATE CONSTRAINT TRIGGER "pack_content_snapshots_promotion_change_trigger"\s+AFTER INSERT ON "pack_content_snapshots" DEFERRABLE INITIALLY DEFERRED/u);
+  assert.match(migration, /"entity_type" = 'pack_content_snapshot'\s+AND "entity_id" = NEW.id AND "entity_version" = 1 AND "operation" = 'upsert'/u);
+  assert.match(migration, /WHEN 'pack_content_snapshot' THEN\s+mutable_entity := false;/u);
+  assert.match(migration, /COMMIT;\s*$/u);
 });
 
 test("provider quarantine source keys are nullable durable idempotency keys", () => {
