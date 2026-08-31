@@ -103,6 +103,17 @@ export class PrismaProviderScheduleRepository {
       `);
       if (!candidate) return null;
 
+      // The joined schedule used the SELECT's snapshot, which can predate a
+      // claimant that committed before we acquired this source lock. Recheck
+      // in a fresh statement while holding the lock shared by all claimants.
+      const current = await transaction.provider_schedules.findUnique({
+        where: { provider_id: candidate.provider_id, organization_id: candidate.organization_id },
+        select: { config_revision_id: true, claim_expires_at: true },
+      });
+      if (current?.config_revision_id === candidate.config_revision_id
+        && current.claim_expires_at !== null
+        && current.claim_expires_at > input.now) return null;
+
       await transaction.provider_schedules.upsert({
         where: { provider_id: candidate.provider_id },
         create: {
