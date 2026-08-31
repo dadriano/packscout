@@ -132,6 +132,39 @@
   line-height: 1.5;
 }
 
+.provider-pulse__rate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.provider-pulse__rate > .admin-indicator,
+.provider-pulse__rate-value > span {
+  color: var(--admin-text-muted);
+  font-size: 0.875rem;
+}
+
+.provider-pulse__rate-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--admin-text);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.provider-pulse__rate[data-rate-state="available"] strong {
+  font-size: 1.75rem;
+  line-height: 1.25;
+}
+
 .provider-pulse__metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

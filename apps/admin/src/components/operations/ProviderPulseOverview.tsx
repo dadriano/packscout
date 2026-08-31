@@ -4,8 +4,12 @@ import { IndicatorTooltip } from "../IndicatorTooltip";
 import { ProviderPulseCard } from "./ProviderPulseCard";
 import type { SourceOperationControlsProps } from "./SourceOperationControls";
 import { count, measurementTotal, metricDescriptions, pulseNeedsAttention, pulseState, sortPulseSources } from "./provider-pulse-presentation";
+import type { RecentRateReading } from "./provider-recent-rate";
 
-export function ProviderPulseOverview({ overview, ...controls }: Omit<SourceOperationControlsProps, "source"> & { overview: ProviderSourceOperationsOverview }) {
+export function ProviderPulseOverview({ overview, recentRates = {}, ...controls }: Omit<SourceOperationControlsProps, "source"> & {
+  overview: ProviderSourceOperationsOverview;
+  recentRates?: Readonly<Record<string, RecentRateReading>>;
+}) {
   const sources = sortPulseSources(overview.sources);
   const stored = measurementTotal(sources, "storage");
   const processed = measurementTotal(sources, "records");
@@ -23,7 +27,7 @@ export function ProviderPulseOverview({ overview, ...controls }: Omit<SourceOper
       </dl>
       {sources.length === 0 ? <EmptyState title="No providers registered" description="Registered providers appear here when available." /> : (
         <div className="provider-pulse__grid">
-          {sources.map((source) => <ProviderPulseCard key={source.providerId} source={source} observedAt={overview.refreshedAt} {...controls} />)}
+          {sources.map((source) => <ProviderPulseCard key={source.providerId} source={source} observedAt={overview.refreshedAt} recentRate={recentRates[source.providerId]} {...controls} />)}
         </div>
       )}
     </section>

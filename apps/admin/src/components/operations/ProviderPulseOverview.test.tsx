@@ -8,8 +8,30 @@ import { cleanupPage, pageText, renderPage } from "../../testing/react-page-test
 import { operationSource, operationsOverview } from "../../testing/provider-source-operations-fixture.ts";
 import { ProviderPulseOverview } from "./ProviderPulseOverview.tsx";
 import { measurementTotal, pulseNeedsAttention, pulseState } from "./provider-pulse-presentation.ts";
+import type { RecentRateReading } from "./provider-recent-rate.ts";
 
 Object.assign(globalThis, { React });
+
+test("recent processing rate is readable, explained, and only shown on running provider cards", async (context) => {
+  const overview = operationsOverview();
+  const providerId = overview.sources[0]!.providerId;
+  const render = (reading: RecentRateReading) => <MemoryRouter><ProviderPulseOverview overview={overview} recentRates={{ [providerId]: reading }} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>;
+  const rendered = await renderPage(render({ state: "available", recordsPerSecond: 0.05, windowMilliseconds: 20_000, sampleCount: 5 }));
+  cleanupPage(context, rendered);
+  assert.equal(rendered.container.querySelectorAll(".provider-pulse__rate").length, 1);
+  const band = rendered.container.querySelector(".provider-pulse__rate")!;
+  assert.equal(band.querySelector("strong")!.textContent, "<0.1");
+  assert.match(band.textContent!, /records\/sec/u);
+  await act(async () => band.querySelector("button")!.focus());
+  const tooltip = rendered.dom.window.document.querySelector('[role="tooltip"]')!;
+  assert.match(tooltip.textContent!, /20 seconds from 5 status samples/u);
+  assert.match(tooltip.textContent!, /not newly stored rows/u);
+  assert.match(tooltip.textContent!, /request timing makes it approximate/u);
+  await act(async () => rendered.root.render(render({ state: "measuring" })));
+  assert.equal(rendered.container.querySelector(".provider-pulse__rate strong")!.textContent, "Measuring…");
+  await act(async () => rendered.root.render(render({ state: "unavailable" })));
+  assert.equal(rendered.container.querySelector(".provider-pulse__rate strong")!.textContent, "Unavailable");
+});
 
 test("provider overview puts problems first, keeps details collapsed, and links the correct provider data", async (context) => {
   const overview = operationsOverview();

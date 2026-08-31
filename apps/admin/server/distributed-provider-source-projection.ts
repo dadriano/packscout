@@ -180,13 +180,14 @@ export function configuredSource(input: Readonly<{
   const active = overview?.activeRun
     ? input.evidence?.runs.find((run) => run.id === overview.activeRun?.id) ?? null
     : null;
-  const elapsed = elapsedMilliseconds(latest, input.now);
+  const progressRun = active ?? latest;
+  const elapsed = elapsedMilliseconds(progressRun, input.now);
   const currentProfile = config && manifest
     ? { configId: config.id, pageLimit: manifest.requestBounds.pageLimit }
     : null;
-  const totalRecords = latest === null
+  const totalRecords = progressRun === null
     ? 0
-    : latest.catalogCount + latest.pullCount + latest.marketEventCount;
+    : progressRun.catalogCount + progressRun.pullCount + progressRun.marketEventCount;
   return {
     providerId: input.provider.id,
     provider: launchProviderKeySchema.parse(input.provider.key),
@@ -244,7 +245,7 @@ export function configuredSource(input: Readonly<{
     freshness: {
       state: freshness(overview?.freshnessState),
       lastHeadReachedAt: overview?.lastHeadReachedAt?.toISOString() ?? null,
-      lastProgressAt: latest?.lastProgressAt?.toISOString() ?? null,
+      lastProgressAt: progressRun?.lastProgressAt?.toISOString() ?? null,
     },
     quality: {
       state: databaseUnreachable ? "degraded" : quality(overview?.qualityState),
@@ -258,19 +259,19 @@ export function configuredSource(input: Readonly<{
     },
     cursor: null,
     progress: {
-      pages: latest?.pageCount ?? 0,
+      pages: progressRun?.pageCount ?? 0,
       records: {
-        catalog: latest?.catalogCount ?? 0,
-        pulls: latest?.pullCount ?? 0,
-        trades: latest?.marketEventCount ?? 0,
+        catalog: progressRun?.catalogCount ?? 0,
+        pulls: progressRun?.pullCount ?? 0,
+        trades: progressRun?.marketEventCount ?? 0,
         total: totalRecords,
       },
       dispositions: {
         // The canonical run records combined material changes, not insert/update counts.
         inserted: null,
         revised: null,
-        duplicate: latest?.duplicateCount ?? 0,
-        quarantined: latest?.quarantinedCount ?? 0,
+        duplicate: progressRun?.duplicateCount ?? 0,
+        quarantined: progressRun?.quarantinedCount ?? 0,
       },
       throughputRecordsPerSecond: elapsed > 0
         ? Number((totalRecords / (elapsed / 1_000)).toFixed(2))

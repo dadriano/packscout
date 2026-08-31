@@ -133,12 +133,18 @@ test("display pause discards an in-flight update, resume refreshes, and failed r
   await act(async () => findButton(rendered, "Resume display").click());
   await settlePage();
   assert.match(pageText(rendered), /Updated Courtyard/u);
-  const beforeFailure = rendered.container.querySelector(".provider-pulse")!.textContent;
+  const measuredEvidence = () => {
+    const copy = rendered.container.querySelector(".provider-pulse")!.cloneNode(true) as Element;
+    copy.querySelectorAll(".provider-pulse__rate").forEach((rate) => rate.remove());
+    return copy.textContent;
+  };
+  const beforeFailure = measuredEvidence();
   fail = true;
   await act(async () => document.dispatchEvent(new rendered.dom.window.Event("visibilitychange")));
   await settlePage();
   assert.match(pageText(rendered), /Refresh failed/u);
-  assert.equal(rendered.container.querySelector(".provider-pulse")!.textContent, beforeFailure);
+  assert.equal(measuredEvidence(), beforeFailure);
+  assert.equal(rendered.container.querySelector(".provider-pulse__rate strong")?.textContent, "Unavailable", "browser rate expires while durable evidence is retained");
   await act(async () => findButton(rendered, "Pause display").click());
   fail = false;
   const requestsBeforeRetry = requests.length;

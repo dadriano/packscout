@@ -4,13 +4,14 @@ import { IndicatorTooltip } from "../IndicatorTooltip";
 import { ProviderPulseDetails } from "./ProviderPulseDetails";
 import type { SourceOperationControlsProps } from "./SourceOperationControls";
 import { count, measuredAge, metricDescriptions, pulseIssue, pulseNeedsAttention, pulseState } from "./provider-pulse-presentation";
+import { isRecentRateEligible, recentRateDescription, recentRateValue, type RecentRateReading } from "./provider-recent-rate";
 
 function Metric({ label, description, children }: { label: string; description: string; children: ReactNode }) {
   return <div><dt><IndicatorTooltip label={label} description={description} /></dt><dd>{children}</dd></div>;
 }
 
-export function ProviderPulseCard(props: SourceOperationControlsProps & { observedAt: string }) {
-  const { source, observedAt } = props;
+export function ProviderPulseCard(props: SourceOperationControlsProps & { observedAt: string; recentRate?: RecentRateReading }) {
+  const { source, observedAt, recentRate = { state: "unavailable" } } = props;
   const state = pulseState(source);
   const issue = pulseIssue(source);
   const { storage, records, activity } = source.measurements;
@@ -25,6 +26,12 @@ export function ProviderPulseCard(props: SourceOperationControlsProps & { observ
           <IndicatorTooltip label={state.label} description={state.description} tone={state.tone} />
         </header>
         {issue ? <p className="provider-pulse__issue">{issue}</p> : null}
+        {isRecentRateEligible(source) ? (
+          <div className="provider-pulse__rate" data-rate-state={recentRate.state} role="group" aria-label="Recent processing rate">
+            <IndicatorTooltip label="Recent rate" description={recentRateDescription(recentRate)} />
+            <p className="provider-pulse__rate-value"><strong>{recentRateValue(recentRate)}</strong>{recentRate.state === "available" ? <span>records/sec</span> : null}</p>
+          </div>
+        ) : null}
         <dl className="provider-pulse__metrics">
           <Metric label="Stored rows" description={metricDescriptions.stored}>{count(storage.state === "available" ? storage.counts.total : null)}</Metric>
           <Metric label="Records processed" description={metricDescriptions.processed}>

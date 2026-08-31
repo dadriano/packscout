@@ -12,6 +12,7 @@ import { EmptyState } from "../components/EmptyState";
 import { IndicatorTooltip } from "../components/IndicatorTooltip";
 import { ProviderPulseOverview } from "../components/operations/ProviderPulseOverview";
 import { pulseState } from "../components/operations/provider-pulse-presentation";
+import { expireRecentRates, observeRecentRates, readRecentRate, type RecentRateHistory } from "../components/operations/provider-recent-rate";
 import {
   ConnectionOperationsSummary,
   ProviderSourceOperationsLedger,
@@ -69,6 +70,7 @@ export function OperationsPage({
     status.session.permissions.includes("imports:start");
   const canConfigure = status.phase === "authenticated" &&
     status.session.permissions.includes("providers:manage");
+  const organizationId = status.phase === "authenticated" ? status.session.membership.organizationId : null;
   const [overview, setOverview] = useState<ProviderSourceOperationsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [readFailure, setReadFailure] = useState<string | null>(null);
@@ -80,6 +82,13 @@ export function OperationsPage({
   const priorStates = useRef(new Map<string, string>());
   const readInFlight = useRef(false);
   const refreshAfterRead = useRef(false);
+  const rateGeneration = useRef(0);
+  const [rateHistory, setRateHistory] = useState<RecentRateHistory>({});
+
+  const resetRates = useCallback(() => {
+    rateGeneration.current += 1;
+    setRateHistory((history) => Object.keys(history).length > 0 ? {} : history);
+  }, []);
 
   const refresh = useCallback((reason: "explicit" | "poll" = "explicit") => {
     if (readInFlight.current) {
@@ -92,10 +101,16 @@ export function OperationsPage({
   useEffect(() => {
     if (displayPaused) return;
     let active = true;
+    const requestRateGeneration = rateGeneration.current;
     readInFlight.current = true;
     void getProviderSourceOperationsOverview()
       .then((result) => {
         if (!active || refreshAfterRead.current) return;
+        if (!providerCatalog && organizationId && document.visibilityState === "visible"
+          && requestRateGeneration === rateGeneration.current) {
+          const receivedAt = window.performance.now();
+          setRateHistory((history) => observeRecentRates(history, result, organizationId, receivedAt));
+        }
         const changes = result.sources.flatMap((source) => {
           const next = providerCatalog ? sourceOperationalLabel(source) : pulseState(source).label;
           const previous = priorStates.current.get(source.providerId);
@@ -109,6 +124,7 @@ export function OperationsPage({
         setReadFailure(null);
       })
       .catch((error: unknown) => {
+        if (active) resetRates();
         if (active && !refreshAfterRead.current) setReadFailure(readError(error));
       })
       .finally(() => {
@@ -126,12 +142,16 @@ export function OperationsPage({
       readInFlight.current = false;
       refreshAfterRead.current = false;
     };
-  }, [refreshIndex, displayPaused, providerCatalog]);
+  }, [refreshIndex, displayPaused, providerCatalog, organizationId, resetRates]);
 
   useEffect(() => {
     if (displayPaused) return;
     const poll = () => {
-      if (document.visibilityState === "visible") refresh("poll");
+      if (document.visibilityState === "visible") {
+        const receivedAt = window.performance.now();
+        setRateHistory((history) => expireRecentRates(history, receivedAt));
+        refresh("poll");
+      } else resetRates();
     };
     const intervalId = window.setInterval(poll, REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", poll);
@@ -139,7 +159,7 @@ export function OperationsPage({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [displayPaused, refresh]);
+  }, [displayPaused, refresh, resetRates]);
 
   async function operate(
     source: ProviderSourceOperationsSource,
@@ -206,14 +226,12 @@ export function OperationsPage({
               className="admin-button admin-button-secondary"
               aria-pressed={displayPaused}
               onClick={() => {
-                setDisplayPaused((paused) => {
-                  const next = !paused;
-                  setAnnouncement(next
-                    ? "Display refresh paused. Ingestion continues."
-                    : "Display refresh resumed.");
-                  if (paused) refresh();
-                  return next;
-                });
+                resetRates();
+                setDisplayPaused(!displayPaused);
+                setAnnouncement(!displayPaused
+                  ? "Display refresh paused. Ingestion continues."
+                  : "Display refresh resumed.");
+                if (displayPaused) refresh();
               }}
             >
               {displayPaused ? "Resume display" : "Pause display"}
@@ -263,6 +281,7 @@ export function OperationsPage({
         <div className="ops-error" role="alert">
           <p>{readFailure}</p>
           <button type="button" className="admin-button admin-button-secondary" onClick={() => {
+            resetRates();
             setDisplayPaused(false);
             setLoading(true);
             refresh();
@@ -279,6 +298,9 @@ export function OperationsPage({
       ) : null}
 
       {overview && !providerCatalog ? <ProviderPulseOverview overview={overview} canOperate={canOperate} pendingKey={pendingKey}
+        recentRates={Object.fromEntries(overview.sources.map((source) => [source.providerId,
+          organizationId && !displayPaused && !readFailure ? readRecentRate(rateHistory, source, organizationId) : { state: "unavailable" as const },
+        ]))}
         onCommand={(source, command) => { void operate(source, command); }} /> : null}
       {overview && providerCatalog ? (
         <>
