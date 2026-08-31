@@ -35,8 +35,14 @@ changes require a reviewed policy successor; no local-target guard is relaxed.
 PostgreSQL connections require the exact configured Neon hosts and verified
 TLS. Read-only repeatable-read snapshots include the complete active card
 catalog, current membership evidence, categories and aliases. A full snapshot
-is checked before staging and activation; bounded control/lease checks protect
-each batch without rereading thousands of cards.
+is checked before staging, activation and final verification. Each sequential
+batch and finalization checks a conservative monotonic lease deadline and any
+latched failure immediately before dispatch. The deadline starts before the
+queued lease request, consumes response latency and reserves a 15-second
+margin. Every 30 seconds, renewal revalidates source controls, authority and
+the exact fence. A response cannot revive an expired proof. Immutable staging
+does not reread the active pointer; visible publication boundaries validate the
+source first and then fetch the current pointer before proceeding.
 
 Public identity uses the recovered original UUIDv5 namespace and bare provider
 UUIDs. The new `pack:` and `card:` prefixes are storage keys, and never become
@@ -78,7 +84,8 @@ acquisition and unconfirmed cleanup remain distinct failures, with no retry or
 invented lease ownership. Background lease loss is checked again immediately
 before each cloud write.
 
-Quality observations preserve source quarantine counts and degraded quality.
+Quality observations preserve source quarantine counts and the exact source
+quality, including `unknown`, `degraded` and `unhealthy`.
 Successful import or publication does not resolve an immutable-fact conflict.
 Source freshness derives from the actual completed head and the configured
 staleness limit; publication must not extend a stale head indefinitely. The

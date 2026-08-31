@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
-import { tsImport } from "tsx/esm/api";
-import { optionsFixture } from "./clutchpacks-production-source.test-support.mjs";
+import { register, tsImport } from "tsx/esm/api";
+import { optionsFixture, sourcePostgresFixture } from "./clutchpacks-production-source.test-support.mjs";
 const { createProductionSourceController, ClutchpacksProductionSourceError } = await tsImport("./clutchpacks-production-source-controller.mts", import.meta.url);
 function deferred() { let release; return { promise: new Promise(resolve => { release = resolve; }), release: () => release() }; }
 function fixture() {
@@ -88,4 +88,63 @@ test("actual lease-port request role/owner cannot mutate during authority admiss
   const request = { role: "import", owner: f.lease.owner, leaseMilliseconds: 90_000 };
   const work = f.reader.leasePort.acquire(request); request.role = "promotion"; request.owner = "foreign"; gate.release();
   await work; assert.equal(f.calls.acquire, 1); await f.reader.close();
+});
+
+test("periodic renewal revalidates real authority, runtime, checkpoint and ownership before extending the lease", { timeout: 180_000 }, async context => {
+  // One loader scope preserves the production error-class identity across ports.
+  const modules = register({ namespace: "production-source-renewal-regression" });
+  try {
+    const { createProductionSourceController: create } = await modules.import("./clutchpacks-production-source-controller.mts", import.meta.url);
+    const policy = await modules.import("./clutchpacks-production-source-policy.mts", import.meta.url);
+    const { readProductionSourceState } = await modules.import("./clutchpacks-production-source-state.mts", import.meta.url);
+    const { readProductionSourceCatalog } = await modules.import("./clutchpacks-production-source-catalog.mts", import.meta.url);
+    for (const [mode, code] of [["authority", "PRODUCTION_SOURCE_AUTHORITY_INVALID"],
+      ["runtime", "PRODUCTION_SOURCE_HEAD_OR_RUNTIME_CHANGED"], ["checkpoint", "PRODUCTION_SOURCE_HEAD_OR_RUNTIME_CHANGED"],
+      ["fence", "PRODUCTION_SOURCE_IMPORT_LEASE_UNAVAILABLE"]]) await context.test(`${mode} drift blocks periodic renewal`, async () => {
+      const fixture = await sourcePostgresFixture();
+      const { options, central, provider, leases } = fixture, calls = { acquire: 0, renew: 0, catalog: 0 };
+      const readonly = (client, operation) => policy.drainSourceOperation(callback => client.$transaction(callback,
+        { isolationLevel: "RepeatableRead", maxWait: 5_000, timeout: 30_000 }), async tx => {
+        await tx.$executeRaw`SET TRANSACTION READ ONLY`; return operation(tx);
+      });
+      const reader = create(options, {
+        authority: pinned => readonly(central, tx => policy.readProductionSourceAuthority(tx, pinned)),
+        state: (pinned, authority, lease) => readonly(provider, tx => readProductionSourceState(tx, pinned, authority, lease)),
+        snapshot: (pinned, authority, lease) => readonly(provider, async tx => {
+          const current = await readProductionSourceState(tx, pinned, authority, lease);
+          calls.catalog++; return { current, catalog: await readProductionSourceCatalog(tx, pinned, authority, current) };
+        }),
+        leases: () => ({ acquire: request => { calls.acquire++; return leases.acquire(request); },
+          renew: request => { calls.renew++; return leases.renew(request); }, release: request => leases.release(request) }),
+        cleanup: (_pinned, _authority, lease) => leases.release(lease), close: async () => {},
+      });
+      const currentLease = () => provider.provider_worker_states.findUniqueOrThrow({ where: { worker_role: "import" } });
+      let held;
+      try {
+        await reader.read();
+        const acquired = await reader.leasePort.acquire({ role: "import", owner: "fixture:periodic-publication", leaseMilliseconds: 90_000 });
+        assert.equal(acquired.kind, "acquired"); held = acquired.lease;
+        const request = { role: "import", owner: held.owner, fence: held.fence, leaseMilliseconds: 90_000 };
+        assert.equal((await reader.leasePort.renew(request)).fence, held.fence);
+        if (mode === "authority") await central.operators.update({ where: { id: options.scope.operatorId },
+          data: { state: "disabled", row_version: { increment: 1n }, updated_at: new Date() } });
+        if (mode === "runtime") await provider.provider_runtime.update({ where: { singleton_key: true },
+          data: { last_control_sync_at: new Date(), row_version: { increment: 1n } } });
+        if (mode === "checkpoint") await provider.provider_runtime.update({ where: { singleton_key: true },
+          data: { source_cursor_hash: "f".repeat(64), row_version: { increment: 1n } } });
+        if (mode === "fence") {
+          assert.equal(await leases.release(held), true); held = undefined;
+          const foreign = await leases.acquire({ role: "import", owner: "fixture:replacement-importer", leaseMilliseconds: 90_000 });
+          assert.equal(foreign.kind, "acquired"); held = foreign.lease; assert.ok(held.fence > request.fence);
+        }
+        const before = await currentLease();
+        await assert.rejects(reader.leasePort.renew(request), error => error.code === code && error.message === code);
+        assert.deepEqual(await currentLease(), before, "failed validation must not extend or replace the lease");
+        assert.deepEqual(calls, { acquire: 1, renew: 1, catalog: 1 });
+      } finally {
+        await reader.close();
+        try { if (held) await leases.release(held); } finally { await fixture.close(); }
+      }
+    });
+  } finally { await modules.unregister(); }
 });

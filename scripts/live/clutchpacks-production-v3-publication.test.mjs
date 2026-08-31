@@ -93,7 +93,9 @@ function fixture() {
       async acquire(request) { events.push("lease"); owned = { role: "import", owner: request.owner, fence: 489n,
         rowVersion: 1n, heartbeatAt: new Date(now), expiresAt: new Date("2026-08-31T18:15:00.000Z") };
         return { kind: "acquired", lease: owned }; },
-      async renew() { events.push("renew"); return owned; },
+      async renew() { events.push("renew"); await input.assertSourceQuiet(owned);
+        owned = { ...owned, heartbeatAt: new Date(owned.heartbeatAt.getTime() + 1),
+          expiresAt: new Date(owned.expiresAt.getTime() + 1) }; return owned; },
       async release() { events.push("release"); return true; },
     },
     async readSource() { events.push("read-source"); return { scope, source: structuredClone(intent.source) }; },
@@ -156,9 +158,13 @@ test("predecessor generation changes after finalize: activation is refused even 
   await assert.rejects(publish(f.input), rejects("PRODUCTION_PUBLICATION_FAILED"));
   assert.equal(f.events.includes("activate"), false); assert.equal(f.events.includes("rollback"), false);
 });
-test("source lease loss during staging prevents the next cloud write and never steals a new fence", async () => {
+test("detected source lease loss during staging prevents the next cloud write and never steals a new fence", async t => {
+  let tick;
+  t.mock.method(globalThis, "setInterval", callback => { tick = callback; return 1; });
+  t.mock.method(globalThis, "clearInterval", () => undefined);
   const f = fixture(); const start = f.input.client.start;
-  f.input.client.start = async request => { const result = await start(request); f.input.leasePort.renew = async () => null; return result; };
+  f.input.client.start = async request => { const result = await start(request); f.input.leasePort.renew = async () => null;
+    tick(); await new Promise(resolve => setImmediate(resolve)); return result; };
   await assert.rejects(publish(f.input), rejects("PRODUCTION_PUBLICATION_FAILED"));
   assert.equal(f.events.includes("batch"), false); assert.equal(f.events.includes("activate"), false);
   assert.equal(f.events.filter(x => x === "lease").length, 1); assert.equal(f.events.at(-1), "release");
@@ -273,21 +279,19 @@ test("activation cannot mutate the durably prepared request before it is sent", 
   assert.equal((await publish(f.input)).status, "verified");
 });
 
-test("background source or lease loss during a deferred active-state read prevents the next batch", async t => {
+test("background source or lease loss during a deferred staging response prevents the next batch", async t => {
   for (const mode of ["quiet", "renewal"]) {
     const f = fixture(); let tick; let unblock; let entered;
     const blocked = new Promise(resolve => { entered = resolve; });
     const delayed = new Promise(resolve => { unblock = resolve; });
     t.mock.method(globalThis, "setInterval", callback => { tick = callback; return 1; });
     t.mock.method(globalThis, "clearInterval", () => undefined);
-    const activeState = f.input.client.activeState; const quiet = f.input.assertSourceQuiet;
+    const start = f.input.client.start; const quiet = f.input.assertSourceQuiet;
     let loseQuiet = false;
     f.input.assertSourceQuiet = async lease => { if (loseQuiet) { f.events.push("background-source-lost"); throw new Error("source resumed"); }
       return quiet(lease); };
-    let paused = false;
-    f.input.client.activeState = async () => {
-      if (f.events.includes("start") && !paused) { paused = true; entered(); await delayed; }
-      return activeState();
+    f.input.client.start = async request => {
+      const receipt = await start(request); entered(); await delayed; return receipt;
     };
     const publication = publish(f.input);
     const rejected = assert.rejects(publication, rejects("PRODUCTION_PUBLICATION_FAILED"));
@@ -295,7 +299,7 @@ test("background source or lease loss during a deferred active-state read preven
     if (mode === "quiet") loseQuiet = true;
     else f.input.leasePort.renew = async () => { f.events.push("background-lease-lost"); return null; };
     tick();
-    // Drain the background promise chain while the state read remains paused.
+    // Drain the background promise chain while the staging response remains paused.
     await new Promise(resolve => setImmediate(resolve));
     unblock(); await rejected;
     assert.equal(f.events.includes("batch"), false, `${mode}: no cloud batch after background loss`);
@@ -312,4 +316,76 @@ test("unconfirmed lease cleanup remains an explicit recovery outcome before any 
   await assert.rejects(publish(f.input), rejects("PRODUCTION_SOURCE_LEASE_CLEANUP_UNCONFIRMED"));
   assert.equal(acquisitions, 1);
   assert.equal(f.events.some(event => ["start", "batch", "finalize", "activate", "observation", "release"].includes(event)), false);
+});
+
+test("83 sequential staged batches do not repeat source or active-pointer reads", async () => {
+  const f = fixture(); const batch = f.input.plan.batches[0];
+  f.input.plan.batches = Array.from({ length: 83 }, (_, batchIndex) => ({ ...batch, batchIndex,
+    records: batchIndex === 0 ? batch.records : [] }));
+  f.input.plan.manifest.batchCount = 83;
+  f.input.intent.candidate.planSha256 = digest(f.input.plan);
+  assert.equal((await publish(f.input)).status, "verified");
+  const staging = f.events.slice(f.events.indexOf("start") + 1, f.events.indexOf("finalize"));
+  assert.equal(staging.filter(event => event === "batch").length, 83);
+  assert.equal(staging.some(event => ["read-state", "read-source", "quiet", "renew"].includes(event)), false);
+  assert.equal(f.events.filter(event => event === "read-source").length, 4);
+  assert.ok(f.events.filter(event => event === "read-state").length < 15);
+  assert.ok(f.events.filter(event => event === "quiet").length < 10);
+});
+
+test("source or predecessor drift while persisting observation refuses activation", async () => {
+  for (const mode of ["source", "generation", "fingerprint"]) {
+    const f = fixture(); const prepare = f.input.prepareObservation;
+    f.input.prepareObservation = async () => {
+      const attempt = await prepare();
+      if (mode === "source") f.input.assertSourceQuiet = async () => { throw new Error("source changed"); };
+      if (mode === "generation") f.setState({ ...f.before, generation: f.before.generation + 2 });
+      if (mode === "fingerprint") f.setState({ ...f.before, activeRelease: { ...f.before.activeRelease, releaseFingerprint: hash("0") } });
+      return attempt;
+    };
+    await assert.rejects(publish(f.input), rejects("PRODUCTION_PUBLICATION_FAILED"));
+    assert.equal(f.events.includes("activate"), false);
+    assert.equal(f.events.includes("observation"), false);
+    assert.equal(f.events.at(-1), "release");
+  }
+});
+
+test("missing full source proof cannot fall back to a predecessor-only check", async () => {
+  const f = fixture(); const read = f.input.readSource; let reads = 0;
+  f.input.readSource = async lease => ++reads === 2 ? undefined : read(lease);
+  await assert.rejects(publish(f.input), rejects("PRODUCTION_PUBLICATION_FAILED"));
+  assert.equal(f.events.includes("start"), false);
+  assert.equal(f.events.at(-1), "release");
+});
+
+test("source drift after activation refuses public observation and unsafe rollback", async () => {
+  const f = fixture(); const activate = f.input.client.activate;
+  f.input.client.activate = async request => {
+    const result = await activate(request);
+    f.input.assertSourceQuiet = async () => { throw new Error("source changed"); };
+    return result;
+  };
+  await assert.rejects(publish(f.input), rejects("PRODUCTION_VERIFICATION_RECOVERY_REQUIRED"));
+  assert.equal(f.events.includes("observation"), false);
+  assert.equal(f.events.includes("rollback"), false);
+  assert.equal(f.events.at(-1), "release");
+});
+
+test("pointer movement during final source validation cannot produce a verified receipt or unsafe rollback", async () => {
+  for (const mode of ["foreign", "generation", "fingerprint"]) {
+    const f = fixture(); const read = f.input.readSource;
+    f.input.readSource = async lease => {
+      const result = await read(lease);
+      if (f.events.includes("verify-public")) {
+        const current = f.state();
+        if (mode === "foreign") f.setState({ ...current, activeRelease: { ...current.activeRelease, publicReleaseId: id("88") } });
+        if (mode === "generation") f.setState({ ...current, generation: current.generation + 2 });
+        if (mode === "fingerprint") f.setState({ ...current, activeRelease: { ...current.activeRelease, releaseFingerprint: hash("0") } });
+      }
+      return result;
+    };
+    await assert.rejects(publish(f.input), rejects("PRODUCTION_VERIFICATION_RECOVERY_REQUIRED"));
+    assert.equal(f.events.includes("rollback"), false);
+    assert.equal(f.events.at(-1), "release");
+  }
 });

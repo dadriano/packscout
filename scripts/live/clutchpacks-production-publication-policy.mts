@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import { approvedPublicCatalogConfigurationV1Schema, canonicalJson } from "@packscout/contracts";
 import type { PrismaProviderWorkerLeaseRepository, ProviderWorkerLease } from "@packscout/database";
@@ -168,26 +169,20 @@ export interface ClutchpacksProductionLeaseAttempt {
   readonly request: { readonly role: "import"; readonly owner: string; readonly leaseMilliseconds: number };
   readonly requestSha256: string;
 }
-/** Caller checks process ownership/quiet source without changing operator state.
- * Call assertLive before every publication write and revalidate source pins there.
- * Lease renewals serialize; loss is latched and cannot reacquire a newer fence. */
+/** Initial quiet proof precedes acquisition; the adapter revalidates source,
+ * authority and exact ownership on every periodic renewal. Dispatch checks use
+ * only the bounded monotonic proof and join any renewal already in flight. */
 export async function withClutchpacksProductionPublicationLease<T>(input: {
   readonly intent: unknown; readonly port: ClutchpacksProductionLeasePort;
-  /** Persist the exact generated owner before an acquire that may commit without
-   * returning. A failed or uncertain acquire must never generate a silent retry. */
+  /** Persist the exact owner before an acquire that may commit without returning. */
   readonly prepareLeaseAttempt: (attempt: ClutchpacksProductionLeaseAttempt) => Promise<void>;
   readonly assertSourceQuiet: (ownedLease?: ClutchpacksProductionOwnedImportLease) => Promise<void>;
   readonly operation: (lease: ClutchpacksProductionOwnedImportLease, assertLive: () => Promise<void>,
     assertNotLost: () => void) => Promise<T>;
+  readonly monotonicNow?: () => number;
 }): Promise<T> {
   const intent = parseClutchpacksProductionPublicationIntent(input.intent);
-  const quiet = async (ownedLease?: ClutchpacksProductionOwnedImportLease) => {
-    try { await input.assertSourceQuiet(ownedLease); }
-    catch { return refuse("PRODUCTION_SOURCE_NOT_QUIET"); }
-  };
-  await quiet();
-  // Unique process owner prevents concurrent attempts sharing an operation ID
-  // from renewing each other's lease. Cloud operation identities remain stable.
+  try { await input.assertSourceQuiet(); } catch { return refuse("PRODUCTION_SOURCE_NOT_QUIET"); }
   const attemptId = randomUUID();
   const owner = `production-publication:${intent.operationId}:${attemptId}`;
   const leaseMilliseconds = 15 * 60_000;
@@ -195,6 +190,18 @@ export async function withClutchpacksProductionPublicationLease<T>(input: {
   try { await input.prepareLeaseAttempt(Object.freeze({ attemptId, intentSha256: productionPublicationSha256(intent),
     request, requestSha256: productionPublicationSha256(request) })); }
   catch { return refuse("PRODUCTION_IMPORT_LEASE_ATTEMPT_PERSIST_FAILED"); }
+  let failure: ClutchpacksProductionPublicationError | null = null;
+  const lose = (): never => { failure ??= new ClutchpacksProductionPublicationError("PRODUCTION_IMPORT_LEASE_LOST"); throw failure; };
+  let lastMonotonic = -1;
+  const monotonic = () => {
+    let now: number;
+    try { now = (input.monotonicNow ?? (() => performance.now()))(); } catch { return lose(); }
+    if (!Number.isFinite(now) || now < 0 || now < lastMonotonic) return lose();
+    lastMonotonic = now; return now;
+  };
+  // Start before the queued adapter call so database/postcheck/queue latency
+  // consumes validity rather than extending it at response time.
+  const acquiredStarted = monotonic();
   let acquired;
   try { acquired = await input.port.acquire(request); }
   catch (error) {
@@ -207,32 +214,53 @@ export async function withClutchpacksProductionPublicationLease<T>(input: {
   if (acquired.kind === "held") return refuse("PRODUCTION_IMPORT_LEASE_UNAVAILABLE");
   if (acquired.kind !== "acquired" || acquired.lease?.owner !== owner || acquired.lease?.role !== "import" ||
     typeof acquired.lease?.fence !== "bigint" || acquired.lease.fence < 1n) return refuse("PRODUCTION_IMPORT_LEASE_ACQUIRE_UNKNOWN");
-  const lease: ClutchpacksProductionOwnedImportLease = { role: "import", owner, fence: acquired.lease.fence };
-  let failure: ClutchpacksProductionPublicationError | null = null;
-  let pending: Promise<void> | null = null;
-  // Recheck after asynchronous reads and immediately before dispatching a write.
-  // This observes background failures without starting another database round trip.
-  const assertNotLost = () => { if (failure !== null) throw failure; };
-  const assertLive = async () => {
-    assertNotLost();
-    pending ??= (async () => {
-      try {
-        await quiet(lease);
-        const renewed = await input.port.renew({ ...lease, leaseMilliseconds });
-        if (renewed === null || renewed.owner !== owner || renewed.role !== "import" || renewed.fence !== lease.fence) {
-          return refuse("PRODUCTION_IMPORT_LEASE_LOST");
-        }
-      } catch (error) {
-        failure = error instanceof ClutchpacksProductionPublicationError ? error
-          : new ClutchpacksProductionPublicationError("PRODUCTION_IMPORT_LEASE_LOST");
-      }
-    })().finally(() => { pending = null; });
-    await pending;
-    assertNotLost();
+  const lease: ClutchpacksProductionOwnedImportLease = Object.freeze({ role: "import", owner, fence: acquired.lease.fence });
+  let proof: { deadline: number; heartbeatAt: number; expiresAt: number } | undefined;
+  const acceptProof = (returned: ProviderWorkerLease | null, started: number) => {
+    if (failure !== null) throw failure;
+    if (returned === null || returned.owner !== owner || returned.role !== "import" || returned.fence !== lease.fence) return lose();
+    const heartbeatAt = returned.heartbeatAt instanceof Date ? returned.heartbeatAt.getTime() : NaN;
+    const expiresAt = returned.expiresAt instanceof Date ? returned.expiresAt.getTime() : NaN;
+    const duration = expiresAt - heartbeatAt;
+    const deadline = started + duration - 15_000;
+    const receivedAt = monotonic();
+    if (!Number.isFinite(heartbeatAt) || !Number.isFinite(expiresAt) || !Number.isSafeInteger(duration) ||
+      duration <= 15_000 || duration > leaseMilliseconds || !Number.isFinite(deadline) || deadline <= receivedAt ||
+      (proof !== undefined && (receivedAt >= proof.deadline || heartbeatAt <= proof.heartbeatAt || expiresAt <= proof.expiresAt))) return lose();
+    // Copy primitives: retaining mutable Date objects could change accepted proof.
+    proof = { deadline, heartbeatAt, expiresAt };
   };
-  const timer = setInterval(() => { void assertLive().catch(() => undefined); }, 30_000);
+  const assertNotLost = () => {
+    if (failure !== null) throw failure;
+    const now = monotonic();
+    if (proof === undefined || now >= proof.deadline) return lose();
+    return now;
+  };
+  let pending: Promise<void> | null = null;
+  const renew = (): Promise<void> => {
+    if (pending !== null) return pending;
+    const started = assertNotLost();
+    pending = (async () => {
+      try { acceptProof(await input.port.renew({ ...lease, leaseMilliseconds }), started); }
+      catch { return lose(); }
+    })().finally(() => { pending = null; });
+    return pending;
+  };
+  const assertLive = async () => {
+    if (pending !== null) await pending;
+    const now = assertNotLost();
+    if (proof!.deadline - now <= 30_000) {
+      await renew(); assertNotLost();
+    }
+  };
+  let timer: ReturnType<typeof setInterval> | undefined;
   try {
-    await assertLive();
+    // From this point ownership is known: even invalid date/latency proof gets
+    // normal exact-fence cleanup, never an invented force-clear or reacquire.
+    acceptProof(acquired.lease, acquiredStarted);
+    timer = setInterval(() => {
+      try { void renew().catch(() => undefined); } catch { /* Expiry/loss is already latched. */ }
+    }, 30_000);
     const result = await input.operation(lease, assertLive, assertNotLost);
     await assertLive();
     return result;
@@ -240,8 +268,8 @@ export async function withClutchpacksProductionPublicationLease<T>(input: {
     if (error instanceof ClutchpacksProductionPublicationError) throw error;
     return refuse("PRODUCTION_PUBLICATION_FAILED");
   } finally {
-    clearInterval(timer);
-    await pending;
+    if (timer !== undefined) clearInterval(timer);
+    await Promise.resolve(pending).catch(() => undefined);
     let released = false;
     try { released = await input.port.release(lease); } catch { /* No raw transport error may escape. */ }
     if (!released) refuse("PRODUCTION_IMPORT_LEASE_RELEASE_FAILED");

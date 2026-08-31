@@ -128,12 +128,15 @@ export async function publishClutchpacksProductionV3(input: ClutchpacksProductio
     assertSourceQuiet: input.assertSourceQuiet, operation: async (lease, assertLive, assertNotLost) => {
       const guard = async (fullSourceBinding = false) => {
         await assertLive();
+        // Visible publication boundaries revalidate the live source. Read the
+        // target after the potentially slow source proof so the receipt/CAS
+        // cannot rely on a pointer sampled before that proof completed.
+        const source = fullSourceBinding ? await input.readSource(lease) : undefined;
+        if (!fullSourceBinding) await input.assertSourceQuiet(lease);
+        await assertLive();
         const activeState = await input.client.activeState();
-        // The renewed import fence excludes canonical writes. assertSourceQuiet
-        // checks the cheap owner/runtime pins every time; full card snapshots
-        // are loaded only at staging, activation and final verification boundaries.
         const disposition = fullSourceBinding
-          ? assertClutchpacksProductionBindings(intent, { ...await input.readSource(lease),
+          ? assertClutchpacksProductionBindings(intent, { scope: source?.scope, source: source?.source,
             approvedConfiguration: input.approvedConfiguration, plan: input.plan, activeState })
           : assertClutchpacksProductionPredecessor(intent, activeState);
         assertNotLost();
@@ -149,8 +152,11 @@ export async function publishClutchpacksProductionV3(input: ClutchpacksProductio
       const guarded: DataReleaseV3PublicationPort = {
         activeState: () => input.client.activeState(), status: id => input.client.status(id),
         start: async request => { await guard(true); return write(() => input.client.start(request)); },
-        applyBatch: async request => { await guard(); return write(() => input.client.applyBatch(request)); },
-        finalize: async request => { await guard(); return write(() => input.client.finalize(request)); },
+        // These sequential operations affect only this immutable staged release.
+        // The lease proof is checked at every dispatch and renewed in the
+        // background; fresh source and pointer checks precede activation.
+        applyBatch: async request => { await assertLive(); return write(() => input.client.applyBatch(request)); },
+        finalize: async request => { await assertLive(); return write(() => input.client.finalize(request)); },
         activate: async request => {
           await guard(true);
           const attempt = await input.prepareObservation();

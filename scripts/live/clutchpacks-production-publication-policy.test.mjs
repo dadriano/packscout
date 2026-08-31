@@ -144,25 +144,44 @@ test("verified receipt retains degraded source truth and excludes arbitrary evid
 });
 
 function leaseFixture() {
-  const { intent } = fixture(); const calls = []; let owned; let savedAttempt;
+  const { intent } = fixture(); const calls = []; let owned; let savedAttempt; let clock = 0;
+  const epoch = Date.parse("2026-08-31T18:00:00.000Z");
   const port = {
-    async acquire(request) { calls.push("acquire"); assert.deepEqual(request, savedAttempt.request); owned = { role: "import", owner: request.owner, fence: 489n,
-      rowVersion: 1n, heartbeatAt: new Date(), expiresAt: new Date(Date.now() + request.leaseMilliseconds) };
+    async acquire(request) { calls.push("acquire"); assert.deepEqual(request, savedAttempt.request);
+      owned = { role: "import", owner: request.owner, fence: 489n, rowVersion: 1n,
+        heartbeatAt: new Date(epoch + clock), expiresAt: new Date(epoch + clock + request.leaseMilliseconds) };
       return { kind: "acquired", lease: owned }; },
-    async renew(request) { calls.push("renew"); assert.equal(request.owner, owned.owner);
-      assert.equal(request.fence, owned.fence); return owned; },
-    async release(request) { calls.push("release"); assert.equal(request.owner, owned.owner);
-      assert.equal(request.fence, owned.fence); return true; },
+    async renew(request) { calls.push("renew"); assert.equal(request.owner, owned.owner); assert.equal(request.fence, owned.fence);
+      const heartbeat = Math.max(epoch + clock, owned.heartbeatAt.getTime() + 1);
+      owned = { ...owned, rowVersion: owned.rowVersion + 1n, heartbeatAt: new Date(heartbeat), expiresAt: new Date(heartbeat + request.leaseMilliseconds) };
+      return owned; },
+    async release(request) { calls.push("release"); assert.equal(request.owner, savedAttempt.request.owner);
+      assert.equal(request.fence, 489n); return true; },
   };
-  const input = { intent, port, prepareLeaseAttempt: async attempt => { calls.push("persist"); savedAttempt = structuredClone(attempt); }, assertSourceQuiet: async lease => { calls.push(lease ? "quiet-owned" : "quiet"); },
+  const input = { intent, port, monotonicNow: () => clock,
+    prepareLeaseAttempt: async attempt => { calls.push("persist"); savedAttempt = structuredClone(attempt); },
+    assertSourceQuiet: async lease => { calls.push(lease ? "quiet-owned" : "quiet"); },
     operation: async (lease, assertLive) => { assert.equal(lease.fence, 489n); calls.push("stage");
       await assertLive(); calls.push("activate"); return "verified"; } };
-  return { calls, input, savedAttempt: () => savedAttempt };
+  return { calls, input, savedAttempt: () => savedAttempt, owned: () => owned,
+    advance: milliseconds => { clock += milliseconds; }, setClock: value => { clock = value; } };
 }
-test("quiet source and exact renewed import fence surround writes; cleanup precedes success", async () => {
-  const f = leaseFixture(); assert.equal(await withLease(f.input), "verified");
-  assert.deepEqual(f.calls, ["quiet", "persist", "acquire", "quiet-owned", "renew", "stage", "quiet-owned", "renew",
-    "activate", "quiet-owned", "renew", "release"]);
+function fakeTimer(t) {
+  let callback;
+  t.mock.method(globalThis, "setInterval", (next, milliseconds) => { assert.equal(milliseconds, 30_000); callback = next; return 1; });
+  t.mock.method(globalThis, "clearInterval", () => undefined);
+  return () => callback();
+}
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+test("83 dispatches use acquired proof without repeated quiet reads or renewals", async () => {
+  const f = leaseFixture(); f.input.operation = async (_, assertLive, assertNotLost) => {
+    for (let i = 0; i < 83; i++) { await assertLive(); assertNotLost(); f.calls.push("dispatch"); }
+    return "verified";
+  };
+  assert.equal(await withLease(f.input), "verified");
+  assert.equal(f.calls.filter(call => call === "dispatch").length, 83);
+  assert.equal(f.calls.filter(call => call === "quiet").length, 1); assert.equal(f.calls.includes("quiet-owned"), false);
+  assert.equal(f.calls.includes("renew"), false); assert.equal(f.calls.at(-1), "release");
 });
 test("resident not quiet prevents lease acquisition; foreign live lease prevents writes and release", async () => {
   const f = leaseFixture(); f.input.assertSourceQuiet = async () => { throw new Error("private detail"); };
@@ -172,18 +191,40 @@ test("resident not quiet prevents lease acquisition; foreign live lease prevents
   await assert.rejects(withLease(g.input), refuses("PRODUCTION_IMPORT_LEASE_UNAVAILABLE"));
   assert.deepEqual(g.calls, ["quiet", "persist"]);
 });
-test("lease loss latches before activation, never reacquires, and releases only the original fence", async () => {
-  const f = leaseFixture(); const renew = f.input.port.renew; let n = 0;
-  f.input.port.renew = async request => ++n === 1 ? renew(request) : null;
-  await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
-  assert.equal(f.calls.filter(x => x === "acquire").length, 1);
-  assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+test("timer renews every30seconds even with ample cached budget and dispatches join it", async t => {
+  const tick = fakeTimer(t); const f = leaseFixture(); const entered = deferred(), finish = deferred(); const renew = f.input.port.renew;
+  f.input.port.renew = async request => { entered.resolve(); await finish.promise; return renew(request); };
+  f.input.operation = async (_, assertLive) => {
+    f.advance(30_000); tick(); await entered.promise;
+    let dispatched = false; const first = assertLive().then(() => { dispatched = true; }); const second = assertLive();
+    await Promise.resolve(); assert.equal(dispatched, false); finish.resolve(); await Promise.all([first, second]);
+    assert.equal(f.calls.filter(call => call === "renew").length, 1);
+    for (let i = 0; i < 83; i++) await assertLive();
+    assert.equal(f.calls.filter(call => call === "renew").length, 1);
+  };
+  await withLease(f.input);
 });
-test("source resumes during staging: refuse activation while still releasing publication ownership", async () => {
-  const f = leaseFixture(); let n = 0;
-  f.input.assertSourceQuiet = async () => { if (++n === 3) throw new Error("source resumed"); };
-  await assert.rejects(withLease(f.input), refuses("PRODUCTION_SOURCE_NOT_QUIET"));
-  assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+test("inflight timer renewal failure latches despite an unexpired old proof and never reacquires", async t => {
+  const tick = fakeTimer(t);
+  for (const mode of ["null", "throw", "owner", "role", "fence"]) {
+    const f = leaseFixture(); const entered = deferred(), finish = deferred(); let renewals = 0;
+    f.input.port.renew = async () => { renewals++; entered.resolve(); await finish.promise;
+      if (mode === "null") return null;
+      if (mode === "throw") throw new Error("private source authority failure");
+      return { ...f.owned(), [mode]: mode === "fence" ? 999n : "foreign" };
+    };
+    f.input.operation = async (_, assertLive, assertNotLost) => {
+      f.advance(30_000); tick(); await entered.promise;
+      const first = assert.rejects(assertLive(), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+      const second = assert.rejects(assertLive(), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+      finish.resolve(); await Promise.all([first, second]);
+      assert.throws(assertNotLost, refuses("PRODUCTION_IMPORT_LEASE_LOST")); tick();
+      await assertLive(); f.calls.push("activate");
+    };
+    await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+    assert.equal(renewals, 1); assert.equal(f.calls.filter(x => x === "acquire").length, 1);
+    assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+  }
 });
 test("failed stage and uncertain cleanup cannot emit success or leak transport secrets", async () => {
   const f = leaseFixture(); f.input.operation = async () => { throw new Error("postgres://secret"); };
@@ -200,19 +241,13 @@ test("same reviewed operation receives different process lease owners across att
   }
   assert.notEqual(owners[0], owners[1]);
 });
-test("overlapping phase guards share one renewal and cannot accumulate concurrent lease requests", async () => {
-  const f = leaseFixture(); const renew = f.input.port.renew;
+test("low remaining proof budget causes one early renewal shared by overlapping dispatch checks", async () => {
+  const f = leaseFixture(); const renew = f.input.port.renew; const entered = deferred(), finish = deferred(); let calls = 0;
+  f.input.port.renew = async request => { calls++; entered.resolve(); await finish.promise; return renew(request); };
   f.input.operation = async (_, assertLive) => {
-    let finish; let started;
-    const entered = new Promise(resolve => { started = resolve; });
-    const delayed = new Promise(resolve => { finish = resolve; });
-    let calls = 0;
-    f.input.port.renew = async request => { calls++; started(); await delayed; return renew(request); };
-    const first = assertLive(); await entered;
-    const second = assertLive(); const third = assertLive();
-    finish(); await Promise.all([first, second, third]);
-    assert.equal(calls, 1);
-    f.input.port.renew = renew;
+    f.advance(860_000);
+    const first = assertLive(); await entered.promise; const second = assertLive(); const third = assertLive();
+    finish.resolve(); await Promise.all([first, second, third]); assert.equal(calls, 1);
   };
   await withLease(f.input);
 });
@@ -239,4 +274,91 @@ test("unknown acquire or unconfirmed cleanup keeps exact evidence and never retr
     assert.equal(acquisitions, 1); assert.ok(f.savedAttempt().request.owner);
     assert.deepEqual(f.calls, ["quiet", "persist"]);
   }
+});
+
+test("known acquire response delay consumes request-start validity and still releases exact ownership", async () => {
+  const f = leaseFixture(); const acquire = f.input.port.acquire;
+  f.input.port.acquire = async request => { const result = await acquire(request); f.advance(885_000); return result; };
+  await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+  assert.equal(f.calls.includes("stage"), false); assert.equal(f.calls.at(-1), "release");
+});
+test("acquire queue delay cannot move proof deadline to response time", async () => {
+  const f = leaseFixture(); const acquire = f.input.port.acquire;
+  f.input.port.acquire = async request => { f.advance(120_000); return acquire(request); };
+  f.input.operation = async (_, assertLive, assertNotLost) => {
+    f.advance(764_999); assertNotLost(); f.advance(1);
+    assert.throws(assertNotLost, refuses("PRODUCTION_IMPORT_LEASE_LOST")); await assertLive();
+  };
+  await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+  assert.equal(f.calls.includes("renew"), false); assert.equal(f.calls.at(-1), "release");
+});
+test("invalid finite-date or duration proof after known acquisition is never accepted or left unreleased", async () => {
+  for (const mutate of [lease => { lease.heartbeatAt = new Date(NaN); }, lease => { lease.expiresAt = new Date(Infinity); },
+    lease => { lease.heartbeatAt = "2026-08-31T18:00:00.000Z"; },
+    lease => { lease.expiresAt = new Date(lease.heartbeatAt.getTime() + 900_001); },
+    lease => { lease.expiresAt = new Date(lease.heartbeatAt.getTime() + 15_000); },
+    lease => { lease.expiresAt = new Date(lease.heartbeatAt.getTime() - 1); }]) {
+    const f = leaseFixture(); const acquire = f.input.port.acquire;
+    f.input.port.acquire = async request => { const result = await acquire(request); mutate(result.lease); return result; };
+    await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+    assert.equal(f.calls.includes("stage"), false); assert.equal(f.calls.at(-1), "release");
+  }
+});
+test("same or stale renewal timestamps cannot manufacture a new validity window", async t => {
+  const tick = fakeTimer(t);
+  for (const stale of [false, true]) {
+    const f = leaseFixture(); f.input.port.renew = async () => { const old = f.owned(); return { ...old,
+      heartbeatAt: new Date(old.heartbeatAt.getTime() - (stale ? 1 : 0)), expiresAt: new Date(old.expiresAt.getTime() - (stale ? 1 : 0)) }; };
+    f.input.operation = async (_, assertLive) => { f.advance(30_000); tick(); await assertLive(); f.calls.push("activate"); };
+    await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+    assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+  }
+});
+test("renew response delay consumes its own request-start window and cannot revive an expired response", async t => {
+  const tick = fakeTimer(t); const f = leaseFixture(); const renew = f.input.port.renew;
+  f.input.port.renew = async request => { const result = await renew(request); f.advance(885_000); return result; };
+  f.input.operation = async (_, assertLive) => { f.advance(30_000); tick(); await assertLive(); f.calls.push("activate"); };
+  await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+  assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+});
+test("renewal cannot replace a proof that expired while its response was pending", async t => {
+  const tick = fakeTimer(t); const f = leaseFixture(); const renew = f.input.port.renew;
+  f.input.port.renew = async request => { const result = await renew(request); f.advance(855_000); return result; };
+  f.input.operation = async (_, assertLive, assertNotLost) => {
+    f.advance(30_000); tick();
+    // Old proof expires at885s; the candidate is still valid until915s. A gap in
+    // local proof must nevertheless latch loss, never revive the expired proof.
+    await assert.rejects(assertLive(), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+    assert.throws(assertNotLost, refuses("PRODUCTION_IMPORT_LEASE_LOST")); await assertLive(); f.calls.push("activate");
+  };
+  await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+  assert.equal(f.calls.filter(call => call === "renew").length, 1);
+  assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+});
+test("event-loop delay, backwards or nonfinite monotonic clocks latch loss before any renewal/write", async t => {
+  const tick = fakeTimer(t);
+  for (const next of [885_001, -1, NaN, Infinity]) {
+    const f = leaseFixture(); f.input.operation = async (_, assertLive, assertNotLost) => {
+      f.setClock(next); assert.throws(assertNotLost, refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+      f.setClock(0); tick(); await assertLive(); f.calls.push("activate");
+    };
+    await assert.rejects(withLease(f.input), refuses("PRODUCTION_IMPORT_LEASE_LOST"));
+    assert.equal(f.calls.includes("renew"), false); assert.equal(f.calls.includes("activate"), false); assert.equal(f.calls.at(-1), "release");
+  }
+});
+test("wall-clock rollback and returned Date mutation do not change accepted monotonic proof", async t => {
+  const f = leaseFixture(); f.input.operation = async (_, assertLive, assertNotLost) => {
+    t.mock.method(Date, "now", () => 0);
+    f.owned().heartbeatAt.setTime(0); f.owned().expiresAt.setTime(0);
+    f.advance(30_000); await assertLive(); assertNotLost(); return "verified";
+  };
+  assert.equal(await withLease(f.input), "verified"); assert.equal(f.calls.includes("renew"), false);
+});
+test("cleanup waits for in-flight renewal before normal exact-fence release", async t => {
+  const tick = fakeTimer(t); const f = leaseFixture(); const entered = deferred(), finish = deferred(); const renew = f.input.port.renew;
+  f.input.port.renew = async request => { entered.resolve(); await finish.promise; return renew(request); };
+  f.input.operation = async () => { f.advance(30_000); tick(); await entered.promise; throw new Error("private stage failure"); };
+  const run = withLease(f.input); const rejected = assert.rejects(run, refuses("PRODUCTION_PUBLICATION_FAILED"));
+  await entered.promise; await Promise.resolve(); assert.equal(f.calls.includes("release"), false);
+  finish.resolve(); await rejected; assert.equal(f.calls.at(-1), "release");
 });
