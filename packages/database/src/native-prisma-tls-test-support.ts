@@ -115,10 +115,15 @@ export async function createPostgresTlsProbe(
     socketTimeouts: 0,
   };
   const context = certificate ? createSecureContext(certificate) : undefined;
-  const sockets = new Set<Socket>();
+  const sockets = new Map<Socket, Promise<void>>();
   const track = (socket: Socket) => {
-    sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
+    const closed = new Promise<void>((resolve) => {
+      socket.once("close", () => {
+        sockets.delete(socket);
+        resolve();
+      });
+    });
+    sockets.set(socket, closed);
     socket.setTimeout(SOCKET_TIMEOUT_MS, () => {
       evidence.socketTimeouts += 1;
       socket.destroy();
@@ -185,10 +190,15 @@ export async function createPostgresTlsProbe(
     port: address.port,
     evidence,
     async close() {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>((resolve, reject) => {
+      // net.Server can finish closing before a wrapped TLS socket emits its
+      // own close event. Evidence is finalized by those socket listeners, so
+      // teardown must also await every tracked transport's close completion.
+      const closedSockets = [...sockets.values()];
+      const closedServer = new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
+      for (const socket of sockets.keys()) socket.destroy();
+      await Promise.all([closedServer, ...closedSockets]);
     },
   };
 }
