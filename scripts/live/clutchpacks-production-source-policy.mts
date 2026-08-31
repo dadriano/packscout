@@ -11,7 +11,9 @@ export function refuseSource(code: string): never { throw new ClutchpacksProduct
 export function sourceWire(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item));
 }
-/** Matches the maintenance full-route digest, including revisions and encrypted credential bytes. */
+/** Hashes the full wire value with contracts canonicalJson, including revisions
+ * and encrypted credential bytes. Numeric byte-key ordering can differ from
+ * the maintenance providerMixedPageDigest format; pin this format explicitly. */
 export function sourceDigest(value: unknown): string {
   return createHash("sha256").update(canonicalJson(sourceWire(value))).digest("hex");
 }

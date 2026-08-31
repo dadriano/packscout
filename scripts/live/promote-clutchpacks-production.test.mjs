@@ -5,13 +5,17 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
-const { runClutchpacksProductionCli: run, parseClutchpacksProductionSourceConfig: parseConfig, serializeClutchpacksProductionSourcePort: serializeSource } =
+const { runClutchpacksProductionCli: run, parseClutchpacksProductionSourceConfig: parseConfig, serializeClutchpacksProductionSourcePort: serializeSource, clutchpacksProductionSourcePinsFromObservation: sourcePinsFromObservation } =
   await tsImport("./promote-clutchpacks-production.mts", import.meta.url);
 const { CLUTCHPACKS_PRODUCTION_SCOPE: scope, productionPublicationSha256: digest, withClutchpacksProductionPublicationLease: withLease } =
   await tsImport("./clutchpacks-production-publication-policy.mts", import.meta.url);
 const id = suffix => `11111111-1111-5111-8111-${suffix.padStart(12, "0")}`;
 const hash = text => createHash("sha256").update(text).digest("hex");
 const now = "2026-08-31T18:00:00.000Z";
+const observationForPins = pins => ({ sourceCheckpoint: { runId: pins.runId, checkpointHash: pins.checkpointHash,
+  stateGeneration: BigInt(pins.stateGeneration), promotionSequence: BigInt(pins.promotionSequence) },
+  sourceObservation: { lastHeadReachedAt: pins.lastHeadReachedAt, qualityState: pins.qualityState, quarantineCount: pins.quarantineCount },
+  stabilityFingerprint: pins.stabilityFingerprint });
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "packscout-production-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -62,7 +66,7 @@ async function fixture(t) {
         activeRelease: { publicReleaseId: id("3"), releaseFingerprint: "e".repeat(64) }, previousRelease: null }; } },
       publicClient: {}, catalogReadToken: "private-catalog-token", close() { events.push("close-convex"); },
     }; },
-    projectSource: raw => raw,
+    projectSource: raw => ({ ...raw, sourcePins: sourcePinsFromObservation(observationForPins(raw.sourcePins)) }),
     buildConfiguration(input) { events.push("build-configuration"); assert.equal(input.approvedAt, now); return structuredClone(baseline); },
     async buildPlan(input) { events.push("build-plan"); assert.equal(input.readAt, now); return structuredClone(plan); },
     verifyIdentity(input) { events.push("verify-identity"); assert.equal(input.proof.baseline.rawSha256, baselinePin.sha256); },
@@ -71,7 +75,7 @@ async function fixture(t) {
       assert.deepEqual(input.inventory, { fixtureInventory: "current production inventory" }); },
     async publish(input) { events.push("publish"); assert.equal(input.intent.readAt, now); assert.deepEqual(input.plan, plan);
       const attempt = await input.prepareObservation();
-      assert.equal(attempt.request.qualityState, "degraded"); assert.equal(input.intent.source.quarantineCount, 465);
+      assert.equal(attempt.request.qualityState, sourcePins.qualityState); assert.equal(input.intent.source.quarantineCount, 465);
       const file = `${bundlePath}.observation.${attempt.request.observationSequence}.json`;
       const saved = JSON.parse(await readFile(file, "utf8"));
       assert.deepEqual(attempt.request, saved.request); assert.equal(attempt.requestSha256, digest(saved.request));
@@ -261,4 +265,27 @@ test("exclusive lease-evidence collision refuses before acquire and preserves th
   });
   await assert.rejects(run(["--publish", f.bundlePath], { NODE_ENV: "production" }, f.deps), refused("PRODUCTION_IMPORT_LEASE_ATTEMPT_PERSIST_FAILED"));
   assert.equal(acquisitions, 0); assert.equal(await readFile(collision, "utf8"), "operator-owned evidence");
+});
+
+test("unknown and unhealthy source quality with465 quarantines survives actual pin mapping, intent, observation and output", async t => {
+  for (const qualityState of ["unknown", "unhealthy"]) {
+    const f = await fixture(t); f.sourcePins.qualityState = qualityState;
+    const prepared = await run(["--prepare", f.configPath, f.bundlePath], { NODE_ENV: "production" }, f.deps);
+    assert.equal(prepared.qualityState, qualityState); assert.equal(prepared.quarantineCount, 465);
+    const bundle = JSON.parse(await readFile(f.bundlePath, "utf8")); assert.equal(bundle.intent.source.qualityState, qualityState);
+    const verified = await run(["--publish", f.bundlePath], { NODE_ENV: "production" }, f.deps);
+    assert.equal(verified.qualityState, qualityState); assert.equal(verified.quarantineCount, 465);
+    const names = (await readdir(f.directory)).filter(name => name.includes(".observation.")); assert.equal(names.length, 1);
+    const attempt = JSON.parse(await readFile(path.join(f.directory, names[0]), "utf8"));
+    assert.equal(attempt.request.qualityState, qualityState);
+    assert.equal(JSON.parse(await readFile(verified.receiptPath, "utf8")).source.qualityState, qualityState);
+  }
+});
+test("source pin mapping rejects malformed quality and healthy quarantines without reinterpreting them", async t => {
+  const f = await fixture(t);
+  for (const qualityState of ["healthy", "invalid", null, 1]) {
+    assert.throws(() => sourcePinsFromObservation(observationForPins({ ...f.sourcePins, qualityState })), refused("PRODUCTION_SOURCE_CHECKPOINT_INVALID"));
+  }
+  const healthy = sourcePinsFromObservation(observationForPins({ ...f.sourcePins, qualityState: "healthy", quarantineCount: 0 }));
+  assert.equal(healthy.qualityState, "healthy"); assert.equal(healthy.quarantineCount, 0);
 });

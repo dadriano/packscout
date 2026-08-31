@@ -29,7 +29,7 @@ export interface ClutchpacksProductionPostHeadOptions extends z.input<typeof opt
 }
 const preparedSchema = z.object({ status: z.literal("prepared"), bundlePath: absolute, bundleSha256: hash,
   operationId: z.uuid(), publicReleaseId: z.uuid(), readAt: iso,
-  qualityState: z.enum(["healthy", "degraded"]), quarantineCount: count }).strict();
+  qualityState: intentSchema.shape.source.shape.qualityState, quarantineCount: count }).strict();
 const verifiedOutputSchema = preparedSchema.omit({ bundlePath: true, readAt: true }).extend({
   status: z.literal("verified"), receiptPath: absolute }).strict();
 const bundleSchema = z.object({ schemaVersion: z.literal("clutchpacks_production_bundle_v1"),

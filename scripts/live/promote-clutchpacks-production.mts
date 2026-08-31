@@ -20,6 +20,7 @@ import { publishClutchpacksProductionV3, clutchpacksProductionObservationOperati
 import type { assertClutchpacksProductionIdentityContinuity, assertClutchpacksProductionInventoryContinuity } from "./clutchpacks-production-identity-continuity.mts";
 import type { openClutchpacksProductionConvexRuntime } from "./clutchpacks-production-convex-runtime.mts";
 import type { verifyClutchpacksProductionPublicReadback } from "./clutchpacks-production-public-readback.mts";
+import type { ClutchpacksProductionSourceSnapshot } from "./clutchpacks-production-source-reader.mts";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const decimal = z.string().regex(/^(0|[1-9][0-9]{0,19})$/u);
@@ -178,6 +179,19 @@ export interface ClutchpacksProductionCliDependencies {
   readonly now: () => string;
   readonly operationId: () => string;
   readonly healthNow: () => string;
+}
+/** Preserve the source's reported health; a completed import does not establish
+ * healthy quality, and quarantines can never accompany a healthy claim. */
+export function clutchpacksProductionSourcePinsFromObservation(source: Pick<ClutchpacksProductionSourceSnapshot,
+  "sourceCheckpoint" | "sourceObservation" | "stabilityFingerprint">): ClutchpacksProductionSourcePins {
+  const checkpoint = source.sourceCheckpoint;
+  const pins = clutchpacksProductionPublicationIntentSchema.shape.source.safeParse({
+    runId: checkpoint.runId, checkpointHash: checkpoint.checkpointHash,
+    stateGeneration: String(checkpoint.stateGeneration), promotionSequence: String(checkpoint.promotionSequence),
+    stabilityFingerprint: source.stabilityFingerprint, lastHeadReachedAt: source.sourceObservation.lastHeadReachedAt,
+    qualityState: source.sourceObservation.qualityState, quarantineCount: source.sourceObservation.quarantineCount });
+  if (!pins.success) return refuse("PRODUCTION_SOURCE_CHECKPOINT_INVALID");
+  return pins.data;
 }
 function productionScope(config: ClutchpacksProductionSourceConfig) {
   return { organizationId: config.scope.organizationId, providerId: config.scope.providerId, providerKey: config.scope.providerKey,
@@ -352,17 +366,7 @@ async function defaultDependencies(): Promise<ClutchpacksProductionCliDependenci
     },
     projectSource(raw) {
       const source = raw as SourceRead;
-      const checkpoint = source.sourceCheckpoint;
-      const lastHeadReachedAt = source.sourceObservation.lastHeadReachedAt;
-      if (lastHeadReachedAt === null || !Number.isFinite(Date.parse(lastHeadReachedAt)) ||
-        new Date(lastHeadReachedAt).toISOString() !== lastHeadReachedAt) return refuse("PRODUCTION_SOURCE_CHECKPOINT_INVALID");
-      const pins = clutchpacksProductionPublicationIntentSchema.shape.source.safeParse({
-        runId: checkpoint.runId, checkpointHash: checkpoint.checkpointHash,
-        stateGeneration: checkpoint.stateGeneration.toString(), promotionSequence: checkpoint.promotionSequence.toString(),
-        stabilityFingerprint: source.stabilityFingerprint, lastHeadReachedAt,
-        qualityState: source.sourceObservation.qualityState, quarantineCount: source.sourceObservation.quarantineCount });
-      if (!pins.success) return refuse("PRODUCTION_SOURCE_CHECKPOINT_INVALID");
-      return { ...clutchpacksProductionSourceProjection(source), sourcePins: pins.data };
+      return { ...clutchpacksProductionSourceProjection(source), sourcePins: clutchpacksProductionSourcePinsFromObservation(source) };
     },
     openConvex: openClutchpacksProductionConvexRuntime, buildConfiguration: buildClutchpacksProductionConfiguration,
     buildPlan: buildClutchpacksProductionPlan, verifyIdentity: assertClutchpacksProductionIdentityContinuity,

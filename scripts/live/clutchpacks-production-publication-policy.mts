@@ -29,8 +29,8 @@ const predecessor = z.object({ generation: count, publicReleaseId: z.uuid().null
 const source = z.object({
   runId: z.uuid(), checkpointHash: hash, stateGeneration: sequence,
   promotionSequence: sequence, stabilityFingerprint: hash, lastHeadReachedAt: iso,
-  qualityState: z.enum(["healthy", "degraded"]), quarantineCount: count,
-}).strict().refine(value => value.quarantineCount === 0 || value.qualityState === "degraded");
+  qualityState: z.enum(["healthy", "degraded", "unhealthy", "unknown"]), quarantineCount: count,
+}).strict().refine(value => value.quarantineCount === 0 || value.qualityState !== "healthy");
 const scope = z.object({
   organizationId: z.literal(CLUTCHPACKS_PRODUCTION_SCOPE.organizationId),
   providerId: z.literal(CLUTCHPACKS_PRODUCTION_SCOPE.providerId),

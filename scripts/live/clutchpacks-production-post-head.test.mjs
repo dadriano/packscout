@@ -35,14 +35,14 @@ async function fixture(t) {
     artifactDirectory: path.join(directory, "artifacts"), publisherWorktree: worktree, expectedPublisherCommit: "a".repeat(40),
     expectedResidentAuthorityDigest: "d".repeat(64), timeoutMs: 5_000 };
   const events = [], children = [], gitCalls = [];
-  const controls = { dirty: false, wrongCommit: false, phaseFailure: null, receiptMutation: null,
+  const controls = { qualityState: "degraded", dirty: false, wrongCommit: false, phaseFailure: null, receiptMutation: null,
     outputMutation: null, hang: false, terminated: false, outputBytes: 0, sourceHeadOverride: null, onSpawn: null };
   const makeBundle = sourceConfig => {
     const approvedConfiguration = { fixtureApprovedConfiguration: true }, plan = { manifest: { counts: { repacks: 17 } } };
     const intent = { schemaVersion: "clutchpacks_production_publication_v1", operationId: id("5"), target,
       scope, readAt: now, source: { runId: options.head.runId, checkpointHash: options.head.checkpointHash,
         stateGeneration: options.head.generation, promotionSequence: "65536", stabilityFingerprint: "e".repeat(64),
-        lastHeadReachedAt: controls.sourceHeadOverride ?? options.head.headFinishedAt, qualityState: "degraded", quarantineCount: 465 },
+        lastHeadReachedAt: controls.sourceHeadOverride ?? options.head.headFinishedAt, qualityState: controls.qualityState, quarantineCount: 465 },
       approvedConfigurationSha256: digest(approvedConfiguration), candidate: { publicReleaseId: id("6"),
         releaseFingerprint: "8".repeat(64), planSha256: digest(plan) }, predecessor: { generation: 2,
         publicReleaseId: id("7"), releaseFingerprint: "9".repeat(64) } };
@@ -211,4 +211,14 @@ test("a concurrent pending owner and a symlink target remain untouched by a reje
   const elsewhere = path.join(f.directory, "elsewhere"); await mkdir(elsewhere, { mode: 0o700 }); await symlink(elsewhere, existing);
   await assert.rejects(publish(f.options, f.deps), safelyBlocked("POST_HEAD_PENDING_RECONCILIATION"));
   assert.deepEqual(await readdir(elsewhere), []); assert.equal(f.children.length, 0);
+});
+
+test("post-head verification retains unknown quality with465 quarantines through prepared and verified outputs", async t => {
+  const f = await fixture(t); f.controls.qualityState = "unknown";
+  const result = await publish(f.options, f.deps); assert.equal(result.status, "verified");
+  const directory = path.join(f.options.artifactDirectory, f.options.head.runId);
+  const bundle = await read(path.join(directory, "bundle.json"));
+  assert.equal(bundle.intent.source.qualityState, "unknown"); assert.equal(bundle.intent.source.quarantineCount, 465);
+  const receipt = await read(result.receiptPath); assert.equal(receipt.source.qualityState, "unknown");
+  assert.equal(receipt.source.quarantineCount, 465);
 });
