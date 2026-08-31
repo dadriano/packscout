@@ -434,6 +434,8 @@ export class PrismaAdminProviderRuntimeRepository {
     readonly requireNoActiveRun?: boolean;
     /** Optional recovery authority, checked atomically with a new queue write. */
     readonly expectedImportLease?: { readonly owner: string; readonly fence: bigint };
+    /** Optional caller admission bound; requires a fenced lease and a full transaction budget. */
+    readonly notAfter?: Date;
   }): Promise<AdminRunNowPersistenceResult> {
     return this.database.$transaction(async (transaction) => {
       // Match worker lock ordering. The lease lock spans the runtime checks
@@ -524,6 +526,14 @@ export class PrismaAdminProviderRuntimeRepository {
         limit 1
       `);
       if (active && input.requireNoActiveRun) return conflict("active_run_conflict");
+      if (input.notAfter !== undefined) {
+        const [admission] = await transaction.$queryRaw<Array<{ now: Date }>>`select clock_timestamp() as now`;
+        if (!(input.notAfter instanceof Date) || !Number.isFinite(input.notAfter.getTime()) || !admission ||
+          input.notAfter.getTime() - admission.now.getTime() < TRANSACTION_OPTIONS.timeout ||
+          !importLease?.lease_expires_at || importLease.lease_expires_at.getTime() - admission.now.getTime() < TRANSACTION_OPTIONS.timeout) {
+          return conflict("runtime_unavailable");
+        }
+      }
       await transaction.control_commands.create({
         data: {
           id: input.commandId,
