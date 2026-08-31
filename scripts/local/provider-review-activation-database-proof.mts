@@ -132,7 +132,7 @@ async function readSnapshot(
 ): Promise<ProviderReviewActivationDatabaseSnapshot> {
   const [identity, runtime, activeRunCount, actionableCommandCount,
     ownedLeaseCount, runCount, commandCount, categories, packs, collectibles,
-    contents, pulls, pullItems, marketEvents, quarantineCount] =
+    contents, contentSnapshots, pulls, pullItems, marketEvents, quarantineCount] =
     await Promise.all([
       database.database_identity.findUniqueOrThrow({
         where: { singleton_key: true },
@@ -154,6 +154,7 @@ async function readSnapshot(
       database.packs.count(),
       database.collectibles.count(),
       database.pack_contents.count(),
+      database.pack_content_snapshots.count(),
       database.pulls.count(),
       database.pull_items.count(),
       database.market_events.count(),
@@ -172,7 +173,7 @@ async function readSnapshot(
     ownedLeaseCount,
     runCount,
     commandCount,
-    canonicalCount: categories + packs + collectibles + contents + pulls +
+    canonicalCount: categories + packs + collectibles + contents + contentSnapshots + pulls +
       pullItems + marketEvents,
     quarantineCount,
   });

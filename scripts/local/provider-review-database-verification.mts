@@ -111,6 +111,7 @@ export async function verifyFreshProviderReviewDatabase(input: {
                (select count(*) from collectible_name_aliases) +
                (select count(*) from collectible_instances) +
                (select count(*) from pack_contents) +
+               (select count(*) from pack_content_snapshots) +
                (select count(*) from provider_accounts) +
                (select count(*) from pulls) +
                (select count(*) from pull_items) +

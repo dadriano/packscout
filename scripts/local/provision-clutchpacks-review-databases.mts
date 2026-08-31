@@ -109,6 +109,7 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "collectible_name_aliases",
   "collectible_instances",
   "pack_contents",
+  "pack_content_snapshots",
   "provider_accounts",
   "pulls",
   "pull_items",

@@ -23,6 +23,7 @@ import {
   PROVIDER_MIXED_PAGE_MAX_BYTES,
   PROVIDER_MIXED_PAGE_MAX_RECORDS,
   providerMixedPageCanonicalBytes,
+  providerMixedPageDigest,
   providerMixedCursorFingerprint,
   validateProviderMixedPage,
   type CanonicalJsonValue,
@@ -700,6 +701,56 @@ async function phygitalsMixedPage(
     },
   })));
 }
+
+test("one pinned source pack attests its category, pack and membership snapshot as three canonical records", async () => {
+  const packId = "66666666-6666-4666-8666-666666666666";
+  const previewCardId = "77777777-7777-4777-8777-777777777777";
+  const record = packRecord(packId);
+  record.data.collection_id = packId;
+  record.data.price_bucket_odds = [{
+    bucket_id: "88888888-8888-4888-8888-888888888888", name: "Featured chase",
+    drawable_count: 1, min_price: "$30", max_price: "$30", has_more: false,
+    preview_cards: [{ id: previewCardId, title: "Reviewed preview",
+      front_image_url: "https://d18ez2bunk7yz0.cloudfront.net/cards/fixture.png" }],
+  }];
+  const fixture = sourceFixture({ pages: [sourcePage({
+    cursor: "managed-membership-continuation", continuation: "continue", records: [record],
+  })] });
+  const rawPage = await fixture.source.nextPage(sourceInput({ recordsPerRequest: 1 }));
+  const page = validateProviderMixedPage(rawPage);
+  assert.deepEqual(page.records.map(({ entityType }) => entityType), [
+    "category", "pack", "pack_content_snapshot",
+  ]);
+  assert.equal(page.records.some(({ disposition }) => disposition === "quarantine"), false);
+  assert.equal(page.records[1]!.candidate.packKey, `pack:${packId}`);
+  const snapshot = page.records[2]!.candidate;
+  assert.equal(snapshot.packKey, `pack:${packId}`);
+  assert.equal(snapshot.completeness, "complete");
+  assert.ok(Array.isArray(snapshot.items));
+  assert.deepEqual(snapshot.items.map((item) => {
+    assert.ok(item !== null && typeof item === "object" && !Array.isArray(item));
+    return item.collectibleKey;
+  }), [`card:${previewCardId}`]);
+  assert.equal(page.runId, runId);
+  assert.equal(page.configVersionId, configVersionId);
+  assert.equal(page.leaseFence, 1n);
+  assert.equal(fixture.requestedUrls.length, 1);
+  assert.equal(fixture.requestedUrls[0]!.searchParams.get("limit"), "1");
+  assert.equal(fixture.terminalizations.length, 1);
+  const scope = fixture.terminalizations[0]!.operationScope;
+  assert.equal(scope.operationKind, "page_read");
+  if (scope.operationKind !== "page_read") assert.fail("Expected a managed page read.");
+  assert.equal(scope.pageLimit, 1);
+  assert.deepEqual(fixture.translations, [{ sourceRecordCount: 1, normalizedRecordCount: 3 }]);
+  assert.deepEqual(fixture.translationBindings, [{ mixedPageId: page.pageId,
+    responseDigest: page.responseDigest, recordsPerRequest: 1, requestSettingsRevisionId }]);
+  assert.ok(rawPage !== null && typeof rawPage === "object" && !Array.isArray(rawPage));
+  const body = Object.fromEntries(Object.entries(rawPage).filter(([key]) => key !== "responseDigest"));
+  assert.equal(providerMixedPageDigest(body), fixture.translationBindings[0]!.responseDigest);
+  assert.ok(Array.isArray(body.records));
+  assert.notEqual(providerMixedPageDigest({ ...body, records: body.records.slice(0, 2) }), page.responseDigest);
+  assert.equal(dataforrestClutchpacksDistributedSourceAdapterManifest.requestBounds.pageLimit, 2_000);
+});
 
 test("Phygitals uses the same run's 1,000-record request pin across checkpoint continuation and mutable setting changes", async () => {
   const manifest = dataforrestPhygitalsDistributedV2SourceAdapterManifest;

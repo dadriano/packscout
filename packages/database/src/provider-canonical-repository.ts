@@ -249,7 +249,7 @@ async function sameSourcePackEvidenceChange(
   return false;
 }
 
-async function appendPromotionRange(
+export async function appendPromotionRange(
   client: ProviderQueryClient,
   changes: readonly PromotionChangeDraft[],
   changedAt = new Date(),
@@ -708,6 +708,7 @@ export class ProviderCanonicalTransaction {
     }
     const evidenceKinds = [...normalizeEvidenceKinds(input.evidenceKinds)];
     const data = {
+      source_snapshot_id: input.sourceSnapshotId ?? null,
       pack_id: input.packId,
       collectible_id: input.collectibleId,
       collectible_instance_id: input.collectibleInstanceId,

@@ -5,6 +5,7 @@ import {
   parsePackScoutBuybackEvTimestampMillisV1,
   packscoutPublicIdentityUuid,
   publicRepackDetailSchema,
+  publicHttpsOriginSchema,
   publicVendorSchema,
   sha256CanonicalJson,
   type ApprovedPublicCatalogConfigurationV1,
@@ -16,18 +17,24 @@ import {
   buildProviderCatalogReleasePublishPlan,
   createPackScoutBuybackEvPromotionEligibilityV1,
   normalizeClutchpacksPromotionEvEvidenceV1,
+  projectProvisionalProviderPackContentsV1,
   type DataReleaseV3CanonicalProduct,
   type DataReleaseV3PublishPlan,
   type ProviderCatalogPublicProjection,
   type ProviderCatalogReleaseConfigurationSnapshot,
   type ProviderCatalogReleaseSnapshotCheckpoint,
 } from "@packscout/services";
+import {
+  stableClutchpacksContentCatalog,
+  validateClutchpacksContentCatalog,
+  type DistributedClutchpacksContentCatalog,
+} from "./distributed-clutchpacks-content-snapshot.mts";
 
 export const DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY = "clutchpacks" as const;
 export const LOCAL_PUBLIC_CONFIGURATION_KEY =
   "local-clutchpacks-distributed-v1" as const;
-export const LOCAL_PUBLIC_CONFIGURATION_REVISION = 2 as const;
-export const LOCAL_PUBLIC_CONFIGURATION_SEQUENCE = 2n as const;
+export const LOCAL_PUBLIC_CONFIGURATION_REVISION = 3 as const;
+export const LOCAL_PUBLIC_CONFIGURATION_SEQUENCE = 3n as const;
 export const LOCAL_CONFIDENCE_POLICY = Object.freeze({
   version: "local-clutchpacks-promotion-ev-v2",
   completeScoreBasisPoints: 8_500,
@@ -158,6 +165,11 @@ export interface DistributedClutchpacksSnapshotFacts {
   readonly latestSourceHeadConfigVersionId: string;
   readonly latestSourceHeadConfigVersionNumber: bigint;
   readonly latestSourceHeadFinishedAt: Date;
+  /** Actual source head above remains unchanged by an audited catalog backfill. */
+  readonly catalogSettledAt: Date;
+  readonly catalogBackfillProofDigest: string | null;
+  readonly approvedPublicAssetOrigins: readonly string[];
+  readonly contentCatalog: DistributedClutchpacksContentCatalog;
   readonly promotionSequence: bigint;
   readonly promotionChangeCount: bigint;
   readonly minimumPromotionSequence: bigint | null;
@@ -194,6 +206,10 @@ function stableSnapshotBody(input: DistributedClutchpacksSnapshotFacts) {
     activeImportLeaseCount: input.activeImportLeaseCount,
     latestSourceHeadRunId: input.latestSourceHeadRunId,
     latestSourceHeadFinishedAt: input.latestSourceHeadFinishedAt.toISOString(),
+    catalogSettledAt: input.catalogSettledAt.toISOString(),
+    catalogBackfillProofDigest: input.catalogBackfillProofDigest,
+    approvedPublicAssetOrigins: input.approvedPublicAssetOrigins,
+    contentCatalog: stableClutchpacksContentCatalog(input.contentCatalog),
     promotionSequence: input.promotionSequence.toString(),
     promotionChangeCount: input.promotionChangeCount.toString(),
     maximumPromotionChangedAt: input.maximumPromotionChangedAt?.toISOString() ?? null,
@@ -221,6 +237,7 @@ export function assertDistributedClutchpacksStableSnapshot(
   const finishedAt = input.latestSourceHeadFinishedAt.getTime();
   const maximumChangedAt = input.maximumPromotionChangedAt?.getTime() ?? NaN;
   const maximumPackAt = input.maximumPackSourceUpdatedAt.getTime();
+  const settledAt = input.catalogSettledAt.getTime();
   if (
     input.providerKey !== DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY ||
     input.providerIdentityKey !== DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY ||
@@ -239,14 +256,18 @@ export function assertDistributedClutchpacksStableSnapshot(
     input.minimumPromotionSequence !== 1n ||
     input.maximumPromotionSequence !== input.promotionSequence ||
     !Number.isFinite(finishedAt) || !Number.isFinite(maximumChangedAt) ||
-    !Number.isFinite(maximumPackAt) || maximumChangedAt > finishedAt ||
+    !Number.isFinite(maximumPackAt) || !Number.isFinite(settledAt) || settledAt < finishedAt ||
+    (settledAt > finishedAt && (input.catalogBackfillProofDigest === null || !SHA256_PATTERN.test(input.catalogBackfillProofDigest))) ||
+    maximumChangedAt > settledAt ||
     maximumPackAt > finishedAt || input.activePackCount < 1 ||
     input.activePackCount !== input.packs.length ||
-    input.activePackContentCount !== 0 ||
+    input.activePackContentCount !== input.contentCatalog.memberships.length ||
     !Number.isSafeInteger(input.staleAfterSeconds) ||
     input.staleAfterSeconds < 60 ||
     input.packs.some((pack) => pack.sourceUpdatedAt.getTime() > finishedAt)
   ) return refuse("CLUTCHPACKS_SNAPSHOT_INELIGIBLE");
+  validateClutchpacksContentCatalog({ providerId: input.providerId, settledAt: input.catalogSettledAt,
+    packs: input.packs, catalog: input.contentCatalog });
   const checkpoint: ProviderCatalogReleaseSnapshotCheckpoint = {
     platformKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
     sharedConfigurationEpoch: {
@@ -257,8 +278,8 @@ export function assertDistributedClutchpacksStableSnapshot(
     },
     settledSequence: input.promotionSequence,
     sourceHeadSequence: input.promotionSequence,
-    settledAt: new Date(finishedAt),
-    sourceHeadAt: new Date(finishedAt),
+    settledAt: new Date(settledAt),
+    sourceHeadAt: new Date(settledAt),
   };
   return {
     facts: input,
@@ -270,8 +291,9 @@ export function assertDistributedClutchpacksStableSnapshot(
 }
 
 function publicVendor(input: DistributedClutchpacksSnapshotFacts): PublicVendor {
-  const imageOrigins = [...new Set(input.packs.map(({ primaryImageUrl }) =>
-    httpsOrigin(primaryImageUrl)))].sort();
+  const imageOrigins = input.approvedPublicAssetOrigins.map((origin) => publicHttpsOriginSchema.parse(origin));
+  if (imageOrigins.length === 0 || imageOrigins.some((origin, index) => index > 0 && imageOrigins[index - 1]! >= origin) ||
+      input.packs.some(({ primaryImageUrl }) => !imageOrigins.includes(httpsOrigin(primaryImageUrl)))) return refuse("PUBLIC_IMAGE_UNAPPROVED");
   return publicVendorSchema.parse({
     publicVendorId: packscoutPublicIdentityUuid(`provider:${input.providerId}`),
     vendorKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
@@ -473,7 +495,7 @@ function v3Product(
       : { kind: "not_documented" },
     vendorReportedEv: vendorEvV3(pack),
     primaryImage: detail.primaryImage,
-    topChase: null,
+    topChase: detail.topChase,
     contentSummary: detail.contentSummary,
     actionAvailability: detail.actionAvailability,
     sourceUpdatedAt: detail.sourceUpdatedAt,
@@ -499,7 +521,7 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
   const readAtMillis = parsePackScoutBuybackEvTimestampMillisV1(promotionReadAt);
   if (
     readAtMillis === null ||
-    readAtMillis < facts.latestSourceHeadFinishedAt.getTime()
+    readAtMillis < facts.catalogSettledAt.getTime()
   ) return refuse("CLUTCHPACKS_PROMOTION_CLOCK_INVALID");
   const vendor = publicVendor(facts);
   const packs = [...facts.packs].sort((left, right) =>
@@ -507,7 +529,18 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
   if (new Set(packs.map(({ packKey }) => packKey)).size !== packs.length) {
     return refuse("PUBLIC_REPACK_INVALID");
   }
-  const repacks = packs.map((pack) => publicRepack(facts, vendor, pack));
+  const evidence = validateClutchpacksContentCatalog({ providerId: facts.providerId, settledAt: facts.catalogSettledAt,
+    packs, catalog: facts.contentCatalog });
+  const contents = projectProvisionalProviderPackContentsV1({
+    identityPolicy: "provider_provisional_v1", providerId: facts.providerId,
+    platformKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY, snapshotAt: facts.catalogSettledAt,
+    publicAssetOrigins: facts.approvedPublicAssetOrigins,
+    packs: packs.map((pack) => ({ id: pack.id, rowVersion: pack.rowVersion, packKey: pack.packKey,
+      detail: publicRepack(facts, vendor, pack), evidenceCompleteness: evidence.get(pack.id) ?? "unknown" })),
+    collectibles: facts.contentCatalog.collectibles, instances: facts.contentCatalog.instances,
+    memberships: facts.contentCatalog.memberships,
+  });
+  const repacks = contents.repacks;
   const publicAssetOrigins = [...vendor.imageOrigins];
   const baseConfiguration = approvedPublicCatalogConfigurationV1Schema.parse({
     schemaVersion: "approved_public_catalog_v1",
@@ -532,7 +565,7 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
       packExternalId: pack.packKey,
       publicRepackId: repacks[index]!.publicRepackId,
     })),
-    collectibles: [],
+    collectibles: contents.collectibleMappings,
   });
   const configurationHash = await sha256CanonicalJson(
     "packscout.local-distributed-public-configuration.v1",
@@ -567,16 +600,16 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
   const projection: ProviderCatalogPublicProjection = {
     vendors: [vendor],
     categories: [],
-    collectibles: [],
+    collectibles: contents.collectibles,
     repacks,
-    repackChases: [],
-    dataAsOf: new Date(facts.maximumPackSourceUpdatedAt),
+    repackChases: contents.repackChases,
+    dataAsOf: contents.dataAsOf,
   };
   const providerPlan = await buildProviderCatalogReleasePublishPlan({
     checkpoint,
     configuration,
     projection,
-    lastSuccessfulObservationAt: new Date(facts.latestSourceHeadFinishedAt),
+    lastSuccessfulObservationAt: new Date(facts.catalogSettledAt),
   });
   const v3Products = packs.map((pack, index) =>
     v3Product(facts, vendor, pack, repacks[index]!));
@@ -620,8 +653,8 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
           organizationId: facts.organizationId,
           products: v3Products,
           categories: [],
-          collectibles: [],
-          chases: [],
+          collectibles: contents.collectibles,
+          chases: contents.repackChases,
         };
       },
     },

@@ -28,6 +28,7 @@
   "scripts": {
     "postinstall": "npm run db:prisma:generate",
     "dev": "npm run dev:frontend",
+    "backfill:clutchpacks-chases:local": "node --import tsx scripts/local/backfill-clutchpacks-chase-cards.mts",
     "dev:frontend": "npm run dev --workspace=@packscout/frontend",
     "dev:admin": "npm run dev --workspace=@packscout/admin",
     "dev:worker": "npm run dev --workspace=@packscout/worker",

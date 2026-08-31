@@ -64,6 +64,7 @@ export interface ProviderMixedPageCandidateRecordDraft {
     | "collectible_name_alias"
     | "collectible_instance"
     | "pack_content"
+    | "pack_content_snapshot"
     | "provider_account";
   readonly candidate: CanonicalJsonObject;
 }

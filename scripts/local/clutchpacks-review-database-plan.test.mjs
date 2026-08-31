@@ -408,11 +408,18 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /database\.datname::text/u);
   assert.match(runtime, /state === "nonempty"/u);
   assert.match(executor, /grant select, insert, update on table/u);
-  const providerRuntimeTables = executor.match(/const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u)?.[1];
-  assert.equal(typeof providerRuntimeTables, "string");
-  assert.match(providerRuntimeTables, /"provider_request_settings"/u);
-  assert.doesNotMatch(providerRuntimeTables, /"provider_request_settings_revisions"/u);
+  const providerSchema = readFileSync(new URL(
+    "../../packages/database/prisma/provider/schema.prisma", import.meta.url,
+  ), "utf8");
+  const providerTables = [...providerSchema.matchAll(/^model\s+(\w+)\s*\{/gmu)]
+    .map((match) => match[1]).filter((name) => name !== "database_identity").sort();
+  const grantList = /const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  assert.ok(grantList, "provider runtime grants must remain an explicit table allowlist");
+  const runtimeTables = [...grantList[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]);
+  assert.ok(runtimeTables.includes("provider_request_settings"));
+  assert.ok(!runtimeTables.includes("provider_request_settings_revisions"));
   assert.match(executor, /grant select, insert on table public\.provider_request_settings_revisions/u);
+  assert.deepEqual([...runtimeTables, "provider_request_settings_revisions"].sort(), providerTables);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);
