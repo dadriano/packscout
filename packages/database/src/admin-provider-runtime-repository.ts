@@ -10,6 +10,7 @@ import {
 } from "./provider-local-evidence.ts";
 import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
 import { providerMixedPageDigest } from "./provider-mixed-page-contract.ts";
+import type { ProviderRuntimeResumeGuard } from "./provider-runtime-resume-guard.ts";
 import { lockProviderWorkerLease, providerWorkerLeaseIsLive } from "./provider-worker-lease-repository.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
@@ -639,6 +640,7 @@ export class PrismaAdminProviderRuntimeRepository {
     readonly correlationId: string;
     readonly reason: string | null;
     readonly requestedAt: Date;
+    readonly expectedRuntimeGuard?: ProviderRuntimeResumeGuard;
   }): Promise<{
     readonly commandId: string;
     readonly outcome: ProviderCommandOutcome;

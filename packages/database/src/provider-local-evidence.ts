@@ -16,6 +16,7 @@ const localAuditEvidenceKeys = new Set([
   "packAfterId", "collectibleAfterId", "packScanDone", "collectibleScanDone",
   "quarantineAfterId", "quarantineAfterAt",
   "commandType",
+  "guardDigest",
   "consumerKey",
   "durationMilliseconds",
   "expiredCount",
