@@ -273,8 +273,16 @@ export async function loadStableSnapshot(input: {
   readonly gateway: BoundedProviderDatabaseGateway;
   readonly approvedPublicAssetOrigins: readonly string[];
   readonly expectedImportLease?: OwnedPublicationImportLease;
+  readonly expectedScope?: { readonly organizationId: string; readonly providerId: string;
+    readonly configVersionId: string; readonly configVersionNumber: string };
 }): Promise<DistributedClutchpacksStableSnapshot> {
   const central = await centralSnapshot(input.central);
+  const expected = input.expectedScope;
+  if (expected !== undefined && (central.organization_id !== expected.organizationId || central.id !== expected.providerId ||
+      central.active_config_version_id !== expected.configVersionId ||
+      central.active_config_version?.version_number.toString() !== expected.configVersionNumber)) {
+    return refuse("CLUTCHPACKS_PUBLICATION_AUTHORITY_UNAVAILABLE");
+  }
   const result = await input.gateway.runWithProviderDatabase(
     { organizationId: central.organization_id, providerId: central.id },
     async (database) => await providerSnapshot(database, central, input.approvedPublicAssetOrigins, input.expectedImportLease),

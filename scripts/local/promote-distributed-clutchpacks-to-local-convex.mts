@@ -16,7 +16,6 @@ import {
 } from "@packscout/contracts";
 import {
   BoundedProviderDatabaseGateway,
-  ProviderDatabaseDestinationPolicy,
   createCentralDatabaseLifecycle,
 } from "@packscout/database";
 import {
@@ -68,7 +67,9 @@ import {
 } from "./distributed-clutchpacks-provider-terminal.mts";
 
 export { providerSnapshot } from "./distributed-clutchpacks-publication-snapshot.mts";
-import { loadStableSnapshot, parseClutchpacksApprovedAssetOrigins } from "./distributed-clutchpacks-publication-snapshot.mts";
+import { parseClutchpacksApprovedAssetOrigins } from "./distributed-clutchpacks-publication-snapshot.mts";
+import { loadClutchpacksPublicationSnapshot as loadStableSnapshot, readClutchpacksPublicationDatabaseConfiguration,
+  type ClutchpacksPublicationDatabaseConfiguration } from "./distributed-clutchpacks-publication-database.mts";
 
 import { publicationImportLeasePort, withPublicationImportLease } from "./distributed-clutchpacks-publication-lease.mts";
 
@@ -115,23 +116,6 @@ function required(value: string | undefined, code: string): string {
   const normalized = value?.trim() ?? "";
   if (normalized.length === 0 || /[\r\n\0]/u.test(normalized)) return refuse(code);
   return normalized;
-}
-
-function centralDatabaseUrl(environment: NodeJS.ProcessEnv): string {
-  const value = required(
-    environment.PACKSCOUT_CENTRAL_DATABASE_URL,
-    "CENTRAL_DATABASE_CONFIGURATION_INVALID",
-  );
-  try {
-    const parsed = new URL(value);
-    if (
-      (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") ||
-      parsed.hostname.length === 0 || parsed.pathname.length < 2
-    ) return refuse("CENTRAL_DATABASE_CONFIGURATION_INVALID");
-    return parsed.toString();
-  } catch {
-    return refuse("CENTRAL_DATABASE_CONFIGURATION_INVALID");
-  }
 }
 
 function credentialKey(environment: NodeJS.ProcessEnv): {
@@ -494,19 +478,20 @@ export async function promoteDistributedClutchpacksToLocalConvex(options: {
   readonly checkOnly?: boolean;
 } = {}): Promise<void> {
   dotenv.config({ path: path.join(repositoryRoot, ".env") });
+  const databaseConfiguration = readClutchpacksPublicationDatabaseConfiguration(process.env);
   const local = await readLocalConvexConfiguration();
   // Before any provider/manifest publication or authority installation. A
   // legacy public snapshot being readable does not mean retention is ready.
   return await withLocalConvexEvReady(await createLocalConvexEvMigrationClient(local),
-    () => promoteReadyDistributedClutchpacks(local, options));
+    () => promoteReadyDistributedClutchpacks(local, options, databaseConfiguration));
 }
 
 async function promoteReadyDistributedClutchpacks(
   local: Awaited<ReturnType<typeof readLocalConvexConfiguration>>,
   options: { readonly checkOnly?: boolean },
+  databaseConfiguration: ClutchpacksPublicationDatabaseConfiguration,
 ): Promise<void> {
   const baseUrl = loopbackSiteUrl(local.childEnvironment);
-  const centralUrl = centralDatabaseUrl(process.env);
   const approvedPublicAssetOrigins = parseClutchpacksApprovedAssetOrigins(
     process.env.PACKSCOUT_LOCAL_CLUTCHPACKS_PUBLIC_ASSET_ORIGINS_JSON,
   );
@@ -516,17 +501,13 @@ async function promoteReadyDistributedClutchpacks(
     keys: new Map([[key.version, key.bytes]]),
   });
   const central = createCentralDatabaseLifecycle({
-    databaseUrl: centralUrl,
+    databaseUrl: databaseConfiguration.centralDatabaseUrl,
     connectionLimit: 2,
   });
   const gateway = new BoundedProviderDatabaseGateway({
     central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
-    destinationPolicy: new ProviderDatabaseDestinationPolicy({
-      allowedHosts: ["127.0.0.1"],
-      allowedPorts: [55_432],
-      allowedSslModes: ["disable"],
-    }),
+    destinationPolicy: databaseConfiguration.runtimePolicy.destinationPolicy,
     connectionLimitPerProvider: 2,
     maximumCachedProviders: 1,
     operationTimeoutMs: 60_000,
@@ -542,6 +523,7 @@ async function promoteReadyDistributedClutchpacks(
     const initial = await failClosedPhase(
       "CLUTCHPACKS_SNAPSHOT_LOAD_FAILED",
       async () => await loadStableSnapshot({
+        databaseConfiguration,
         central: central.client,
         gateway,
         approvedPublicAssetOrigins,
@@ -556,6 +538,7 @@ async function promoteReadyDistributedClutchpacks(
     const confirmed = await failClosedPhase(
       "CLUTCHPACKS_SNAPSHOT_CONFIRMATION_FAILED",
       async () => await loadStableSnapshot({
+        databaseConfiguration,
         central: central.client,
         gateway,
         approvedPublicAssetOrigins,
@@ -600,7 +583,7 @@ async function promoteReadyDistributedClutchpacks(
       operation: async (expectedImportLease, assertLive) => {
         const revalidate = async () => {
           await assertLive();
-          const current = await loadStableSnapshot({ central: central.client, gateway, approvedPublicAssetOrigins, expectedImportLease });
+          const current = await loadStableSnapshot({ databaseConfiguration, central: central.client, gateway, approvedPublicAssetOrigins, expectedImportLease });
           if (current.stabilityFingerprint !== initial.stabilityFingerprint) return refuse("CLUTCHPACKS_SNAPSHOT_CHANGED_DURING_PUBLICATION");
         };
         await revalidate();
@@ -693,6 +676,7 @@ async function promoteReadyDistributedClutchpacks(
         const finalSnapshot = await failClosedPhase(
           "CLUTCHPACKS_FINAL_SNAPSHOT_LOAD_FAILED",
           async () => await loadStableSnapshot({
+            databaseConfiguration,
             central: central.client,
             gateway,
             approvedPublicAssetOrigins,
