@@ -107,7 +107,10 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
             </> : <div><dt>Worker / quarantine evidence</dt><dd>Unavailable<span className="provider-pulse__subtext">{humanize(activity.reason)}</span></dd></div>}
             <div><dt>{runScope} quarantined</dt><dd>{run ? count(source.progress.dispositions.quarantined) : "Unavailable"}</dd></div>
           </dl>
-          {activity.state === "available" ? <p className="provider-pulse__subtext">Activity measured {dateTime(activity.measuredAt)}. Process liveness is unverified.</p> : null}
+          {activity.state === "available" ? <>
+            <p className="provider-pulse__subtext">Page & quarantine checked <time dateTime={activity.historyMeasuredAt}>{dateTime(activity.historyMeasuredAt)}</time> · cached up to 60s.</p>
+            <p className="provider-pulse__subtext">Leases checked <time dateTime={activity.measuredAt}>{dateTime(activity.measuredAt)}</time>. Process liveness is unverified.</p>
+          </> : null}
         </section>
         {source.processor?.activity === "action_required" && !databaseUnavailable ? (
           <aside className="admin-note admin-note-warning" role="note">

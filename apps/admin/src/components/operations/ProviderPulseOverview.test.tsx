@@ -48,6 +48,35 @@ test("partial aggregates preserve available counts and missing provider data sta
   assert.equal(measurementTotal([excessive, excessive], "records").value, null);
 });
 
+test("cached page and quarantine history disclose their older observation separately from fresh lease checks", async (context) => {
+  const overview = operationsOverview();
+  overview.sources = overview.sources.slice(0, 1);
+  overview.refreshedAt = "2026-08-21T12:00:45.000Z";
+  const activity = overview.sources[0]!.measurements.activity;
+  assert.equal(activity.state, "available");
+  if (activity.state !== "available") return;
+  activity.measuredAt = overview.refreshedAt;
+  activity.historyMeasuredAt = "2026-08-21T12:00:00.000Z";
+  activity.importLease.heartbeatAt = overview.refreshedAt;
+  activity.importLease.expiresAt = "2026-08-21T12:01:00.000Z";
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const card = rendered.container.querySelector(".provider-pulse__card")!;
+  assert.match(card.querySelector(".provider-pulse__card-overview")!.textContent!, /Page & quarantine checked 45s ago/u);
+  const page = [...card.querySelectorAll(".provider-pulse__metrics > div")].find((metric) => metric.querySelector("dt")!.textContent?.startsWith("Last page"))!;
+  assert.equal(page.querySelector("dd")!.textContent, "49s ago", "page age uses the displayed status time, not the cached history time");
+  const times = [...card.querySelectorAll(".provider-pulse__details time")];
+  assert.deepEqual(times.map((time) => time.getAttribute("datetime")), [activity.historyMeasuredAt, activity.measuredAt]);
+  assert.match(times[0]!.parentElement!.textContent!, /Page & quarantine checked.*cached up to 60s/u);
+  assert.match(times[1]!.parentElement!.textContent!, /Leases checked/u);
+  for (const label of ["Last page", "Open quarantine"]) {
+    const indicator = [...card.querySelectorAll("button")].find((button) => button.textContent?.startsWith(label))!;
+    await act(async () => indicator.focus());
+    const tooltip = rendered.dom.window.document.querySelector('[role="tooltip"]')!;
+    assert.match(tooltip.textContent!, /cached for up to 60 seconds; newer/u);
+  }
+});
+
 test("worker indicators do not claim running from missing, expired, or unavailable leases", () => {
   const source = operationSource(0);
   assert.equal(pulseState(source).label, "Retrying");

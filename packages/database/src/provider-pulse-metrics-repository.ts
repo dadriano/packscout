@@ -31,11 +31,15 @@ export interface ProviderPulseLease {
   readonly expiresAt: string | null;
 }
 
-export interface ProviderPulseActivity {
+export interface ProviderPulseLeases {
   readonly measuredAt: string;
-  readonly lastCommittedPageAt: string | null;
   readonly importLease: ProviderPulseLease;
   readonly promotionLease: ProviderPulseLease;
+}
+
+export interface ProviderPulseHistory {
+  readonly measuredAt: string;
+  readonly lastCommittedPageAt: string | null;
   readonly quarantine: {
     readonly open: number;
     readonly resolved: number;
@@ -50,15 +54,19 @@ type TotalsRow = {
   readonly accepted: bigint;
 } & { readonly [Key in Exclude<keyof ProviderPulseCounts, "total">]: bigint };
 
-interface ActivityRow {
+interface LeasesRow {
   readonly measured_at: Date;
-  readonly last_committed_page_at: Date | null;
   readonly import_state: ProviderPulseLease["state"];
   readonly import_heartbeat_at: Date | null;
   readonly import_expires_at: Date | null;
   readonly promotion_state: ProviderPulseLease["state"];
   readonly promotion_heartbeat_at: Date | null;
   readonly promotion_expires_at: Date | null;
+}
+
+interface HistoryRow {
+  readonly measured_at: Date;
+  readonly last_committed_page_at: Date | null;
   readonly open: bigint;
   readonly resolved: bigint;
   readonly expired: bigint;
@@ -126,13 +134,12 @@ export class PrismaProviderPulseMetricsRepository {
     });
   }
 
-  async readActivity(): Promise<ProviderPulseActivity> {
+  async readLeases(): Promise<ProviderPulseLeases> {
     return this.readOnly(2_000, async (transaction) => {
       // Lease expiry is compared with the same database clock used for this
       // measurement. An active lease does not establish OS process liveness.
-      const [row] = await transaction.$queryRaw<ActivityRow[]>(ProviderPrisma.sql`
+      const [row] = await transaction.$queryRaw<LeasesRow[]>(ProviderPrisma.sql`
         select statement_timestamp() as measured_at,
-          (select max(committed_at) from public.provider_run_pages) as last_committed_page_at,
           case when importer.lease_owner is null then 'unowned'
             when importer.lease_expires_at > statement_timestamp() then 'active'
             else 'expired' end as import_state,
@@ -142,22 +149,14 @@ export class PrismaProviderPulseMetricsRepository {
             when promoter.lease_expires_at > statement_timestamp() then 'active'
             else 'expired' end as promotion_state,
           promoter.heartbeat_at as promotion_heartbeat_at,
-          promoter.lease_expires_at as promotion_expires_at,
-          quarantine.open, quarantine.resolved, quarantine.expired, quarantine.retained
-        from (
-          select count(*) filter (where state = 'open') as open,
-                 count(*) filter (where state = 'resolved') as resolved,
-                 count(*) filter (where state = 'expired') as expired,
-                 count(*) as retained
-          from public.quarantine_records
-        ) quarantine
+          promoter.lease_expires_at as promotion_expires_at
+        from (values (1)) as measurement(singleton)
         left join public.provider_worker_states importer on importer.worker_role = 'import'
         left join public.provider_worker_states promoter on promoter.worker_role = 'promotion'
       `);
-      if (row === undefined) throw new Error("Provider pulse activity is unavailable.");
+      if (row === undefined) throw new Error("Provider pulse leases are unavailable.");
       return {
         measuredAt: row.measured_at.toISOString(),
-        lastCommittedPageAt: row.last_committed_page_at?.toISOString() ?? null,
         importLease: {
           state: row.import_state,
           heartbeatAt: row.import_heartbeat_at?.toISOString() ?? null,
@@ -168,6 +167,30 @@ export class PrismaProviderPulseMetricsRepository {
           heartbeatAt: row.promotion_heartbeat_at?.toISOString() ?? null,
           expiresAt: row.promotion_expires_at?.toISOString() ?? null,
         },
+      };
+    });
+  }
+
+  async readHistory(): Promise<ProviderPulseHistory> {
+    return this.readOnly(2_000, async (transaction) => {
+      // Retained history grows with ingestion. Keep its exact aggregates
+      // separate from the worker point reads so callers can cache this scan.
+      const [row] = await transaction.$queryRaw<HistoryRow[]>(ProviderPrisma.sql`
+        select statement_timestamp() as measured_at,
+          (select max(committed_at) from public.provider_run_pages) as last_committed_page_at,
+          quarantine.open, quarantine.resolved, quarantine.expired, quarantine.retained
+        from (
+          select count(*) filter (where state = 'open') as open,
+                 count(*) filter (where state = 'resolved') as resolved,
+                 count(*) filter (where state = 'expired') as expired,
+                 count(*) as retained
+          from public.quarantine_records
+        ) quarantine
+      `);
+      if (row === undefined) throw new Error("Provider pulse history is unavailable.");
+      return {
+        measuredAt: row.measured_at.toISOString(),
+        lastCommittedPageAt: row.last_committed_page_at?.toISOString() ?? null,
         quarantine: {
           open: safeCount(row.open),
           resolved: safeCount(row.resolved),

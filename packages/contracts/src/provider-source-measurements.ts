@@ -56,6 +56,7 @@ const activitySchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("available"),
     measuredAt: instant,
+    historyMeasuredAt: instant,
     lastCommittedPageAt: instant.nullable(),
     importLease: leaseSchema,
     promotionLease: leaseSchema,

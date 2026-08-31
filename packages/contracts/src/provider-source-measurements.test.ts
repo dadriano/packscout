@@ -14,7 +14,7 @@ const measured = {
   },
   records: { state: "available", measuredAt, processed: 12, accepted: 9 },
   activity: {
-    state: "available", measuredAt, lastCommittedPageAt: null,
+    state: "available", measuredAt, historyMeasuredAt: measuredAt, lastCommittedPageAt: null,
     importLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
     promotionLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
     quarantine: { open: 1, resolved: 2, expired: 3, retained: 6 },
@@ -56,6 +56,22 @@ test("lease measurements never expose owners or claim to verify OS process liven
     assert.equal(providerSourceMeasurementsSchema.safeParse({
       ...measured, activity: { ...measured.activity,
         importLease: { ...measured.activity.importLease, [field]: "private-host" } },
+    }).success, false);
+  }
+});
+
+test("cached activity history retains its own required observation time beside fresh leases", () => {
+  const historyMeasuredAt = "2026-08-30T11:59:15.000Z";
+  const result = providerSourceMeasurementsSchema.parse({
+    ...measured, activity: { ...measured.activity, historyMeasuredAt },
+  });
+  assert.equal(result.activity.state, "available");
+  if (result.activity.state !== "available") return;
+  assert.equal(result.activity.measuredAt, measuredAt);
+  assert.equal(result.activity.historyMeasuredAt, historyMeasuredAt);
+  for (const invalid of [undefined, null, "recently"]) {
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, activity: { ...measured.activity, historyMeasuredAt: invalid },
     }).success, false);
   }
 });

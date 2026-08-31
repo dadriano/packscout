@@ -65,7 +65,7 @@ export function operationMeasurements(index = 0): ProviderSourceMeasurements {
     storage: { state: "available", measuredAt: now, counts: { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) } },
     records: { state: "available", measuredAt: now, processed: 700_000 + index, accepted: 699_000 + index },
     activity: {
-      state: "available", measuredAt: now, lastCommittedPageAt: "2026-08-21T11:59:56.000Z",
+      state: "available", measuredAt: now, historyMeasuredAt: now, lastCommittedPageAt: "2026-08-21T11:59:56.000Z",
       importLease: index === 0 ? { state: "active", heartbeatAt: now, expiresAt: "2026-08-21T12:00:30.000Z" } : { state: "unowned", heartbeatAt: null, expiresAt: null },
       promotionLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
       quarantine: { open: index, resolved: 0, expired: index * 10, retained: index * 11 },

@@ -129,7 +129,7 @@ export function measuredAge(value: string | null, observedAt: string): string {
 export const metricDescriptions = {
   stored: "Exact rows in canonical entity tables, including child and relationship rows. These are not unique source records. Counts are cached for up to 60 seconds; measurement times are in Details.",
   processed: "Source records processed across all retained runs. Repeat processing is counted again; this is not the number of unique stored entities. Cached for up to 60 seconds.",
-  page: "Time since the latest durably committed import page, measured at the displayed status snapshot. A heartbeat or running state does not count as committed progress.",
-  quarantine: "Retained quarantine entries still open for this provider, across runs. Resolved and expired entries are excluded. This is separate from the current run's quarantine count.",
+  page: "Time since the last durably committed page found by the history check, relative to the displayed status time. History is cached for up to 60 seconds; newer pages may exist. A heartbeat is not committed progress.",
+  quarantine: "Open quarantine entries across retained runs, excluding resolved and expired entries. History is cached for up to 60 seconds; newer changes may exist. This is separate from the current run's quarantine count.",
   attention: "Providers with failed or uncertain state, stale data, quality warnings, open quarantine, retries, missing configuration, or unavailable measurements. A running provider may also need attention.",
 } as const;

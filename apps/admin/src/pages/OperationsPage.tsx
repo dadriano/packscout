@@ -239,7 +239,7 @@ export function OperationsPage({
               tone={staleDisplay ? "pending" : "neutral"}
               description={displayPaused ? "The displayed snapshot is frozen. Ingestion and scheduling continue. Resume display to fetch current evidence."
                 : readFailure ? "The latest refresh failed. Previously loaded evidence is retained and its displayed measurement times have not changed."
-                  : "Status refreshes every 5 seconds while this page is visible. Stored-row and retained-run totals are cached for up to 60 seconds. This does not imply that a worker is running."} />
+                  : "Status and leases refresh every 5 seconds while this page is visible. Row counts, retained-run totals, last-page history, and quarantine counts are cached for up to 60 seconds. Refreshing does not prove a worker is running."} />
           )}
           <span>
             {providerCatalog ? displayPaused

@@ -34,7 +34,7 @@ const evidence: LocalSourceEvidence = {
     } },
     records: { state: "available", measuredAt: observedAt, processed: 20, accepted: 12 },
     activity: {
-      state: "available", measuredAt: observedAt, lastCommittedPageAt: null,
+      state: "available", measuredAt: observedAt, historyMeasuredAt: observedAt, lastCommittedPageAt: null,
       importLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
       promotionLease: { state: "unowned", heartbeatAt: null, expiresAt: null },
       quarantine: { open: 0, resolved: 0, expired: 0, retained: 0 },

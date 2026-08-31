@@ -36,6 +36,9 @@ export function ProviderPulseCard(props: SourceOperationControlsProps & { observ
             {activity.state === "available" ? <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>{count(activity.quarantine.open)}</Link> : "Unavailable"}
           </Metric>
         </dl>
+        {activity.state === "available" ? (
+          <p className="provider-pulse__subtext">Page & quarantine checked {measuredAge(activity.historyMeasuredAt, observedAt)}</p>
+        ) : null}
       </div>
       <ProviderPulseDetails {...props} />
     </article>

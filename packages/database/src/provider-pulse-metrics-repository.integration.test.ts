@@ -208,11 +208,12 @@ test("provider pulse counts exact stored rows and all retained runs without infe
     assert.deepEqual(empty.counts, emptyCounts);
     assert.equal(empty.processed, 0);
     assert.equal(empty.accepted, 0);
-    const emptyActivity = await repository.readActivity();
-    assert.equal(emptyActivity.lastCommittedPageAt, null);
-    assert.deepEqual(emptyActivity.importLease, { state: "unowned", heartbeatAt: null, expiresAt: null });
-    assert.deepEqual(emptyActivity.promotionLease, emptyActivity.importLease);
-    assert.deepEqual(emptyActivity.quarantine, { open: 0, resolved: 0, expired: 0, retained: 0 });
+    const emptyHistory = await repository.readHistory();
+    const emptyLeases = await repository.readLeases();
+    assert.equal(emptyHistory.lastCommittedPageAt, null);
+    assert.deepEqual(emptyLeases.importLease, { state: "unowned", heartbeatAt: null, expiresAt: null });
+    assert.deepEqual(emptyLeases.promotionLease, emptyLeases.importLease);
+    assert.deepEqual(emptyHistory.quarantine, { open: 0, resolved: 0, expired: 0, retained: 0 });
 
     await seedCanonicalRows(harness.client);
     const seeded = await seedRetainedRuns(harness.client);
@@ -224,20 +225,33 @@ test("provider pulse counts exact stored rows and all retained runs without infe
     assert.equal(await harness.client.promotion_changes.count(), 18);
     assert.equal(totals.processed, 162);
     assert.equal(totals.accepted, 131);
-    const activity = await repository.readActivity();
-    assert.equal(activity.lastCommittedPageAt, seeded.lastCommittedPageAt.toISOString());
-    assert.equal(activity.importLease.state, "active");
-    assert.equal(activity.promotionLease.state, "unowned");
-    assert.deepEqual(activity.quarantine, { open: 2, resolved: 1, expired: 2, retained: 5 });
-    assert.ok(Date.parse(activity.importLease.expiresAt!) > Date.parse(activity.measuredAt));
-    assert.ok(Date.parse(activity.importLease.heartbeatAt!) > Date.parse(activity.lastCommittedPageAt!));
-    assert.equal(JSON.stringify(activity).includes("pulse-test-private-worker"), false);
-    assert.deepEqual(Object.keys(activity.importLease), ["state", "heartbeatAt", "expiresAt"]);
+    const history = await repository.readHistory();
+    const leases = await repository.readLeases();
+    assert.equal(history.lastCommittedPageAt, seeded.lastCommittedPageAt.toISOString());
+    assert.equal(leases.importLease.state, "active");
+    assert.equal(leases.promotionLease.state, "unowned");
+    assert.deepEqual(history.quarantine, { open: 2, resolved: 1, expired: 2, retained: 5 });
+    assert.ok(Date.parse(leases.importLease.expiresAt!) > Date.parse(leases.measuredAt));
+    assert.ok(Date.parse(leases.importLease.heartbeatAt!) > Date.parse(history.lastCommittedPageAt!));
+    assert.ok(Date.parse(leases.measuredAt) >= Date.parse(history.measuredAt));
+    assert.equal(JSON.stringify(leases).includes("pulse-test-private-worker"), false);
+    assert.deepEqual(Object.keys(leases.importLease), ["state", "heartbeatAt", "expiresAt"]);
     await harness.client.provider_runs.update({
       where: { id: seeded.lastRunId },
       data: { heartbeat_at: new Date(), last_progress_at: new Date(), row_version: { increment: 1n } },
     });
-    assert.equal((await repository.readActivity()).lastCommittedPageAt, activity.lastCommittedPageAt);
+    assert.equal((await repository.readHistory()).lastCommittedPageAt, history.lastCommittedPageAt);
+
+    await harness.client.quarantine_records.updateMany({
+      where: { state: "open" },
+      data: { state: "resolved", resolved_at: new Date(), row_version: { increment: 1n } },
+    });
+    const resolvedHistory = await repository.readHistory();
+    assert.deepEqual(resolvedHistory.quarantine, { open: 0, resolved: 3, expired: 2, retained: 5 });
+    assert.deepEqual(history.quarantine, { open: 2, resolved: 1, expired: 2, retained: 5 },
+      "an earlier history snapshot keeps its own observed counts");
+    assert.deepEqual((await repository.readLeases()).importLease, leases.importLease,
+      "history changes do not alter the separately observed worker lease");
 
     await harness.client.$executeRaw(Prisma.sql`
       update public.provider_worker_states
@@ -245,9 +259,13 @@ test("provider pulse counts exact stored rows and all retained runs without infe
           lease_expires_at = statement_timestamp(), row_version = row_version + 1
       where worker_role = 'import'
     `);
-    const expired = await repository.readActivity();
+    const expired = await repository.readLeases();
     assert.equal(expired.importLease.state, "expired");
     assert.ok(Date.parse(expired.importLease.expiresAt!) <= Date.parse(expired.measuredAt));
+    const unchangedHistory = await repository.readHistory();
+    assert.equal(unchangedHistory.lastCommittedPageAt, resolvedHistory.lastCommittedPageAt);
+    assert.deepEqual(unchangedHistory.quarantine, resolvedHistory.quarantine,
+      "a lease transition does not masquerade as committed data or a quarantine change");
   } finally {
     await harness.close();
   }
@@ -279,16 +297,29 @@ test("provider pulse reads are read-only, bounded, and do not wait for runtime o
       await transaction.$queryRaw(Prisma.sql`select singleton_key from provider_runtime for update`);
       await transaction.$queryRaw(Prisma.sql`select worker_role from provider_worker_states for update`);
       assert.deepEqual((await repository.readTotals()).counts, emptyCounts);
-      assert.equal((await repository.readActivity()).importLease.state, "unowned");
+      assert.equal((await repository.readLeases()).importLease.state, "unowned");
+      assert.equal((await repository.readHistory()).lastCommittedPageAt, null);
     });
     assert.deepEqual(settings, [
-      { read_only: "on", timeout: "6s" }, { read_only: "on", timeout: "2s" },
+      { read_only: "on", timeout: "6s" },
+      { read_only: "on", timeout: "2s" }, { read_only: "on", timeout: "2s" },
     ]);
     await harness.client.$transaction(async (transaction) => {
-      await transaction.$executeRaw(Prisma.sql`lock table provider_run_pages in access exclusive mode`);
-      await assert.rejects(repository.readActivity(), /statement timeout/u);
+      await transaction.$executeRaw(Prisma.sql`
+        lock table provider_run_pages, quarantine_records in access exclusive mode
+      `);
+      assert.equal((await repository.readLeases()).importLease.state, "unowned",
+        "lease polling must not touch locked history or quarantine tables");
+      await assert.rejects(repository.readHistory(), /statement timeout/u);
     });
-    assert.equal((await repository.readActivity()).lastCommittedPageAt, null);
+    assert.equal((await repository.readHistory()).lastCommittedPageAt, null);
+    await harness.client.$transaction(async (transaction) => {
+      await transaction.$executeRaw(Prisma.sql`lock table provider_worker_states in access exclusive mode`);
+      assert.equal((await repository.readHistory()).lastCommittedPageAt, null,
+        "history aggregation must not touch locked worker rows");
+      await assert.rejects(repository.readLeases(), /statement timeout/u);
+    });
+    assert.equal((await repository.readLeases()).importLease.state, "unowned");
   } finally {
     await harness.close();
   }

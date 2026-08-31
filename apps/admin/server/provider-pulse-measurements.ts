@@ -6,17 +6,48 @@ import {
 import {
   PrismaProviderPulseMetricsRepository,
   type ProviderPrismaClient,
+  type ProviderPulseHistory,
   type ProviderPulseTotals,
 } from "@packscout/database";
 
-const TOTALS_CACHE_MS = 60_000;
+const HISTORY_CACHE_MS = 60_000;
 type TotalsMeasurement = Pick<ProviderSourceMeasurements, "storage" | "records">;
-type Repository = Pick<PrismaProviderPulseMetricsRepository, "readTotals" | "readActivity">;
+type ActivityMeasurement = Extract<ProviderSourceMeasurements["activity"], { state: "available" }>;
+type HistoryMeasurement = Pick<ActivityMeasurement, "historyMeasuredAt" | "lastCommittedPageAt" | "quarantine">;
+type Repository = Pick<PrismaProviderPulseMetricsRepository, "readTotals" | "readHistory" | "readLeases">;
 
-interface CachedTotals {
+interface CachedMeasurement<T> {
   readonly scope: string;
   readonly expiresAt: number;
-  readonly result: Promise<TotalsMeasurement>;
+  readonly result: Promise<T>;
+}
+
+const historySchema = providerSourceMeasurementsSchema.shape.activity.options[0].pick({
+  historyMeasuredAt: true, lastCommittedPageAt: true, quarantine: true,
+});
+
+function measuredHistory(history: ProviderPulseHistory): HistoryMeasurement {
+  return historySchema.parse({ historyMeasuredAt: history.measuredAt,
+    lastCommittedPageAt: history.lastCommittedPageAt, quarantine: history.quarantine });
+}
+
+function cachedMeasurement<T>(
+  cache: WeakMap<ProviderPrismaClient, CachedMeasurement<T>>,
+  database: ProviderPrismaClient,
+  scope: string,
+  checkedAt: number,
+  read: () => Promise<T>,
+): Promise<T> {
+  const cached = cache.get(database);
+  if (cached?.scope === scope && cached.expiresAt > checkedAt) return cached.result;
+  const result: Promise<T> = read().catch((error: unknown) => {
+    // Failed or malformed snapshots retry on the next refresh. An older
+    // failure cannot remove a replacement query for a newer route or scope.
+    if (cache.get(database)?.result === result) cache.delete(database);
+    throw error;
+  });
+  cache.set(database, { scope, expiresAt: checkedAt + HISTORY_CACHE_MS, result });
+  return result;
 }
 
 function measuredTotals(totals: ProviderPulseTotals): TotalsMeasurement {
@@ -35,7 +66,8 @@ function measuredTotals(totals: ProviderPulseTotals): TotalsMeasurement {
 export class ProviderPulseMeasurementReader {
   // The gateway replaces its client on a route/credential change. A WeakMap
   // makes the client part of the cache identity without retaining credentials.
-  readonly #totals = new WeakMap<ProviderPrismaClient, CachedTotals>();
+  readonly #totals = new WeakMap<ProviderPrismaClient, CachedMeasurement<TotalsMeasurement>>();
+  readonly #history = new WeakMap<ProviderPrismaClient, CachedMeasurement<HistoryMeasurement>>();
 
   constructor(
     private readonly now: () => Date = () => new Date(),
@@ -52,26 +84,22 @@ export class ProviderPulseMeasurementReader {
       identity.organizationId, identity.providerId, identity.configurationId,
     ]);
     const repository = this.repository(database);
-    let cached = this.#totals.get(database);
     const checkedAt = this.now().getTime();
-    if (!cached || cached.scope !== scope || cached.expiresAt <= checkedAt) {
-      const result: Promise<TotalsMeasurement> = repository.readTotals().then(measuredTotals).catch(() => {
-        // Retry transient failures on the next refresh, without evicting a
-        // newer query that replaced this entry while it was still running.
-        if (this.#totals.get(database)?.result === result) this.#totals.delete(database);
+    const totalsRead = cachedMeasurement(this.#totals, database, scope, checkedAt,
+      () => repository.readTotals().then(measuredTotals));
+    const historyRead = cachedMeasurement(this.#history, database, scope, checkedAt,
+      () => repository.readHistory().then(measuredHistory));
+    // All full-history scans are cached. Only the two worker lease records are
+    // checked every refresh, with their own database observation time.
+    const [totals, activity] = await Promise.all([
+      totalsRead.catch(() => {
         const unavailable = unavailableProviderSourceMeasurements("query_failed");
         return { storage: unavailable.storage, records: unavailable.records };
-      });
-      cached = { scope, expiresAt: checkedAt + TOTALS_CACHE_MS, result };
-      this.#totals.set(database, cached);
-    }
-    // Repository queries have database-side deadlines. Failure of the exact
-    // scan never replaces the independently read runtime or lease evidence.
-    const [totals, activity] = await Promise.all([
-      cached.result,
-      repository.readActivity()
-        .then((value) => providerSourceMeasurementsSchema.shape.activity.parse({
-          state: "available", ...value,
+      }),
+      Promise.all([historyRead, repository.readLeases()])
+        .then(([history, leases]) => providerSourceMeasurementsSchema.shape.activity.parse({
+          state: "available", ...history, measuredAt: leases.measuredAt,
+          importLease: leases.importLease, promotionLease: leases.promotionLease,
         }))
         .catch(() => ({ state: "unavailable" as const, reason: "query_failed" as const })),
     ]);
