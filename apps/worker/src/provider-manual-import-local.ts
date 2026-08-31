@@ -250,6 +250,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               authorityResolver: input.sourceAuthorityResolver,
               integration: input.integration,
               workerId: input.workerId,
+              maximumPageRecords: providerManualImportExecutionBudget(databaseConfiguration.runtimePolicy.mode).maximumPageRecords,
               translationRecorder: audit,
               terminalizeRequest: createProviderDataforrestRequestTerminalizer({
                 audit,

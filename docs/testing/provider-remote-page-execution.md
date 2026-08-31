@@ -2,8 +2,9 @@
 
 The worker commits one normalized source page atomically. A remote PostgreSQL
 round trip can make a valid page exceed the local transaction window even when
-the source HTTP response is quick. Runtime mode selects a finite execution
-budget; it does not change the source request size, cursor, or schema.
+the source HTTP response is quick. Runtime mode selects finite execution and
+request resource budgets without changing provider configuration, cursor identity,
+adapter versions, or schema.
 
 | Bound | Local | Remote |
 | --- | --- | --- |
@@ -11,6 +12,25 @@ budget; it does not change the source request size, cursor, or schema.
 | Whole page window, including source read | 55 seconds | 540 seconds |
 | Routed gateway operation | 60 seconds | 600 seconds |
 | Default import lease | 300 seconds | 900 seconds |
+| Source records per request | Adapter maximum | Smaller of 100 and adapter maximum |
+
+The remote manual importer applies the source-record ceiling through the
+adapter's existing per-operation bounds. It does not rewrite the immutable
+manifest or use provider-specific branches. For example, Collector Crypt keeps
+its 1,000-record manifest and exact saved cursor envelope while a remote request
+uses `limit=100`. Local requests retain the manifest maximum. The same effective
+bound governs request admission, HTTP query, audit scope, response interpretation,
+and terminalization. A response containing 101 records for a 100-record request
+is rejected before canonical translation; the transport attempt remains audited.
+Response-byte and source-timeout limits are unchanged. No page is sliced or
+discarded locally: only the source's returned continuation advances the cursor.
+
+The smaller remote request bounds sequential pull and event writes, which do
+not use collectible batching. At the observed approximately 46 ms warm Neon
+round trip, a 1,000-pull page's minimum 8,000 operations could consume most of
+the 480-second transaction window before constraints or additional lookups.
+This estimate motivates the ceiling; it does not substitute for a durable first
+page and subsequent progress after launch.
 
 The gateway requires an explicit `atomic_import_page` profile to allow an
 operation over 60 seconds. Standard callers retain their previous bounds.
@@ -38,6 +58,8 @@ not permission to start a duplicate worker.
 | Acceptance behavior | Evidence |
 | --- | --- |
 | Remote bounds nest inside the lease; invalid modes/short leases refuse before I/O | `apps/worker/src/provider-manual-import-execution-budget.test.ts` |
+| Remote requests use 100 with the unchanged opaque cursor, canonical order and manifest; local uses 1,000; 101 records refuse before translation | `apps/worker/src/provider-dataforrest-mixed-page-source.test.ts` |
+| Invalid source ceilings refuse before I/O; a ceiling cannot increase a smaller manifest maximum | `apps/worker/src/provider-dataforrest-mixed-page-source.test.ts` |
 | Explicit atomic opt-in preserves destination authorization and standard bounds | `packages/database/src/provider-database-gateway.test.ts` |
 | Attempts are clipped and unknown/commit errors are never retried | `packages/database/src/provider-page-transaction.test.ts` |
 | Source quarantine batching and extended first-attempt lease reserve remain atomic | `packages/database/src/provider-quarantine-batch.integration.test.ts` |

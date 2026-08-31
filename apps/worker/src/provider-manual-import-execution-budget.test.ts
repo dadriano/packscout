@@ -9,9 +9,11 @@ test("remote atomic pages have finite nested deadlines within their lease; local
   assert.deepEqual(providerManualImportExecutionBudget(), {
     transactionMilliseconds: 30_000, pageMilliseconds: 55_000,
     gatewayMilliseconds: 60_000, leaseMilliseconds: 300_000,
+    maximumPageRecords: undefined,
   });
   const remote = providerManualImportExecutionBudget("remote");
   assert.equal(remote.transactionMilliseconds, 480_000);
+  assert.equal(remote.maximumPageRecords, 100);
   assert.equal(remote.pageMilliseconds - remote.transactionMilliseconds, 60_000);
   assert.equal(remote.gatewayMilliseconds - remote.pageMilliseconds, 60_000);
   assert.equal(remote.leaseMilliseconds - remote.gatewayMilliseconds, 300_000);

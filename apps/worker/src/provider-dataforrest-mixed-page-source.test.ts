@@ -47,6 +47,7 @@ import {
   "./provider-dataforrest-live-integration.ts";
 import type { ProviderCapturePageSourceInput } from
   "./provider-capture-source-contract.ts";
+import { providerManualImportExecutionBudget } from "./provider-manual-import-execution-budget.ts";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const providerId = "11111111-1111-4111-8111-111111111111";
@@ -415,6 +416,7 @@ function jsonResponse(value: unknown): Response {
 function sourceFixture(input: Readonly<{
   pages: readonly DataforrestEventsPageV1[];
   pageLimit?: number;
+  maximumPageRecords?: number;
   integration?: ProviderDataforrestLiveIntegration;
   resolvedAuthority?: ResolvedDataforrestSourceAuthority;
   workerId?: string;
@@ -504,6 +506,7 @@ function sourceFixture(input: Readonly<{
     workerId: input.workerId ?? "fixture:clutchpacks",
     integration,
     adapter,
+    maximumPageRecords: input.maximumPageRecords,
   });
   return {
     source,
@@ -535,10 +538,12 @@ function phygitalsCardRecord(
 function collectorSourceFixture(
   pages: readonly DataforrestEventsPageV1[],
   manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  maximumPageRecords?: number,
 ) {
   return {
     ...sourceFixture({
       pages,
+      maximumPageRecords,
       integration: createProviderDataforrestLiveIntegration("collector_crypt", manifest),
       resolvedAuthority: {
         ...resolvedAuthority,
@@ -562,6 +567,76 @@ function collectorPullRecords(count: number): DataforrestEventRecordV1[] {
     platform: "collector_crypt",
   }));
 }
+
+test("remote page ceiling preserves the opaque Collector cursor, canonical ordering and original 1,000-record manifest", async () => {
+  const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;
+  const originalManifest = structuredClone(manifest);
+  const checkpoint = {
+    sourceInstanceId: providerId, sourceRevisionId: configVersionId,
+    sourceTypeKey: manifest.sourceTypeKey, adapterVersion: manifest.adapterVersion,
+    cursorCodecKey: manifest.cursorCodecKey, cursorGeneration: 1,
+    value: "collector/opaque+saved==?limit=1000&position=163000",
+  };
+  const checkpointFingerprint = providerMixedCursorFingerprint(checkpoint);
+  const pages = [sourcePage({ cursor: "collector-bounded-next", continuation: "continue", records: collectorPullRecords(100) }),
+    sourcePage({ cursor: "collector-bounded-head", continuation: "head", records: [] })];
+  const translated = [];
+  for (const mode of ["remote", "local"] as const) {
+    const fixture = collectorSourceFixture(pages, manifest, providerManualImportExecutionBudget(mode).maximumPageRecords);
+    const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority, pageNumber: 2, checkpoint, checkpointFingerprint,
+    })));
+    translated.push(first);
+    assert.equal(first.records.length, 100);
+    assert.deepEqual(first.inputCursor, checkpoint);
+    assert.equal(first.inputCursorFingerprint, checkpointFingerprint);
+    assert.deepEqual(first.nextCursor, { ...checkpoint, value: "collector-bounded-next" });
+    const second = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority, pageNumber: 3,
+      checkpoint: first.nextCursor, checkpointFingerprint: first.nextCursorFingerprint,
+    })));
+    assert.equal(second.continuation, "head");
+    assert.deepEqual(fixture.requestedUrls.map(url => url.searchParams.get("cursor")), [checkpoint.value, "collector-bounded-next"]);
+    const limit = mode === "remote" ? 100 : 1_000;
+    assert.equal(fixture.requestedUrls.every(url => url.searchParams.get("limit") === String(limit)), true);
+    assert.equal(fixture.terminalizations.every(({ operationScope }) =>
+      operationScope.operationKind === "page_read" && operationScope.pageLimit === limit
+      && operationScope.adapterVersion === manifest.adapterVersion), true);
+    const firstScope = fixture.terminalizations[0]!.operationScope;
+    assert.ok(firstScope.operationKind === "page_read");
+    assert.equal(firstScope.requestedCursorFingerprint, checkpointFingerprint);
+    assert.deepEqual(fixture.translations, [{ sourceRecordCount: 100, normalizedRecordCount: 100 },
+      { sourceRecordCount: 0, normalizedRecordCount: 0 }]);
+  }
+  assert.deepEqual(translated[0], translated[1]);
+  assert.deepEqual(manifest, originalManifest);
+  assert.equal(manifest.requestBounds.pageLimit, 1_000);
+});
+
+test("remote 100-record request rejects a 101-record response before translation and audits the effective bound", async () => {
+  const fixture = collectorSourceFixture([sourcePage({ cursor: "collector-bounded-overflow", continuation: "continue",
+    records: collectorPullRecords(101) })], dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  providerManualImportExecutionBudget("remote").maximumPageRecords);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === "PROVIDER_DATAFORREST_INVALID_RESPONSE");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  assert.equal(fixture.terminalizations.length, 1);
+  const scope = fixture.terminalizations[0]!.operationScope;
+  assert.equal(scope.operationKind === "page_read" && scope.pageLimit, 100);
+  assert.equal(fixture.terminalizations[0]!.outcome.ok, true);
+  assert.deepEqual(fixture.translations, []);
+});
+
+test("page ceilings reject invalid values before I/O and never increase an adapter's smaller maximum", async () => {
+  for (const maximumPageRecords of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => collectorSourceFixture([], undefined, maximumPageRecords), /page record ceiling is invalid/u);
+  }
+  const fixture = collectorSourceFixture([sourcePage({ cursor: "smaller-manifest-head", continuation: "head",
+    records: collectorPullRecords(100) })], dataforrestLaunchDistributedSourceAdapterManifest, 1_000);
+  const page = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })));
+  assert.equal(page.records.length, 100);
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+});
 
 test("Collector requests and accepts exactly 1,000 records with an exact version-pinned continuation", async () => {
   const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;

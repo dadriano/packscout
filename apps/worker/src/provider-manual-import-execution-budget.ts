@@ -1,12 +1,12 @@
 export type ProviderImportExecutionMode = "local" | "remote";
 
-/** Runtime budgets, not source request limits or test deadlines. Each remote
- * page remains atomic; its transaction and gateway expire before its lease. */
+/** Runtime resource budgets, not provider configuration or test deadlines. Each
+ * page remains atomic; a request ceiling only lowers the adapter's maximum. */
 const budgets = Object.freeze({
   local: Object.freeze({ transactionMilliseconds: 30_000, pageMilliseconds: 55_000,
-    gatewayMilliseconds: 60_000, leaseMilliseconds: 300_000 }),
+    gatewayMilliseconds: 60_000, leaseMilliseconds: 300_000, maximumPageRecords: undefined }),
   remote: Object.freeze({ transactionMilliseconds: 480_000, pageMilliseconds: 540_000,
-    gatewayMilliseconds: 600_000, leaseMilliseconds: 900_000 }),
+    gatewayMilliseconds: 600_000, leaseMilliseconds: 900_000, maximumPageRecords: 100 }),
 });
 
 export function providerManualImportExecutionBudget(mode: ProviderImportExecutionMode = "local") {
