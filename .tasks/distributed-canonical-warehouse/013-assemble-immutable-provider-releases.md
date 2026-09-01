@@ -5,16 +5,14 @@
 **Blocks:** distributed-canonical-warehouse/014
 **Estimated scope:** large
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
-**Status:** in progress
+**Status:** complete
 
-## Current Integration Gap
+## Completion
 
-The original provider-local assembly implementation exists at commit
-`a6ef83a` but is not present on `origin/main`. The authoritative provider
-schema still contains the release tables, so this task is reopened to port the
-repository and assembly service behind the current central/provider clients and
-current Convex-facing contracts. Historical completion evidence is a selective
-port source, not proof that the current branch can assemble a release.
+The provider-local repository and assembly service are ported behind the
+current split central/provider clients and active Convex-facing contracts.
+Focused unit, migrated PostgreSQL, Convex, typecheck, lint, schema, and
+framework-suite verification covers the current implementation.
 
 ## Start Here
 
