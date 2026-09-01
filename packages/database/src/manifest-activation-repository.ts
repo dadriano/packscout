@@ -4,11 +4,16 @@ import {
   activeCatalogManifestStateV1Schema,
   canonicalJson,
   catalogManifestActivateRequestSchema,
+  catalogManifestActiveStateReceiptSchema,
+  catalogManifestActiveStateRequestSchema,
   catalogManifestActivationReceiptSchema,
+  catalogManifestPublicationRequestDigest,
   catalogManifestReceiptDigest,
+  catalogManifestReceiptSchema,
   catalogManifestRollbackReceiptSchema,
   catalogManifestRollbackToManifestRequestSchema,
   catalogManifestSignedReceiptEnvelopeSchema,
+  catalogManifestStatusNotFoundReceiptSchema,
   catalogManifestStatusRequestSchema,
   verifyGlobalCatalogManifestV1,
   type ActiveCatalogManifestStateV1,
@@ -53,7 +58,10 @@ export type ManifestActivationRepositoryFailureCode =
   | "MANIFEST_ACTIVATION_STATE_CONFLICT"
   | "MANIFEST_ACTIVATION_RECEIPT_INVALID"
   | "MANIFEST_ACTIVATION_OPERATION_TERMINAL"
-  | "MANIFEST_ACTIVATION_EVIDENCE_INVALID";
+  | "MANIFEST_ACTIVATION_EVIDENCE_INVALID"
+  | "MANIFEST_ACTIVATION_STATUS_INVALID"
+  | "MANIFEST_ACTIVATION_RECONCILIATION_INVALID"
+  | "MANIFEST_ACTIVATION_CLEAR_FORBIDDEN";
 
 export class ManifestActivationRepositoryError extends Error {
   constructor(readonly code: ManifestActivationRepositoryFailureCode) {
@@ -95,6 +103,20 @@ export interface ExactManifestActivationReceiptEvidence {
   readonly receiptSha256: string;
   readonly exactResponseBody: string;
   readonly exactResponseSha256: string;
+}
+
+export interface SignedManifestActiveStateEvidence
+  extends ExactManifestActivationReceiptEvidence {
+  readonly activeManifest: GlobalCatalogManifestV1 | null;
+  readonly previousManifest: GlobalCatalogManifestV1 | null;
+}
+
+export interface ManifestActivationStatusObservation {
+  readonly operationId: string;
+  readonly resultKind: "not_found" | "terminal";
+  readonly requestDigest: string;
+  readonly responseDigest: string;
+  readonly observedAt: Date;
 }
 
 export interface ManifestActivationIntent {
@@ -249,6 +271,101 @@ function text(value: Uint8Array): string {
   } catch {
     failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
   }
+}
+
+const ACTIVE_STATE_REQUEST = catalogManifestActiveStateRequestSchema.parse({
+  schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+  operationId: "catalog-manifest-active-state",
+});
+const ACTIVE_STATE_REQUEST_BODY = canonicalJson(ACTIVE_STATE_REQUEST);
+
+function exactSignedEnvelope(
+  evidence: ExactManifestActivationReceiptEvidence,
+): ReturnType<typeof catalogManifestSignedReceiptEnvelopeSchema.parse> {
+  if (
+    !SHA256_PATTERN.test(evidence.receiptSha256) ||
+    !SHA256_PATTERN.test(evidence.exactResponseSha256) ||
+    sha256(evidence.canonicalReceiptBody) !== evidence.receiptSha256 ||
+    sha256(evidence.exactResponseBody) !== evidence.exactResponseSha256
+  ) failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
+  let receipt: unknown;
+  let response: unknown;
+  try {
+    receipt = JSON.parse(evidence.canonicalReceiptBody) as unknown;
+    response = JSON.parse(evidence.exactResponseBody) as unknown;
+  } catch {
+    failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
+  }
+  const envelope = catalogManifestSignedReceiptEnvelopeSchema.safeParse(
+    response,
+  );
+  if (
+    !envelope.success ||
+    canonicalJson(receipt) !== evidence.canonicalReceiptBody ||
+    canonicalJson(envelope.data.receipt) !== evidence.canonicalReceiptBody
+  ) failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
+  return envelope.data;
+}
+
+async function assertSignedEnvelopeDigest(
+  envelope: ReturnType<typeof catalogManifestSignedReceiptEnvelopeSchema.parse>,
+): Promise<void> {
+  if (
+    await catalogManifestReceiptDigest(envelope.receipt) !==
+      envelope.responseAuth.receiptDigest
+  ) failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
+}
+
+function assertStateManifestBinding(input: Readonly<{
+  state: ActiveCatalogManifestStateV1;
+  activeManifest: GlobalCatalogManifestV1 | null;
+  previousManifest: GlobalCatalogManifestV1 | null;
+}>): void {
+  const active = input.state.activeManifest;
+  const previous = input.state.previousManifest;
+  if (active === null) {
+    if (
+      input.state.generation !== 0 || input.state.observation !== null ||
+      input.state.terminalReceiptSha256 !== null ||
+      previous !== null || input.activeManifest !== null ||
+      input.previousManifest !== null
+    ) failure("MANIFEST_ACTIVATION_CLEAR_FORBIDDEN");
+    return;
+  }
+  const manifest = input.activeManifest;
+  const observation = input.state.observation;
+  if (
+    manifest === null || observation === null ||
+    manifest.publicReleaseId !== active.publicReleaseId ||
+    manifest.manifestFingerprint !== active.manifestFingerprint ||
+    canonicalJson({
+      sharedConfigurationEpoch: manifest.sharedConfigurationEpoch,
+      providerReferenceSetHash: manifest.providerReferenceSetHash,
+    }) !== canonicalJson({
+      sharedConfigurationEpoch: active.sharedConfigurationEpoch,
+      providerReferenceSetHash: active.providerReferenceSetHash,
+    }) ||
+    observation.publicReleaseId !== manifest.publicReleaseId ||
+    observation.providerReferenceSetHash !== manifest.providerReferenceSetHash ||
+    observation.providerSelections.length !== manifest.providerReferences.length
+  ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+  for (const [index, reference] of manifest.providerReferences.entries()) {
+    const selected = observation.providerSelections[index];
+    if (
+      selected === undefined ||
+      selected.platformKey !== reference.platformKey ||
+      selected.publicProviderReleaseId !== reference.publicProviderReleaseId
+    ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+  }
+  if (previous === null) {
+    if (input.previousManifest !== null) {
+      failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+    }
+  } else if (
+    input.previousManifest === null ||
+    input.previousManifest.publicReleaseId !== previous.publicReleaseId ||
+    input.previousManifest.manifestFingerprint !== previous.manifestFingerprint
+  ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
 }
 
 function validDate(value: Date): boolean {
@@ -915,6 +1032,254 @@ export class PrismaManifestActivationRepository {
     observedAt: Date;
   }>): Promise<ManifestActivationIntent> {
     return this.#recordNonAccepted("failed", input);
+  }
+
+  /** Persists every exact signed status response before recovery dispatch or
+   * acknowledgement. A not-found probe is durable evidence, not an in-memory
+   * branch. */
+  async recordStatusObservation(input: Readonly<{
+    lease: ManifestActivationLease;
+    operationId: string;
+    evidence: ExactManifestActivationReceiptEvidence;
+    observedAt: Date;
+  }>): Promise<ManifestActivationStatusObservation> {
+    assertUuid(input.operationId);
+    if (!validDate(input.observedAt)) {
+      failure("MANIFEST_ACTIVATION_INPUT_INVALID");
+    }
+    const envelope = exactSignedEnvelope(input.evidence);
+    await assertSignedEnvelopeDigest(envelope);
+    return this.central.$transaction(async (transaction) => {
+      const state = await lockState(transaction);
+      requireLease(state, input.lease);
+      const current = await operationById(transaction, input.operationId, true);
+      if (!current || current.state === "failed") {
+        failure("MANIFEST_ACTIVATION_STATUS_INVALID");
+      }
+      const intent = await mapOperation(current);
+      const request = this.statusRequest(intent);
+      const requestBody = canonicalJson(request);
+      const requestDigest = sha256(requestBody);
+      let resultKind: ManifestActivationStatusObservation["resultKind"];
+      const notFound = catalogManifestStatusNotFoundReceiptSchema.safeParse(
+        envelope.receipt,
+      );
+      if (notFound.success) {
+        if (
+          canonicalJson(notFound.data.target) !==
+            canonicalJson(request.target) ||
+          notFound.data.requestDigest !== intent.requestDigest
+        ) failure("MANIFEST_ACTIVATION_STATUS_INVALID");
+        resultKind = "not_found";
+      } else {
+        const found = catalogManifestReceiptSchema.safeParse(envelope.receipt);
+        if (!found.success || found.data.operationKind === "activeState") {
+          failure("MANIFEST_ACTIVATION_STATUS_INVALID");
+        }
+        await receiptFor(
+          current.operation,
+          parseRequest(current.operation, text(current.requestBytes)),
+          input.evidence,
+        );
+        resultKind = "terminal";
+      }
+      const inserted = await transaction.$executeRaw(CentralPrisma.sql`
+        insert into manifest_activation_status_observations (
+          operation_id, lease_fence, result_kind,
+          request_digest, request_bytes, receipt_hash, receipt_bytes,
+          response_digest, response_bytes, observed_at
+        ) values (
+          ${input.operationId}::uuid, ${input.lease.fence}, ${resultKind},
+          ${requestDigest}, ${Buffer.from(requestBody, "utf8")},
+          ${input.evidence.receiptSha256},
+          ${Buffer.from(input.evidence.canonicalReceiptBody, "utf8")},
+          ${input.evidence.exactResponseSha256},
+          ${Buffer.from(input.evidence.exactResponseBody, "utf8")},
+          ${input.observedAt}
+        ) on conflict (operation_id, response_digest) do nothing
+      `);
+      if (inserted === 0) {
+        const [existing] = await transaction.$queryRaw<Array<{
+          resultKind: string;
+          requestDigest: string;
+          requestBytes: Uint8Array;
+          receiptHash: string;
+          receiptBytes: Uint8Array;
+          responseBytes: Uint8Array;
+        }>>(CentralPrisma.sql`
+          select result_kind as "resultKind",
+                 request_digest as "requestDigest",
+                 request_bytes as "requestBytes",
+                 receipt_hash as "receiptHash",
+                 receipt_bytes as "receiptBytes",
+                 response_bytes as "responseBytes"
+          from manifest_activation_status_observations
+          where operation_id = ${input.operationId}::uuid
+            and response_digest = ${input.evidence.exactResponseSha256}
+        `);
+        if (
+          !existing || existing.resultKind !== resultKind ||
+          existing.requestDigest !== requestDigest ||
+          existing.receiptHash !== input.evidence.receiptSha256 ||
+          !exactBytes(requestBody, existing.requestBytes) ||
+          !exactBytes(input.evidence.canonicalReceiptBody, existing.receiptBytes) ||
+          !exactBytes(input.evidence.exactResponseBody, existing.responseBytes)
+        ) failure("MANIFEST_ACTIVATION_STATUS_INVALID");
+      }
+      return {
+        operationId: input.operationId,
+        resultKind,
+        requestDigest,
+        responseDigest: input.evidence.exactResponseSha256,
+        observedAt: input.observedAt,
+      };
+    }, TRANSACTION);
+  }
+
+  /** Adopts an already-active signed Convex state or reconciles a later signed
+   * observation. This never sends a mutation and explicitly refuses a cleared
+   * state. Exact active and previous manifest bytes must be supplied. */
+  async reconcileSignedActiveState(input: Readonly<{
+    lease: ManifestActivationLease;
+    observationKind: "bootstrap" | "reconciliation";
+    evidence: SignedManifestActiveStateEvidence;
+    observedAt: Date;
+  }>): Promise<ManifestActivationMirror> {
+    if (!validDate(input.observedAt)) {
+      failure("MANIFEST_ACTIVATION_INPUT_INVALID");
+    }
+    const envelope = exactSignedEnvelope(input.evidence);
+    await assertSignedEnvelopeDigest(envelope);
+    const parsedReceipt = catalogManifestActiveStateReceiptSchema.safeParse(
+      envelope.receipt,
+    );
+    const expectedRequestDigest = await catalogManifestPublicationRequestDigest(
+      ACTIVE_STATE_REQUEST,
+    );
+    if (
+      !parsedReceipt.success ||
+      parsedReceipt.data.operationId !== ACTIVE_STATE_REQUEST.operationId ||
+      parsedReceipt.data.requestDigest !== expectedRequestDigest ||
+      parsedReceipt.data.receiptDigest !==
+        await catalogManifestReceiptDigest(parsedReceipt.data)
+    ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+    let activeManifest: GlobalCatalogManifestV1 | null = null;
+    let previousManifest: GlobalCatalogManifestV1 | null = null;
+    try {
+      activeManifest = input.evidence.activeManifest === null
+        ? null
+        : await verifyGlobalCatalogManifestV1(input.evidence.activeManifest);
+      previousManifest = input.evidence.previousManifest === null
+        ? null
+        : await verifyGlobalCatalogManifestV1(input.evidence.previousManifest);
+    } catch {
+      failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+    }
+    const observedState = parsedReceipt.data.details.activeState;
+    assertStateManifestBinding({
+      state: observedState,
+      activeManifest,
+      previousManifest,
+    });
+    const activeBody = activeManifest === null
+      ? null
+      : canonicalJson(activeManifest);
+    const previousBody = previousManifest === null
+      ? null
+      : canonicalJson(previousManifest);
+    const stateBody = canonicalJson(observedState);
+    return this.central.$transaction(async (transaction) => {
+      const current = await lockState(transaction);
+      requireLease(current, input.lease);
+      if (
+        input.observationKind === "bootstrap" &&
+        (current.activeGeneration !== 0n || current.activeManifestId !== null)
+      ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+      const observedGeneration = BigInt(observedState.generation);
+      if (observedGeneration < current.activeGeneration) {
+        failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+      }
+      const sameGeneration = observedGeneration === current.activeGeneration;
+      if (
+        sameGeneration && current.activeManifestId !== null &&
+        (
+          activeBody === null || current.activeManifestBytes === null ||
+          current.activeStateBytes === null ||
+          !exactBytes(activeBody, current.activeManifestBytes) ||
+          !exactBytes(stateBody, current.activeStateBytes)
+        )
+      ) failure("MANIFEST_ACTIVATION_RECONCILIATION_INVALID");
+
+      await transaction.$executeRaw(CentralPrisma.sql`
+        insert into manifest_activation_state_observations (
+          observation_kind, lease_fence, active_generation,
+          active_manifest_id, active_manifest_fingerprint,
+          active_manifest_bytes, active_manifest_bytes_hash,
+          previous_manifest_id, previous_manifest_fingerprint,
+          previous_manifest_bytes, previous_manifest_bytes_hash,
+          active_state_bytes, active_state_hash,
+          request_digest, request_bytes, convex_receipt_id,
+          receipt_hash, receipt_bytes, response_digest, response_bytes,
+          observed_at
+        ) values (
+          ${input.observationKind}, ${input.lease.fence}, ${observedGeneration},
+          ${activeManifest?.publicReleaseId ?? null},
+          ${activeManifest?.manifestFingerprint ?? null},
+          ${activeBody === null ? null : Buffer.from(activeBody, "utf8")},
+          ${activeBody === null ? null : sha256(activeBody)},
+          ${previousManifest?.publicReleaseId ?? null},
+          ${previousManifest?.manifestFingerprint ?? null},
+          ${previousBody === null ? null : Buffer.from(previousBody, "utf8")},
+          ${previousBody === null ? null : sha256(previousBody)},
+          ${Buffer.from(stateBody, "utf8")}, ${sha256(stateBody)},
+          ${expectedRequestDigest},
+          ${Buffer.from(ACTIVE_STATE_REQUEST_BODY, "utf8")},
+          ${parsedReceipt.data.receiptDigest},
+          ${input.evidence.receiptSha256},
+          ${Buffer.from(input.evidence.canonicalReceiptBody, "utf8")},
+          ${input.evidence.exactResponseSha256},
+          ${Buffer.from(input.evidence.exactResponseBody, "utf8")},
+          ${input.observedAt}
+        ) on conflict (response_digest, lease_fence) do nothing
+      `);
+
+      if (activeManifest === null) {
+        if (current.activeManifestId !== null) {
+          failure("MANIFEST_ACTIVATION_CLEAR_FORBIDDEN");
+        }
+        return mapState(current);
+      }
+      if (sameGeneration) return mapState(current);
+      const [updated] = await transaction.$queryRaw<StateRow[]>(CentralPrisma.sql`
+        update manifest_activation_state
+        set active_generation = ${observedGeneration},
+            active_manifest_id = ${activeManifest.publicReleaseId},
+            active_manifest_fingerprint = ${activeManifest.manifestFingerprint},
+            active_manifest_bytes = ${Buffer.from(activeBody!, "utf8")},
+            active_manifest_bytes_hash = ${sha256(activeBody!)},
+            active_state_bytes = ${Buffer.from(stateBody, "utf8")},
+            active_state_hash = ${sha256(stateBody)},
+            previous_manifest_id = ${previousManifest?.publicReleaseId ?? null},
+            previous_manifest_fingerprint = ${previousManifest?.manifestFingerprint ?? null},
+            previous_manifest_bytes = ${previousBody === null
+              ? null
+              : Buffer.from(previousBody, "utf8")},
+            previous_manifest_bytes_hash = ${previousBody === null
+              ? null
+              : sha256(previousBody)},
+            last_receipt_id = ${parsedReceipt.data.receiptDigest},
+            row_version = row_version + 1,
+            updated_at = greatest(
+              updated_at + interval '1 microsecond', ${input.observedAt}
+            )
+        where singleton_key
+          and lease_owner = ${input.lease.owner}
+          and lease_fence = ${input.lease.fence}
+        returning ${stateProjection}
+      `);
+      if (!updated) failure("MANIFEST_ACTIVATION_LEASE_LOST");
+      return mapState(updated);
+    }, TRANSACTION);
   }
 
   async accept(input: Readonly<{

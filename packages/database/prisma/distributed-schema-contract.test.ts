@@ -50,9 +50,14 @@ const CENTRAL_TABLES = [
   "catalog_publication_operations",
   "manifest_activation_state",
   "manifest_activation_operations",
+  "manifest_activation_status_observations",
+  "manifest_activation_state_observations",
   "artifact_retention_executions",
   "manifest_reconciliation_job_wake",
   "manifest_reconciliation_job_schedule",
+  "promotion_job_liveness_evaluator_state",
+  "promotion_job_liveness_observations",
+  "promotion_job_liveness_conditions",
   "manifest_reconciliation_job_invocations",
   "manifest_reconciliation_job_delivery_tombstones",
   "manifest_reconciliation_invocation_details",
@@ -244,6 +249,9 @@ const CENTRAL_SOFT_REFERENCES = [
   "manifest_activation_state.previous_manifest_id",
   "manifest_activation_operations.expected_manifest_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_gate_intents.target_provider_release_id",
+  "manifest_gate_intents.target_catalog_version_id",
+  "manifest_gate_intents.requested_by_operator_id",
   "manifest_reconciliation_job_invocations.result_public_release_id",
 ] as const;
 
@@ -279,8 +287,12 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "catalog_promotion_changes.entity_id",
   "provider_invalidation_checkpoints.confirmed_provider_release_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_gate_intents.requested_by_operator_id",
+  "manifest_gate_intents.target_catalog_version_id",
+  "manifest_gate_intents.target_provider_release_id",
   "manifest_reconciliation_job_invocations.result_public_release_id",
   "manifest_reconciliation_job_invocations.run_id",
+  "promotion_job_liveness_conditions.delivery_event_id",
 ] as const;
 
 const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
@@ -517,7 +529,7 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
 
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
-  assert.equal(centralModels.size, 49);
+  assert.equal(centralModels.size, 54);
   assert.equal(providerModels.size, 37);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);

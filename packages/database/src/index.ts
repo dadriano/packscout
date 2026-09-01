@@ -117,6 +117,7 @@ export * from "./provider-promotion-job-repository.ts";
 export * from "./manifest-reconciliation-job-repository.ts";
 export * from "./manifest-gate-intent-repository.ts";
 export * from "./provider-promotion-invocation-projection-repository.ts";
+export * from "./promotion-job-liveness-repository.ts";
 export * from "./promotion-v2-types.ts";
 export * from "./provider-promotion-repository.ts";
 export * from "./manifest-promotion-repository.ts";

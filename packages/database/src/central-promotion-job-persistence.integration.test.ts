@@ -233,6 +233,62 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
       acknowledgedAt: new Date(base.getTime() + 3_000),
     }), code("PROMOTION_JOB_GATE_INTENT_INVALID"));
 
+    await gates.coalesce({
+      providerId: providerTwo,
+      requestedGeneration: 1n,
+      cause: "provider_completion",
+      evidenceDigest: promotionJobSha256("gate-evidence-provider-two"),
+      requestedAt: new Date(base.getTime() + 3_500),
+    });
+    const firstClaim = await gates.claimNext({
+      owner: "manifest-promotion-test:fair-queue",
+      now: new Date(base.getTime() + 4_000),
+      claimMilliseconds: 60_000,
+    });
+    assert.equal(firstClaim?.providerId, providerOne);
+    await gates.deferClaim({
+      providerId: firstClaim!.providerId,
+      claimToken: firstClaim!.claimToken,
+      observedGeneration: firstClaim!.observedGeneration,
+      failureCode: "PROVIDER_GATEWAY_UNREACHABLE",
+      observedAt: new Date(base.getTime() + 4_100),
+      retryAt: new Date(base.getTime() + 64_100),
+    });
+    const secondClaim = await gates.claimNext({
+      owner: "manifest-promotion-test:fair-queue",
+      now: new Date(base.getTime() + 4_200),
+      claimMilliseconds: 60_000,
+    });
+    assert.equal(
+      secondClaim?.providerId,
+      providerTwo,
+      "provider one deferral cannot prevent provider two from being claimed",
+    );
+    await gates.acknowledgeClaim({
+      providerId: secondClaim!.providerId,
+      claimToken: secondClaim!.claimToken,
+      observedGeneration: secondClaim!.observedGeneration,
+      acknowledgedAt: new Date(base.getTime() + 4_300),
+    });
+    await assert.rejects(gates.acknowledgeClaim({
+      providerId: firstClaim!.providerId,
+      claimToken: firstClaim!.claimToken,
+      observedGeneration: firstClaim!.observedGeneration,
+      acknowledgedAt: new Date(base.getTime() + 4_400),
+    }), code("PROMOTION_JOB_GATE_INTENT_INVALID"));
+    const retriedClaim = await gates.claimNext({
+      owner: "manifest-promotion-test:fair-queue",
+      now: new Date(base.getTime() + 65_000),
+      claimMilliseconds: 60_000,
+    });
+    assert.equal(retriedClaim?.providerId, providerOne);
+    await gates.acknowledgeClaim({
+      providerId: retriedClaim!.providerId,
+      claimToken: retriedClaim!.claimToken,
+      observedGeneration: retriedClaim!.observedGeneration,
+      acknowledgedAt: new Date(base.getTime() + 65_100),
+    });
+
     const rawProviderInvocationId = randomUUID();
     const rawProviderAttemptId = randomUUID();
     const rawProviderReleaseId = randomUUID();
@@ -309,7 +365,7 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
       secondProjection.providerInvocationIdDigest,
       projected.providerInvocationIdDigest,
     );
-    assert.equal((await gates.load(providerOne))?.acknowledgedGeneration, 1n);
+    assert.equal((await gates.load(providerOne))?.acknowledgedGeneration, 2n);
     assert.equal((await manifest.loadWakeIntent()).requestedGeneration, 2n);
 
     const baselineAt = new Date("2026-08-04T12:00:00.000Z");

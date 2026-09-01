@@ -35,9 +35,14 @@ import {
   PrismaManifestActivationRepository,
   type ExactManifestActivationIntentInput,
 } from "./manifest-activation-repository.ts";
+import { PrismaManifestGateIntentRepository } from
+  "./manifest-gate-intent-repository.ts";
+import { PromotionJobPersistenceError } from
+  "./promotion-job-persistence-types.ts";
 import { createMigratedCentralTestDatabase } from "./test-support.ts";
 
 const organizationId = "75000000-0000-4000-8000-000000000001";
+const otherOrganizationId = "75000000-0000-4000-8000-000000000004";
 const providerIds = {
   alpha: "75000000-0000-4000-8000-000000000002",
   beta: "75000000-0000-4000-8000-000000000003",
@@ -58,6 +63,8 @@ const publicReleaseIds = {
   betaOne: "75333333-3333-5333-8333-333333333333",
 } as const;
 const base = new Date("2026-09-01T12:00:00.000Z");
+const operatorId = "75000000-0000-4000-8000-000000000099";
+const otherOperatorId = "75000000-0000-4000-8000-000000000098";
 
 function hash(value: string | Uint8Array): string {
   const digest = createHash("sha256");
@@ -336,6 +343,52 @@ async function receiptEvidence(
   };
 }
 
+async function activeStateEvidence(input: Readonly<{
+  activeState: ActiveCatalogManifestStateV1;
+  activeManifest: GlobalCatalogManifestV1 | null;
+  previousManifest: GlobalCatalogManifestV1 | null;
+  serverTime: string;
+}>) {
+  const request = {
+    schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+    operationId: "catalog-manifest-active-state",
+  } as const;
+  const withoutDigest = {
+    schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+    operationKind: "activeState" as const,
+    operationId: request.operationId,
+    terminalState: "observed" as const,
+    result: "active_state" as const,
+    serverTime: input.serverTime,
+    requestDigest: await catalogManifestPublicationRequestDigest(request),
+    details: { activeState: input.activeState },
+  };
+  const receipt = {
+    ...withoutDigest,
+    receiptDigest: await catalogManifestReceiptDigest(withoutDigest),
+  };
+  const envelope = catalogManifestSignedReceiptEnvelopeSchema.parse({
+    ok: true,
+    receipt,
+    responseAuth: {
+      signatureVersion: PRODUCTION_AUTH_SIGNATURE_VERSION,
+      keyId: "manifest-primary.v1",
+      receiptDigest: receipt.receiptDigest,
+      signature: repeated("a"),
+    },
+  });
+  const canonicalReceiptBody = canonicalJson(receipt);
+  const exactResponseBody = canonicalJson(envelope);
+  return {
+    canonicalReceiptBody,
+    receiptSha256: hash(canonicalReceiptBody),
+    exactResponseBody,
+    exactResponseSha256: hash(exactResponseBody),
+    activeManifest: input.activeManifest,
+    previousManifest: input.previousManifest,
+  };
+}
+
 async function seedCompleteCatalogs(
   database: Awaited<ReturnType<typeof createMigratedCentralTestDatabase>>["client"],
 ): Promise<void> {
@@ -416,6 +469,13 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
         name: "Manifest activation integration",
       },
     });
+    await harness.client.organizations.create({
+      data: {
+        id: otherOrganizationId,
+        slug: "manifest-activation-other-organization",
+        name: "Manifest activation other organization",
+      },
+    });
     await harness.client.providers.createMany({
       data: [{
         id: providerIds.alpha,
@@ -429,7 +489,113 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
         display_name: "Beta",
       }],
     });
+    await harness.client.operators.create({
+      data: {
+        id: operatorId,
+        email_normalized: "manifest-activation@example.test",
+        display_name: "Manifest activation operator",
+        password_hash: "argon2id$manifest-activation-test",
+        state: "active",
+      },
+    });
+    await harness.client.operators.create({
+      data: {
+        id: otherOperatorId,
+        email_normalized: "manifest-activation-other@example.test",
+        display_name: "Other organization operator",
+        password_hash: "argon2id$manifest-activation-other-test",
+        state: "active",
+      },
+    });
+    await harness.client.operator_memberships.createMany({
+      data: [{
+        organization_id: organizationId,
+        operator_id: operatorId,
+        role: "admin",
+      }, {
+        organization_id: otherOrganizationId,
+        operator_id: otherOperatorId,
+        role: "admin",
+      }],
+    });
     await seedCompleteCatalogs(harness.client);
+
+    const gateRepository = new PrismaManifestGateIntentRepository(
+      harness.client,
+    );
+    const authorizationDigest = hash("authorized alpha removal");
+    await assert.rejects(
+      gateRepository.authorizeExplicit({
+        providerId: providerIds.alpha,
+        operation: "remove",
+        targetProviderReleaseId: null,
+        targetCatalogVersionId: null,
+        requestedByOperatorId: otherOperatorId,
+        authorizationDigest,
+        requestedAt: base,
+      }),
+      (error: unknown) =>
+        error instanceof PromotionJobPersistenceError &&
+        error.code === "PROMOTION_JOB_GATE_INTENT_INVALID",
+      "an active admin from another organization cannot authorize a gate",
+    );
+    const explicit = await gateRepository.authorizeExplicit({
+      providerId: providerIds.alpha,
+      operation: "remove",
+      targetProviderReleaseId: null,
+      targetCatalogVersionId: null,
+      requestedByOperatorId: operatorId,
+      authorizationDigest,
+      requestedAt: base,
+    });
+    assert.equal(explicit.operationGeneration, 1n);
+    assert.equal(
+      (await gateRepository.authorizeExplicit({
+        providerId: providerIds.alpha,
+        operation: "remove",
+        targetProviderReleaseId: null,
+        targetCatalogVersionId: null,
+        requestedByOperatorId: operatorId,
+        authorizationDigest,
+        requestedAt: new Date(base.getTime() + 1),
+      })).operationGeneration,
+      1n,
+      "exact explicit authorization replay is idempotent",
+    );
+    await gateRepository.coalesce({
+      providerId: providerIds.alpha,
+      requestedGeneration: 2n,
+      cause: "provider_completion",
+      evidenceDigest: hash("newer automatic gate"),
+      requestedAt: new Date(base.getTime() + 1_000),
+    });
+    const explicitClaim = await gateRepository.claimNext({
+      owner: "manifest-explicit-test",
+      now: new Date(base.getTime() + 2_000),
+      claimMilliseconds: 60_000,
+    });
+    assert.equal(explicitClaim?.observedGeneration, 1n);
+    assert.equal(explicitClaim?.requestedOperation, "remove");
+    const remaining = await gateRepository.acknowledgeClaim({
+      providerId: explicitClaim!.providerId,
+      claimToken: explicitClaim!.claimToken,
+      observedGeneration: explicitClaim!.observedGeneration,
+      acknowledgedAt: new Date(base.getTime() + 3_000),
+    });
+    assert.equal(remaining.pending, true);
+    assert.equal(remaining.requestedOperation, null);
+    const automaticClaim = await gateRepository.claimNext({
+      owner: "manifest-explicit-test",
+      now: new Date(base.getTime() + 4_000),
+      claimMilliseconds: 60_000,
+    });
+    assert.equal(automaticClaim?.observedGeneration, 2n);
+    await gateRepository.acknowledgeClaim({
+      providerId: automaticClaim!.providerId,
+      claimToken: automaticClaim!.claimToken,
+      observedGeneration: automaticClaim!.observedGeneration,
+      acknowledgedAt: new Date(base.getTime() + 5_000),
+    });
 
     const [alphaOne, alphaTwo, betaOne] = await Promise.all([
       reference({
@@ -470,6 +636,30 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
       repository.claimLease("manifest-worker-one", 60_000),
       repositoryCode("MANIFEST_ACTIVATION_LEASE_HELD"),
       "a shared worker name cannot create concurrent live owners",
+    );
+    const bootstrapEvidence = await activeStateEvidence({
+      activeState: emptyState(),
+      activeManifest: null,
+      previousManifest: null,
+      serverTime: "2026-09-01T12:00:00.000Z",
+    });
+    const bootstrapped = await repository.reconcileSignedActiveState({
+      lease: firstLease,
+      observationKind: "bootstrap",
+      evidence: bootstrapEvidence,
+      observedAt: base,
+    });
+    assert.equal(bootstrapped.generation, 0n);
+    const bootstrapRows = await harness.client.$queryRaw<Array<{
+      responseBytes: Uint8Array;
+    }>>(CentralPrisma.sql`
+      select response_bytes as "responseBytes"
+      from manifest_activation_state_observations
+    `);
+    assert.equal(bootstrapRows.length, 1);
+    assert.equal(
+      Buffer.from(bootstrapRows[0]!.responseBytes).toString("utf8"),
+      bootstrapEvidence.exactResponseBody,
     );
 
     const alphaRequest = activateRequest({
@@ -573,6 +763,25 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
     const alphaEvidence = await receiptEvidence(
       alphaRequest,
       "2026-09-01T12:00:06.000Z",
+    );
+    const statusObservation = await repository.recordStatusObservation({
+      lease: recoveryLease,
+      operationId: alphaIntent.id,
+      evidence: alphaEvidence,
+      observedAt: new Date(base.getTime() + 5_500),
+    });
+    assert.equal(statusObservation.resultKind, "terminal");
+    const statusRows = await harness.client.$queryRaw<Array<{
+      responseBytes: Uint8Array;
+    }>>(CentralPrisma.sql`
+      select response_bytes as "responseBytes"
+      from manifest_activation_status_observations
+      where operation_id = ${alphaIntent.id}::uuid
+    `);
+    assert.equal(statusRows.length, 1);
+    assert.equal(
+      Buffer.from(statusRows[0]!.responseBytes).toString("utf8"),
+      alphaEvidence.exactResponseBody,
     );
     const alphaAccepted = await repository.accept({
       lease: recoveryLease,
@@ -704,6 +913,27 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
     assert.equal(
       advanced.operation.exactResponseSha256,
       advanceEvidence.exactResponseSha256,
+    );
+    const clearedState = activeCatalogManifestStateV1Schema.parse({
+      generation: 4,
+      activeManifest: null,
+      previousManifest: null,
+      observation: null,
+      terminalReceiptSha256: repeated("9"),
+    });
+    await assert.rejects(
+      repository.reconcileSignedActiveState({
+        lease: recoveryLease,
+        observationKind: "reconciliation",
+        evidence: await activeStateEvidence({
+          activeState: clearedState,
+          activeManifest: null,
+          previousManifest: null,
+          serverTime: "2026-09-01T12:00:15.000Z",
+        }),
+        observedAt: new Date(base.getTime() + 15_000),
+      }),
+      repositoryCode("MANIFEST_ACTIVATION_CLEAR_FORBIDDEN"),
     );
   } finally {
     await harness.close();

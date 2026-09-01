@@ -26,7 +26,33 @@ export interface ManifestGateIntent {
   readonly latestCause: ManifestReconciliationWakeCause | null;
   readonly latestEvidenceDigest: string | null;
   readonly latestRequestedAt: Date | null;
+  readonly operationGeneration: bigint | null;
+  readonly requestedOperation: ManifestGateExplicitOperation | null;
+  readonly targetProviderReleaseId: string | null;
+  readonly targetCatalogVersionId: string | null;
+  readonly requestedByOperatorId: string | null;
+  readonly authorizationDigest: string | null;
+  readonly attemptCount: number;
+  readonly lastAttemptedAt: Date | null;
+  readonly retryAt: Date | null;
+  readonly lastFailureCode: string | null;
   readonly pending: boolean;
+}
+
+export type ManifestGateExplicitOperation =
+  | "advance"
+  | "add"
+  | "remove"
+  | "rollback";
+
+export interface ManifestGateClaim extends ManifestGateIntent {
+  readonly organizationId: string;
+  readonly providerKey: string;
+  readonly providerLifecycle: "draft" | "active" | "disabled" | "archived";
+  readonly providerRowVersion: bigint;
+  readonly observedGeneration: bigint;
+  readonly claimToken: string;
+  readonly claimExpiresAt: Date;
 }
 
 export interface ProjectProviderPromotionInvocationInput {
