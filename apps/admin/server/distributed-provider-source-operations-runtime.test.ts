@@ -127,7 +127,7 @@ test("an unsupported configured adapter is distinct from absent configuration wi
   assert.equal(databaseReads, 0);
 });
 
-test("distributed request sizes use the current immutable profile, never a different run's configuration", async () => {
+test("distributed current settings and historical run pins remain independent of configuration identity", async () => {
   const configId = uuid(22);
   const run: AdminLocalRunRecord = {
     id: uuid(21), trigger: "manual", state: "running", requestedByOperatorId: uuid(4),
@@ -138,6 +138,9 @@ test("distributed request sizes use the current immutable profile, never a diffe
     materialChangeCount: 100, failureCode: null, failureClass: null,
     requestedAt: new Date(now), startedAt: new Date(now), lastProgressAt: new Date(now),
     heartbeatAt: new Date(now), finishedAt: null,
+    recordsPerRequest: 100,
+    requestSettingsRevisionId: uuid(30),
+    requestSettingsParentRunId: null,
   };
   const overview: AdminLocalProviderOverview = {
     runtimeState: "running", runtimeReason: null, runtimeGeneration: 4n,
@@ -147,7 +150,19 @@ test("distributed request sizes use the current immutable profile, never a diffe
     activeRun: { id: run.id, state: "running" }, latestRun: run,
     openQuarantineCount: 0, latestQuarantineReasonCode: null, latestRetention: null,
   };
-  const older = { ...run, id: uuid(23), configVersionId: uuid(24), state: "succeeded" as const };
+  const older = { ...run, id: uuid(23), configVersionId: uuid(24), state: "succeeded" as const,
+    recordsPerRequest: null, requestSettingsRevisionId: null };
+  const evidence = {
+    overview,
+    runs: [run, older],
+    details: [],
+    measurements: unavailableProviderSourceMeasurements("query_failed"),
+    configurationCurrent: true,
+    requestSettings: {
+      id: uuid(31),
+      recordsPerRequest: 1_000,
+    } as { id: string; recordsPerRequest: number } | null,
+  };
   const runtime = createDistributedProviderSourceOperationsRuntime({
     central: {
       providers: { async findMany() { return [{
@@ -160,20 +175,30 @@ test("distributed request sizes use the current immutable profile, never a diffe
     } as unknown as CentralPrismaClient,
     gateway: {
       async runWithAdminProviderDatabase() {
-        return { state: "reachable", value: { overview, runs: [run, older], details: [],
-          measurements: unavailableProviderSourceMeasurements("query_failed") } };
+        return { state: "reachable", value: evidence };
       },
     } as unknown as Parameters<typeof createDistributedProviderSourceOperationsRuntime>[0]["gateway"],
     sourceIntegrations: createLaunchSourceIntegrationCapabilities(),
     diagnosticCursorKey: new Uint8Array(32).fill(7), now: () => new Date(now),
   });
   const detail = await runtime.operations.detail(organizationId, uuid(20));
-  assert.equal(detail.source.source?.requestSizePolicy, "adapter_profile");
-  assert.equal(detail.source.source?.recordsPerRequest, 2_000);
-  assert.equal(detail.source.activeRun?.recordsPerRequest, 2_000);
+  assert.equal(detail.source.source?.requestSizePolicy, "request_settings_revision");
+  assert.equal(detail.source.source?.requestSettingsRevisionId, uuid(31));
+  assert.equal(detail.source.source?.recordsPerRequest, 1_000);
+  assert.equal(detail.source.activeRun?.recordsPerRequest, 100);
   assert.equal(detail.source.processor?.activity, "running", "a count failure does not hide runtime state");
   assert.deepEqual(detail.source.measurements.storage, { state: "unavailable", reason: "query_failed" });
-  assert.deepEqual(detail.runHistory.map((value) => value.recordsPerRequest), [2_000, null]);
+  assert.deepEqual(detail.runHistory.map((value) => value.recordsPerRequest), [100, null]);
+  evidence.requestSettings = null;
+  const uninitialized = await runtime.operations.detail(organizationId, uuid(20));
+  assert.equal(uninitialized.source.source?.requestSizePolicy, "adapter_profile");
+  assert.equal(uninitialized.source.source?.recordsPerRequest, 2_000);
+  assert.equal(uninitialized.source.source?.requestSettingsRevisionId, null);
+  evidence.configurationCurrent = false;
+  const mismatched = await runtime.operations.detail(organizationId, uuid(20));
+  assert.equal(mismatched.source.source?.recordsPerRequest, null);
+  assert.equal(mismatched.source.source?.requestSettingsRevisionId, null);
+  assert.equal(mismatched.source.activeRun?.recordsPerRequest, 100);
 });
 
 test("authorized empty-org source overview returns 200 while unauthorized reads do no work", async () => {

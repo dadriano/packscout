@@ -88,6 +88,7 @@ const baseSource: ProviderSourceOperationsSource = {
     pauseRequested: false,
     recordsPerRequest: 1_000,
     requestSizePolicy: "schedule_revision",
+    requestSettingsRevisionId: null,
     configuration: {
       validated: true,
       fields: [{ label: "Binding", value: "registered", masked: false }],

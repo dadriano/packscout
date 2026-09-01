@@ -7,6 +7,7 @@ import {
 } from "@packscout/database";
 import {
   ProviderSourceImportRequestError,
+  providerSourceRequestSettingsPolicy,
   type ProviderSourceImportRunSummary,
   type ProviderSourceManualImportDelegate,
 } from "@packscout/services";
@@ -97,6 +98,9 @@ implements ProviderSourceManualImportDelegate {
             commandId,
             runId: this.#ids.id(),
             correlationId: this.#ids.id(),
+            requestSettingsPolicy: providerSourceRequestSettingsPolicy(
+              input.authority.providerKey, input.authority.adapterKey,
+            ),
           });
         if (result.kind !== "created" && result.kind !== "deduplicated") {
           if (

@@ -471,6 +471,7 @@ function sourceSummary(input: Readonly<{
           lifecycle: input.source.state,
           pauseRequested: input.source.pauseRequested,
           recordsPerRequest: input.source.recordsPerRequest,
+          requestSettingsRevisionId: null,
           requestSizePolicy: "schedule_revision",
           configuration: {
             validated: true,

@@ -59,7 +59,7 @@ test("adapter-pinned request sizes are visible without an inapplicable save cont
   );
   cleanupPage(context, rendered);
   await settlePage();
-  assert.match(pageText(rendered), /pinned by the active adapter profile \(2,000 records\)/u);
+  assert.match(pageText(rendered), /No configurable request setting is initialized.*verified adapter default is 2,000 records/u);
   assert.equal(rendered.container.querySelector("#provider-source-records-per-request"), null);
   assert.ok(![...rendered.container.querySelectorAll("button")].some((button) =>
     button.textContent?.includes("Save request size")));

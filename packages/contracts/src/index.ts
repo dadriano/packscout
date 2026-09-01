@@ -26,6 +26,7 @@ export * from "./provider-source-operations-v1.ts";
 export * from "./provider-source-canonical-content-v1.ts";
 export * from "./provider-source-canonical-lifecycle.ts";
 export * from "./dataforrest-events-v1.ts";
+export * from "./dataforrest-distributed-request-policy.ts";
 export * from "./public-repacks.ts";
 export * from "./public-pack-availability-v1.ts";
 export * from "./repack-heat.ts";

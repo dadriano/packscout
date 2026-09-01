@@ -14,9 +14,11 @@ const intent = { pins, authorityDigest: "a".repeat(64), parentRunId: pins.initia
 
 function fixture() {
   const stored = new Map(); const history = []; let run = null; let failQueue = false;
+  const parent = { id: intent.parentRunId, records_per_request: 100,
+    request_settings_revision_id: "337fdac5-d49d-4565-a5cb-af8d9333b607" };
   const database = {
     control_commands: { findUnique: async ({ where }) => stored.get(where.id) ?? null },
-    provider_runs: { findUnique: async () => run },
+    provider_runs: { findUnique: async ({ where }) => where.id === parent.id ? parent : run },
   };
   const commands = {
     async submitRuntimeCommand(input) {
@@ -28,9 +30,12 @@ function fixture() {
     async requestRunNow(input) {
       history.push("queue");
       assert.equal(input.expectedCursorFingerprint, intent.checkpointHash);
+      assert.equal(input.requestSettingsRecoveryParentRunId, intent.parentRunId);
       assert.equal(input.requireNoActiveRun, true); assert.equal(input.expectedGeneration, 3n);
       if (failQueue) throw new Error("test interruption after resume");
       run = { id: input.runId, control_command_id: input.commandId, requested_cursor_hash: intent.checkpointHash,
+        records_per_request: parent.records_per_request, request_settings_revision_id: parent.request_settings_revision_id,
+        request_settings_parent_run_id: parent.id,
         config_version_id: pins.configId, config_version_number: 4n, state: "queued" };
       stored.set(input.commandId, { command_type: "run", state: "accepted", resulting_run_id: input.runId,
         expected_generation: 3n, requested_by_operator_id: pins.operatorId, correlation_id: pins.operationId,
@@ -40,7 +45,7 @@ function fixture() {
   };
   const invoke = (assertPinned = async resumed => { history.push(resumed ? "pin-idle" : "pin-error"); }) =>
     queueBackfillRetry({ database, intent, commands, assertPinned });
-  return { database, commands, stored, history, invoke, getRun: () => run, failQueue: value => { failQueue = value; } };
+  return { database, commands, stored, history, invoke, parent, getRun: () => run, failQueue: value => { failQueue = value; } };
 }
 
 test("terminal source failure resumes and queues exactly once using original generation and checkpoint", async () => {
@@ -80,4 +85,15 @@ test("forged resume provenance and wrong queued checkpoint fail without another 
   const g = fixture(); await g.invoke(); g.getRun().requested_cursor_hash = "f".repeat(64);
   await assert.rejects(g.invoke(), /QUEUED_RUN_CONFLICT/);
   assert.equal(g.history.filter(e => e === "queue").length, 1);
+});
+
+test("a retry keeps the parent's request pin and refuses forged or unknown pin lineage", async () => {
+  const f = fixture(); await f.invoke();
+  assert.equal(f.getRun().records_per_request, 100);
+  f.getRun().records_per_request = 1000;
+  await assert.rejects(f.invoke(), /QUEUED_RUN_CONFLICT/);
+  const g = fixture(); await g.invoke(); g.getRun().request_settings_parent_run_id = pins.operatorId;
+  await assert.rejects(g.invoke(), /QUEUED_RUN_CONFLICT/);
+  const h = fixture(); await h.invoke(); h.parent.request_settings_revision_id = null;
+  await assert.rejects(h.invoke(), /QUEUED_RUN_CONFLICT/);
 });

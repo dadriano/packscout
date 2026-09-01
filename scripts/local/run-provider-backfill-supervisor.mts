@@ -46,7 +46,12 @@ export async function readBackfillView(database: ProviderPrismaClient, pins: Bac
   if (target && intent) {
     const commandId = backfillId(pins.operationId, `command/${intent.parentRunId}`);
     const command = await database.control_commands.findUnique({ where: { id: commandId } });
+    const parent = await database.provider_runs.findUnique({ where: { id: intent.parentRunId } });
     if (target.control_command_id !== commandId || target.requested_cursor_hash !== intent.checkpointHash ||
+      !parent || target.request_settings_parent_run_id !== parent.id ||
+      parent.records_per_request === null || parent.request_settings_revision_id === null ||
+      target.records_per_request !== parent.records_per_request ||
+      target.request_settings_revision_id !== parent.request_settings_revision_id ||
       target.config_version_id !== pins.configId || target.config_version_number !== authority.configNumber ||
       !command || command.resulting_run_id !== target.id || command.command_type !== "run" ||
       command.correlation_id !== pins.operationId || command.requested_by_operator_id !== pins.operatorId ||

@@ -4,6 +4,7 @@ import {
   dataforrestOpaqueCursorV1Schema,
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestEventsV1SourceAdapterManifest,
+  dataforrestDistributedRequestPolicy,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
   type SourceAdapterFailure,
@@ -130,6 +131,7 @@ function recordsScopesMatch(operation: Exclude<
 function validateCaptureOperation(
   operation: SourceAdapterOperation,
   manifest: SourceAdapterManifestV1,
+  distributedRun: Readonly<{ provider: LaunchProviderKey; maximumRecords: number }> | null,
 ): OperationValidation {
   if (
     operation.sourceTypeKey !== manifest.sourceTypeKey ||
@@ -235,7 +237,12 @@ function validateCaptureOperation(
       ),
     };
   }
-  if (operation.bounds.pageLimit > manifestBounds.pageLimit) {
+  const maximumRecords = operation.operationKind === "page_read" && distributedRun !== null
+    ? distributedRun.maximumRecords
+    : manifestBounds.pageLimit;
+  if (operation.bounds.pageLimit > maximumRecords ||
+    (operation.operationKind === "page_read" && distributedRun !== null &&
+      operation.provider !== distributedRun.provider)) {
     return {
       ok: false,
       failure: stableFailure(
@@ -390,14 +397,29 @@ function mapTransportFailure(
 export class DataforrestEventsSourceAdapter implements SourceAdapter {
   readonly manifest: SourceAdapterManifestV1;
   readonly #requestDependencies: HardenedProviderRequestDependencies;
+  readonly #distributedRun: Readonly<{ provider: LaunchProviderKey; maximumRecords: number }> | null;
 
   constructor(
     requestDependencies: HardenedProviderRequestDependencies = {},
     manifest: SourceAdapterManifestV1 =
       dataforrestEventsV1SourceAdapterManifest,
+    requestPolicy?: Readonly<{ mode: "distributed_run_pin"; provider: LaunchProviderKey }>,
   ) {
     this.#requestDependencies = requestDependencies;
     this.manifest = manifest;
+    this.#distributedRun = null;
+    if (requestPolicy !== undefined) {
+      const capacity = dataforrestDistributedRequestPolicy(manifest.adapterVersion, requestPolicy.provider);
+      if (requestPolicy.mode !== "distributed_run_pin" || capacity === null ||
+        manifest.requestBounds.pageLimit !== capacity.defaultRecordsPerRequest ||
+        manifest.requestBounds.maximumResponseBytes !== capacity.maximumResponseBytes ||
+        manifest.requestBounds.timeoutMilliseconds !== capacity.timeoutMilliseconds ||
+        !manifest.supportedProviders.some(({ provider }) => provider === requestPolicy.provider)) {
+        throw new TypeError("Distributed DataForrest request capacity is invalid.");
+      }
+      this.#distributedRun = Object.freeze({ provider: requestPolicy.provider,
+        maximumRecords: capacity.maximumRecordsPerRequest });
+    }
   }
 
   validateConnectionConfiguration(
@@ -458,7 +480,7 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
       }
       throw error;
     }
-    const validation = validateCaptureOperation(operation, this.manifest);
+    const validation = validateCaptureOperation(operation, this.manifest, this.#distributedRun);
     if (!validation.ok) return failedRequest(validation.failure);
     try {
       const capture = await captureHardenedProviderResponse(

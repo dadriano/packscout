@@ -8,6 +8,8 @@ import type {
   ProviderSourceCursorResetPreview,
   ReviseProviderSourceIntervalRequest,
   ReviseProviderSourceRecordsPerRequestRequest,
+  ReviseDistributedProviderRequestSettingsRequest,
+  ReviseDistributedProviderRequestSettingsResponse,
   RotateSourceConnectionCredentialRequest,
 } from "@packscout/contracts";
 import { requestJson } from "./client";
@@ -193,6 +195,16 @@ export function reviseProviderSourceRecordsPerRequest(
     method: "POST",
     json: input,
   });
+}
+
+export function reviseDistributedProviderRequestSettings(
+  providerId: string,
+  input: ReviseDistributedProviderRequestSettingsRequest,
+) {
+  return requestJson<ReviseDistributedProviderRequestSettingsResponse>(
+    sourcePath(providerId, providerId, "records-per-request"),
+    { method: "POST", json: input },
+  );
 }
 
 export function previewProviderSourceCursorReset(

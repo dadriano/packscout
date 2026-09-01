@@ -46,6 +46,9 @@ export interface ProviderCapturePageSourceInput {
   readonly runId: string;
   readonly workerFence: bigint;
   readonly pageNumber: number;
+  /** Required by the live distributed source; capture-only sources do not consume a request setting. */
+  readonly recordsPerRequest?: number | null;
+  readonly requestSettingsRevisionId?: string | null;
   readonly sourceCheckpoint: CanonicalJsonValue | null;
   readonly sourceCheckpointFingerprint: string | null;
   readonly signal: AbortSignal;

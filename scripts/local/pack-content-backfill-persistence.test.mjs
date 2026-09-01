@@ -65,15 +65,18 @@ async function fixture(bin) {
     assert.equal(acquired.kind, "acquired"); const lease = acquired.lease;
     const runs = new PrismaProviderRunRepository(db);
     const runId = randomUUID();
+    // Seed a historical, request-unmanaged run without inventing an HTTP receipt.
     assert.equal((await runs.start({ runId, idempotencyKey: "fixture:head", trigger: "scheduled",
       requestedByOperatorId: null, configVersionId, configVersionNumber: 1n, workerId: owner,
-      workerFence: lease.fence, correlationId: randomUUID(), requestedAt: new Date() })).kind, "started");
+      workerFence: lease.fence, correlationId: randomUUID(), requestedAt: new Date(),
+      requestSettingsPolicy: "unmanaged" })).kind, "started");
     const cursor = { opaque: "protected-fixture-checkpoint-do-not-log" };
     assert.equal((await runs.commitPage({ pageId: randomUUID(), runId, workerId: owner, workerFence: lease.fence,
       contractVersion: "fixture-page-v1", requestedCursor: null, requestedCursorHash: null,
       nextCursor: cursor, nextCursorHash: providerMixedCursorFingerprint(cursor), continuation: "head",
       responseDigest: "b".repeat(64), counts: { records: 0, catalog: 0, pulls: 0, marketEvents: 0,
-        accepted: 0, duplicate: 0, quarantined: 0, materialChanges: 0 }, committedAt: new Date() })).kind, "committed");
+        accepted: 0, duplicate: 0, quarantined: 0, materialChanges: 0 }, committedAt: new Date(),
+      requestSettingsPolicy: "unmanaged" })).kind, "committed");
     assert.equal((await runs.finish({ runId, workerId: owner, workerFence: lease.fence, state: "succeeded",
       failureCode: null, failureClass: null, failureSummary: null, correlationId: randomUUID(), finishedAt: new Date() })).kind, "finished");
     const capturedAt = new Date().toISOString();
@@ -164,7 +167,8 @@ test("catalog-only backfill checkpoints are fenced, resumable and preserve the e
       const runId = randomUUID();
       assert.equal((await f.runs.start({ runId, idempotencyKey: "fixture:incomplete", trigger: "scheduled", requestedByOperatorId: null,
         configVersionId: f.manifest.configVersionId, configVersionNumber: BigInt(f.manifest.configVersionNumber),
-        workerId: f.lease.owner, workerFence: f.lease.fence, correlationId: randomUUID(), requestedAt: new Date() })).kind, "started");
+        workerId: f.lease.owner, workerFence: f.lease.fence, correlationId: randomUUID(), requestedAt: new Date(),
+        requestSettingsPolicy: "unmanaged" })).kind, "started");
       assert.equal((await f.runs.finish({ runId, workerId: f.lease.owner, workerFence: f.lease.fence, state: "incomplete",
         failureCode: "TEST_INTERRUPTION", failureClass: "worker", failureSummary: "Test incomplete run",
         correlationId: randomUUID(), finishedAt: new Date() })).kind, "finished");

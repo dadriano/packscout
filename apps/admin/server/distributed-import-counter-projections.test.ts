@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { dataforrestClutchpacksDistributedSourceAdapterManifest } from "@packscout/contracts";
 import {
   PrismaAdminProviderRuntimeRepository,
+  PrismaProviderRequestSettingsRepository,
   type AdminLocalProviderOverview,
   type AdminLocalRunDetailRecord,
   type BoundedProviderDatabaseGateway,
@@ -29,6 +30,9 @@ const run: AdminLocalRunDetailRecord = {
   configVersionId: "31000000-0000-4000-8000-000000000004",
   configVersionNumber: 1n,
   workerFence: 1n,
+  recordsPerRequest: null,
+  requestSettingsRevisionId: null,
+  requestSettingsParentRunId: null,
   attemptNumber: 1,
   recoveryOfRunId: null,
   requestedCursorHash: null,
@@ -89,6 +93,10 @@ test("source and page projections preserve known dispositions without guessing i
   context.mock.method(PrismaAdminProviderRuntimeRepository.prototype, "overview", async () => overview);
   context.mock.method(PrismaAdminProviderRuntimeRepository.prototype, "listRuns", async () => ({ items: [run], hasMore: false }));
   context.mock.method(PrismaAdminProviderRuntimeRepository.prototype, "getRun", async () => run);
+  context.mock.method(PrismaProviderRequestSettingsRepository.prototype, "current", async (input: { readonly providerId: string }) => {
+    assert.deepEqual(input, { providerId: provider.id });
+    return null;
+  });
   const central = {
     providers: {
       async findMany() {
@@ -97,20 +105,31 @@ test("source and page projections preserve known dispositions without guessing i
           lifecycle: "active",
           active_config_version: {
             id: run.configVersionId,
+            version_number: run.configVersionNumber,
             adapter_key: dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion,
             schedule_seconds: 300, stale_after_seconds: 900,
+            expires_at: null,
           },
         }];
       },
     },
   } as unknown as CentralPrismaClient;
+  const currentRuntime = {
+    central_provider_id: provider.id, provider_key: provider.key,
+    cached_config_version_id: run.configVersionId, cached_config_version_number: run.configVersionNumber,
+    cached_configuration: { adapterKey: dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion },
+    config_expires_at: null as Date | null,
+  };
+  let localRuntime = { ...currentRuntime };
   const gateway = {
     async runWithAdminProviderDatabase(
       target: { organizationId: string; providerId: string },
       read: (database: ProviderPrismaClient) => Promise<unknown>,
     ) {
       assert.deepEqual(target, { organizationId, providerId: provider.id });
-      return { state: "reachable", value: await read({} as ProviderPrismaClient) };
+      return { state: "reachable", value: await read({
+        provider_runtime: { async findUnique() { return localRuntime; } },
+      } as unknown as ProviderPrismaClient) };
     },
   } as unknown as Pick<BoundedProviderDatabaseGateway, "runWithAdminProviderDatabase">;
   const runtime = createDistributedProviderSourceOperationsRuntime({
@@ -122,4 +141,17 @@ test("source and page projections preserve known dispositions without guessing i
   assert.deepEqual(detail.source.progress.dispositions, expected);
   assert.deepEqual(detail.pageProgress[0]?.dispositions, expected);
   assert.equal(detail.source.progress.records.total, 10);
+  assert.equal(detail.source.source?.recordsPerRequest, 2_000);
+  assert.equal(detail.source.source?.requestSizePolicy, "adapter_profile");
+  for (const mismatch of [
+    { central_provider_id: organizationId }, { provider_key: "phygitals" },
+    { cached_config_version_id: organizationId }, { cached_config_version_number: 2n },
+    { cached_configuration: { adapterKey: "unknown" } }, { config_expires_at: now },
+  ]) {
+    localRuntime = { ...currentRuntime, ...mismatch };
+    const unavailable = await runtime.operations.detail(organizationId, provider.id);
+    assert.equal(unavailable.source.source?.recordsPerRequest, null);
+    assert.equal(unavailable.source.source?.requestSettingsRevisionId, null);
+    assert.deepEqual(unavailable.source.progress.dispositions, expected);
+  }
 });

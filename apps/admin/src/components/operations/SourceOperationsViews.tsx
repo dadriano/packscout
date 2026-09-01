@@ -8,7 +8,11 @@ import { Link } from "react-router-dom";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
 import { recordsPerRequestDisplay } from "../source-configuration/records-per-request";
 import { dateTime, humanize, insertRevisionCounts, interval } from "./OperationStatus";
-import { SourceOperationControls, type SourceOperationCommand } from "./SourceOperationControls";
+import {
+  SourceOperationControls,
+  sourceRequestSettingsUnavailable,
+  type SourceOperationCommand,
+} from "./SourceOperationControls";
 
 export type { SourceOperationCommand } from "./SourceOperationControls";
 
@@ -171,6 +175,7 @@ export function ProviderSourceOperationsLedger({
         {sources.map((source) => {
           const operational = sourceOperationalLabel(source);
           const actionRequired = source.processor?.activity === "action_required";
+          const requestSettingsUnavailable = sourceRequestSettingsUnavailable(source);
           return (
             <article key={source.providerId} className={`source-lane is-${source.processor?.activity ?? "unconfigured"}`}>
               <div className="source-lane__rail" aria-hidden="true"><span /></div>
@@ -214,8 +219,15 @@ export function ProviderSourceOperationsLedger({
               {actionRequired ? (
                 <aside className="admin-note admin-note-warning source-recovery-guidance" role="note">
                   <strong>Administrator recovery required.</strong>{" "}
-                  Disable this source, correct the reported cause, run Test source while disabled, Activate paused, then Resume. Run now and Resume cannot clear Action required.
+                  {source.source?.requestSizePolicy === "schedule_revision"
+                    ? "Disable this source, correct the reported cause, run Test source while disabled, Activate paused, then Resume. Run now and Resume cannot clear Action required."
+                    : "Review the recorded failure and correct its cause before an authorized recovery. Changing request size does not restart work or clear the failure."}
                 </aside>
+              ) : null}
+              {requestSettingsUnavailable ? (
+                <p className="source-config-field-help" role="note">
+                  Run now requires verified request settings and an authorized worker handoff. No new run can be requested from this page yet.
+                </p>
               ) : null}
               <footer className="source-lane__actions">
                 {source.configured ? <Link to={`/providers/${source.providerId}`}>Diagnostics</Link> : <Link to="/source-configuration">Configure source</Link>}

@@ -149,6 +149,22 @@ test("unsupported configured adapters have distinct guidance from missing config
   assert.equal(pulseNeedsAttention(unsupported), true);
 });
 
+test("distributed providers without managed request settings cannot start or expose legacy lifecycle controls", async (context) => {
+  const overview = operationsOverview();
+  const distributed = operationSource(0);
+  distributed.source!.requestSizePolicy = "adapter_profile";
+  distributed.source!.requestSettingsRevisionId = null;
+  overview.sources = [distributed];
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+  const card = rendered.container.querySelector(`[data-provider-id="${distributed.providerId}"]`)!;
+  await act(async () => card.querySelector("summary")!.click());
+  const requestSettingsButton = [...card.querySelectorAll("button")].find((button) => button.textContent === "Request settings unavailable")!;
+  assert.equal(requestSettingsButton.disabled, true);
+  assert.match(card.textContent!, /Run now requires verified request settings and an authorized worker handoff/u);
+  assert.ok(![...card.querySelectorAll("button")].some((button) => /^(Pause|Resume)$/u.test(button.textContent ?? "")));
+});
+
 test("terminal and paused state take precedence over historical retries and stale running evidence", () => {
   const source = operationSource(0);
   source.processor!.retryCount = 7;

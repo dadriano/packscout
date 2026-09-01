@@ -10,21 +10,23 @@ import {
 } from "@packscout/contracts";
 import {
   PrismaAdminProviderRuntimeRepository,
+  PrismaProviderRequestSettingsRepository,
   type AdminLocalRunDetailRecord,
+  type AdminLocalRunRecord,
   type BoundedProviderDatabaseGateway,
   type CentralPrismaClient,
 } from "@packscout/database";
 import {
   ProviderSourceOperationsError,
+  type ProviderSourceIntegrationCapability,
   type ProviderSourceIntegrationCapabilityRegistry,
 } from "@packscout/services";
 import type { ProviderSourceOperationsRouterDependencies } from
   "./routes/provider-source-operations.ts";
 import {
-  configuredSource,
-  runSummary,
-  type CentralSourceProvider,
-  type LocalSourceEvidence,
+  configuredSource as projectConfiguredSource,
+  type CentralSourceProvider as ProjectedCentralSourceProvider,
+  type LocalSourceEvidence as ProjectedLocalSourceEvidence,
 } from "./distributed-provider-source-projection.ts";
 import { ProviderPulseMeasurementReader } from "./provider-pulse-measurements.ts";
 
@@ -33,6 +35,77 @@ const PROVIDER_READ_CONCURRENCY = 4;
 const safeCodePattern = /^[A-Z][A-Z0-9_]{0,127}$/u;
 const registrationKeyPattern = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u;
 
+interface CentralSourceProvider extends ProjectedCentralSourceProvider {
+  readonly activeConfig: null | Readonly<{
+    id: string;
+    version: bigint;
+    adapterKey: string;
+    scheduleSeconds: number;
+    staleAfterSeconds: number;
+    expiresAt: Date | null;
+  }>;
+}
+
+interface LocalSourceEvidence extends ProjectedLocalSourceEvidence {
+  readonly configurationCurrent: boolean;
+  readonly requestSettings: Readonly<{ id: string; recordsPerRequest: number }> | null;
+}
+
+function safeCode(value: string | null, fallback: string): string | null {
+  if (value === null) return null;
+  return safeCodePattern.test(value) ? value : fallback;
+}
+
+function runSummary(run: AdminLocalRunRecord | null) {
+  if (run === null) return null;
+  return {
+    id: run.id,
+    trigger: run.trigger,
+    state: run.state,
+    requestedAt: run.requestedAt.toISOString(),
+    startedAt: run.startedAt?.toISOString() ?? null,
+    finishedAt: run.finishedAt?.toISOString() ?? null,
+    lastProgressAt: (run.lastProgressAt ?? run.requestedAt).toISOString(),
+    reachedHead: run.reachedSourceHead,
+    failureCode: safeCode(run.failureCode, "IMPORT_FAILURE_UNAVAILABLE"),
+    // Settings can change independently of source configuration. Only the
+    // immutable run pin says what this run actually requested.
+    recordsPerRequest: run.recordsPerRequest,
+  };
+}
+
+function configuredSource(input: Readonly<{
+  provider: CentralSourceProvider;
+  evidence: LocalSourceEvidence | null;
+  capability: ProviderSourceIntegrationCapability | null;
+  now: Date;
+}>): ProviderSourceOperationsSource {
+  const projected = projectConfiguredSource(input);
+  const overview = input.evidence?.overview ?? null;
+  const latest = input.evidence?.runs[0] ?? null;
+  const active = overview?.activeRun
+    ? input.evidence?.runs.find((run) => run.id === overview.activeRun?.id) ?? null
+    : null;
+  const requestSettingsAvailable = input.evidence?.configurationCurrent === true;
+  const requestSettings = requestSettingsAvailable ? input.evidence?.requestSettings : null;
+  return {
+    ...projected,
+    source: projected.source === null
+      ? null
+      : {
+          ...projected.source,
+          recordsPerRequest: requestSettingsAvailable
+            ? requestSettings?.recordsPerRequest ?? projected.source.recordsPerRequest
+            : null,
+          requestSizePolicy: requestSettingsAvailable && !requestSettings
+            ? "adapter_profile"
+            : "request_settings_revision",
+          requestSettingsRevisionId: requestSettings?.id ?? null,
+        },
+    activeRun: runSummary(active),
+    latestRun: runSummary(latest),
+  };
+}
 function registrationKey(value: string): string {
   const candidate = value.toLowerCase().replace(/[^a-z0-9._-]+/gu, "_")
     .replace(/^[_\-.]+|[_\-.]+$/gu, "").slice(0, 128);
@@ -84,9 +157,11 @@ export function createDistributedProviderSourceOperationsRuntime(
         active_config_version: {
           select: {
             id: true,
+            version_number: true,
             adapter_key: true,
             schedule_seconds: true,
             stale_after_seconds: true,
+            expires_at: true,
           },
         },
       },
@@ -100,9 +175,11 @@ export function createDistributedProviderSourceOperationsRuntime(
         ? null
         : {
             id: row.active_config_version.id,
+            version: row.active_config_version.version_number,
             adapterKey: row.active_config_version.adapter_key,
             scheduleSeconds: row.active_config_version.schedule_seconds,
             staleAfterSeconds: row.active_config_version.stale_after_seconds,
+            expiresAt: row.active_config_version.expires_at,
           },
     }));
   }
@@ -116,17 +193,47 @@ export function createDistributedProviderSourceOperationsRuntime(
       { organizationId, providerId: provider.id },
       async (database) => {
         const repository = new PrismaAdminProviderRuntimeRepository(database);
-        const [overview, page, measured] = await Promise.all([
+        const [overview, page, requestSettings, runtime, measured] = await Promise.all([
           repository.overview(),
           repository.listRuns({ snapshotAt: now(), limit: 25 }),
+          new PrismaProviderRequestSettingsRepository(database).current({ providerId: provider.id }),
+          database.provider_runtime.findUnique({
+            where: { singleton_key: true },
+            select: {
+              central_provider_id: true,
+              provider_key: true,
+              cached_config_version_id: true,
+              cached_config_version_number: true,
+              cached_configuration: true,
+              config_expires_at: true,
+            },
+          }),
           measurements.read(database, { organizationId, providerId: provider.id,
             configurationId: provider.activeConfig!.id }),
         ]);
+        const observedAt = now().getTime();
+        const config = provider.activeConfig;
+        const cached = runtime?.cached_configuration;
+        const configurationCurrent = !!config && !!runtime &&
+          runtime.central_provider_id === provider.id && runtime.provider_key === provider.key &&
+          runtime.cached_config_version_id === config.id &&
+          runtime.cached_config_version_number === config.version &&
+          typeof cached === "object" && cached !== null && !Array.isArray(cached) &&
+          cached.adapterKey === config.adapterKey &&
+          (runtime.config_expires_at === null || runtime.config_expires_at.getTime() > observedAt) &&
+          (config.expiresAt === null || config.expiresAt.getTime() > observedAt);
         const details = includeDetails
           ? (await Promise.all(page.items.map((run) => repository.getRun(run.id))))
               .filter((detail): detail is AdminLocalRunDetailRecord => detail !== null)
           : [];
-        return { overview, runs: page.items, details, measurements: measured };
+        return {
+          overview,
+          runs: page.items,
+          details,
+          measurements: measured,
+          requestSettings,
+          configurationCurrent,
+        };
       },
     );
     return result.state === "reachable" ? result.value : null;
@@ -221,10 +328,7 @@ export function createDistributedProviderSourceOperationsRuntime(
         refreshedAt: now().toISOString(),
         connection: null,
         source: view.source,
-        runHistory: (view.evidence?.runs ?? []).map((run) => runSummary(run, {
-          configId: view.source.source!.sourceRevisionId,
-          pageLimit: view.source.source!.recordsPerRequest,
-        })),
+        runHistory: (view.evidence?.runs ?? []).map(runSummary),
         pageProgress: pages,
         sourceTest: null,
       });

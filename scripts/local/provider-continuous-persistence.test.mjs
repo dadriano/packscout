@@ -17,6 +17,10 @@ function fixture() {
     adapterVersion: integration.manifest.adapterVersion, cursorCodecKey: integration.manifest.cursorCodecKey,
     cursorGeneration: 1, value: "synthetic-private-continuation" };
   const hash = providerMixedCursorFingerprint(cursor);
+  const setting = { id: "8b333333-3333-4333-8333-333333333337", revision_number: 1n,
+    records_per_request: 1000, origin: "operator", config_version_id: pins.configId,
+    config_version_number: 4n, adapter_key: integration.manifest.adapterVersion,
+    created_by_operator_id: pins.operatorId, created_at: now };
   const runtime = { central_provider_id: pins.providerId, provider_key: pins.providerKey, operating_state: "idle",
     state_generation: 11n, cached_config_version_id: pins.configId, cached_config_version_number: 4n,
     cached_configuration: authority.cachedConfiguration, config_expires_at: null, schedule_seconds: 300,
@@ -44,6 +48,7 @@ function fixture() {
     },
     database_identity: { findUniqueOrThrow: async () => ({ database_role: "provider", provider_id: pins.providerId, provider_key: pins.providerKey }) },
     provider_runtime: { findUniqueOrThrow: async () => runtime },
+    provider_request_settings: { findUnique: async () => ({ active_revision: setting }) },
     provider_worker_states: { findUniqueOrThrow: async () => lease, updateMany: async ({ where, data }) => {
       assert.equal(where.row_version, lease.row_version); writes.push("lease");
       const next = { ...data }; delete next.row_version; Object.assign(lease, next); lease.row_version++; return { count: 1 };
@@ -74,7 +79,7 @@ function fixture() {
   };
   const view = () => readContinuousView(database, pins, authority);
   const persist = async () => persistContinuousCycle(database, pins, authority, await view());
-  return { now, cursor, hash, authority, database, runtime, parent, last, runs, commands, audits, writes, lease, view, persist,
+  return { now, cursor, hash, authority, database, runtime, parent, last, runs, commands, audits, writes, lease, view, persist, setting,
     queue: cycle => queueContinuousCycle({ database, cycle, readAuthority: async () => authority }),
     onNextLease(callback) { beforeAcquire = callback; } };
 }
@@ -90,7 +95,21 @@ test("durable head receipt and queue copy exact full checkpoint once, retain his
   assert.equal(f.runtime.state_generation, 11n); assert.equal(f.commands.size, 1);
   assert.equal([...f.commands.values()][0].command_type, "run");
   assert.equal(f.lease.lease_owner, null); assert.equal(f.lease.lease_fence, 460n);
+  assert.equal(f.runs.get(cycle.runId).records_per_request, 1000);
+  assert.equal(f.runs.get(cycle.runId).request_settings_revision_id, f.setting.id);
   assert.equal((await f.view()).cycleQueued, true);
+});
+test("a new head-poll cycle pins the current setting rather than guessing the historical parent's limit", async () => {
+  const f = fixture(); const cycle = await f.persist();
+  f.setting.records_per_request = 500;
+  f.setting.revision_number = 2n;
+  f.setting.id = "8b333333-3333-4333-8333-333333333338";
+  await f.queue(cycle);
+  const child = f.runs.get(cycle.runId);
+  assert.equal(child.records_per_request, 500);
+  assert.equal(child.request_settings_revision_id, f.setting.id);
+  assert.equal(child.request_settings_parent_run_id, null);
+  assert.deepEqual(child.requested_cursor, f.cursor);
 });
 test("request acknowledgement loss is replay-safe and an advanced completed child remains recognized", async () => {
   const f = fixture(); const cycle = await f.persist(); const commands = new PrismaAdminProviderRuntimeRepository(f.database);

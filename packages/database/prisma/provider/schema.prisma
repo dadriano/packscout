@@ -572,6 +572,30 @@ model provider_worker_states {
   updated_at       DateTime    @default(now()) @db.Timestamptz(6)
 }
 
+// Independent request policy. Revisions are append-only; changing the pointer
+// does not change source configuration, runtime generation, or checkpoints.
+model provider_request_settings {
+  singleton_key      Boolean  @id @default(true)
+  active_revision_id String   @unique @db.Uuid
+  active_revision    provider_request_settings_revisions @relation(fields: [active_revision_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+model provider_request_settings_revisions {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revision_number        BigInt   @unique
+  records_per_request    Int
+  origin                 String
+  config_version_id      String   @db.Uuid
+  config_version_number  BigInt
+  adapter_key            String
+  created_by_operator_id String?  @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+  active_settings        provider_request_settings?
+  runs                   provider_runs[]
+
+  @@unique([id, records_per_request], map: "provider_request_settings_revision_pin_key")
+}
+
 model provider_runs {
   id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   control_command_id        String?     @db.Uuid
@@ -582,6 +606,10 @@ model provider_runs {
   requested_by_operator_id  String?     @db.Uuid
   config_version_id         String      @db.Uuid
   config_version_number     BigInt
+  // Null means historical/uninitialized, not the adapter default or latest setting.
+  records_per_request       Int?
+  request_settings_revision_id String? @db.Uuid
+  request_settings_parent_run_id String? @db.Uuid
   worker_fence              BigInt
   attempt_number            Int         @default(1)
   requested_cursor          Json?       @db.JsonB
@@ -617,6 +645,9 @@ model provider_runs {
   pages              provider_run_pages[]
   quarantines        quarantine_records[]
   activity_events    provider_activity_outbox[]
+  request_settings_revision provider_request_settings_revisions? @relation(fields: [request_settings_revision_id, records_per_request], references: [id, records_per_request], onDelete: Restrict, onUpdate: NoAction, map: "provider_runs_request_settings_revision_fkey")
+  request_settings_parent_run provider_runs? @relation("provider_run_request_settings_parent", fields: [request_settings_parent_run_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_runs_request_settings_parent_fkey")
+  request_settings_child_runs provider_runs[] @relation("provider_run_request_settings_parent")
 
   @@index([control_command_id], map: "provider_runs_control_command_id_idx")
   @@index([recovery_of_run_id], map: "provider_runs_recovery_of_run_id_idx")

@@ -72,6 +72,8 @@ const PROVIDER_TABLES = [
   "provider_state_events",
   "provider_worker_states",
   "provider_runs",
+  "provider_request_settings",
+  "provider_request_settings_revisions",
   "provider_run_pages",
   "control_commands",
   "quarantine_records",
@@ -235,6 +237,8 @@ const CENTRAL_SOFT_REFERENCES = [
 ] as const;
 
 const PROVIDER_SOFT_REFERENCES = [
+  "provider_request_settings_revisions.config_version_id",
+  "provider_request_settings_revisions.created_by_operator_id",
   "database_identity.provider_id",
   "provider_runtime.central_provider_id",
   "provider_runtime.cached_config_version_id",
@@ -269,6 +273,8 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
 ] as const;
 
 const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
+  "provider_request_settings_revisions.config_version_id",
+  "provider_request_settings_revisions.created_by_operator_id",
   "database_identity.provider_id",
   "market_events.event_group_id",
   "promotion_changes.entity_id",
@@ -502,7 +508,7 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
   assert.equal(centralModels.size, 42);
-  assert.equal(providerModels.size, 32);
+  assert.equal(providerModels.size, 34);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 

@@ -126,6 +126,8 @@ test("distributed source overview accepts one bounded ClutchPacks lane with real
           },
           runs: [],
           details: [],
+          configurationCurrent: true,
+          requestSettings: null,
         },
       };
     },
@@ -168,6 +170,7 @@ test("concrete factory composes current-admin provider dependencies without lega
   assert.ok(runtime.app.canonical);
   assert.ok(runtime.app.importOperations);
   assert.ok(runtime.app.providerSourceOperations);
+  assert.ok(runtime.app.providerRequestSettings);
   assert.equal(runtime.app.providerSources, undefined);
   await runtime.close();
 });

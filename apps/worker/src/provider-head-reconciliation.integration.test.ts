@@ -40,7 +40,8 @@ test("head progress survives a callback crash, resumes receipts without source r
       configuration: { adapterKey: "synthetic-head" }, expiresAt: null, scheduleSeconds: 300, nextDueAt: null, synchronizedAt: new Date() });
     const runId = await enqueue(harness, configId, 1); let workerId = "integration:durable-head";
     let sourceReads = 0;
-    const source = { supports: () => true, async nextPage(input: Parameters<import("./provider-manual-import-executor.ts").ProviderManualImportPageSource["nextPage"]>[0]) {
+    const source = { supports: () => true, requestSettingsPolicy: () => "unmanaged" as const,
+      async nextPage(input: Parameters<import("./provider-manual-import-executor.ts").ProviderManualImportPageSource["nextPage"]>[0]) {
       sourceReads += 1; assert.equal(sourceReads, 1, "Committed source head must never be fetched again.");
       const nextCursor = { at: "synthetic-head" };
       const body = { contractVersion: PROVIDER_MIXED_PAGE_CONTRACT_VERSION, providerId: input.authority.providerId,

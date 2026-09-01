@@ -15,6 +15,7 @@ const provider: CentralSourceProvider = {
 const active: AdminLocalRunRecord = {
   id: uuid(3), trigger: "manual", state: "running", requestedByOperatorId: null,
   configVersionId: uuid(2), configVersionNumber: 1n, workerFence: 1n,
+  recordsPerRequest: 321, requestSettingsRevisionId: uuid(5), requestSettingsParentRunId: null,
   attemptNumber: 1, recoveryOfRunId: null, requestedCursorHash: null, finalCursorHash: null,
   reachedSourceHead: false, pageCount: 8, catalogCount: 100, pullCount: 200,
   marketEventCount: 300, acceptedCount: 570, duplicateCount: 10, quarantinedCount: 20,
@@ -62,6 +63,7 @@ for (const newestState of ["queued", "succeeded"] as const) {
     };
     const source = project(evidence(newest));
     assert.equal(source.activeRun?.id, active.id);
+    assert.equal(source.activeRun?.recordsPerRequest, 321, "the immutable run pin is projected directly");
     assert.equal(source.latestRun?.id, newest.id, "latest history identity remains separate");
     assert.equal(source.processor?.activity, "running");
     assert.equal(source.progress.pages, 8);

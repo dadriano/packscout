@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import assert from "node:assert/strict";
+import { dataforrestDistributedRequestPolicy } from "@packscout/contracts";
 import { createProviderDatabaseLifecycle, initializeProviderDatabaseIdentity, PrismaAdminProviderRuntimeRepository,
   PrismaProviderRuntimeRepository, type ProviderPrismaClient } from "@packscout/database";
 
@@ -143,6 +144,10 @@ export async function enqueue(
   const runtime = await new PrismaProviderRuntimeRepository(
     harness.client,
   ).snapshot();
+  const adapterKey = runtime.cachedConfiguration?.configuration.adapterKey;
+  const requestPolicy = typeof adapterKey === "string"
+    ? dataforrestDistributedRequestPolicy(adapterKey, runtime.providerKey)
+    : null;
   const result = await new PrismaAdminProviderRuntimeRepository(
     harness.client,
   ).requestRunNow({
@@ -155,6 +160,12 @@ export async function enqueue(
     commandId: randomUUID(),
     runId: randomUUID(),
     correlationId: randomUUID(),
+    ...(requestPolicy !== null && typeof adapterKey === "string" ? {
+      requestSettingsDefault: {
+        recordsPerRequest: requestPolicy.defaultRecordsPerRequest,
+        adapterKey,
+      },
+    } : { requestSettingsPolicy: "unmanaged" as const }),
   });
   assert.equal(result.kind, "created");
   if (result.kind !== "created") throw new Error("Run was not queued.");

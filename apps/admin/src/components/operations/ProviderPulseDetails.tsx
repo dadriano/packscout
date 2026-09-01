@@ -2,7 +2,11 @@ import { importRunDetailPath, type ProviderSourceMeasurements, type ProviderSour
 import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { age, dateTime, humanize, interval } from "./OperationStatus";
-import { SourceOperationControls, type SourceOperationControlsProps } from "./SourceOperationControls";
+import {
+  SourceOperationControls,
+  sourceRequestSettingsUnavailable,
+  type SourceOperationControlsProps,
+} from "./SourceOperationControls";
 import { count, isDatabaseUnavailable, isUnsupportedSource, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
 
 const entityLabels = {
@@ -60,6 +64,7 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
   const run = source.activeRun ?? source.latestRun;
   const runScope = source.activeRun ? "Current run" : "Latest run";
   const failure = source.processor?.actionRequiredCode ?? run?.failureCode ?? source.quality.latestFailureCode;
+  const requestSettingsUnavailable = sourceRequestSettingsUnavailable(source);
   return (
     <details className="provider-pulse__details">
       <summary>Details<span className="provider-pulse__details-hint">Counts, runs & controls</span></summary>
@@ -114,8 +119,16 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
         </section>
         {source.processor?.activity === "action_required" && !databaseUnavailable ? (
           <aside className="admin-note admin-note-warning" role="note">
-            <strong>Administrator recovery required.</strong> Disable this source, correct the cause, run Test source, Activate paused, then Resume.
+            <strong>Administrator recovery required.</strong>{" "}
+            {source.source?.requestSizePolicy === "schedule_revision"
+              ? "Disable this source, correct the cause, run Test source, Activate paused, then Resume."
+              : "Review the recorded failure and correct its cause before an authorized recovery. Changing request size does not restart work or clear the failure."}
           </aside>
+        ) : null}
+        {requestSettingsUnavailable ? (
+          <p className="source-config-field-help" role="note">
+            Run now requires verified request settings and an authorized worker handoff. No new run can be requested from this page yet.
+          </p>
         ) : null}
         <footer className="provider-pulse__actions">
           <nav aria-label={`${source.displayName} data links`}>

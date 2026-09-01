@@ -16,7 +16,12 @@ export async function queueBackfillRetry(input: {
   const existing = await database.control_commands.findUnique({ where: { id: commandId } });
   if (existing) {
     const run = await database.provider_runs.findUnique({ where: { id: intent.runId } });
+    const parent = await database.provider_runs.findUnique({ where: { id: intent.parentRunId } });
     if (!run || run.control_command_id !== commandId || run.requested_cursor_hash !== intent.checkpointHash ||
+      !parent || run.request_settings_parent_run_id !== parent.id ||
+      parent.records_per_request === null || parent.request_settings_revision_id === null ||
+      run.records_per_request !== parent.records_per_request ||
+      run.request_settings_revision_id !== parent.request_settings_revision_id ||
       run.config_version_id !== intent.pins.configId || run.config_version_number !== BigInt(intent.configNumber) ||
       existing.command_type !== "run" || existing.resulting_run_id !== run.id || existing.idempotency_key !== runKey ||
       existing.expected_generation !== generation + 1n || existing.requested_by_operator_id !== intent.pins.operatorId ||
@@ -44,6 +49,7 @@ export async function queueBackfillRetry(input: {
   }
   await input.assertPinned(true);
   const result = await commands.requestRunNow({ providerId: intent.pins.providerId, operatorId: intent.pins.operatorId,
+    requestSettingsRecoveryParentRunId: intent.parentRunId,
     expectedConfigVersionId: intent.pins.configId, expectedConfigVersionNumber: BigInt(intent.configNumber),
     expectedGeneration: generation + 1n, expectedCursorFingerprint: intent.checkpointHash, requireNoActiveRun: true,
     idempotencyKey: runKey, commandId, runId: intent.runId, correlationId: intent.pins.operationId });

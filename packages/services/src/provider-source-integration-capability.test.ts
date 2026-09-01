@@ -18,8 +18,22 @@ import {
   createClutchpacksSourceIntegrationCapabilities,
   createLaunchSourceIntegrationCapabilities,
   providerSourceIntegrationCapability,
+  providerSourceRequestSettingsPolicy,
   ProviderSourceIntegrationCapabilityRegistry,
 } from "./provider-source-integration-capability.ts";
+
+test("only the exact installed protected capture tuple has unmanaged request settings", () => {
+  assert.equal(providerSourceRequestSettingsPolicy("clutchpacks", CLUTCHPACKS_CAPTURE_ADAPTER_KEY), "unmanaged");
+  for (const [providerKey, adapterKey] of [
+    ["courtyard", CLUTCHPACKS_CAPTURE_ADAPTER_KEY],
+    ["unknown", CLUTCHPACKS_CAPTURE_ADAPTER_KEY],
+    ["clutchpacks", "unknown"],
+    ["clutchpacks", dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion],
+    ["courtyard", dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion],
+    ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion],
+  ] as const) assert.equal(providerSourceRequestSettingsPolicy(providerKey, adapterKey), "required");
+});
 
 test("ClutchPacks advertises capture and only the current live DataForrest adapter", () => {
   const installed = createClutchpacksSourceIntegrationCapabilities();

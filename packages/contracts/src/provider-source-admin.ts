@@ -347,6 +347,18 @@ export const reviseProviderSourceRecordsPerRequestRequestSchema = z
   })
   .strict();
 
+/** Independent isolated-provider request settings; not a source/cursor revision. */
+export const reviseDistributedProviderRequestSettingsRequestSchema = z.object({
+  expectedConfigVersionId: uuidSchema,
+  expectedRequestSettingsRevisionId: uuidSchema,
+  recordsPerRequest: providerSourceAdminRecordsPerRequestSchema,
+}).strict();
+
+export const reviseDistributedProviderRequestSettingsResponseSchema = z.object({
+  requestSettingsRevisionId: uuidSchema,
+  recordsPerRequest: providerSourceAdminRecordsPerRequestSchema,
+}).strict();
+
 export const previewProviderSourceCursorResetRequestSchema = z
   .object({ expectedSourceRevisionId: uuidSchema })
   .strict();
@@ -408,6 +420,12 @@ export type ReviseProviderSourceIntervalRequest = z.input<
 >;
 export type ReviseProviderSourceRecordsPerRequestRequest = z.input<
   typeof reviseProviderSourceRecordsPerRequestRequestSchema
+>;
+export type ReviseDistributedProviderRequestSettingsRequest = z.input<
+  typeof reviseDistributedProviderRequestSettingsRequestSchema
+>;
+export type ReviseDistributedProviderRequestSettingsResponse = z.infer<
+  typeof reviseDistributedProviderRequestSettingsResponseSchema
 >;
 export type ConfirmProviderSourceCursorResetRequest = z.input<
   typeof confirmProviderSourceCursorResetRequestSchema

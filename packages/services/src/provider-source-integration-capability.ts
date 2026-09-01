@@ -149,3 +149,14 @@ ProviderSourceIntegrationCapabilityRegistry {
     ),
   ]);
 }
+
+const unmanagedRequestCapabilities = new ProviderSourceIntegrationCapabilityRegistry([
+  providerSourceIntegrationCapability("clutchpacks", CLUTCHPACKS_CAPTURE_ADAPTER_KEY),
+]);
+
+/** File-capture execution is the only installed source without live request settings. */
+export function providerSourceRequestSettingsPolicy(
+  providerKey: string, adapterKey: string,
+): "required" | "unmanaged" {
+  return unmanagedRequestCapabilities.has(providerKey, adapterKey) ? "unmanaged" : "required";
+}

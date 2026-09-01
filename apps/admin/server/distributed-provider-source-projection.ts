@@ -45,7 +45,6 @@ function safeCode(value: string | null, fallback: string): string | null {
 
 export function runSummary(
   run: AdminLocalRunRecord | null,
-  currentProfile: Readonly<{ configId: string; pageLimit: number }> | null,
 ) {
   if (run === null) return null;
   return {
@@ -58,11 +57,8 @@ export function runSummary(
     lastProgressAt: (run.lastProgressAt ?? run.requestedAt).toISOString(),
     reachedHead: run.reachedSourceHead,
     failureCode: safeCode(run.failureCode, "IMPORT_FAILURE_UNAVAILABLE"),
-    // Historical configurations may have different immutable profiles. Do not
-    // report the current limit as the limit used by an older run.
-    recordsPerRequest: run.configVersionId === currentProfile?.configId
-      ? currentProfile.pageLimit
-      : null,
+    // Only the immutable per-run pin says what this run actually requested.
+    recordsPerRequest: run.recordsPerRequest,
   };
 }
 
@@ -182,9 +178,6 @@ export function configuredSource(input: Readonly<{
     : null;
   const progressRun = active ?? latest;
   const elapsed = elapsedMilliseconds(progressRun, input.now);
-  const currentProfile = config && manifest
-    ? { configId: config.id, pageLimit: manifest.requestBounds.pageLimit }
-    : null;
   const totalRecords = progressRun === null
     ? 0
     : progressRun.catalogCount + progressRun.pullCount + progressRun.marketEventCount;
@@ -211,6 +204,7 @@ export function configuredSource(input: Readonly<{
           pauseRequested: false,
           recordsPerRequest: manifest!.requestBounds.pageLimit,
           requestSizePolicy: "adapter_profile",
+          requestSettingsRevisionId: null,
           configuration: {
             validated: true,
             fields: [
@@ -284,8 +278,8 @@ export function configuredSource(input: Readonly<{
       config === null ? "not_configured"
         : input.capability === null ? "unsupported" : "database_unreachable",
     ),
-    activeRun: runSummary(active, currentProfile),
-    latestRun: runSummary(latest, currentProfile),
+    activeRun: runSummary(active),
+    latestRun: runSummary(latest),
     connectionImpact: {
       state: "none",
       safeCode: null,

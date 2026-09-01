@@ -17,6 +17,8 @@ import {
 } from "./distributed-provider-observer-runtime.ts";
 import { createDistributedProviderSourceOperationsRuntime } from
   "./distributed-provider-source-operations-runtime.ts";
+import { createDistributedProviderRequestSettingsRuntime } from
+  "./distributed-provider-request-settings-runtime.ts";
 import { createAdminManualImportAdmissionRuntime } from
   "./import-operations-runtime.ts";
 import { createRoutedProviderManualImportDelegate } from
@@ -136,6 +138,11 @@ export const createAdminProviderRuntimeFactory: AdminProviderRuntimeFactory =
             sourceIntegrations,
             diagnosticCursorKey: context.actorPseudonymKey,
           }),
+        providerRequestSettings: createDistributedProviderRequestSettingsRuntime({
+          central: context.central,
+          gateway,
+          sourceIntegrations,
+        }),
       },
       workerFleetEvidence,
       operationalHealthRepository:

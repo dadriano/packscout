@@ -31,6 +31,10 @@ import {
   type ProviderSourcesRouterDependencies,
 } from "./routes/provider-sources.ts";
 import {
+  createDistributedProviderRequestSettingsRouter,
+  type DistributedProviderRequestSettingsRouterDependencies,
+} from "./routes/distributed-provider-request-settings.ts";
+import {
   createProviderSourceOperationsRouter,
   type ProviderSourceOperationsRouterDependencies,
 } from "./routes/provider-source-operations.ts";
@@ -92,6 +96,10 @@ export interface AdminAppDependencies {
   >;
   providerSources?: Omit<
     ProviderSourcesRouterDependencies,
+    "auth" | "cookiePolicy" | "sameOrigin"
+  >;
+  providerRequestSettings?: Omit<
+    DistributedProviderRequestSettingsRouterDependencies,
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   providerSourceOperations?: Omit<
@@ -318,6 +326,17 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/provider-sources",
         createProviderSourcesRouter({
           ...dependencies.providerSources,
+          auth: service,
+          cookiePolicy,
+          sameOrigin,
+        }),
+      );
+    }
+    if (dependencies.providerRequestSettings) {
+      app.use(
+        "/api/provider-sources",
+        createDistributedProviderRequestSettingsRouter({
+          ...dependencies.providerRequestSettings,
           auth: service,
           cookiePolicy,
           sameOrigin,

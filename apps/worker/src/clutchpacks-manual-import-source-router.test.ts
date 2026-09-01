@@ -9,10 +9,13 @@ import {
   ProviderManualImportExecutor,
   ProviderManualImportPageSourceRouter,
   createProviderManualImportExecutor,
+  providerManualImportRequestSettingsPolicy,
   type ProviderManualImportPageSource,
 } from "./provider-manual-import-executor.ts";
 import { ProviderCaptureSourceError } from
   "./provider-capture-source-contract.ts";
+import { ProviderCaptureMixedPageSource } from "./provider-capture-mixed-page-source.ts";
+import { CLUTCHPACKS_CAPTURE_ADAPTER_KEY } from "@packscout/services";
 
 function source(
   adapterKey: string,
@@ -56,6 +59,25 @@ test("manual import source router dispatches exactly one installed adapter", asy
   assert.deepEqual(await router.nextPage(request("live-v3")), {
     marker: "live",
   });
+});
+
+test("request settings capability stays explicit and routes only one protected capture source", () => {
+  const capture = new ProviderCaptureMixedPageSource({
+    captureRoot: "/tmp/packscout-capture-capability-only",
+    actorHmacKey: Buffer.alloc(32, 0x5a),
+  });
+  const live = source(DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION, "live");
+  const router = new ProviderManualImportPageSourceRouter([capture, live]);
+  assert.equal(router.requestSettingsPolicy(CLUTCHPACKS_CAPTURE_ADAPTER_KEY, "clutchpacks"), "unmanaged");
+  assert.equal(router.requestSettingsPolicy(DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION, "clutchpacks"), "required");
+  assert.equal(router.requestSettingsPolicy(CLUTCHPACKS_CAPTURE_ADAPTER_KEY, "courtyard"), "required");
+  assert.equal(router.requestSettingsPolicy("missing", "clutchpacks"), "required");
+  assert.equal(new ProviderManualImportPageSourceRouter([capture, capture])
+    .requestSettingsPolicy(CLUTCHPACKS_CAPTURE_ADAPTER_KEY, "clutchpacks"), "required");
+  assert.equal(providerManualImportRequestSettingsPolicy(source("unclassified", "custom"), "unclassified", "clutchpacks"), "required");
+  const incorrectlyUnmanagedLive = { ...live, requestSettingsPolicy: () => "unmanaged" as const };
+  assert.equal(providerManualImportRequestSettingsPolicy(incorrectlyUnmanagedLive,
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION, "clutchpacks"), "required");
 });
 
 test("manual import source router keeps ClutchPacks and Courtyard on exact independent tuples", async () => {

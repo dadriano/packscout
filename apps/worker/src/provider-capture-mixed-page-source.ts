@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { providerSourceRequestSettingsPolicy } from "@packscout/services";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
   PROVIDER_MIXED_PAGE_MAX_BYTES,
@@ -238,6 +239,11 @@ export class ProviderCaptureMixedPageSource {
 
   supports(adapterKeyValue: string, providerKey: string): boolean {
     return this.#registry.supports(adapterKeyValue, providerKey);
+  }
+
+  requestSettingsPolicy(adapterKeyValue: string, providerKey: string): "required" | "unmanaged" {
+    return this.supports(adapterKeyValue, providerKey)
+      ? providerSourceRequestSettingsPolicy(providerKey, adapterKeyValue) : "required";
   }
 
   adapterKeys(): readonly string[] {
