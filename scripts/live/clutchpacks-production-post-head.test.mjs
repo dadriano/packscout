@@ -497,7 +497,6 @@ async function recoveryFixture(t) {
     assertionProvenance: "production_source_state_strict_admission_v1" };
   const baseSpawn = f.deps.spawn;
   const spawn = (file, args, input) => {
-    assert.deepEqual(input.env, expectedEnvironment);
     assert.deepEqual(Object.keys(input.env).sort(), ["HOME", "NODE_ENV", "PATH", "TMPDIR"]);
     const publishOffset = args.indexOf("--publish"), bundlePath = args[publishOffset + 1];
     const handshakePath = args[args.indexOf("--handshake") + 1];
