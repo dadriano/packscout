@@ -51,6 +51,13 @@ const CENTRAL_TABLES = [
   "manifest_activation_state",
   "manifest_activation_operations",
   "artifact_retention_executions",
+  "manifest_reconciliation_job_wake",
+  "manifest_reconciliation_job_schedule",
+  "manifest_reconciliation_job_invocations",
+  "manifest_reconciliation_job_delivery_tombstones",
+  "manifest_reconciliation_invocation_details",
+  "manifest_gate_intents",
+  "provider_promotion_invocation_projections",
 ] as const;
 
 const PROVIDER_TABLES = [
@@ -86,6 +93,11 @@ const PROVIDER_TABLES = [
   "provider_publication_operations",
   "provider_publication_receipts",
   "provider_publication_state",
+  "provider_promotion_job_wake",
+  "provider_promotion_job_schedule",
+  "provider_promotion_job_invocations",
+  "provider_promotion_job_delivery_tombstones",
+  "provider_promotion_invocation_details",
 ] as const;
 
 const CENTRAL_ENUMS = {
@@ -232,6 +244,7 @@ const CENTRAL_SOFT_REFERENCES = [
   "manifest_activation_state.previous_manifest_id",
   "manifest_activation_operations.expected_manifest_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_reconciliation_job_invocations.result_public_release_id",
 ] as const;
 
 const PROVIDER_SOFT_REFERENCES = [
@@ -266,6 +279,8 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "catalog_promotion_changes.entity_id",
   "provider_invalidation_checkpoints.confirmed_provider_release_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_reconciliation_job_invocations.result_public_release_id",
+  "manifest_reconciliation_job_invocations.run_id",
 ] as const;
 
 const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
@@ -287,6 +302,7 @@ const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
   "provider_releases.public_provider_id",
   "provider_releases.catalog_version_id",
   "provider_releases.public_profile_version_id",
+  "provider_promotion_job_invocations.run_id",
 ] as const;
 
 const FORBIDDEN_MODEL_PATTERNS = [
@@ -501,8 +517,8 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
 
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
-  assert.equal(centralModels.size, 42);
-  assert.equal(providerModels.size, 32);
+  assert.equal(centralModels.size, 49);
+  assert.equal(providerModels.size, 37);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 

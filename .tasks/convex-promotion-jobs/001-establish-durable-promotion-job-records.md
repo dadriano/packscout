@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/001
 **Depends on:** distributed-canonical-warehouse/013, distributed-canonical-warehouse/014, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/003, convex-promotion-jobs/004, convex-promotion-jobs/006, convex-promotion-jobs/007
-**Status:** todo
+**Status:** complete
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -48,17 +48,17 @@ manifest-reconciliation records in the central database.
 
 ## Acceptance Criteria
 
-- [ ] Independent provider databases cannot read, modify, or collide with one
+- [x] Independent provider databases cannot read, modify, or collide with one
   another's job rows or delivery keys.
-- [ ] Provider and central authorities can use the same opaque delivery token
+- [x] Provider and central authorities can use the same opaque delivery token
   without collision because their scoped digests differ.
-- [ ] Same-key retry returns the original invocation; a pruned live key returns
+- [x] Same-key retry returns the original invocation; a pruned live key returns
   `existing_pruned`; an expired key performs no job action.
-- [ ] A newer wake remains pending when an older invocation closes.
-- [ ] No-change and coalesced scheduled runs retain check-in and terminal
+- [x] A newer wake remains pending when an older invocation closes.
+- [x] No-change and coalesced scheduled runs retain check-in and terminal
   evidence without manufacturing a publication attempt.
-- [ ] Retention converges under age and cap without deleting protected truth.
-- [ ] Schemas contain no `platform_*` tables, fixed roster, cross-database FK,
+- [x] Retention converges under age and cap without deleting protected truth.
+- [x] Schemas contain no `platform_*` tables, fixed roster, cross-database FK,
   legacy composite-client dependency, or manifest `clear`.
 
 ## Verification

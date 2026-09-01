@@ -963,3 +963,112 @@ model provider_publication_state {
   completed_release  provider_releases?             @relation(fields: [completed_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_release_id_fkey")
   completion_receipt provider_publication_receipts? @relation(fields: [completion_receipt_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_receipt_id_fkey")
 }
+
+/// Coalesced work request for the one provider-publication job owned by this
+/// physical provider database. Provider identity comes from database_identity.
+model provider_promotion_job_wake {
+  singleton_key               Boolean   @id @default(true)
+  requested_generation        BigInt    @default(0)
+  acknowledged_generation     BigInt    @default(0)
+  latest_cause                String?
+  latest_requested_at         DateTime? @db.Timestamptz(6)
+  latest_delivery_generation  BigInt?
+  latest_delivery_state       String?
+  last_delivery_attempt_at    DateTime? @db.Timestamptz(6)
+  latest_delivery_failure_code String?
+  row_version                 BigInt    @default(1)
+  created_at                  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// Trusted deployment schedule state for the local provider-publication job.
+model provider_promotion_job_schedule {
+  singleton_key                    Boolean   @id @default(true)
+  lifecycle                        String    @default("pending_activation")
+  schedule_epoch                   BigInt    @default(0)
+  cadence_seconds                  Int       @default(60)
+  baseline_at                      DateTime? @db.Timestamptz(6)
+  activated_at                     DateTime? @db.Timestamptz(6)
+  paused_at                        DateTime? @db.Timestamptz(6)
+  last_admitted_window_index       BigInt?
+  last_scheduled_checkin_at        DateTime? @db.Timestamptz(6)
+  next_expected_checkin_at         DateTime? @db.Timestamptz(6)
+  row_version                      BigInt    @default(1)
+  created_at                       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// Bounded operator-safe summary of one provider-publication invocation.
+model provider_promotion_job_invocations {
+  run_id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  delivery_key_digest          String    @unique(map: "provider_promotion_job_invocations_delivery_key") @db.Char(64)
+  trigger_evidence_digest      String    @db.Char(64)
+  delivery_issued_at           DateTime  @db.Timestamptz(6)
+  delivery_expires_at          DateTime  @db.Timestamptz(6)
+  trigger_kind                 String
+  lifecycle_state              String    @default("running")
+  outcome                      String?
+  observed_wake_generation     BigInt?
+  schedule_epoch               BigInt?
+  schedule_window_index        BigInt?
+  scheduled_due_at             DateTime? @db.Timestamptz(6)
+  scheduled_checkin_at         DateTime? @db.Timestamptz(6)
+  requested_at                 DateTime  @db.Timestamptz(6)
+  started_at                   DateTime  @db.Timestamptz(6)
+  finished_at                  DateTime? @db.Timestamptz(6)
+  ownership_key                String?
+  ownership_token              String?   @db.Uuid
+  ownership_expires_at         DateTime? @db.Timestamptz(6)
+  before_lane_position         BigInt?
+  after_lane_position          BigInt?
+  before_settled_position      BigInt?
+  after_settled_position       BigInt?
+  cycle_count                  Int       @default(0)
+  promotion_attempt_count      Int       @default(0)
+  publication_count            Int       @default(0)
+  operation_count              Int       @default(0)
+  related_attempt_count        Int       @default(0)
+  related_attempt_set_digest   String    @db.Char(64)
+  safe_failure_code            String?
+  continuation_generation      BigInt?
+  retention_protected          Boolean   @default(false)
+  created_at                   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime  @default(now()) @db.Timestamptz(6)
+
+  delivery_tombstone provider_promotion_job_delivery_tombstones?
+  detail             provider_promotion_invocation_details?
+
+  @@index([started_at(sort: Desc), run_id(sort: Desc)], map: "provider_promotion_job_invocations_history_idx")
+  @@index([ownership_expires_at], map: "provider_promotion_job_invocations_running_idx")
+  @@index([finished_at(sort: Desc), run_id(sort: Desc)], map: "provider_promotion_job_invocations_retention_idx")
+}
+
+/// Replay identity retained independently from the bounded invocation summary.
+model provider_promotion_job_delivery_tombstones {
+  delivery_key_digest     String   @id @db.Char(64)
+  trigger_evidence_digest String   @db.Char(64)
+  invocation_run_id       String?  @unique(map: "provider_promotion_job_delivery_tombstones_invocation_key") @db.Uuid
+  trigger_kind            String
+  issued_at               DateTime @db.Timestamptz(6)
+  expires_at              DateTime @db.Timestamptz(6)
+  created_at              DateTime @default(now()) @db.Timestamptz(6)
+
+  invocation provider_promotion_job_invocations? @relation(fields: [invocation_run_id], references: [run_id], onDelete: SetNull, onUpdate: NoAction, map: "provider_promotion_job_delivery_tombstones_invocation_fkey")
+
+  @@index([expires_at, delivery_key_digest], map: "provider_promotion_job_delivery_tombstones_expiry_idx")
+}
+
+/// Canonical bounded attempt snapshots for one still-retained invocation.
+model provider_promotion_invocation_details {
+  run_id                     String   @id @db.Uuid
+  attempt_count              Int
+  operation_count            Int
+  attempt_set_digest         String   @db.Char(64)
+  canonical_detail_body      String
+  canonical_detail_digest    String   @db.Char(64)
+  observed_at                DateTime @db.Timestamptz(6)
+  created_at                 DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime @default(now()) @db.Timestamptz(6)
+
+  invocation provider_promotion_job_invocations @relation(fields: [run_id], references: [run_id], onDelete: Cascade, onUpdate: NoAction, map: "provider_promotion_invocation_details_invocation_fkey")
+}
