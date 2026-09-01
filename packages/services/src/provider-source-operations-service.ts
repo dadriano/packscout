@@ -6,6 +6,7 @@ import {
   providerSourceOperationsDetailSchema,
   providerSourceOperationsOverviewSchema,
   providerSourceOperationsSourceTypeSchema,
+  unavailableProviderSourceMeasurements,
   type ProviderSourceAdminCatalog,
   type ProviderSourceAdminSummary,
   type ProviderSourceDiagnosticFilter,
@@ -542,6 +543,9 @@ function sourceSummary(input: Readonly<{
       total: { kind: "unknown", label: "Total unknown" },
     },
     activeRun: runSummary(input.facts?.activeRun ?? null),
+    measurements: unavailableProviderSourceMeasurements(
+      input.source ? "unsupported" : "not_configured",
+    ),
     latestRun: runSummary(input.facts?.latestRun ?? null),
     connectionImpact,
   };

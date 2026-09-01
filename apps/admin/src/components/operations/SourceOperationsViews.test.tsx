@@ -9,6 +9,7 @@ import type {
   ProviderSourceOperationsSource,
 } from "@packscout/contracts";
 import { SourceDiagnosticFeed } from "./SourceDiagnosticFeed.tsx";
+import { operationMeasurements } from "../../testing/provider-source-operations-fixture.ts";
 import {
   ConnectionOperationsSummary,
   ProviderSourceOperationsLedger,
@@ -72,6 +73,7 @@ const baseSource: ProviderSourceOperationsSource = {
   provider: "courtyard",
   displayName: "First platform",
   configured: true,
+  measurements: operationMeasurements(),
   source: {
     sourceInstanceId: ids.source,
     sourceRevisionId: ids.revision,

@@ -107,6 +107,10 @@ test("all four catalog surfaces render the same values from the shared boundary"
     // Uniform buyback shows the exact rate on every surface.
     assert.ok(markup.includes("85%"), `${surface} buyback`);
   }
+  assert.match(
+    surfaces.cards,
+    /<dd[^>]*data-tone="positive"[^>]*>High · 100%<\/dd>/,
+  );
   for (const value of EXPECTED_METRIC_VALUES) {
     assert.ok(surfaces.allRepacks.includes(value), `all repacks ${value}`);
     assert.ok(surfaces.inspector.includes(value), `inspector ${value}`);

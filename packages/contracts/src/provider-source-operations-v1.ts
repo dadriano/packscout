@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerSourceMeasurementsSchema } from "./provider-source-measurements.ts";
 import {
   launchProviderKeySchema,
   normalizedContinuationSchema,
@@ -210,6 +211,7 @@ export const providerSourceOperationsSourceSchema = z.object({
       label: z.literal("Total unknown"),
     }).strict(),
   }).strict(),
+  measurements: providerSourceMeasurementsSchema,
   activeRun: runSummarySchema.nullable(),
   latestRun: runSummarySchema.nullable(),
   connectionImpact: z.object({

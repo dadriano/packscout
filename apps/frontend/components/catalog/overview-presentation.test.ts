@@ -44,6 +44,7 @@ test("presents the three nonpositive-policy overview KPIs", () => {
     presentation[1]?.accessibleLabel,
     "Median EV %: -1.80%. Negative. Includes known current and last-known estimates. 500 high-confidence repacks.",
   );
+  assert.equal(presentation[1]?.tone, "positive");
   assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
 });
 
@@ -57,6 +58,8 @@ test("overview opportunity rows retain server-presented last-known EV", () => {
   assert.equal(row.packScoutEv.statusLabel, "Last-known estimate");
   assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
   assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 50%");
+  assert.equal(row.packScoutEv.tone, "negative");
+  assert.equal(row.packScoutEv.confidence.tone, "caution");
   assert.match(
     row.packScoutEv.freshness.dataAsOfLabel,
     /^Source evidence last observed /,
@@ -72,8 +75,10 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.packPrice.displayValue, "$100.00");
   assert.equal(row.packScoutEv.evDollars.displayValue, "-$15.00");
   assert.equal(row.packScoutEv.evPercent.displayValue, "-15.00%");
+  assert.equal(row.packScoutEv.evPercent.tone, "negative");
   assert.equal(row.packScoutEv.grossEvDollars.displayValue, "$85.00");
   assert.equal(row.packScoutEv.confidence.displayValue, "High · 100%");
+  assert.equal(row.packScoutEv.confidence.tone, "positive");
   assert.equal(row.buyback.displayValue, "85%");
   assert.equal(row.topChaseValue.displayValue, "$850.00");
   assert.equal(row.simulated, false);
@@ -131,5 +136,29 @@ test("scales repack groups and retains unavailable reasons", () => {
 
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
   assert.equal(presentation[0]?.medianEvPercent.displayValue, "-2.30%");
+  assert.equal(presentation[0]?.medianEvPercent.tone, "positive");
   assert.equal(presentation[1]?.medianEvPercent.displayValue, "Unavailable");
+  assert.equal(presentation[1]?.medianEvPercent.tone, "unavailable");
+});
+
+test("overview medians propagate selective EV tones", () => {
+  const kpis = presentDashboardKpis({
+    totalRepacks: 1,
+    medianPackScoutEvPercent: { status: "available", basisPoints: -1_000 },
+    highestChaseValueUsdMinor: null,
+    highConfidenceRepacks: 0,
+  });
+  const summaries = presentCatalogSummaries([
+    {
+      key: "collector_crypt",
+      label: "Collector Crypt",
+      repackCount: 1,
+      medianPackScoutEvPercent: { status: "available", basisPoints: -500 },
+    },
+  ]);
+
+  assert.equal(kpis[1]?.state, "negative");
+  assert.equal(kpis[1]?.tone, "warning");
+  assert.equal(summaries[0]?.medianEvPercent.semanticState, "negative");
+  assert.equal(summaries[0]?.medianEvPercent.tone, "caution");
 });

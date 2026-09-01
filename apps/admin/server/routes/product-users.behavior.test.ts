@@ -596,6 +596,42 @@ test("directory rows reach the browser as a bounded, explicit projection", async
   });
 });
 
+test("profile display fields are bounded and isolated from the canonical email on every read", async () => {
+  const profileUser = {
+    ...emailUser,
+    profile: {
+      name: "N".repeat(300),
+      email: "profile@example.test",
+      rawIdentity: { accessToken: "never-serialize" },
+      integrationToken,
+    },
+  };
+  const { app, cookiePolicy } = createHarness(
+    async () => ({ items: [profileUser], nextCursor: null, searchTruncated: false }),
+    async () => ({ ...detail, user: profileUser }),
+    undefined,
+    undefined,
+    { listQueue: async () => ({ items: [profileUser], nextCursor: null, queueTruncated: false }) },
+  );
+  await withServer(app, async (baseUrl) => {
+    for (const path of ["list", "detail", "access/queue"]) {
+      const response = await fetch(`${baseUrl}/api/product-users/${path}`, {
+        method: "POST",
+        headers: headers(cookiePolicy.name, "admin-session"),
+        body: JSON.stringify(path === "detail" ? { subject: emailUser.subject } : {}),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const serialized = await response.text();
+      assertBrowserSafe(serialized);
+      const payload = JSON.parse(serialized);
+      const user = path === "detail" ? payload.user : payload.items[0];
+      assert.deepEqual(user.profile, { name: "N".repeat(240), email: "profile@example.test" });
+      assert.equal(user.email, "ada@example.test");
+    }
+  });
+});
+
 test("search terms travel in the body and reach the directory read", async () => {
   const { app, cookiePolicy, requests } = createHarness();
   await withServer(app, async (baseUrl) => {

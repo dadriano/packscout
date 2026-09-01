@@ -3,6 +3,7 @@ import {
   PrismaClient as ProviderPrismaClient,
 } from "../prisma/generated/provider/index.js";
 import { providerDatabaseTarget } from "./database-topology.ts";
+import { normalizeNativePrismaTlsUrl } from "./native-prisma-tls.ts";
 import {
   createRoleAwareDatabaseLifecycle,
   type RoleAwareDatabaseLifecycle,
@@ -43,7 +44,7 @@ function boundedConnectionUrl(databaseUrl: string, connectionLimit: number): str
     throw new TypeError("Provider database URL is invalid.");
   }
   parsed.searchParams.set("connection_limit", String(connectionLimit));
-  return parsed.toString();
+  return normalizeNativePrismaTlsUrl(parsed).toString();
 }
 
 export function createProviderDatabaseLifecycle(

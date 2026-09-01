@@ -12,6 +12,7 @@ import {
   presentSignedEvPercentMetric,
   presentTopChaseValue,
   type MetricSemanticState,
+  type MetricTone,
   type MetricValuePresentation,
   type PackScoutEvV3Presentation,
 } from "@/lib/packscout-ev-presentation";
@@ -30,6 +31,7 @@ export type KpiPresentation = Readonly<{
   accessibleLabel: string;
   state: MetricSemanticState | "plain";
   stateLabel?: "Neutral" | "Negative" | "Unavailable";
+  tone?: MetricTone;
   reasonCopy?: string;
 }>;
 
@@ -97,6 +99,7 @@ export function presentDashboardKpis(
       accessibleLabel: `${median.accessibleLabel} Includes known current and last-known estimates. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
+      tone: median.tone,
       ...(median.availability === "unavailable"
         ? { reasonCopy: median.reasonCopy }
         : {}),

@@ -80,9 +80,13 @@ export function ProductUserLedger({
           const identity = describeProductUserIdentity(user);
           const secondaryLine =
             identity.secondary ??
-            (identity.kind === "subject"
-              ? "No email or wallet address recorded for this sign-up."
-              : null);
+            (identity.kind === "name"
+              ? "No email available for this sign-up."
+              : identity.kind === "subject"
+                ? "No name, email, or wallet address available for this sign-up."
+                : identity.kind === "wallet"
+                  ? "No name or email available for this sign-up."
+                  : "Name not available for this sign-up.");
           return (
             <article key={user.subject}>
               <span>{String(startIndex + index).padStart(2, "0")}</span>
@@ -98,6 +102,12 @@ export function ProductUserLedger({
                   <p className="product-users__identity">{secondaryLine}</p>
                 ) : null}
                 <dl className="product-users__facts">
+                  {identity.kind === "name" && user.walletAddress ? (
+                    <div>
+                      <dt>Wallet address</dt>
+                      <dd>{user.walletAddress}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Sign-in source</dt>
                     <dd>{user.authMethod}</dd>

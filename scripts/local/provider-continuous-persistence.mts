@@ -12,14 +12,15 @@ const cycleAction = "local.provider_continuous.cycle";
 const options = { isolationLevel: "Serializable" as const, maxWait: 5000, timeout: 15_000 };
 const queueKey = (cycle: ContinuousCycle) => `continuous/${cycle.pins.operationId}/${cycle.parentRunId}/run`;
 
-async function assertOperation(database: ProviderQueryClient, pins: BackfillPins, authority: BackfillAuthority, create: boolean) {
+async function assertOperation(database: ProviderQueryClient, pins: BackfillPins, authority: BackfillAuthority, create: boolean,
+  active: () => void = () => {}) {
   const details = { pins, authorityDigest: authority.digest };
   const rows = await database.local_audit_events.findMany({ where: { correlation_id: pins.operationId, action: operationAction }, take: 2 });
   if (rows.length > 1 || (rows[0] && (rows[0].target_id !== pins.initialRunId || rows[0].outcome !== "success" ||
     backfillDigest(rows[0].details) !== backfillDigest(details)))) refuseBackfill("CONTINUOUS_OPERATION_DRIFT");
-  if (create && !rows.length) await database.local_audit_events.create({ data: {
+  if (create && !rows.length) { active(); await database.local_audit_events.create({ data: {
     correlation_id: pins.operationId, actor_operator_id: pins.operatorId, action: operationAction,
-    target_type: "provider_run", target_id: pins.initialRunId, outcome: "success", details, occurred_at: new Date() } });
+    target_type: "provider_run", target_id: pins.initialRunId, outcome: "success", details, occurred_at: new Date() } }); }
 }
 export async function readContinuousCycle(database: ProviderQueryClient, pins: BackfillPins, authority: BackfillAuthority) {
   const row = await database.local_audit_events.findFirst({ where: { correlation_id: pins.operationId, action: cycleAction },
@@ -54,11 +55,11 @@ export async function readContinuousView(database: ProviderPrismaClient, pins: B
   await assertOperation(database, pins, authority, false);
   const cycle = await readContinuousCycle(database, pins, authority);
   const cycleQueued = cycle !== null && await findContinuousQueuedRun(database, cycle);
-  const snapshot = cycle && cycleQueued
-    ? (await readBackfillView(database, cyclePins(cycle), authority)).snapshot
-    : await readBackfillSnapshot(database, pins, authority, cycle?.parentRunId ?? pins.initialRunId);
+  const backfill = cycle && cycleQueued ? await readBackfillView(database, cyclePins(cycle), authority) : null;
+  const snapshot = backfill?.snapshot ?? await readBackfillSnapshot(database, pins, authority, cycle?.parentRunId ?? pins.initialRunId);
   await assertLatestRun(database, snapshot.run.id);
-  return { snapshot, cycle, cycleQueued, scheduleSeconds: authority.scheduleSeconds, authorityDigest: authority.digest };
+  return { snapshot, cycle, cycleQueued, scheduleSeconds: authority.scheduleSeconds, authorityDigest: authority.digest,
+    ownedLeaseExpiresAt: backfill?.ownedLeaseExpiresAt ?? null };
 }
 async function lockState(tx: ProviderTransactionClient, runId: string) {
   const lease = await lockProviderWorkerLease(tx, "import");
@@ -67,7 +68,8 @@ async function lockState(tx: ProviderTransactionClient, runId: string) {
   return lease;
 }
 export async function persistContinuousCycle(database: ProviderPrismaClient, pins: BackfillPins,
-  authority: BackfillAuthority, observed: ContinuousView): Promise<ContinuousCycle> {
+  authority: BackfillAuthority, observed: ContinuousView, active: () => void = () => {}): Promise<ContinuousCycle> {
+  active();
   return database.$transaction(async tx => {
     await lockState(tx, observed.snapshot.run.id);
     await assertOperation(tx, pins, authority, false);
@@ -81,7 +83,8 @@ export async function persistContinuousCycle(database: ProviderPrismaClient, pin
     }
     const cycle = makeContinuousCycle({ ...observed, snapshot, authorityDigest: authority.digest,
       scheduleSeconds: authority.scheduleSeconds }, pins);
-    await assertOperation(tx, pins, authority, true);
+    await assertOperation(tx, pins, authority, true, active);
+    active();
     await tx.local_audit_events.create({ data: { correlation_id: pins.operationId, actor_operator_id: pins.operatorId,
       action: cycleAction, target_type: "provider_run", target_id: cycle.parentRunId, outcome: "success",
       details: cycle, occurred_at: snapshot.now } });
@@ -108,8 +111,11 @@ async function assertQueueCheckpoint(database: ProviderQueryClient, authority: B
  * head is eligible, never paused/stopped/failed. Queue copies the current cursor. */
 export async function queueContinuousCycle(input: { database: ProviderPrismaClient; cycle: ContinuousCycle;
   readAuthority: () => Promise<BackfillAuthority>;
+  active?: () => void;
   commands?: Pick<PrismaAdminProviderRuntimeRepository, "requestRunNow"> }) {
   const { database, cycle } = input;
+  const active = input.active ?? (() => {});
+  active();
   const authority = await input.readAuthority();
   assertContinuousCycle(cycle, cycle.pins, authority.digest);
   if (await findContinuousQueuedRun(database, cycle)) {
@@ -130,6 +136,7 @@ export async function queueContinuousCycle(input: { database: ProviderPrismaClie
     }, options);
     if (snapshot) {
       const leases = new PrismaProviderWorkerLeaseRepository(database);
+      active();
       const claim = await leases.acquire({ role: "import", owner: queueOwner(cycle), leaseMilliseconds: 120_000 });
       if (claim.kind === "held") refuseBackfill("CONTINUOUS_LEASE_UNAVAILABLE");
       try { if (claim.lease.fence !== snapshot.lease.fence + 1n) refuseBackfill("CONTINUOUS_LEASE_UNAVAILABLE"); }
@@ -142,6 +149,7 @@ export async function queueContinuousCycle(input: { database: ProviderPrismaClie
     return assertQueueCheckpoint(tx, authority, cycle);
   }, options);
   const leases = new PrismaProviderWorkerLeaseRepository(database);
+  active();
   const acquired = await leases.acquire({ role: "import", owner: queueOwner(cycle), leaseMilliseconds: 120_000 });
   if (acquired.kind === "held") refuseBackfill("CONTINUOUS_LEASE_UNAVAILABLE");
   try {
@@ -153,6 +161,7 @@ export async function queueContinuousCycle(input: { database: ProviderPrismaClie
       await assertQueueCheckpoint(tx, fresh, cycle, acquired.lease);
     }, options);
     const commands = input.commands ?? new PrismaAdminProviderRuntimeRepository(database);
+    active();
     const result = await commands.requestRunNow({ providerId: cycle.pins.providerId, operatorId: cycle.pins.operatorId,
       expectedConfigVersionId: cycle.pins.configId, expectedConfigVersionNumber: BigInt(cycle.configNumber),
       expectedGeneration: BigInt(cycle.generation), expectedCursorFingerprint: cycle.checkpointHash, requireNoActiveRun: true,

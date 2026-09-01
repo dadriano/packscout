@@ -5,7 +5,7 @@
   "regions": ["pdx1"],
   "functions": {
     "server.ts": {
-      "includeFiles": "{public/**,dist/server.bundle.mjs}",
+      "includeFiles": "{public/**,dist/**}",
       "maxDuration": 300
     }
   },

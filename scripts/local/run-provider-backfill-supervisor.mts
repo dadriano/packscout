@@ -12,10 +12,11 @@ import { readBackfillEnvironment, readBackfillAuthority, backfillWorkspaceRoot,
   type BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
 import { readBackfillIntent, readBackfillSnapshot, currentBackfillRunId } from "./provider-backfill-supervisor-state.mts";
 import { assertBackfillOperation, persistBackfillIntent, claimBackfillExecution,
-  assertBackfillRetryPinned } from "./provider-backfill-supervisor-persistence.mts";
+  assertBackfillRetryPinned, readOwnedBackfillLeaseExpiry, releaseExpiredBackfillHeadLease } from "./provider-backfill-supervisor-persistence.mts";
 import { queueBackfillRetry } from "./provider-backfill-supervisor-queue.mts";
-import { superviseProviderBackfill, type BackfillView } from "./provider-backfill-supervisor.mts";
+import { superviseProviderBackfill, backfillHasOwnedExpiredHeadLease, type BackfillView } from "./provider-backfill-supervisor.mts";
 import { readBackfillRestart, recordBackfillLaunch, persistClosedBackfillRestart } from "./provider-backfill-supervisor-restart.mts";
+import { withResidentOperation } from "./provider-resident-operation.mts";
 
 export function parseBackfillArguments(args: readonly string[]) {
   const mode = args[0];
@@ -71,7 +72,8 @@ export async function readBackfillView(database: ProviderPrismaClient, pins: Bac
     ![BigInt(intent.generation), BigInt(intent.generation) + 1n].includes(snapshot.generation))) {
     refuseBackfill("BACKFILL_PENDING_CHECKPOINT_DRIFT");
   }
-  return { snapshot, intent, pendingRetry, restart };
+  return { snapshot, intent, pendingRetry, restart, authorityDigest: authority.digest,
+    ownedLeaseExpiresAt: await readOwnedBackfillLeaseExpiry(database, pins, authority, snapshot) };
 }
 
 export async function executeBackfillChild(input: { pins: BackfillPins; owner: string;
@@ -102,15 +104,15 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
       allowedPorts: [55432, 55433, 55434, 55435], allowedSslModes: ["disable"] }),
     connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000 });
   const owner = `local:backfill:${args.pins.operationId}:${randomUUID()}`;
-  const withDatabase = async <T,>(operation: (db: ProviderPrismaClient, authority: BackfillAuthority) => Promise<T>): Promise<T> => {
+  const withDatabase = async <T,>(operation: (db: ProviderPrismaClient, authority: BackfillAuthority, active: () => void) => Promise<T>): Promise<T> => {
     const authority = await readBackfillAuthority(central.client, cipher, args.pins);
-    const outcome = await gateway.runWithCachedProviderDatabase(authority.route, async (db) => {
-      try { return { ok: true as const, value: await operation(db, authority) }; }
+    const outcome = await withResidentOperation(async (db: ProviderPrismaClient, active) => {
+      try { return { ok: true as const, value: await operation(db, authority, active) }; }
       catch (error) {
         if (error instanceof ProviderBackfillSupervisorError) return { ok: false as const, code: error.code };
         throw error;
       }
-    });
+    }, callback => gateway.runWithCachedProviderDatabase(authority.route, callback), signal);
     if (outcome.state !== "reachable") refuseBackfill("BACKFILL_PROVIDER_DATABASE_UNAVAILABLE");
     if (!outcome.value.ok) refuseBackfill(outcome.value.code);
     return outcome.value.value;
@@ -120,30 +122,42 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
     const read = () => withDatabase((db, authority) => readBackfillView(db, args.pins, authority));
     if (args.mode === "--check-only") {
       const view = await read();
-      const disposition = view.pendingRetry ? "durable_retry_pending" : classifyBackfillCheckpoint(view.snapshot);
+      const disposition = view.pendingRetry ? "durable_retry_pending" : backfillHasOwnedExpiredHeadLease(view)
+        ? "owned_expired_head_cleanup" : classifyBackfillCheckpoint(view.snapshot);
       return { outcome: disposition, providerId: args.pins.providerId, runId: view.snapshot.run.id,
         state: view.snapshot.run.state, pages: view.snapshot.run.pageCount, accepted: view.snapshot.run.accepted,
         failureCode: safeBackfillFailureCode(view.snapshot.run.failureCode), retryRunId: view.intent?.runId ?? null,
         notBefore: view.intent?.notBefore ?? null, leaseOwned: view.snapshot.lease.owner !== null };
     }
     const outcome = await superviseProviderBackfill({ pins: args.pins, read,
-      persistRetry: (view) => withDatabase(async (db, authority) => {
-        await assertBackfillOperation(db, args.pins, authority, true);
+      releaseExpiredHeadLease: view => withDatabase(async (db, authority, active) => {
+        const current = await readBackfillView(db, args.pins, authority);
+        if (current.snapshot.run.id !== view.snapshot.run.id || current.snapshot.generation !== view.snapshot.generation ||
+          current.snapshot.checkpointHash !== view.snapshot.checkpointHash || !backfillHasOwnedExpiredHeadLease(current)) {
+          refuseBackfill("BACKFILL_HEAD_LEASE_CHANGED");
+        }
+        await releaseExpiredBackfillHeadLease(db, args.pins, authority, current.snapshot, owner, active);
+      }),
+      persistRetry: (view) => withDatabase(async (db, authority, active) => {
+        active();
+        await assertBackfillOperation(db, args.pins, authority, true, active);
         let snapshot = view.snapshot;
         if (snapshot.lease.owner !== null) {
-          const lease = await claimBackfillExecution(db, args.pins, authority, snapshot, owner);
+          const lease = await claimBackfillExecution(db, args.pins, authority, snapshot, owner, active);
           await new PrismaProviderWorkerLeaseRepository(db).release(lease);
           snapshot = await readBackfillSnapshot(db, args.pins, authority, snapshot.run.id);
         }
-        await persistBackfillIntent(db, args.pins, authority, snapshot, view.intent, randomInt(1_000_000) / 1_000_000);
+        active();
+        await persistBackfillIntent(db, args.pins, authority, snapshot, view.intent, randomInt(1_000_000) / 1_000_000, active);
       }),
       async execute(view) {
-        const held = await withDatabase(async (db, authority) => {
-          await assertBackfillOperation(db, args.pins, authority, true);
-          const lease = await claimBackfillExecution(db, args.pins, authority, view.snapshot, owner);
+        const held = await withDatabase(async (db, authority, active) => {
+          active();
+          await assertBackfillOperation(db, args.pins, authority, true, active);
+          const lease = await claimBackfillExecution(db, args.pins, authority, view.snapshot, owner, active);
           try {
             if (view.pendingRetry && view.intent) await queueBackfillRetry({ database: db, intent: view.intent,
-              assertPinned: (resumed) => assertBackfillRetryPinned(db, authority, view.intent!, lease, resumed) });
+              assertPinned: async (resumed) => { active(); await assertBackfillRetryPinned(db, authority, view.intent!, lease, resumed); active(); } });
             else {
               const current = await readBackfillView(db, args.pins, authority);
               if (current.snapshot.run.id !== view.snapshot.run.id || classifyBackfillCheckpoint(current.snapshot) !== "execute" ||
@@ -152,8 +166,9 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
               }
             }
             const current = await readBackfillView(db, args.pins, authority);
+            active();
             const launch = await recordBackfillLaunch(db, args.pins, authority, lease, current.snapshot.run.id,
-              view.intent?.runId ?? args.pins.initialRunId);
+              view.intent?.runId ?? args.pins.initialRunId, active);
             return { lease, route: authority.route, authority, launch };
           } catch (error) { await new PrismaProviderWorkerLeaseRepository(db).release(lease); throw error; }
         });
@@ -161,19 +176,21 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
           const closed = await executeBackfillChild({ pins: args.pins, owner, environment: environment.workerEnvironment, signal });
           if (closed.signal === "SIGTERM" || closed.signal === "SIGINT") return "operator_stop" as const;
           if (!signal.aborted) {
-            await withDatabase(async (db, authority) => {
+            await withDatabase(async (db, authority, active) => {
               const after = await readBackfillView(db, args.pins, authority);
               if (["queued", "running"].includes(after.snapshot.run.state) && !["paused", "stopped"].includes(after.snapshot.state)) {
                 await persistClosedBackfillRestart({ database: db, pins: args.pins, authority,
                   lease: held.lease, launch: held.launch, childClosed: true, aborted: signal.aborted,
-                  jitter: randomInt(1_000_000) / 1_000_000 });
+                  jitter: randomInt(1_000_000) / 1_000_000, active });
               }
             });
           }
         }
         finally {
-          await gateway.runWithCachedProviderDatabase(held.route,
-            (db) => new PrismaProviderWorkerLeaseRepository(db).release(held.lease));
+          // Fenced release is cleanup even after operator abort; still drain it
+          // before gateway close or the next authoritative observation.
+          await withResidentOperation((db: ProviderPrismaClient) => new PrismaProviderWorkerLeaseRepository(db).release(held.lease),
+            callback => gateway.runWithCachedProviderDatabase(held.route, callback), new AbortController().signal);
         }
       },
       wait: (milliseconds) => new Promise<void>((resolve) => {

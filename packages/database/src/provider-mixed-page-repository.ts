@@ -15,6 +15,7 @@ import type {
 import { appendProviderActivityOutbox } from "./provider-local-evidence.ts";
 import { providerPageRequestSettingsFailure, unmanagedProviderRequestSettingsAllowed } from "./provider-run-request-settings.ts";
 import type { ProviderRequestSettingsPolicy } from "./provider-request-settings-repository.ts";
+import { runProviderPageTransaction } from "./provider-page-transaction.ts";
 import {
   type ProviderMixedPageRecord,
   PROVIDER_MIXED_PAGE_MAX_QUARANTINES,
@@ -35,11 +36,6 @@ import {
   setProviderImportLeaseContext,
 } from "./provider-worker-lease-repository.ts";
 
-const TRANSACTION_OPTIONS = Object.freeze({
-  maxWait: 5_000,
-  timeout: 30_000,
-  isolationLevel: ProviderPrisma.TransactionIsolationLevel.Serializable,
-});
 const RECORD_LOCAL_PRISMA_CODES = new Set([
   "P2000", "P2002", "P2003", "P2004", "P2005", "P2006", "P2007",
   "P2011", "P2012", "P2013", "P2014", "P2019", "P2023", "P2025",
@@ -307,12 +303,18 @@ export class PrismaProviderMixedPageRepository {
     readonly workerId: string;
     readonly page: unknown;
     readonly requestSettingsPolicy?: ProviderRequestSettingsPolicy;
+    readonly deadlineAt?: number;
   }): Promise<CommitProviderMixedPageResult> {
     const workerId = requireProviderMixedPageWorkerId(input.workerId);
     const page = validateProviderMixedPage(input.page);
-    return this.database.$transaction(async (transaction) => {
+    return runProviderPageTransaction({ database: this.database,
+      deadlineAt: input.deadlineAt ?? Date.now() + 55_000,
+      operation: async (transaction, attempt, timeout) => {
       const lease = await lockProviderWorkerLease(transaction, "import");
       if (!providerWorkerLeaseIsLive(lease, { owner: workerId, fence: page.leaseFence })) {
+        return { kind: "lease_lost" as const };
+      }
+      if (attempt > 0 && lease.lease_expires_at!.getTime() - lease.database_now.getTime() <= timeout + 1_000) {
         return { kind: "lease_lost" as const };
       }
       await setProviderImportLeaseContext(transaction, { owner: workerId, fence: page.leaseFence });
@@ -493,6 +495,6 @@ export class PrismaProviderMixedPageRepository {
         reachedHead: page.continuation === "head", counts,
         quarantineIds: quarantines.map(({ id }) => id),
       };
-    }, TRANSACTION_OPTIONS);
+    } });
   }
 }

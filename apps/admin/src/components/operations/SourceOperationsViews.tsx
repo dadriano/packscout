@@ -8,8 +8,13 @@ import { Link } from "react-router-dom";
 import { StatusBadge, type StatusTone } from "../StatusBadge";
 import { recordsPerRequestDisplay } from "../source-configuration/records-per-request";
 import { dateTime, humanize, insertRevisionCounts, interval } from "./OperationStatus";
+import {
+  SourceOperationControls,
+  sourceRequestSettingsUnavailable,
+  type SourceOperationCommand,
+} from "./SourceOperationControls";
 
-export type SourceOperationCommand = "run" | "pause" | "resume";
+export type { SourceOperationCommand } from "./SourceOperationControls";
 
 function elapsed(milliseconds: number): string {
   if (milliseconds === 0) return "Not started";
@@ -169,19 +174,8 @@ export function ProviderSourceOperationsLedger({
       <div className="source-lanes__list">
         {sources.map((source) => {
           const operational = sourceOperationalLabel(source);
-          const isPending = pendingKey?.startsWith(`${source.providerId}:`) ?? false;
           const actionRequired = source.processor?.activity === "action_required";
-          const requestSettingsUnavailable = source.source !== null &&
-            source.source.requestSizePolicy !== "schedule_revision" &&
-            (source.source.requestSizePolicy === "adapter_profile" ||
-              source.source.requestSettingsRevisionId === null || source.source.recordsPerRequest === null);
-          const runLabel = actionRequired
-            ? "Resolve before run"
-            : requestSettingsUnavailable
-              ? "Request settings unavailable"
-            : source.latestRun?.state === "failed"
-              ? "Retry source"
-              : "Run now";
+          const requestSettingsUnavailable = sourceRequestSettingsUnavailable(source);
           return (
             <article key={source.providerId} className={`source-lane is-${source.processor?.activity ?? "unconfigured"}`}>
               <div className="source-lane__rail" aria-hidden="true"><span /></div>
@@ -239,13 +233,7 @@ export function ProviderSourceOperationsLedger({
                 {source.configured ? <Link to={`/providers/${source.providerId}`}>Diagnostics</Link> : <Link to="/source-configuration">Configure source</Link>}
                 <Link to={`/runs?providerId=${source.providerId}`}>Run history</Link>
                 {source.progress.openQuarantine > 0 ? <Link to={`/quarantine?providerId=${source.providerId}&state=open`}>Quarantine</Link> : null}
-                {canOperate && source.source ? (
-                  <div>
-                    <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.lifecycle !== "active" || actionRequired || requestSettingsUnavailable} onClick={() => onCommand(source, "run")}>{isPending ? "Working…" : runLabel}</button>
-                    {source.source.requestSizePolicy === "schedule_revision" && source.source.lifecycle === "active" ? <button type="button" className="admin-button admin-button-secondary" disabled={isPending || source.source.pauseRequested} onClick={() => onCommand(source, "pause")}>Pause</button> : null}
-                    {source.source.requestSizePolicy === "schedule_revision" && (source.source.lifecycle === "paused" || source.source.pauseRequested) ? <button type="button" className="admin-button admin-button-primary" disabled={isPending || actionRequired} onClick={() => onCommand(source, "resume")}>Resume</button> : null}
-                  </div>
-                ) : null}
+                <SourceOperationControls source={source} canOperate={canOperate} pendingKey={pendingKey} onCommand={onCommand} />
               </footer>
             </article>
           );

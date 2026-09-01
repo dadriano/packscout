@@ -36,7 +36,9 @@ export function backfillRestartApplies(restart: BackfillRestart | null, snapshot
 }
 
 export async function recordBackfillLaunch(database: ProviderPrismaClient, pins: BackfillPins,
-  authority: BackfillAuthority, lease: ProviderWorkerLease, runId: string, anchorRunId: string): Promise<BackfillLaunch> {
+  authority: BackfillAuthority, lease: ProviderWorkerLease, runId: string, anchorRunId: string,
+  active: () => void = () => {}): Promise<BackfillLaunch> {
+  active();
   return database.$transaction(async (tx) => {
     const owned = await lockProviderWorkerLease(tx, "import");
     await tx.$queryRaw`select id from provider_runs where id=${runId}::uuid for update`;
@@ -47,6 +49,7 @@ export async function recordBackfillLaunch(database: ProviderPrismaClient, pins:
       s.actionableCommands.some(command => command.runId !== runId)) refuseBackfill("BACKFILL_LAUNCH_PIN_CHANGED");
     const launch = launchSchema.parse({ runId, anchorRunId, owner: lease.owner, fence: lease.fence.toString(),
       generation: s.generation.toString(), state: s.run.state, authorityDigest: authority.digest });
+    active();
     await tx.local_audit_events.create({ data: { correlation_id: pins.operationId, actor_operator_id: pins.operatorId,
       action: "local.provider_backfill.launch", target_type: "provider_run", target_id: runId,
       outcome: "success", details: launch, occurred_at: owned.database_now } });
@@ -70,8 +73,9 @@ export function assertClosedBackfillChild(input: { snapshot: BackfillSnapshot; l
 /** Called only after the owned subprocess 'close' event, never for a timeout or uncertain process. */
 export async function persistClosedBackfillRestart(input: { database: ProviderPrismaClient; pins: BackfillPins;
   authority: BackfillAuthority; lease: ProviderWorkerLease; launch: BackfillLaunch;
-  childClosed: boolean; aborted: boolean; jitter: number }): Promise<void> {
+  childClosed: boolean; aborted: boolean; jitter: number; active?: () => void }): Promise<void> {
   const { database, pins, authority, launch, lease } = input;
+  input.active?.();
   await database.$transaction(async (tx) => {
     const owned = await lockProviderWorkerLease(tx, "import");
     const runId = await currentBackfillRunId(tx, launch.runId);
@@ -92,6 +96,7 @@ export async function persistClosedBackfillRestart(input: { database: ProviderPr
     const restart = restartSchema.parse({ ...launch, runId, state: s.run.state, generation: s.generation.toString(),
       kind: "closed_child_restart", checkpointHash: s.checkpointHash, consecutiveNoProgress: count,
       notBefore: new Date(owned.database_now.getTime() + backfillDelayMilliseconds(count, input.jitter)).toISOString() });
+    input.active?.();
     await tx.local_audit_events.create({ data: { correlation_id: pins.operationId, actor_operator_id: pins.operatorId,
       action, target_type: "provider_run", target_id: runId, outcome: "success", details: restart, occurred_at: owned.database_now } });
   }, transactionOptions);

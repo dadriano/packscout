@@ -32,6 +32,7 @@ const emailUser: ProductUserDirectoryRow = {
   subject: "https://auth.example.test/|did:example:email-user",
   authMethod: "https://auth.example.test",
   email: "ada@example.test",
+  profile: { name: "Ada Lovelace", email: "ada@example.test" },
   walletAddress: "0xWalletAddress0001",
   firstSeenAt: "2026-08-01T09:00:00.000Z",
   lastSeenAt: "2026-08-19T12:00:00.000Z",
@@ -50,6 +51,7 @@ const opaqueUser: ProductUserDirectoryRow = {
   subject:
     "https://auth.example.test/|did:example:opaque-user-with-a-very-long-token-identifier",
   email: null,
+  profile: null,
   walletAddress: null,
   standing: "suspended",
   access: {
@@ -64,7 +66,8 @@ const opaqueUser: ProductUserDirectoryRow = {
 const waitingUser: ProductUserDirectoryRow = {
   ...emailUser,
   subject: "https://auth.example.test/|did:example:waiting-user",
-  email: "waiting@example.test",
+  email: null,
+  profile: { name: "Grace Hopper", email: "waiting@example.test" },
   walletAddress: null,
   access: {
     state: "awaiting_review",
@@ -242,6 +245,7 @@ test("the directory lists sign-ups newest first, including records with no email
   await settlePage();
 
   const text = pageText(renderer);
+  assert.match(text, /Ada Lovelace/);
   assert.match(text, /ada@example\.test/);
   assert.match(text, /0xWalletAddress0001/);
   assert.match(text, /Sign-in source/);
@@ -250,7 +254,7 @@ test("the directory lists sign-ups newest first, including records with no email
   assert.match(text, /3 repacks · 1 collectible/);
   assert.match(text, /0 repacks · 0 collectibles/);
   // The record with neither attribute still renders an identifiable row.
-  assert.match(text, /No email or wallet address recorded for this sign-up/);
+  assert.match(text, /No name, email, or wallet address available for this sign-up/);
   assert.match(text, /did:example:opaque/);
   assert.equal(
     renderer.container.querySelectorAll(".admin-row-list article").length,
@@ -304,7 +308,7 @@ test("access state and standing are separate badges that can never read as one",
  * returnTo. No rendered link may therefore carry one, in any encoding, while
  * the row must still open exactly the user it names.
  */
-test("no rendered link carries a subject key, and the opaque link still opens the user", async (context) => {
+test("no rendered link carries profile details or a subject, and opaque links still open the user", async (context) => {
   forgetProductUserHandles();
   context.after(() => forgetProductUserHandles());
   directoryFetch(context);
@@ -327,6 +331,14 @@ test("no rendered link carries a subject key, and the opaque link still opens th
           `link ${href} carries a subject key`,
         );
         assert.ok(!rendering.includes(encodeURIComponent(row.subject)));
+        if (row.profile?.name) {
+          assert.ok(!rendering.includes(row.profile.name));
+          assert.ok(!rendering.includes(encodeURIComponent(row.profile.name)));
+        }
+        if (row.profile?.email) {
+          assert.ok(!rendering.includes(row.profile.email));
+          assert.ok(!rendering.includes(encodeURIComponent(row.profile.email)));
+        }
       }
       // Nor any fragment of an identity: issuer, scheme, or wallet address.
       assert.doesNotMatch(rendering, /did:|auth\.example\.test|0xWallet|@/);
@@ -520,7 +532,8 @@ test("the review queue lists waiting identities oldest-first from the queue read
     ...renderer.container.querySelectorAll(".product-users__label"),
   ].map((label) => label.textContent?.trim() ?? "");
   assert.equal(labels.length, 2);
-  assert.equal(labels[0], "waiting@example.test");
+  assert.equal(labels[0], "Grace Hopper");
+  assert.match(text, /waiting@example\.test/);
   assert.match(labels[1] ?? "", /did:example:opaque/);
   // The queue has no search; the ledger search belongs to the full listing.
   assert.equal(
@@ -564,7 +577,7 @@ test("a truncated queue explains it is complete from the front", async (context)
   assert.match(text, /work it oldest-first/i);
 });
 
-test("approving from the queue confirms the consequence, then updates the row in place", async (context) => {
+test("approving a profile-enriched sign-up keeps its name and email while updating access", async (context) => {
   const { decisionRequests, countRequests } = directoryFetch(context, {
     decide: () =>
       jsonResponse({
@@ -582,6 +595,8 @@ test("approving from the queue confirms the consequence, then updates the row in
   cleanupPage(context, renderer);
   await settlePage();
   await openQueue(renderer);
+  assert.match(pageText(renderer), /Grace Hopper/);
+  assert.match(pageText(renderer), /waiting@example\.test/);
 
   await act(async () => findButton(renderer, "Approve").click());
   await settlePage();
@@ -615,6 +630,8 @@ test("approving from the queue confirms the consequence, then updates the row in
   assert.match(text, /Access approved\. They are in the beta now\./);
   const rows = [...renderer.container.querySelectorAll(".admin-row-list article")];
   assert.equal(rows.length, 2);
+  assert.match(rows[0]?.textContent ?? "", /Grace Hopper/);
+  assert.match(rows[0]?.textContent ?? "", /waiting@example\.test/);
   assert.match(rows[0]?.textContent ?? "", /Approved/);
   assert.match(rows[0]?.textContent ?? "", /Approved by an operator/);
   assert.ok(

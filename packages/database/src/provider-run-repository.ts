@@ -855,6 +855,7 @@ export class PrismaProviderRunRepository {
           data: {
             id: input.recoveryRunId,
             recovery_of_run_id: active.id,
+            reached_source_head: active.reached_source_head,
             idempotency_key:
               `recovery/${active.id}/${attemptNumber.toString()}`,
             trigger: "recovery",

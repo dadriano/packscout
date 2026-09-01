@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import express from "express";
-import { PROVIDER_SOURCE_OPERATIONS_VERSION } from "@packscout/contracts";
+import { PROVIDER_SOURCE_OPERATIONS_VERSION, unavailableProviderSourceMeasurements } from "@packscout/contracts";
 import type { AdminLocalProviderOverview, AdminLocalRunRecord, CentralPrismaClient } from "@packscout/database";
 import { AuthServiceError, createLaunchSourceIntegrationCapabilities, type AuthenticatedActor } from "@packscout/services";
 import { createSessionCookiePolicy } from "./auth/cookies.ts";
@@ -93,6 +93,40 @@ test("an organization with only archived providers receives an empty runtime ove
   assert.equal(fixture.downstreamCalls(), 0);
 });
 
+test("an unsupported configured adapter is distinct from absent configuration without querying either database", async () => {
+  let databaseReads = 0;
+  const runtime = createDistributedProviderSourceOperationsRuntime({
+    central: {
+      providers: { async findMany() { return [
+        {
+          id: uuid(20), provider_key: "clutchpacks", display_name: "ClutchPacks", lifecycle: "active",
+          active_config_version: {
+            id: uuid(22), adapter_key: "unsupported-adapter-v99",
+            schedule_seconds: 3_600, stale_after_seconds: 7_200,
+          },
+        },
+        {
+          id: uuid(30), provider_key: "courtyard", display_name: "Courtyard", lifecycle: "active",
+          active_config_version: null,
+        },
+      ]; } },
+    } as unknown as CentralPrismaClient,
+    gateway: {
+      async runWithAdminProviderDatabase() {
+        databaseReads += 1;
+        throw new Error("Unavailable source capabilities must not open provider databases.");
+      },
+    },
+    sourceIntegrations: createLaunchSourceIntegrationCapabilities(),
+    diagnosticCursorKey: new Uint8Array(32).fill(7), now: () => new Date(now),
+  });
+  const overview = await runtime.operations.overview(organizationId);
+  assert.equal(overview.sources.length, 2);
+  assert.deepEqual(overview.sources[0]!.measurements, unavailableProviderSourceMeasurements("unsupported"));
+  assert.deepEqual(overview.sources[1]!.measurements, unavailableProviderSourceMeasurements("not_configured"));
+  assert.equal(databaseReads, 0);
+});
+
 test("distributed current settings and historical run pins remain independent of configuration identity", async () => {
   const configId = uuid(22);
   const run: AdminLocalRunRecord = {
@@ -118,8 +152,17 @@ test("distributed current settings and historical run pins remain independent of
   };
   const older = { ...run, id: uuid(23), configVersionId: uuid(24), state: "succeeded" as const,
     recordsPerRequest: null, requestSettingsRevisionId: null };
-  const evidence = { overview, runs: [run, older], details: [], configurationCurrent: true,
-    requestSettings: { id: uuid(31), recordsPerRequest: 1_000 } as { id: string; recordsPerRequest: number } | null };
+  const evidence = {
+    overview,
+    runs: [run, older],
+    details: [],
+    measurements: unavailableProviderSourceMeasurements("query_failed"),
+    configurationCurrent: true,
+    requestSettings: {
+      id: uuid(31),
+      recordsPerRequest: 1_000,
+    } as { id: string; recordsPerRequest: number } | null,
+  };
   const runtime = createDistributedProviderSourceOperationsRuntime({
     central: {
       providers: { async findMany() { return [{
@@ -143,6 +186,8 @@ test("distributed current settings and historical run pins remain independent of
   assert.equal(detail.source.source?.requestSettingsRevisionId, uuid(31));
   assert.equal(detail.source.source?.recordsPerRequest, 1_000);
   assert.equal(detail.source.activeRun?.recordsPerRequest, 100);
+  assert.equal(detail.source.processor?.activity, "running", "a count failure does not hide runtime state");
+  assert.deepEqual(detail.source.measurements.storage, { state: "unavailable", reason: "query_failed" });
   assert.deepEqual(detail.runHistory.map((value) => value.recordsPerRequest), [100, null]);
   evidence.requestSettings = null;
   const uninitialized = await runtime.operations.detail(organizationId, uuid(20));

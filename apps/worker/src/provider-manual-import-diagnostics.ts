@@ -1,4 +1,5 @@
 import { sourceAdapterFailureCodes } from "@packscout/contracts";
+import { ProviderPageTransactionExpiredError, ProviderPageTransactionWindowError } from "@packscout/database";
 import { ProviderCaptureSourceError } from "./provider-capture-source-contract.ts";
 import { ProviderDataforrestSourceError } from "./provider-dataforrest-mixed-page-source.ts";
 
@@ -8,6 +9,7 @@ export type ProviderManualImportStage =
   | "source_read"
   | "page_validation"
   | "page_commit"
+  | "head_reconciliation"
   | "fact_reference_reconciliation"
   | "quarantine_reconciliation"
   | "run_finish"
@@ -33,7 +35,7 @@ const sourceCodes = new Set([
 ]);
 const stages = new Set<ProviderManualImportStage>([
   "run_preparation", "lease_renewal", "source_read", "page_validation", "page_commit",
-  "fact_reference_reconciliation", "quarantine_reconciliation", "run_finish", "execution",
+  "head_reconciliation", "fact_reference_reconciliation", "quarantine_reconciliation", "run_finish", "execution",
 ]);
 
 // Read only own data properties. Do not serialize errors or inspect messages,
@@ -59,6 +61,10 @@ function isTypedSourceFailure(error: unknown): boolean {
 }
 
 function databaseCategory(error: unknown): string | null {
+  try {
+    if (error instanceof ProviderPageTransactionExpiredError) return "TRANSACTION_EXPIRED";
+    if (error instanceof ProviderPageTransactionWindowError) return "TRANSACTION_WINDOW_EXHAUSTED";
+  } catch { return null; }
   const code = ownDataProperty(error, "code");
   const sqlState = code === "P2010"
     ? ownDataProperty(ownDataProperty(error, "meta"), "code")

@@ -114,6 +114,30 @@ browser-visible variable, a log line, or a tracked file.
   see the landing page but cannot request access; it never opens any catalog
   surface.
 
+### Admin signup profile display
+
+The admin's **User signups**, review queue, and user detail view resolve names
+and email addresses from Privy's server-side user API. This also covers existing
+signups whose access tokens did not include profile claims; users do not need
+to sign in again.
+
+Configure `PRIVY_APP_ID` and `PRIVY_APP_SECRET` in the **admin server** environment.
+The app ID must match the frontend/Convex app. Keep the secret in the deployment
+secret store: never use a `VITE_` or `NEXT_PUBLIC_` prefix or commit it to a file.
+The lookup requests only the recorded Privy subject and rejects a mismatched
+response. See [Privy's user lookup API](https://docs.privy.io/api-reference/users/get).
+
+Profiles are display-only. They do not replace the stored identifiers used for
+allowlist admission, signup search, or approval notifications, and do not change
+access or standing. Search continues to match stored email, wallet, and subject
+prefixes; it does not search fetched names or email addresses.
+
+An email-only account may have no name, and a wallet-only account may have neither
+name nor email. The admin labels missing details explicitly and retains the wallet
+or subject. Missing credentials or a failed lookup leave the directory usable
+with its recorded identifiers. Profile requests and their cache are bounded;
+cached details refresh within five minutes in each running admin instance.
+
 ## The identity signal and its caching bounds
 
 - The client mirrors the provider-issued identity token into the

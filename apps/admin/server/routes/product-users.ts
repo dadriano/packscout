@@ -135,6 +135,16 @@ function sanitizeRecord(record: ProductUserRecord): ProductUserRecord {
     subject: bounded(record.subject, PRODUCT_USER_MAX_SUBJECT_LENGTH),
     authMethod: bounded(record.authMethod, PRODUCT_USER_MAX_AUTH_METHOD_LENGTH),
     email: boundedOrNull(record.email, PRODUCT_USER_MAX_TEXT_LENGTH),
+    ...(record.profile === undefined
+      ? {}
+      : {
+          profile: record.profile === null
+            ? null
+            : {
+                name: boundedOrNull(record.profile.name, PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH),
+                email: boundedOrNull(record.profile.email, PRODUCT_USER_MAX_TEXT_LENGTH),
+              },
+        }),
     walletAddress: boundedOrNull(
       record.walletAddress,
       PRODUCT_USER_MAX_WALLET_ADDRESS_LENGTH,

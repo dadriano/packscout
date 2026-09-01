@@ -9,6 +9,9 @@ export function refuseBackfill(code: string): never { throw new ProviderBackfill
 export const transientBackfillCodes = new Set([
   "PROVIDER_DATAFORREST_REQUEST_TIMEOUT", "PROVIDER_DATAFORREST_NETWORK_INTERRUPTION",
   "PROVIDER_DATAFORREST_RATE_LIMITED", "PROVIDER_DATAFORREST_SERVER_FAILURE",
+  // Emitted only for a trusted expired query after its rejected transaction
+  // callback has settled; unknown P2028/commit outcomes retain permanent policy.
+  "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED",
 ]);
 export function safeBackfillFailureCode(value: string | null): string | null {
   return value === null || /^PROVIDER_[A-Z0-9_]{1,110}$/u.test(value) ? value : "BACKFILL_UNKNOWN_FAILURE";
@@ -69,6 +72,7 @@ export interface BackfillSnapshot {
     failureCode: string | null; finishedAt: Date | null; committedPageCount: number;
   };
   readonly lastPage: { number: number; continuation: string; hash: string | null; matches: boolean } | null;
+  readonly headProof?: { runId: string; sourceRunId: string; checkpointHash: string | null; reconciliationComplete: boolean } | null;
 }
 
 export function assertBackfillPins(snapshot: BackfillSnapshot, pins: BackfillPins, configNumber: bigint): void {
@@ -81,10 +85,19 @@ export function assertBackfillPins(snapshot: BackfillSnapshot, pins: BackfillPin
 export function classifyBackfillCheckpoint(snapshot: BackfillSnapshot): "head" | "operator_stop" | "transient_retry" | "page_bound_continuation" | "execute" {
   if (snapshot.state === "paused" || snapshot.state === "stopped") return "operator_stop";
   const run = snapshot.run;
+  const ownHeadPage = snapshot.lastPage?.continuation === "head" && snapshot.lastPage.matches &&
+    snapshot.lastPage.number === run.pageCount && snapshot.lastPage.hash === snapshot.checkpointHash;
+  const proof = snapshot.headProof;
+  const provenHead = proof?.runId === run.id && proof.checkpointHash === snapshot.checkpointHash &&
+    (proof.sourceRunId === run.id ? ownHeadPage : run.pageCount === 0 && snapshot.lastPage === null &&
+      run.requestedHash === snapshot.checkpointHash);
   if (run.state === "succeeded" && run.reachedHead && snapshot.activeRunIds.length === 0 &&
-    snapshot.actionableCommands.length === 0 && snapshot.lease.owner === null && snapshot.lastPage?.continuation === "head" &&
-    run.finalMatches && snapshot.lastPage.matches && snapshot.lastPage.number === run.pageCount &&
-    snapshot.lastPage.hash === snapshot.checkpointHash && run.finalHash === snapshot.checkpointHash) return "head";
+    snapshot.actionableCommands.length === 0 && snapshot.lease.owner === null &&
+    (ownHeadPage || (provenHead && proof?.reconciliationComplete === true)) &&
+    run.finalMatches && run.finalHash === snapshot.checkpointHash) return "head";
+  if (run.state === "running" && run.reachedHead && provenHead && snapshot.state === "running" &&
+    snapshot.activeRunIds.length === 1 && snapshot.activeRunIds[0] === run.id &&
+    snapshot.actionableCommands.every(command => command.runId === run.id)) return "execute";
   if ((run.state === "queued" || run.state === "running") && !run.reachedHead &&
     snapshot.activeRunIds.length === 1 && snapshot.activeRunIds[0] === run.id &&
     (run.state === "queued" ? snapshot.state === "idle" && run.requestedHash === snapshot.checkpointHash

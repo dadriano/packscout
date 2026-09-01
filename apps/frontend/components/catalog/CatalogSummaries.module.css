@@ -110,11 +110,23 @@
   font-weight: 650;
 }
 
-.median[data-state="negative"] {
+.median[data-tone="positive"] {
+  color: var(--color-positive);
+}
+
+.median[data-tone="caution"] {
+  color: var(--color-caution);
+}
+
+.median[data-tone="warning"] {
+  color: var(--color-warning-strong);
+}
+
+.median[data-tone="negative"] {
   color: var(--color-negative);
 }
 
-.median[data-state="unavailable"] {
+.median[data-tone="unavailable"] {
   color: var(--color-status-neutral);
 }
 

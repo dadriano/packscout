@@ -162,6 +162,8 @@ function RepackRow({
       <td className={styles.numeric}>
         <span
           aria-label={estimate.confidence.accessibleLabel}
+          className={styles.confidence}
+          data-tone={estimate.confidence.tone}
           title={estimate.confidence.accessibleLabel}
         >
           {estimate.confidence.displayValue}

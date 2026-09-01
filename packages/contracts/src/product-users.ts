@@ -99,11 +99,19 @@ export const PRODUCT_USER_MAX_PUBLIC_ID_LENGTH = 64;
 /** Catalog display names, bounded as the public catalog bounds them. */
 export const PRODUCT_USER_MAX_DISPLAY_NAME_LENGTH = 240;
 
+/** Display-only profile details; they never replace the stored sign-in email. */
+export interface ProductUserProfile {
+  readonly name: string | null;
+  readonly email: string | null;
+}
+
 /** One directory record as the admin browser is allowed to see it. */
 export interface ProductUserRecord {
   readonly subject: string;
   readonly authMethod: string;
   readonly email: string | null;
+  /** An optional enrichment: profile details may be absent or unavailable. */
+  readonly profile?: ProductUserProfile | null;
   readonly walletAddress: string | null;
   readonly firstSeenAt: string;
   readonly lastSeenAt: string;
@@ -408,7 +416,7 @@ export function describeProductUserRepackAvailability(
   }
 }
 
-export type ProductUserIdentityKind = "email" | "wallet" | "subject";
+export type ProductUserIdentityKind = "name" | "email" | "wallet" | "subject";
 
 export interface ProductUserIdentity {
   readonly kind: ProductUserIdentityKind;
@@ -449,10 +457,17 @@ export function boundedProductUserSubjectLabel(subject: string): string {
  * as an identifiable, selectable row.
  */
 export function describeProductUserIdentity(
-  row: Pick<ProductUserDirectoryRow, "subject" | "email" | "walletAddress">,
+  row: Pick<
+    ProductUserDirectoryRow,
+    "subject" | "email" | "walletAddress" | "profile"
+  >,
 ): ProductUserIdentity {
-  if (row.email !== null && row.email.length > 0) {
-    return { kind: "email", label: row.email, secondary: row.walletAddress };
+  const email = row.profile?.email || row.email;
+  if (row.profile?.name) {
+    return { kind: "name", label: row.profile.name, secondary: email };
+  }
+  if (email !== null && email.length > 0) {
+    return { kind: "email", label: email, secondary: row.walletAddress };
   }
   if (row.walletAddress !== null && row.walletAddress.length > 0) {
     return { kind: "wallet", label: row.walletAddress, secondary: null };

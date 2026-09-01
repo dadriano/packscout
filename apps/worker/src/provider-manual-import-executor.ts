@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { dataforrestDistributedRequestPolicy } from "@packscout/contracts";
 import {
-  PROVIDER_FACT_QUARANTINE_RECONCILIATION_MAX_BATCH,
   PrismaProviderCommandRepository,
-  PrismaProviderFactQuarantineReconciliationRepository,
   ProviderCanonicalRepository,
   PrismaProviderMixedPageRepository,
   PrismaProviderRunRepository,
   PrismaProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
   validateProviderMixedPage,
-  type ProviderFactQuarantineScanCursor,
   type ProviderPrismaClient,
   type ProviderRunCounters,
   type ProviderRunSummary,
@@ -33,6 +30,9 @@ import {
 } from "./provider-manual-import-diagnostics.ts";
 import { readProviderRunRequestPin } from "./provider-run-request-pin.ts";
 
+import { finishProviderImportHead } from "./provider-manual-import-head.ts";
+import { reconcileProviderPageFactReferences } from "./provider-manual-import-reconciliation.ts";
+
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
 
@@ -42,6 +42,7 @@ export type ProviderManualImportExecutionResult =
       kind: "progress";
       runId: string;
       pageCount: number;
+      reconciliationPending?: true;
     }>
   | Readonly<{
       kind: "completed";
@@ -377,6 +378,15 @@ export class ProviderManualImportExecutor {
         return await this.failRun(runs, runId, fence, "PROVIDER_DATAFORREST_REQUEST_SETTINGS_INVALID");
       }
 
+      const finishHead = () => finishProviderImportHead({ database: this.dependencies.database,
+        runId: runId!, workerId: this.#workerId, fence, leaseMilliseconds: this.#leaseMilliseconds,
+        signal, onStage: (next) => { stage = next; } });
+      if (runningRun.reachedSourceHead) {
+        const result = await finishHead();
+        retainLeaseForNextPage = result.kind === "progress";
+        return result;
+      }
+
       let checkpoint = recovery.kind === "resumed"
           || recovery.kind === "recovered"
         ? recovery.checkpoint
@@ -392,10 +402,6 @@ export class ProviderManualImportExecutor {
       const canonical = new ProviderCanonicalRepository(
         this.dependencies.database,
       );
-      const historicalFactQuarantines =
-        new PrismaProviderFactQuarantineReconciliationRepository(
-          this.dependencies.database,
-        );
       let pagesProcessed = 0;
       for (
         let index = 0;
@@ -405,6 +411,7 @@ export class ProviderManualImportExecutor {
           );
         index += 1
       ) {
+        const pageDeadlineAt = Date.now() + 55_000;
         if (signal.aborted) {
           return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
@@ -447,6 +454,7 @@ export class ProviderManualImportExecutor {
           workerId: this.#workerId,
           page,
           requestSettingsPolicy,
+          deadlineAt: pageDeadlineAt,
         });
         if (committed.kind !== "committed" && committed.kind !== "replayed") {
           return await this.failRun(
@@ -462,175 +470,35 @@ export class ProviderManualImportExecutor {
         if (signal.aborted) {
           return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
-        stage = "lease_renewal";
-        const firstReconciliationLease = await leases.renew({
-          role: "import",
-          owner: this.#workerId,
-          fence,
-          leaseMilliseconds: this.#leaseMilliseconds,
-        });
-        if (firstReconciliationLease === null) {
-          return {
-            kind: "blocked",
-            runId,
-            failureCode: "PROVIDER_IMPORT_LEASE_LOST",
-          };
+        if (committed.reachedHead) {
+          const result: ProviderManualImportExecutionResult = Date.now() + 35_000 > pageDeadlineAt
+            ? { kind: "progress", runId, pageCount: committed.pageNumber, reconciliationPending: true }
+            : await finishHead();
+          retainLeaseForNextPage = result.kind === "progress";
+          return result;
         }
-        stage = "fact_reference_reconciliation";
-        let reconciliation = await canonical.reconcileFactReferences({
-          workerId: this.#workerId,
-          workerFence: fence,
-        });
-        if (reconciliation === null) {
-          return {
-            kind: "blocked",
-            runId,
-            failureCode: "PROVIDER_IMPORT_LEASE_LOST",
-          };
-        }
-        if (!committed.reachedHead) continue;
-        for (
-          let batch = 1;
-          reconciliation.materialChangeCount > 0;
-          batch += 1
-        ) {
-          if (batch >= MAXIMUM_HEAD_RECONCILIATION_BATCHES) {
-            return await this.failRun(
-              runs,
-              runId,
-              fence,
-              "PROVIDER_FACT_RECONCILIATION_LIMIT_EXCEEDED",
-            );
-          }
-          if (signal.aborted) {
-            return await this.failRun(
-              runs,
-              runId,
-              fence,
-              "PROVIDER_CAPTURE_ABORTED",
-            );
-          }
-          stage = "lease_renewal";
-          const reconciliationLease = await leases.renew({
-            role: "import",
-            owner: this.#workerId,
-            fence,
-            leaseMilliseconds: this.#leaseMilliseconds,
-          });
-          if (reconciliationLease === null) {
-            return {
-              kind: "blocked",
-              runId,
-              failureCode: "PROVIDER_IMPORT_LEASE_LOST",
-            };
-          }
-          stage = "fact_reference_reconciliation";
-          const nextReconciliation = await canonical.reconcileFactReferences({
-            workerId: this.#workerId,
-            workerFence: fence,
-          });
-          if (nextReconciliation === null) {
-            return {
-              kind: "blocked",
-              runId,
-              failureCode: "PROVIDER_IMPORT_LEASE_LOST",
-            };
-          }
-          reconciliation = nextReconciliation;
-        }
-        if (
-          runningRun.requestedCursor === null
-          && runningRun.requestedCursorFingerprint === null
-        ) {
-          let scanCursor: ProviderFactQuarantineScanCursor | undefined;
-          for (
-            let batch = 0;
-            batch < MAXIMUM_HEAD_RECONCILIATION_BATCHES;
-            batch += 1
-          ) {
-            if (signal.aborted) {
-              return await this.failRun(
-                runs,
-                runId,
-                fence,
-                "PROVIDER_CAPTURE_ABORTED",
-              );
-            }
+        const reconciled = await reconcileProviderPageFactReferences({
+          page: validatedPage, reachedHead: committed.reachedHead, signal,
+          maximumBatches: MAXIMUM_HEAD_RECONCILIATION_BATCHES,
+          renewLease: async () => {
             stage = "lease_renewal";
-            const quarantineLease = await leases.renew({
-              role: "import",
-              owner: this.#workerId,
-              fence,
-              leaseMilliseconds: this.#leaseMilliseconds,
-            });
-            if (quarantineLease === null) {
-              return {
-                kind: "blocked",
-                runId,
-                failureCode: "PROVIDER_IMPORT_LEASE_LOST",
-              };
-            }
-            stage = "quarantine_reconciliation";
-            const quarantineReconciliation =
-              await historicalFactQuarantines.reconcileBatch({
-                runId,
-                workerId: this.#workerId,
-                workerFence: fence,
-                limit: PROVIDER_FACT_QUARANTINE_RECONCILIATION_MAX_BATCH,
-                ...(scanCursor === undefined ? {} : { after: scanCursor }),
-              });
-            if (quarantineReconciliation.kind !== "reconciled") {
-              return await this.failRun(
-                runs,
-                runId,
-                fence,
-                quarantineReconciliation.kind === "lease_lost"
-                  ? "PROVIDER_IMPORT_LEASE_LOST"
-                  : "PROVIDER_FACT_QUARANTINE_RECONCILIATION_NOT_READY",
-              );
-            }
-            if (quarantineReconciliation.nextScanCursor === null) break;
-            scanCursor = quarantineReconciliation.nextScanCursor;
-            if (batch + 1 >= MAXIMUM_HEAD_RECONCILIATION_BATCHES) {
-              return await this.failRun(
-                runs,
-                runId,
-                fence,
-                "PROVIDER_FACT_QUARANTINE_RECONCILIATION_LIMIT_EXCEEDED",
-              );
-            }
-          }
-        }
-        stage = "run_finish";
-        const finished = await runs.finish({
-          runId,
-          workerId: this.#workerId,
-          workerFence: fence,
-          state: "succeeded",
-          failureCode: null,
-          failureClass: null,
-          failureSummary: null,
-          correlationId: randomUUID(),
-          finishedAt: new Date(),
+            return await leases.renew({ role: "import", owner: this.#workerId,
+              fence, leaseMilliseconds: this.#leaseMilliseconds }) !== null;
+          },
+          reconcile: (scan) => {
+            stage = "fact_reference_reconciliation";
+            return canonical.reconcileFactReferences({ workerId: this.#workerId,
+              workerFence: fence, ...scan });
+          },
         });
-        if (
-          finished.kind !== "finished"
-          && finished.kind !== "already_terminal"
-        ) {
-          return {
-            kind: "blocked",
-            runId,
-            failureCode: finished.kind === "lease_lost"
-              ? "PROVIDER_IMPORT_LEASE_LOST"
-              : "PROVIDER_RUN_FINISH_" + finished.kind.toUpperCase(),
-          };
+        if (reconciled === "lease_lost") {
+          return { kind: "blocked", runId, failureCode: "PROVIDER_IMPORT_LEASE_LOST" };
         }
-        return {
-          kind: "completed",
-          runId,
-          pageCount: finished.run.counters.pages,
-          counters: finished.run.counters,
-        };
+        if (reconciled !== "complete") {
+          return await this.failRun(runs, runId, fence, reconciled === "aborted"
+            ? "PROVIDER_CAPTURE_ABORTED" : "PROVIDER_FACT_RECONCILIATION_LIMIT_EXCEEDED");
+        }
+
       }
       if (
         pagesProcessed === maximumPagesThisExecution

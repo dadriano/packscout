@@ -24,7 +24,7 @@ function intent(s = snapshot(), previous = null) {
   return policy.createBackfillIntent({ pins, authorityDigest: "c".repeat(64), snapshot: s, previous, jitter: 0 });
 }
 
-test("only explicit transport/rate/server failures are automatic source retries", () => {
+test("only explicit transport/rate/server and settled expired-query failures automatically retry", () => {
   for (const code of policy.transientBackfillCodes) {
     const s = snapshot(); s.run.failureCode = code;
     assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
@@ -32,6 +32,26 @@ test("only explicit transport/rate/server failures are automatic source retries"
   for (const suffix of ["INVALID_RESPONSE", "RESPONSE_TOO_LARGE", "INVALID_CURSOR", "CANCELLED", "TLS_FAILED", "AUTHENTICATION_FAILED", "UNKNOWN"]) {
     const s = snapshot(); s.run.failureCode = `PROVIDER_DATAFORREST_${suffix}`;
     assert.throws(() => policy.classifyBackfillCheckpoint(s), /BACKFILL_PERMANENT_FAILURE/);
+  }
+});
+test("settled database query expiry resumes only the exact saved checkpoint with durable backoff", () => {
+  const s = snapshot(); s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
+  const first = intent(s);
+  assert.equal(first.checkpointHash, s.checkpointHash); assert.equal(first.parentRunId, s.run.id);
+  assert.equal(first.configNumber, "4"); assert.equal(first.generation, "2");
+  assert.equal(Date.parse(first.notBefore) - s.now.getTime(), 5000);
+  const next = intent(s, first); assert.equal(next.consecutiveNoProgress, 2);
+  assert.equal(next.checkpointHash, s.checkpointHash); assert.equal(Date.parse(next.notBefore) - s.now.getTime(), 10000);
+  for (const code of ["P2028", "PROVIDER_IMPORT_EXECUTION_FAILED", "PROVIDER_IMPORT_INVALID_CURSOR",
+    "PROVIDER_IMPORT_DATABASE_TRANSACTION_FAILED", "PROVIDER_DATAFORREST_INVALID_RESPONSE"]) {
+    const failed = structuredClone(s); failed.run.failureCode = code;
+    assert.throws(() => policy.classifyBackfillCheckpoint(failed), /BACKFILL_PERMANENT_FAILURE/);
+  }
+  for (const mutate of [v => v.checkpointHash = null, v => v.run.finalMatches = false,
+    v => v.activeRunIds.push(pins.operatorId), v => v.lastPage.hash = "c".repeat(64)]) {
+    const invalid = structuredClone(s); mutate(invalid);
+    assert.throws(() => policy.classifyBackfillCheckpoint(invalid), /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
   }
 });
 

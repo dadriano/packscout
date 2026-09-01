@@ -1,0 +1,64 @@
+name: Admin Vercel runtime release
+
+on:
+  repository_dispatch:
+    types: [vercel.deployment.ready]
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Immutable production admin deployment ID to smoke-test
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/admin-vercel-release.yml
+      - scripts/live/report-admin-vercel-check*
+      - scripts/preproduction/check-admin-vercel*
+
+permissions:
+  contents: read
+
+jobs:
+  probe-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test deployed-runtime and check-reporting boundaries
+        run: node --test scripts/preproduction/*admin*.test.mjs scripts/live/*admin*.test.mjs
+
+  release:
+    name: Verify deployed admin runtime
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'repository_dispatch' &&
+        github.event.client_payload.project.id == 'prj_KR0CnNkPlRgaHRxdPkJh9pVqDGsC' &&
+        github.event.client_payload.environment == 'production'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: admin-runtime-release
+    concurrency:
+      group: admin-vercel-runtime-${{ inputs.deployment_id || github.event.client_payload.id }}
+      cancel-in-progress: false
+    steps:
+      # Keep credential-bearing check code on trusted main. The deployment is identified through
+      # Vercel's API, not by checking out/executing the event's supplied git SHA.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Smoke-test the built deployment and report its Vercel check
+        env:
+          PACKSCOUT_ADMIN_DEPLOYMENT_ID: ${{ inputs.deployment_id || github.event.client_payload.id }}
+          VERCEL_ADMIN_CHECK_TOKEN: ${{ secrets.VERCEL_ADMIN_CHECK_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: node scripts/live/report-admin-vercel-check.mjs

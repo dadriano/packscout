@@ -1,3 +1,4 @@
+import { readProviderRunHeadProof } from "./provider-run-head-proof.ts";
 import { randomUUID } from "node:crypto";
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
 import type {
@@ -103,15 +104,8 @@ async function sourceHeadRunIsReady(
         run.state = 'running'::"run_state"
         and run.worker_fence = ${input.workerFence}
         and run.reached_source_head = true
-        and run.requested_cursor is null
-        and run.requested_cursor_hash is null
         and runtime.operating_state = 'running'::"runtime_state"
-        and exists (
-          select 1
-          from provider_run_pages as page
-          where page.provider_run_id = run.id
-            and page.continuation = 'head'::"page_continuation"
-        )
+
       ) as ready
       from provider_runs as run
       cross join provider_runtime as runtime
@@ -120,7 +114,7 @@ async function sourceHeadRunIsReady(
       for update of run, runtime
     `,
   );
-  return run?.ready === true;
+  return run?.ready === true && (await readProviderRunHeadProof(transaction, input.runId))?.fullReplay === true;
 }
 
 async function selectBatch(
@@ -282,10 +276,7 @@ async function resolveMatchedRow(
  * fact is observed during a full source replay. It never writes canonical
  * facts, run/page counters, or source cursors.
  */
-export class PrismaProviderFactQuarantineReconciliationRepository {
-  constructor(private readonly database: ProviderPrismaClient) {}
-
-  async reconcileBatch(input: {
+export async function reconcileProviderFactQuarantineTransaction(transaction: ProviderTransactionClient, input: {
     readonly runId: string;
     readonly workerId: string;
     readonly workerFence: bigint;
@@ -304,7 +295,7 @@ export class PrismaProviderFactQuarantineReconciliationRepository {
     ) throw new RangeError("Provider fact quarantine batch limit is invalid.");
     const after = requireCursor(input.after);
 
-    return this.database.$transaction(async (transaction) => {
+
       const lease = await lockProviderWorkerLease(transaction, "import");
       if (!providerWorkerLeaseIsLive(lease, {
         owner: workerId,
@@ -361,6 +352,20 @@ export class PrismaProviderFactQuarantineReconciliationRepository {
           ? { createdAt: last.created_at, quarantineId: last.id }
           : null,
       };
-    }, TRANSACTION_OPTIONS);
+
+}
+
+export class PrismaProviderFactQuarantineReconciliationRepository {
+  constructor(private readonly database: ProviderPrismaClient) {}
+
+  async reconcileBatch(input: {
+    readonly runId: string;
+    readonly workerId: string;
+    readonly workerFence: bigint;
+    readonly limit: number;
+    readonly after?: ProviderFactQuarantineScanCursor;
+  }): Promise<ProviderFactQuarantineReconciliationResult> {
+    requireUuid(input.runId, "Provider source-head run ID");
+    return this.database.$transaction(transaction => reconcileProviderFactQuarantineTransaction(transaction, input), TRANSACTION_OPTIONS);
   }
 }

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { assertBackfillPins, backfillDigest, backfillId, backfillPinsSchema, classifyBackfillCheckpoint,
   refuseBackfill, type BackfillPins, type BackfillSnapshot } from "./provider-backfill-supervisor-policy.mts";
 import { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
+import { residentFailureCode } from "./provider-resident-errors.mts";
+import { backfillHasOwnedExpiredHeadLease } from "./provider-backfill-supervisor.mts";
 export { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
 
 // All integrations admitted by the existing closed DataForrest live registry use
@@ -23,6 +25,7 @@ export interface ContinuousView {
   cycleQueued: boolean;
   scheduleSeconds: number;
   authorityDigest: string;
+  ownedLeaseExpiresAt?: Date | null;
 }
 export function cyclePins(cycle: ContinuousCycle): BackfillPins {
   return { ...cycle.pins, initialRunId: cycle.runId, operationId: cycle.cycleOperationId };
@@ -65,12 +68,16 @@ export function continuousDecision(view: ContinuousView, pins: BackfillPins): Co
   assertBackfillPins(s, pins, s.run.configNumber);
   if (s.state === "stopped") return { state: "stopped" };
   if (s.state === "paused") return { state: "paused" };
+  if (view.ownedLeaseExpiresAt && view.ownedLeaseExpiresAt > s.now) return { state: "waiting",
+    nextDueAt: view.ownedLeaseExpiresAt.toISOString(),
+    waitMilliseconds: Math.min(continuousObservationMilliseconds, view.ownedLeaseExpiresAt.getTime() - s.now.getTime()) };
   if (view.cycle && s.lease.owner === continuousQueueOwner(view.cycle)) {
     if (s.lease.expiresAt !== null && s.lease.expiresAt > s.now) return { state: "waiting",
       nextDueAt: s.lease.expiresAt.toISOString(), waitMilliseconds: Math.min(continuousObservationMilliseconds, s.lease.expiresAt.getTime() - s.now.getTime()) };
     return { state: "queue" };
   }
   if (view.cycle && !view.cycleQueued) return { state: "queue" };
+  if (view.cycleQueued && backfillHasOwnedExpiredHeadLease(view)) return { state: "execute" };
   if (view.cycleQueued && classifyBackfillCheckpoint(s) !== "head") return { state: "execute" };
   assertContinuousHead(s, pins, s.run.configNumber);
   const next = continuousDueAt(s, view.scheduleSeconds);
@@ -119,8 +126,7 @@ export async function superviseContinuousProvider(port: ContinuousPort, signal: 
         port.emit({ state: blocked === null ? "read_unavailable" : "blocked", code: blocked ?? error.code });
         await port.wait(continuousObservationMilliseconds); continue;
       }
-      blocked = error instanceof Error && "code" in error && typeof error.code === "string" &&
-        /^(BACKFILL|CONTINUOUS)_[A-Z0-9_]{1,100}$/u.test(error.code) ? error.code : "CONTINUOUS_OPERATION_FAILED";
+      blocked ??= residentFailureCode(error);
       port.emit({ state: "blocked", code: blocked });
       await port.wait(continuousObservationMilliseconds);
     }

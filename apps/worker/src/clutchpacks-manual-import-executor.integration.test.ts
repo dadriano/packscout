@@ -1,21 +1,13 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
-import { randomBytes, randomUUID } from "node:crypto";
-import { userInfo } from "node:os";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { test } from "node:test";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
-import { Pool } from "pg";
-import { DATAFORREST_EVENTS_V1_ENDPOINT, dataforrestDistributedRequestPolicy } from "@packscout/contracts";
+import { DATAFORREST_EVENTS_V1_ENDPOINT } from "@packscout/contracts";
 import {
-  createProviderDatabaseLifecycle,
-  initializeProviderDatabaseIdentity,
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
   providerMixedCursorFingerprint,
   providerMixedPageDigest,
-  PrismaAdminProviderRuntimeRepository,
   PrismaProviderActivityOutboxRepository,
   PrismaProviderCommandRepository,
   PrismaProviderRuntimeRepository,
@@ -45,131 +37,7 @@ import {
 import { runProviderManualImportOnce } from
   "./provider-manual-import-local-runtime.ts";
 
-const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const databasePackage = path.join(repositoryRoot, "packages/database");
-const providerSchema = path.join(
-  databasePackage,
-  "prisma/provider/schema.prisma",
-);
-const prismaExecutable = path.join(
-  repositoryRoot,
-  "node_modules/prisma/build/index.js",
-);
-const disposableDatabasePattern =
-  /^packscout_(?:clutch|courtyard)_test_[0-9]+_[a-f0-9]{10}$/u;
-
-interface ProviderHarness {
-  readonly client: ProviderPrismaClient;
-  readonly providerId: string;
-  readonly providerKey: string;
-  close(): Promise<void>;
-}
-
-function adminUrl(): URL {
-  const configured = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
-    ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
-  const parsed = new URL(configured);
-  if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
-    throw new Error("PostgreSQL 16 test infrastructure is required.");
-  }
-  return parsed;
-}
-
-function databaseUrl(source: URL, databaseName: string): string {
-  const result = new URL(source);
-  result.pathname = `/${databaseName}`;
-  // Preserve the explicitly selected Unix socket for isolated PostgreSQL tests.
-  result.hash = "";
-  return result.toString();
-}
-
-async function createHarness(
-  providerLabel: "clutch" | "courtyard" = "clutch",
-  exactProviderKey?: "clutchpacks" | "courtyard",
-): Promise<ProviderHarness> {
-  const rootUrl = adminUrl();
-  const databaseKey =
-    `${providerLabel}_test_${process.pid}_${randomBytes(5).toString("hex")}`;
-  const providerKey = exactProviderKey ?? databaseKey;
-  const databaseName = `packscout_${providerKey}`;
-  if (
-    exactProviderKey === undefined
-      ? !disposableDatabasePattern.test(databaseName)
-      : process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL === undefined
-  ) {
-    throw new Error("Refusing to create an unscoped provider test database.");
-  }
-  const administrator = new Pool({ connectionString: rootUrl.toString(), max: 1 });
-  const providerDatabaseUrl = databaseUrl(rootUrl, databaseName);
-  let created = false;
-  let client: ProviderPrismaClient | undefined;
-  try {
-    const version = await administrator.query<{ server_version_num: string }>(
-      "show server_version_num",
-    );
-    if (Number(version.rows[0]?.server_version_num ?? 0) < 160_000) {
-      throw new Error("PostgreSQL 16 test infrastructure is required.");
-    }
-    const existing = await administrator.query<{ exists: boolean }>(
-      "select exists(select 1 from pg_database where datname = $1) as exists",
-      [databaseName],
-    );
-    if (existing.rows[0]?.exists) {
-      throw new Error("Refusing to replace an existing provider test database.");
-    }
-    await administrator.query(`create database "${databaseName}"`);
-    created = true;
-    await execFileAsync(
-      process.execPath,
-      [prismaExecutable, "migrate", "deploy", "--schema", providerSchema],
-      {
-        cwd: databasePackage,
-        env: {
-          ...process.env,
-          PACKSCOUT_PROVIDER_DATABASE_URL: providerDatabaseUrl,
-        },
-      },
-    );
-    const providerId = randomUUID();
-    client = createProviderDatabaseLifecycle({
-      databaseUrl: providerDatabaseUrl,
-      providerId,
-      providerKey,
-      connectionLimit: 2,
-    }).client;
-    await client.$connect();
-    await initializeProviderDatabaseIdentity({
-      client,
-      providerId,
-      providerKey,
-    });
-    return {
-      client,
-      providerId,
-      providerKey,
-      async close() {
-        await client?.$disconnect();
-        if (created) {
-          await administrator.query(
-            `drop database "${databaseName}" with (force)`,
-          );
-          created = false;
-        }
-        await administrator.end();
-      },
-    };
-  } catch (error) {
-    await client?.$disconnect().catch(() => undefined);
-    if (created) {
-      await administrator.query(
-        `drop database "${databaseName}" with (force)`,
-      ).catch(() => undefined);
-    }
-    await administrator.end().catch(() => undefined);
-    throw error;
-  }
-}
+import { createHarness, enqueue, type ProviderHarness } from "./provider-manual-import-integration-support.ts";
 
 function isolatedClutchSource(captureRoot: string): ProviderManualImportPageSource {
   const source = new ProviderCaptureMixedPageSource({
@@ -422,38 +290,6 @@ function deferredCatalogSource(
       return { ...body, responseDigest: providerMixedPageDigest(body) };
     },
   };
-}
-
-async function enqueue(
-  harness: ProviderHarness,
-  configVersionId: string,
-  sequence: number,
-): Promise<string> {
-  const runtime = await new PrismaProviderRuntimeRepository(
-    harness.client,
-  ).snapshot();
-  const adapterKey = runtime.cachedConfiguration?.configuration.adapterKey;
-  const requestPolicy = typeof adapterKey === "string"
-    ? dataforrestDistributedRequestPolicy(adapterKey, runtime.providerKey) : null;
-  const result = await new PrismaAdminProviderRuntimeRepository(
-    harness.client,
-  ).requestRunNow({
-    providerId: harness.providerId,
-    operatorId: "10000000-0000-4000-8000-000000000001",
-    expectedConfigVersionId: configVersionId,
-    expectedConfigVersionNumber: 1n,
-    expectedGeneration: runtime.generation,
-    idempotencyKey: `clutch-integration-${sequence}-${randomUUID()}`,
-    commandId: randomUUID(),
-    runId: randomUUID(),
-    correlationId: randomUUID(),
-    ...(requestPolicy !== null && typeof adapterKey === "string" ? {
-      requestSettingsDefault: { recordsPerRequest: requestPolicy.defaultRecordsPerRequest, adapterKey },
-    } : { requestSettingsPolicy: "unmanaged" as const }),
-  });
-  assert.equal(result.kind, "created");
-  if (result.kind !== "created") throw new Error("Run was not queued.");
-  return result.run.id;
 }
 
 const parallelCourtyardCursor = Object.freeze({
@@ -980,7 +816,7 @@ test("a settled reconciliation failure preserves the committed page and reports 
       query: {
         async $queryRaw({ args, query }) {
           if ("sql" in args && typeof args.sql === "string"
-            && args.sql.includes("SELECT EXISTS (SELECT 1 FROM packs)")) {
+            && args.sql.includes("SELECT id, pack_key AS key FROM packs")) {
             reconciliationQueries += 1;
             throw Object.assign(new Error(secret), { code: "P2028", meta: { query: secret } });
           }
@@ -994,7 +830,13 @@ test("a settled reconciliation failure preserves the committed page and reports 
       source: {
         supports: source.supports.bind(source),
         requestSettingsPolicy: source.requestSettingsPolicy!.bind(source),
-        nextPage(input) { sourceReads += 1; return source.nextPage(input); },
+        async nextPage(input) {
+          sourceReads += 1;
+          const page = { ...await source.nextPage(input) as Record<string, unknown> };
+          delete page.responseDigest;
+          const head = { ...page, continuation: "head" };
+          return { ...head, responseDigest: providerMixedPageDigest(head) };
+        },
       },
     }).executeNextPage();
     assert.deepEqual(result, {
@@ -1008,7 +850,7 @@ test("a settled reconciliation failure preserves the committed page and reports 
     assert.equal(run.accepted_count, 2);
     assert.equal(run.failure_class, "database");
     assert.equal(run.failure_summary,
-      "Provider import stopped; stage=fact_reference_reconciliation; category=transaction_invalid.");
+      "Provider import stopped; stage=head_reconciliation; category=transaction_invalid.");
     assert.equal(JSON.stringify(result).includes(secret), false);
     assert.equal(run.failure_summary.includes(secret), false);
     assert.notEqual(run.final_cursor_hash, null);
