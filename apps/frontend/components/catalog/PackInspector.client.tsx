@@ -258,24 +258,16 @@ export function RepackInspector({
   const chaseUnavailableReason =
     chase.reasonCopy ?? METRIC_TRUST_COPY.unavailableExplanation;
   const headingId = `repack-inspector-${placement}-${repack.publicRepackId}`;
-  const vendorLimitations = packScoutEv.confidence.limitations.filter((limitation) =>
-    /vendor/i.test(limitation),
-  );
-  const estimateLimitations = packScoutEv.confidence.limitations.filter(
-    (limitation) => !/vendor/i.test(limitation),
-  );
   const estimatedEvHint = [
     METRIC_TRUST_COPY.longRunExplanation,
     packScoutEv.freshness.calculatedLabel,
     packScoutEv.freshness.dataAsOfLabel,
     packScoutEv.freshness.confidenceEvaluatedLabel,
     releaseDataAsOf.label,
-    ...estimateLimitations,
   ].join(" ");
   const vendorReportedEvHint = [
     METRIC_TRUST_COPY.sourceExplanation,
     vendorEv.observedLabel,
-    ...vendorLimitations,
   ]
     .filter(Boolean)
     .join(" ");

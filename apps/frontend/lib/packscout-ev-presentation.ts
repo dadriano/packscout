@@ -39,6 +39,13 @@ export type MetricSemanticState = "neutral" | "negative" | "unavailable";
 
 export type MetricSemanticLabel = "Neutral" | "Negative";
 
+export type MetricTone =
+  | "positive"
+  | "caution"
+  | "warning"
+  | "negative"
+  | "unavailable";
+
 export type AvailableMetricValue = Readonly<{
   availability: "available";
   label: string;
@@ -47,6 +54,7 @@ export type AvailableMetricValue = Readonly<{
   glossaryKey: GlossaryFieldKey;
   semanticState?: Exclude<MetricSemanticState, "unavailable">;
   semanticLabel?: MetricSemanticLabel;
+  tone?: Exclude<MetricTone, "unavailable">;
 }>;
 
 export type UnavailableMetricValue = Readonly<{
@@ -57,6 +65,7 @@ export type UnavailableMetricValue = Readonly<{
   glossaryKey: GlossaryFieldKey;
   semanticState: "unavailable";
   semanticLabel: "Unavailable";
+  tone: "unavailable";
   reason: PublicMetricReason;
   reasonCopy: string;
 }>;
@@ -72,6 +81,7 @@ export type ConfidencePresentation = Readonly<{
   displayValue: string;
   accessibleLabel: string;
   limitations: readonly string[];
+  tone: MetricTone;
 }>;
 
 export type PackScoutEvFreshnessPresentation = Readonly<{
@@ -100,6 +110,7 @@ export type PackScoutEvV3Presentation = Readonly<{
   statusLabel: string;
   semanticState: MetricSemanticState;
   semanticLabel: MetricSemanticLabel | "Unavailable";
+  tone: MetricTone;
   simulated: boolean;
   simulatedLabel: string | null;
   zeroPayout: boolean;
@@ -251,6 +262,15 @@ export function semanticStateForSignedBasisPoints(
   return "neutral";
 }
 
+export function evToneForSignedBasisPoints(
+  basisPoints: number,
+): Exclude<MetricTone, "unavailable"> {
+  if (basisPoints > -500) return "positive";
+  if (basisPoints > -1_000) return "caution";
+  if (basisPoints > -1_500) return "warning";
+  return "negative";
+}
+
 function semanticLabel(
   state: Exclude<MetricSemanticState, "unavailable">,
 ): MetricSemanticLabel {
@@ -263,6 +283,7 @@ function availableMetric(
   displayValue: string,
   glossaryKey: GlossaryFieldKey,
   state?: Exclude<MetricSemanticState, "unavailable">,
+  tone?: Exclude<MetricTone, "unavailable">,
 ): AvailableMetricValue {
   const stateLabel = state ? semanticLabel(state) : undefined;
   return Object.freeze({
@@ -274,6 +295,7 @@ function availableMetric(
       ? `${label}: ${displayValue}. ${stateLabel}.`
       : `${label}: ${displayValue}.`,
     ...(state ? { semanticState: state, semanticLabel: stateLabel } : {}),
+    ...(tone ? { tone } : {}),
   });
 }
 
@@ -290,6 +312,7 @@ function unavailableMetric(
     glossaryKey,
     semanticState: "unavailable" as const,
     semanticLabel: "Unavailable" as const,
+    tone: "unavailable" as const,
     reason,
     reasonCopy,
     accessibleLabel: `${label}: Unavailable. ${reasonCopy}`,
@@ -303,6 +326,7 @@ function availableMoneyMetric(
   options: Readonly<{
     signed?: boolean;
     state?: Exclude<MetricSemanticState, "unavailable">;
+    tone?: Exclude<MetricTone, "unavailable">;
   }> = {},
 ): AvailableMetricValue {
   return availableMetric(
@@ -310,6 +334,7 @@ function availableMoneyMetric(
     formatMoneyMinorUnits(money, { signed: options.signed }),
     glossaryKey,
     options.state,
+    options.tone,
   );
 }
 
@@ -416,6 +441,7 @@ export function presentPackScoutConfidence(
       displayValue: "Unavailable",
       accessibleLabel: "PackScout EV confidence: Unavailable.",
       limitations: Object.freeze([]),
+      tone: "unavailable" as const,
     });
   }
   const band = confidence.band;
@@ -423,6 +449,11 @@ export function presentPackScoutConfidence(
     maximumFractionDigits: 2,
   });
   const limitations = presentConfidenceLimitations(confidence.limitationCodes);
+  const tone = band === "high"
+    ? "positive"
+    : band === "medium"
+      ? "caution"
+      : "warning";
   return Object.freeze({
     availability: "available" as const,
     band,
@@ -436,6 +467,7 @@ export function presentPackScoutConfidence(
         : []),
     ].join(" "),
     limitations,
+    tone,
   });
 }
 
@@ -568,6 +600,7 @@ function unavailablePackScoutPresentation(
     statusLabel,
     semanticState: "unavailable" as const,
     semanticLabel: "Unavailable" as const,
+    tone: "unavailable" as const,
     simulated,
     simulatedLabel: simulated ? ESTIMATE_STATUS_COPY.simulated : null,
     zeroPayout: false,
@@ -641,6 +674,7 @@ export function presentPackScoutEvV3(
     : undefined;
   const state = semanticStateForSignedBasisPoints(metrics.evPercentBasisPoints);
   const stateLabel = semanticLabel(state);
+  const tone = evToneForSignedBasisPoints(metrics.evPercentBasisPoints);
   const zeroPayout = metrics.grossEvMoney.minorUnits === 0;
   const grossEvDollars = availableMoneyMetric(
     "Gross EV $",
@@ -655,12 +689,14 @@ export function presentPackScoutEvV3(
   const evDollars = availableMoneyMetric("EV $", "evDollars", metrics.evDollars, {
     signed: true,
     state,
+    tone,
   });
   const evPercent = availableMetric(
     "EV %",
     formatSignedEvPercent(metrics.evPercentBasisPoints),
     "evPercent",
     state,
+    tone,
   );
   const packPrice = presentRepackPrice(input.price);
   const confidencePresentation = presentPackScoutConfidence(confidence);
@@ -674,6 +710,7 @@ export function presentPackScoutEvV3(
     statusLabel,
     semanticState: state,
     semanticLabel: stateLabel,
+    tone,
     simulated,
     simulatedLabel: simulated ? ESTIMATE_STATUS_COPY.simulated : null,
     zeroPayout,
@@ -806,11 +843,13 @@ export function presentSignedEvPercentMetric(
     return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
   }
   const state = semanticStateForSignedBasisPoints(metric.basisPoints);
+  const tone = evToneForSignedBasisPoints(metric.basisPoints);
   return availableMetric(
     label,
     formatSignedEvPercent(metric.basisPoints),
     "evPercent",
     state,
+    tone,
   );
 }
 

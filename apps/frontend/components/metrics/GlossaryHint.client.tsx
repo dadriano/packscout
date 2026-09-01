@@ -28,6 +28,7 @@ type GlossaryHintProps = Readonly<{
   field: GlossaryFieldKey;
   align?: "start" | "end";
   content?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
+  details?: readonly string[];
   trigger?: ReactNode;
   triggerAriaLabel?: string;
   triggerClassName?: string;
@@ -37,6 +38,7 @@ export function GlossaryHint({
   field,
   align = "start",
   content,
+  details = [],
   trigger,
   triggerAriaLabel,
   triggerClassName,
@@ -138,7 +140,12 @@ export function GlossaryHint({
         aria-controls={panelId}
         aria-describedby={state.open ? panelId : undefined}
         aria-expanded={state.open}
-        aria-label={triggerAriaLabel ?? `About ${definition.label}`}
+        aria-label={
+          triggerAriaLabel ??
+          (details.length > 0
+            ? `About ${definition.label} and its limitations`
+            : `About ${definition.label}`)
+        }
         className={triggerClassName ?? styles.trigger}
         onClick={() => dispatch({ type: "toggle_pin" })}
         ref={triggerRef}
@@ -156,6 +163,24 @@ export function GlossaryHint({
         >
           <span className={styles.heading}>{definition.label}</span>
           <span className={styles.definition}>{definition.definition}</span>
+          {details.length > 0 ? (
+            <span className={styles.details}>
+              <span className={styles.detailsHeading}>
+                Confidence limitations
+              </span>
+              <span className={styles.detailsList} role="list">
+                {details.map((detail) => (
+                  <span
+                    className={styles.detail}
+                    key={detail}
+                    role="listitem"
+                  >
+                    {detail}
+                  </span>
+                ))}
+              </span>
+            </span>
+          ) : null}
           {definition.learnHref ? (
             <Link className={styles.learnLink} href={definition.learnHref}>
               Learn how EV is estimated

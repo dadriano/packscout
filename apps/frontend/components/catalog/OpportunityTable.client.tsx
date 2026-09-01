@@ -23,7 +23,11 @@ type OpportunityTableProps = Readonly<{
 
 function MetricCell({ metric }: { metric: MetricValuePresentation }) {
   return (
-    <span className={styles.metric} data-state={metric.semanticState ?? "plain"}>
+    <span
+      className={styles.metric}
+      data-state={metric.semanticState ?? "plain"}
+      data-tone={metric.tone ?? "plain"}
+    >
       <span aria-hidden="true" className={styles.metricValue}>
         {metric.displayValue}
       </span>
@@ -135,7 +139,8 @@ function OpportunityRow({
         <MetricCell metric={row.packScoutEv.evPercent} />
         <span
           aria-label={row.packScoutEv.confidence.accessibleLabel}
-          className={styles.unavailableReason}
+          className={styles.confidence}
+          data-tone={row.packScoutEv.confidence.tone}
         >
           Confidence: {row.packScoutEv.confidence.displayValue}
         </span>

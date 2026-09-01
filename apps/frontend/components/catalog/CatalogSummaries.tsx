@@ -62,6 +62,7 @@ export function CatalogSummaries({
                   aria-hidden="true"
                   className={styles.median}
                   data-state={row.medianEvPercent.semanticState ?? "plain"}
+                  data-tone={row.medianEvPercent.tone ?? "plain"}
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
                   <small>{row.medianEvPercent.semanticLabel}</small>
