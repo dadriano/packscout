@@ -1,7 +1,7 @@
 # Task: Certify the Distributed Warehouse
 
 **ID:** distributed-canonical-warehouse/020
-**Depends on:** distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/011, distributed-canonical-warehouse/016, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
+**Depends on:** distributed-canonical-warehouse/008, distributed-canonical-warehouse/009, distributed-canonical-warehouse/010, distributed-canonical-warehouse/011, distributed-canonical-warehouse/016, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019, convex-promotion-jobs/009
 **Blocks:** none
 **Estimated scope:** large
 **Estimated effort:** 5–8 days for one builder, including full-flow acceptance, fault injection, representative volume checks, and the repository gate
