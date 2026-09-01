@@ -30,6 +30,8 @@ import { createAdminOperatorInvitationRuntime } from "./operator-invitation-runt
 import { createAdminPasswordResetRuntime } from "./password-reset-runtime.ts";
 import { createProductUserAuditSink } from "./product-user-audit.ts";
 import { createProductUserDirectoryReader } from "./product-user-directory.ts";
+import { withProductUserProfiles } from "./product-user-profiles.ts";
+import { createPrivyProductUserProfileReader } from "./privy-product-user-profile.ts";
 import { createCentralProviderAdminRuntime } from "./provider-runtime.ts";
 import { createPublishedCatalogReader } from "./published-catalog-reader.ts";
 import {
@@ -262,9 +264,13 @@ export async function createAdminRuntime(
       production: !development,
       allowedOrigins,
     });
-    const directory = createProductUserDirectoryReader({
-      config: productUserDirectoryConfig,
-    });
+    const directory = withProductUserProfiles(
+      createProductUserDirectoryReader({ config: productUserDirectoryConfig }),
+      createPrivyProductUserProfileReader({
+        appId: environment.PRIVY_APP_ID,
+        appSecret: environment.PRIVY_APP_SECRET,
+      }),
+    );
     const publishedCatalog = createPublishedCatalogReader({
       config: productUserDirectoryConfig,
     });
