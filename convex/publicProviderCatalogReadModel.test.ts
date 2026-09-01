@@ -547,4 +547,63 @@ describe("public provider catalog composition", () => {
     expect(result?.unfilteredIds).not.toContain(result?.targetId);
     expect(result?.filteredIds).toContain(result?.targetId);
   });
+
+  test("stores and searches art as a first-class collectible type", async () => {
+    const t = createTest();
+    const providers = await seedProviders(t);
+    const fixture = buildMockDataReleaseV2();
+    const collectible = fixture.collectibles[0];
+    if (collectible === undefined) {
+      throw new Error("Expected a collectible fixture.");
+    }
+
+    const result = await t.run(async (ctx) => {
+      const release = providers[0]!.release;
+      const catalog = await loadPublicProviderCatalog(
+        ctx,
+        providers,
+        expectedCounts,
+      );
+      if (catalog === null) return null;
+      const name = "Packscout gallery study";
+      const identity = {
+        ...collectible,
+        publicCollectibleId: "70000000-0000-5000-8000-000000000001",
+        name,
+        normalizedName: normalizePublicSearchText(name),
+        aliases: [],
+        normalizedAliases: [],
+        collectibleType: "art" as const,
+      };
+      const detail = publicCollectibleSchema.parse({
+        ...identity,
+        searchText: buildPublicCollectibleSearchText(identity),
+      });
+      await ctx.db.insert("providerCatalogCollectibles", {
+        releaseId: release._id,
+        publicCollectibleId: detail.publicCollectibleId,
+        collectibleType: detail.collectibleType,
+        normalizedName: detail.normalizedName,
+        searchText: detail.searchText,
+        detail,
+      });
+
+      const matches = await searchProviderCollectibles(ctx, catalog, {
+        search: "gallery",
+        collectibleTypes: ["art"],
+        candidateLimit: 20,
+      });
+      return matches?.map(({ publicCollectibleId, collectibleType }) => ({
+        publicCollectibleId,
+        collectibleType,
+      })) ?? null;
+    });
+
+    expect(result).toEqual([
+      {
+        publicCollectibleId: "70000000-0000-5000-8000-000000000001",
+        collectibleType: "art",
+      },
+    ]);
+  });
 });

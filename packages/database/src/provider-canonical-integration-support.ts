@@ -19,6 +19,8 @@ const PROVIDER_DATABASE_PATTERN = /^packscout_canonical_[0-9]+_[a-f0-9]{10}$/;
 
 export interface ProviderHarness {
   readonly client: ProviderPrismaClient;
+  readonly databaseUrl: string;
+  readonly providerId: string;
   readonly providerKey: string;
   close(): Promise<void>;
 }
@@ -54,6 +56,7 @@ export async function createProviderHarness(): Promise<ProviderHarness> {
   const databaseUrl = providerUrl(adminUrl, databaseName);
   let created = false;
   let client: ProviderPrismaClient | undefined;
+  const providerId = randomUUID();
   try {
     const version = await admin.query<{ server_version_num: string }>("show server_version_num");
     if (Number(version.rows[0]?.server_version_num ?? 0) < 160_000) {
@@ -80,7 +83,7 @@ export async function createProviderHarness(): Promise<ProviderHarness> {
     await client.$connect();
     await initializeProviderDatabaseIdentity({
       client,
-      providerId: randomUUID(),
+      providerId,
       providerKey,
     });
   } catch (error) {
@@ -95,6 +98,8 @@ export async function createProviderHarness(): Promise<ProviderHarness> {
   let closePromise: Promise<void> | undefined;
   return {
     client,
+    databaseUrl,
+    providerId,
     providerKey,
     close() {
       closePromise ??= (async () => {

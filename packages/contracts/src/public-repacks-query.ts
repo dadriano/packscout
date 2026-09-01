@@ -95,7 +95,7 @@ const defaultRepackFilters = Object.freeze({
   categories: Object.freeze([] as string[]),
   collectibleTypes: Object.freeze(
     [] as Array<
-      "card" | "watch" | "coin" | "sealed_product" | "memorabilia" | "other"
+      "card" | "watch" | "art" | "coin" | "sealed_product" | "memorabilia" | "other"
     >,
   ),
   availability: "available" as const,

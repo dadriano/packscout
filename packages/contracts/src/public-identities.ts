@@ -40,3 +40,9 @@ export function provisionalCollectiblePublicId(input: {
     provisionalCollectiblePublicIdentityName(input),
   );
 }
+
+export function globalCategoryPublicId(globalCategoryId: string): string {
+  return packscoutPublicIdentityUuid(
+    `global-category:${normalizedUuid(globalCategoryId, "globalCategoryId")}`,
+  );
+}

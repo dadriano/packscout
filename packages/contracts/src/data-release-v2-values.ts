@@ -108,17 +108,19 @@ export function canonicalArraySchema<TSchema extends z.ZodType>(
     });
 }
 
+export const publicCurrencyKeySchema = z.string().regex(/^[A-Z0-9]{2,12}$/);
+
 export const publicMoneySchema = z
   .object({
     minorUnits: nonNegativeIntegerSchema,
-    currency: z.string().regex(/^[A-Z]{3}$/),
+    currency: publicCurrencyKeySchema,
   })
   .strict();
 
 export const publicReportedMoneySchema = z
   .object({
     minorUnits: nonNegativeIntegerSchema,
-    currency: z.string().regex(/^[A-Z0-9]{2,12}$/),
+    currency: publicCurrencyKeySchema,
   })
   .strict();
 
@@ -144,6 +146,7 @@ export const publicImageSchema = z
 export const publicCollectibleTypeSchema = z.enum([
   "card",
   "watch",
+  "art",
   "coin",
   "sealed_product",
   "memorabilia",

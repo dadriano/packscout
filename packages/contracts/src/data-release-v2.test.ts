@@ -144,13 +144,17 @@ test("V2 enforces comparable EV arithmetic and confidence bands", () => {
   );
 });
 
-test("public display money accepts only ISO 4217-style currency codes", () => {
+test("public display money accepts bounded fiat and token currency keys", () => {
   assert.equal(
     publicMoneySchema.safeParse({ minorUnits: 100, currency: "USD" }).success,
     true,
   );
   assert.equal(
     publicMoneySchema.safeParse({ minorUnits: 100, currency: "USDC" }).success,
+    true,
+  );
+  assert.equal(
+    publicMoneySchema.safeParse({ minorUnits: 100, currency: "usd" }).success,
     false,
   );
   const unavailableUsdComparison = publicPriceSchema.safeParse({
