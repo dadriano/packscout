@@ -40,8 +40,10 @@ interface Dependencies {
 const INVALID = "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_INVALID";
 const UNAVAILABLE = "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_UNAVAILABLE";
 class RuntimeRefusal extends Error {}
+class RetryableOpeningFailure extends Error {}
 function refuse(code = INVALID): never { throw new RuntimeRefusal(code); }
 function unavailable(): never { return refuse(UNAVAILABLE); }
+function retryable(): never { throw new RetryableOpeningFailure(); }
 
 /** Opening reads are idempotent and have no publication authority. A single
  * fresh retry absorbs a transient transport/process failure without ever
@@ -101,8 +103,12 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
     const cliEnvironment = childEnvironment(environment);
     const requireInstance = async () => {
       const value = await onceAfterUnavailable(async () => {
-        const response = await request(`${PUBLIC_URL}/instance_name`, { method: "GET", redirect: "error",
+        const response = await request(`${PUBLIC_URL}/instance_name`, { method: "GET", redirect: "manual",
           credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(30_000) });
+        if ([408, 429].includes(response.status) || (response.status >= 500 && response.status <= 599)) {
+          await response.body?.cancel().catch(() => undefined);
+          return retryable();
+        }
         if (!response.ok) return refuse();
         return boundedText(response, 256);
       });

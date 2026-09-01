@@ -55,7 +55,7 @@ function fixture(options = {}) {
       if (String(url).endsWith("/instance_name")) {
         instanceReads++;
         if (instanceReads <= (options.instanceFailures ?? 0)) throw new Error(`${catalogToken}: private instance failure`);
-        return options.instanceResponse?.() ?? new Response(options.instance ?? "shiny-newt-310");
+        return options.instanceResponse?.(instanceReads) ?? new Response(options.instance ?? "shiny-newt-310");
       }
       if (options.fetch) return await options.fetch(url, settings);
       return Response.json({ status: "success", value: { ok: true }, logLines: [catalogToken] });
@@ -176,9 +176,34 @@ test("opening reports unavailable only after its single bounded retry is exhaust
   assert.equal(graph.instanceReads(), 1);
 });
 
+test("transient instance statuses retry once after cancelling their response body", async () => {
+  let cancelled = 0;
+  const h = fixture({ instanceResponse: attempt => attempt === 1
+    ? new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 503 })
+    : new Response("shiny-newt-310") });
+  (await h.open()).close();
+  assert.equal(h.instanceReads(), 3);
+  assert.equal(cancelled, 1);
+
+  for (const status of [408, 429, 500, 599]) {
+    const retry = fixture({ instanceResponse: attempt => new Response(attempt === 1 ? "later" : "shiny-newt-310",
+      attempt === 1 ? { status } : undefined) });
+    (await retry.open()).close();
+    assert.equal(retry.instanceReads(), 3);
+  }
+});
+
+test("repeated transient instance status exhausts as unavailable", async () => {
+  const h = fixture({ instanceResponse: () => new Response("later", { status: 503 }) });
+  await assert.rejects(h.open(), unavailableFailure);
+  assert.equal(h.instanceReads(), 2);
+  assert.equal(h.completedReads(), 0);
+});
+
 test("integrity mismatches are invalid and never retried", async () => {
   for (const options of [{ instance: "kindhearted-ermine-54" },
-    { instanceResponse: () => new Response("unavailable", { status: 503 }) }]) {
+    { instanceResponse: () => new Response("forbidden", { status: 403 }) },
+    { instanceResponse: () => new Response("redirect", { status: 302, headers: { location: "https://example.com" } }) }]) {
     const h = fixture(options);
     await assert.rejects(h.open(), safeFailure);
     assert.equal(h.instanceReads(), 1);
