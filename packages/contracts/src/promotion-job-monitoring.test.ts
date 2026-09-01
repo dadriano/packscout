@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   promotionJobHistoryQuerySchema,
+  promotionJobMonitoringOverviewSchema,
   promotionJobMonitoringFilterSchema,
   promotionJobMonitoringIdSchema,
 } from "./promotion-job-monitoring.ts";
@@ -63,5 +64,55 @@ test("detail identity is opaque and cannot be a UUID or local run ID", () => {
     "pj_short",
   ]) {
     assert.equal(promotionJobMonitoringIdSchema.safeParse(invalid).success, false);
+  }
+});
+
+test("overview schema strips undeclared protected authority at every boundary", () => {
+  const result = promotionJobMonitoringOverviewSchema.parse({
+    observedAt: "2026-09-01T12:00:00.000Z",
+    organizationId: "never-return",
+    roster: {
+      observedAt: "2026-09-01T12:00:00.000Z",
+      version: "1",
+      highWater: "2",
+      digest: "a".repeat(64),
+      eligibleProviderCount: 0,
+      databaseUrl: "never-return",
+    },
+    evaluator: {
+      state: "current",
+      observedAt: "2026-09-01T12:00:00.000Z",
+      evaluatedThrough: "2026-09-01T12:00:00.000Z",
+      rosterVersion: "1",
+      rosterHighWater: "2",
+      rosterDigest: "a".repeat(64),
+      expectedCount: 1,
+      reachableCount: 1,
+      unavailableCount: 0,
+      manifestEvaluated: true,
+      failureCode: null,
+      credential: "never-return",
+    },
+    manifest: {
+      evidenceSource: "live",
+      observedAt: "2026-09-01T12:00:00.000Z",
+      stale: false,
+      schedule: null,
+      wake: null,
+      activeManifest: null,
+      previousManifest: null,
+      gateQueueDepth: 0,
+      oldestGateAgeMs: null,
+      serializedOperation: null,
+      lastActivationAt: null,
+      lastReconciliationAt: null,
+      latestInvocation: null,
+      receiptBody: "never-return",
+    },
+    providers: [],
+  });
+  const serialized = JSON.stringify(result);
+  for (const token of ["organizationId", "databaseUrl", "credential", "receiptBody"]) {
+    assert.equal(serialized.includes(token), false, token);
   }
 });

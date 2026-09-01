@@ -282,3 +282,199 @@ export interface PromotionJobInvocationDetail {
   readonly attemptSetDigest: string;
   readonly attempts: readonly PromotionJobAttemptMonitoring[];
 }
+
+const decimalSchema = z.string().regex(/^(?:0|[1-9][0-9]{0,18})$/u);
+const digestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+const instantSchema = z.iso.datetime({ offset: true });
+const safeCodeSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u);
+const safeStateSchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/u);
+const safePublicIdSchema = z.string().min(1).max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/u);
+
+export const promotionJobScheduleMonitoringSchema = z.object({
+  lifecycle: z.enum(promotionJobScheduleLifecycles),
+  health: z.enum(promotionJobScheduleHealthStates),
+  scheduleEpoch: decimalSchema,
+  missedWindowCount: decimalSchema,
+  lastScheduledCheckinAt: instantSchema.nullable(),
+  nextExpectedCheckinAt: instantSchema.nullable(),
+});
+
+export const promotionJobWakeMonitoringSchema = z.object({
+  pending: z.boolean(),
+  requestedGeneration: decimalSchema,
+  acknowledgedGeneration: decimalSchema,
+  latestCause: safeStateSchema.nullable(),
+  latestRequestedAt: instantSchema.nullable(),
+  deliveryState: safeStateSchema.nullable(),
+  lastDeliveryAttemptAt: instantSchema.nullable(),
+  failureCode: safeCodeSchema.nullable(),
+});
+
+export const promotionJobInvocationMonitoringSchema = z.object({
+  monitoringId: promotionJobMonitoringIdSchema,
+  job: promotionJobMonitoringFilterSchema,
+  trigger: z.enum(promotionJobTriggerKinds),
+  state: z.enum(["running", "terminal"]),
+  outcome: z.enum(promotionJobTerminalOutcomes).nullable(),
+  requestedAt: instantSchema,
+  startedAt: instantSchema,
+  finishedAt: instantSchema.nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  cycleCount: z.number().int().nonnegative(),
+  attemptCount: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  failureCode: safeCodeSchema.nullable(),
+  continuationPending: z.boolean(),
+});
+
+export const promotionJobPublicReleaseMonitoringSchema = z.object({
+  publicReleaseId: safePublicIdSchema,
+  fingerprint: digestSchema,
+  position: decimalSchema,
+});
+
+export const manifestGateMonitoringSchema = z.object({
+  operation: z.enum(manifestGateOperationKinds),
+  state: z.enum(["pending", "running", "retry_wait", "blocked"]),
+  requestedGeneration: decimalSchema,
+  acknowledgedGeneration: decimalSchema,
+  requestedAt: instantSchema,
+  attemptCount: z.number().int().nonnegative(),
+  retryAt: instantSchema.nullable(),
+  failureCode: safeCodeSchema.nullable(),
+});
+
+export const providerPromotionJobMonitoringSchema = z.object({
+  providerKey: providerPlatformKeySchema,
+  displayName: z.string().trim().min(1).max(120),
+  lifecycle: z.enum(providerLifecycleStates),
+  evidenceSource: z.enum(promotionJobEvidenceSources),
+  observedAt: instantSchema.nullable(),
+  stale: z.boolean(),
+  routeFailureCode: safeCodeSchema.nullable(),
+  state: z.enum(promotionJobProviderStates),
+  schedule: promotionJobScheduleMonitoringSchema.nullable(),
+  wake: promotionJobWakeMonitoringSchema.nullable(),
+  settledPosition: decimalSchema.nullable(),
+  completedRelease: promotionJobPublicReleaseMonitoringSchema.nullable(),
+  activeRelease: promotionJobPublicReleaseMonitoringSchema.nullable(),
+  pendingGate: manifestGateMonitoringSchema.nullable(),
+  latestInvocation: promotionJobInvocationMonitoringSchema.nullable(),
+  projectionLagMs: z.number().int().nonnegative().nullable(),
+});
+
+export const manifestPromotionJobMonitoringSchema = z.object({
+  evidenceSource: z.enum(["live", "unavailable"]),
+  observedAt: instantSchema.nullable(),
+  stale: z.boolean(),
+  schedule: promotionJobScheduleMonitoringSchema.nullable(),
+  wake: promotionJobWakeMonitoringSchema.nullable(),
+  activeManifest: z.object({
+    publicManifestId: safePublicIdSchema,
+    fingerprint: digestSchema,
+    generation: decimalSchema,
+    activatedAt: instantSchema,
+  }).nullable(),
+  previousManifest: z.object({
+    publicManifestId: safePublicIdSchema,
+    fingerprint: digestSchema,
+    generation: decimalSchema,
+    activatedAt: instantSchema,
+  }).nullable(),
+  gateQueueDepth: z.number().int().nonnegative(),
+  oldestGateAgeMs: z.number().int().nonnegative().nullable(),
+  serializedOperation: z.object({
+    operation: z.enum(manifestGateOperationKinds),
+    providerKey: providerPlatformKeySchema,
+    state: z.enum(["persisted", "sent", "accepted", "retry_wait", "blocked"]),
+    attemptCount: z.number().int().nonnegative(),
+    failureCode: safeCodeSchema.nullable(),
+  }).nullable(),
+  lastActivationAt: instantSchema.nullable(),
+  lastReconciliationAt: instantSchema.nullable(),
+  latestInvocation: promotionJobInvocationMonitoringSchema.nullable(),
+});
+
+export const promotionJobEvaluatorMonitoringSchema = z.object({
+  state: z.enum(["pending", "current", "stale", "failed"]),
+  observedAt: instantSchema.nullable(),
+  evaluatedThrough: instantSchema.nullable(),
+  rosterVersion: decimalSchema.nullable(),
+  rosterHighWater: decimalSchema.nullable(),
+  rosterDigest: digestSchema.nullable(),
+  expectedCount: z.number().int().nonnegative().nullable(),
+  reachableCount: z.number().int().nonnegative().nullable(),
+  unavailableCount: z.number().int().nonnegative().nullable(),
+  manifestEvaluated: z.boolean().nullable(),
+  failureCode: safeCodeSchema.nullable(),
+});
+
+export const promotionJobMonitoringOverviewSchema = z.object({
+  observedAt: instantSchema,
+  roster: z.object({
+    observedAt: instantSchema,
+    version: decimalSchema,
+    highWater: decimalSchema,
+    digest: digestSchema,
+    eligibleProviderCount: z.number().int().nonnegative(),
+  }),
+  evaluator: promotionJobEvaluatorMonitoringSchema,
+  manifest: manifestPromotionJobMonitoringSchema,
+  providers: z.array(providerPromotionJobMonitoringSchema),
+}).superRefine((overview, context) => {
+  if (
+    overview.providers.length !== overview.roster.eligibleProviderCount
+    || new Set(overview.providers.map(({ providerKey }) => providerKey)).size
+      !== overview.providers.length
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Promotion job roster evidence is inconsistent.",
+      path: ["providers"],
+    });
+  }
+});
+
+export const promotionJobHistoryPageSchema = z.object({
+  items: z.array(promotionJobInvocationMonitoringSchema).max(100),
+  nextCursor: z.string().min(1).max(1_024).nullable(),
+  rosterDigest: digestSchema,
+});
+
+const promotionJobOperationMonitoringSchema = z.object({
+  operationNumber: z.number().int().nonnegative(),
+  kind: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+  state: z.enum(["pending", "sent", "acknowledged"]),
+  sendCount: z.number().int().nonnegative(),
+  sentAt: instantSchema.nullable(),
+  acknowledgedAt: instantSchema.nullable(),
+  operationIdDigest: digestSchema,
+  requestDigest: digestSchema,
+  receiptDigest: digestSchema.nullable(),
+});
+
+const promotionJobAttemptMonitoringSchema = z.object({
+  attemptNumber: z.number().int().nonnegative(),
+  kind: z.enum(["provider", "manifest"]),
+  state: safeStateSchema,
+  targetPosition: decimalSchema,
+  retryCount: z.number().int().nonnegative(),
+  failureCode: safeCodeSchema.nullable(),
+  publicReleaseId: safePublicIdSchema.nullable(),
+  releaseFingerprint: digestSchema.nullable(),
+  totalOperationCount: z.number().int().nonnegative(),
+  truncatedOperationCount: z.number().int().nonnegative(),
+  orderedOperationDigest: digestSchema,
+  operationSummariesDigest: digestSchema,
+  operations: z.array(promotionJobOperationMonitoringSchema).max(25),
+  observedAt: instantSchema,
+});
+
+export const promotionJobInvocationDetailSchema = z.object({
+  invocation: promotionJobInvocationMonitoringSchema,
+  totalAttemptCount: z.number().int().nonnegative(),
+  truncatedAttemptCount: z.number().int().nonnegative(),
+  attemptSetDigest: digestSchema,
+  attempts: z.array(promotionJobAttemptMonitoringSchema).max(25),
+});
