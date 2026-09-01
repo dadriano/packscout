@@ -62,6 +62,10 @@ import {
   createPasswordResetRouter,
   type PasswordResetRouterDependencies,
 } from "./routes/password-reset.ts";
+import {
+  createPromotionJobsRouter,
+  type PromotionJobsRouterDependencies,
+} from "./routes/promotion-jobs.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -111,6 +115,10 @@ export interface AdminAppDependencies {
     "auth" | "cookiePolicy" | "sameOrigin"
   >;
   workerFleet?: Omit<WorkerFleetRouterDependencies, "auth" | "cookiePolicy">;
+  promotionJobs?: Omit<
+    PromotionJobsRouterDependencies,
+    "auth" | "cookiePolicy"
+  >;
   canonical?: DataInspectionRouterDependencies["canonical"];
   published?: DataInspectionRouterDependencies["published"];
   parity?: DataInspectionRouterDependencies["parity"];
@@ -263,6 +271,16 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
         "/api/worker-fleet",
         createWorkerFleetRouter({
           ...dependencies.workerFleet,
+          auth: service,
+          cookiePolicy,
+        }),
+      );
+    }
+    if (dependencies.promotionJobs) {
+      app.use(
+        "/api/promotion-jobs",
+        createPromotionJobsRouter({
+          ...dependencies.promotionJobs,
           auth: service,
           cookiePolicy,
         }),

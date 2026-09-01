@@ -159,7 +159,8 @@
     "start:source-supervisor:local": "npm run start:source-supervisor:local --workspace=@packscout/worker",
     "start:worker:production": "npm run start:production --workspace=@packscout/worker",
     "start:admin:embedded:local": "tsx scripts/local/start-admin-embedded.ts",
-    "start:admin-operations-fixture:local": "node --import tsx scripts/local/start-admin-operations-browser-fixture.mts"
+    "start:admin-operations-fixture:local": "node --import tsx scripts/local/start-admin-operations-browser-fixture.mts",
+    "start:admin-promotion-jobs-fixture:local": "node --import tsx scripts/local/start-admin-promotion-jobs-browser-fixture.mts"
   },
   "devDependencies": {
     "@edge-runtime/vm": "5.0.0",
