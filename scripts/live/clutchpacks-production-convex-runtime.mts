@@ -37,7 +37,21 @@ interface Dependencies {
   readonly fetch?: typeof fetch;
   readonly readUtf8?: (file: string) => Promise<string>;
 }
-function refuse(): never { throw new Error("CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_INVALID"); }
+const INVALID = "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_INVALID";
+const UNAVAILABLE = "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_UNAVAILABLE";
+class RuntimeRefusal extends Error {}
+function refuse(code = INVALID): never { throw new RuntimeRefusal(code); }
+function unavailable(): never { return refuse(UNAVAILABLE); }
+
+/** Opening reads are idempotent and have no publication authority. A single
+ * fresh retry absorbs a transient transport/process failure without ever
+ * retrying a response or value that failed an integrity check. */
+async function onceAfterUnavailable<T>(operation: () => Promise<T>): Promise<T> {
+  try { return await operation(); }
+  catch (error) { if (error instanceof RuntimeRefusal) throw error; }
+  try { return await operation(); }
+  catch (error) { if (error instanceof RuntimeRefusal) throw error; return unavailable(); }
+}
 
 function childEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
@@ -60,9 +74,11 @@ async function boundedText(response: Response, limit: number): Promise<string> {
       if (chunk.done) break;
       size += chunk.value.byteLength;
       if (size > limit) { await reader.cancel(); return refuse(); }
-      value += decoder.decode(chunk.value, { stream: true });
+      try { value += decoder.decode(chunk.value, { stream: true }); }
+      catch { return refuse(); }
     }
-    return value + decoder.decode();
+    try { return value + decoder.decode(); }
+    catch { return refuse(); }
   } finally { reader.releaseLock(); }
 }
 
@@ -84,13 +100,16 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
     const request = dependencies.fetch ?? fetch;
     const cliEnvironment = childEnvironment(environment);
     const requireInstance = async () => {
-      const response = await request(`${PUBLIC_URL}/instance_name`, { method: "GET", redirect: "error",
-        credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(30_000) });
-      if (!response.ok || await boundedText(response, 256) !== DEPLOYMENT) return refuse();
+      const value = await onceAfterUnavailable(async () => {
+        const response = await request(`${PUBLIC_URL}/instance_name`, { method: "GET", redirect: "error",
+          credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(30_000) });
+        if (!response.ok) return refuse();
+        return boundedText(response, 256);
+      });
+      if (value !== DEPLOYMENT) return refuse();
     };
     await requireInstance();
-    const captured: Record<string, string> = {};
-    const reads = await Promise.allSettled(environmentNames.map(async (name) => {
+    const readEnvironment = () => Promise.allSettled(environmentNames.map(async (name) => {
       const result = await run(process.execPath, [path.join(projectRoot, "node_modules/convex/bin/main.js"),
         "env", "get", name, "--env-file", "/dev/null", "--deployment", DEPLOYMENT],
       { cwd: projectRoot, env: cliEnvironment, timeout: 45_000, maxBuffer: 64 * 1_024 });
@@ -98,7 +117,16 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
       const value = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
       return { name, value };
     }));
-    if (reads.some((result) => result.status !== "fulfilled")) return refuse();
+    const firstReads = await readEnvironment();
+    const reads = firstReads.some((result) => result.status !== "fulfilled")
+      ? await readEnvironment()
+      : firstReads;
+    if (reads.some((result) => result.status !== "fulfilled")) return unavailable();
+    for (let index = 0; index < firstReads.length; index += 1) {
+      const first = firstReads[index]!, second = reads[index]!;
+      if (first.status === "fulfilled" && second.status === "fulfilled" && first.value.value !== second.value.value) return refuse();
+    }
+    const captured: Record<string, string> = {};
     for (const result of reads) {
       if (result.status === "fulfilled" && result.value.value !== "") captured[result.value.name] = result.value.value;
     }
@@ -109,8 +137,9 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
     for (const name of graphNames) {
       if (captured[name] !== undefined) graphEnvironment[name] = captured[name];
     }
-    const checked = await run(process.execPath, ["--import", "tsx", "--input-type=module", "-e", validateGraphSource],
-      { cwd: projectRoot, env: graphEnvironment, timeout: 45_000, maxBuffer: 1_024 });
+    const checked = await onceAfterUnavailable(() => run(process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", validateGraphSource],
+      { cwd: projectRoot, env: graphEnvironment, timeout: 45_000, maxBuffer: 1_024 }));
     if (checked.stdout !== '{"valid":true}') return refuse();
     const ids: unknown = JSON.parse(captured.PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS!);
     const keys: unknown = JSON.parse(captured.PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS!);
@@ -158,8 +187,9 @@ export async function openClutchpacksProductionConvexRuntime(environment: NodeJS
         ownedSecret = null;
       },
     };
-  } catch {
+  } catch (error) {
     ownedSecret?.fill(0);
+    if (error instanceof RuntimeRefusal) throw error;
     return refuse();
   }
 }

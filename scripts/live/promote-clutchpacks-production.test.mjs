@@ -203,6 +203,7 @@ test("known source codes survive sanitization while arbitrary codes and private 
   for (const [error, code] of [
     [Object.assign(new Error("source-secret transport"), { code: "PRODUCTION_SOURCE_ROUTE_CHANGED" }), "PRODUCTION_SOURCE_ROUTE_CHANGED"],
     [Object.assign(new Error("source-secret transport"), { code: "EXFILTRATE_source-secret" }), "PRODUCTION_CLI_FAILED"],
+    [new Error("CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_UNAVAILABLE"), "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_UNAVAILABLE"],
     [new Error("CLUTCHPACKS_PRODUCTION_IDENTITY_CONTINUITY_FAILED"), "CLUTCHPACKS_PRODUCTION_IDENTITY_CONTINUITY_FAILED"],
   ]) {
     const f = await fixture(t); f.deps.openSource = async () => { throw error; };

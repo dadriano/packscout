@@ -28,33 +28,45 @@ function fixture(options = {}) {
     HOME: process.env.HOME, PATH: process.env.PATH, PACKSCOUT_DATABASE_URL: "private-database-fixture",
     NODE_OPTIONS: "private-hook-must-not-reach-child", PACKSCOUT_CATALOG_READ_TOKEN: "stale-operator-token" };
   const calls = [];
-  let completedReads = 0;
+  let completedReads = 0, graphRuns = 0, instanceReads = 0;
+  const readAttempts = new Map();
   const dependencies = {
     async readUtf8() { return JSON.stringify({ version: options.version ?? "1.43.0" }); },
     async run(file, args, settings) {
       calls.push({ file, args, settings: { ...settings, env: { ...settings.env } } });
       if (args[0] === "--import") {
+        graphRuns++;
+        if (graphRuns <= (options.graphFailures ?? 0)) throw new Error(`${catalogToken}: private graph stderr`);
         // Real existing backend graph validator, in a child with fixture secrets.
         return await promisify(execFile)(file, args, settings);
       }
       const name = args[3];
+      const attempt = (readAttempts.get(name) ?? 0) + 1; readAttempts.set(name, attempt);
       await Promise.resolve();
       completedReads++;
-      if (options.failRead === name) throw new Error(`${catalogToken}: private child stderr`);
+      const failures = options.failRead === name ? Number.POSITIVE_INFINITY : (options.readFailures?.[name] ?? 0);
+      if (attempt <= failures) throw new Error(`${catalogToken}: private child stderr`);
       assert.deepEqual(args.slice(1), ["env", "get", name, "--env-file", "/dev/null", "--deployment", "shiny-newt-310"]);
-      return { stdout: values[name] === undefined ? "" : `${values[name]}\n` };
+      const value = options.readValue?.(name, attempt, values) ?? values[name];
+      return { stdout: value === undefined ? "" : `${value}\n` };
     },
     async fetch(url, settings) {
       calls.push({ url: String(url), settings });
-      if (String(url).endsWith("/instance_name")) return new Response(options.instance ?? "shiny-newt-310");
+      if (String(url).endsWith("/instance_name")) {
+        instanceReads++;
+        if (instanceReads <= (options.instanceFailures ?? 0)) throw new Error(`${catalogToken}: private instance failure`);
+        return options.instanceResponse?.() ?? new Response(options.instance ?? "shiny-newt-310");
+      }
       if (options.fetch) return await options.fetch(url, settings);
       return Response.json({ status: "success", value: { ok: true }, logLines: [catalogToken] });
     },
   };
   return { values, environment, dependencies, calls, completedReads: () => completedReads,
+    graphRuns: () => graphRuns, instanceReads: () => instanceReads,
     open: () => openClutchpacksProductionConvexRuntime(environment, dependencies) };
 }
 const safeFailure = (error) => error.message === "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_INVALID";
+const unavailableFailure = (error) => error.message === "CLUTCHPACKS_PRODUCTION_CONVEX_RUNTIME_UNAVAILABLE";
 
 test("opening privately validates existing single V3 authority without publication or environment writes", async () => {
   const h = fixture();
@@ -129,10 +141,63 @@ test("optional Heat absence remains valid for the distinct existing V3 surface",
   const runtime = await h.open(); runtime.close();
 });
 
-test("all private reads settle before a sanitized child failure is reported", async () => {
+test("all private reads settle in both snapshots before sanitized unavailability is reported", async () => {
   const h = fixture({ failRead: "PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS" });
-  await assert.rejects(h.open(), safeFailure);
-  assert.equal(h.completedReads(), 7);
+  await assert.rejects(h.open(), unavailableFailure);
+  assert.equal(h.completedReads(), 14);
+});
+
+test("opening retries each read-only availability boundary once", async () => {
+  const instance = fixture({ instanceFailures: 1 });
+  (await instance.open()).close();
+  assert.equal(instance.instanceReads(), 3);
+  assert.equal(instance.completedReads(), 7);
+
+  const environment = fixture({ readFailures: { PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS: 1 } });
+  (await environment.open()).close();
+  assert.equal(environment.completedReads(), 14);
+  assert.equal(environment.graphRuns(), 1);
+
+  const graph = fixture({ graphFailures: 1 });
+  (await graph.open()).close();
+  assert.equal(graph.completedReads(), 7);
+  assert.equal(graph.graphRuns(), 2);
+});
+
+test("opening reports unavailable only after its single bounded retry is exhausted", async () => {
+  const instance = fixture({ instanceFailures: 2 });
+  await assert.rejects(instance.open(), unavailableFailure);
+  assert.equal(instance.instanceReads(), 2);
+  assert.equal(instance.completedReads(), 0);
+
+  const graph = fixture({ graphFailures: 2 });
+  await assert.rejects(graph.open(), unavailableFailure);
+  assert.equal(graph.graphRuns(), 2);
+  assert.equal(graph.instanceReads(), 1);
+});
+
+test("integrity mismatches are invalid and never retried", async () => {
+  for (const options of [{ instance: "kindhearted-ermine-54" },
+    { instanceResponse: () => new Response("unavailable", { status: 503 }) }]) {
+    const h = fixture(options);
+    await assert.rejects(h.open(), safeFailure);
+    assert.equal(h.instanceReads(), 1);
+    assert.equal(h.completedReads(), 0);
+  }
+
+  const changed = fixture({
+    readFailures: { PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS: 1 },
+    readValue: (name, attempt, values) => name === "PACKSCOUT_RUNTIME_ENVIRONMENT" && attempt === 2
+      ? "preproduction"
+      : values[name],
+  });
+  await assert.rejects(changed.open(), safeFailure);
+  assert.equal(changed.completedReads(), 14);
+  assert.equal(changed.graphRuns(), 0);
+
+  const invalidGraph = fixture({ values: { PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS: '["missing-v1"]' } });
+  await assert.rejects(invalidGraph.open(), safeFailure);
+  assert.equal(invalidGraph.graphRuns(), 1);
 });
 
 test("public client omits admin authority and secret diagnostics, and refuses mutation transport", async () => {
