@@ -1,4 +1,5 @@
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
+import { runDrainedDatabaseTransaction } from "./drained-database-transaction.ts";
 import type {
   ProviderPrismaClient,
   ProviderTransactionClient,
@@ -113,7 +114,7 @@ export class PrismaProviderWorkerLeaseRepository {
     readonly leaseMilliseconds: number;
   }): Promise<AcquireProviderWorkerLeaseResult> {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return this.database.$transaction(async (transaction) => {
+    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
       let row = await lockProviderWorkerLease(transaction, input.role);
       const active = row.lease_owner !== null
         && row.lease_expires_at !== null
@@ -147,7 +148,7 @@ export class PrismaProviderWorkerLeaseRepository {
         kind: takeover ? "acquired" as const : "renewed" as const,
         lease: leaseFrom(row),
       };
-    }, TRANSACTION_OPTIONS);
+    });
   }
 
   async renew(input: {
@@ -157,7 +158,7 @@ export class PrismaProviderWorkerLeaseRepository {
     readonly leaseMilliseconds: number;
   }): Promise<ProviderWorkerLease | null> {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return this.database.$transaction(async (transaction) => {
+    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
       let row = await lockProviderWorkerLease(transaction, input.role);
       if (!providerWorkerLeaseIsLive(row, {
         owner: input.owner,
@@ -184,7 +185,7 @@ export class PrismaProviderWorkerLeaseRepository {
       if (updated.count !== 1) return null;
       row = await lockProviderWorkerLease(transaction, input.role);
       return leaseFrom(row);
-    }, TRANSACTION_OPTIONS);
+    });
   }
 
   async release(input: {
@@ -193,7 +194,7 @@ export class PrismaProviderWorkerLeaseRepository {
     readonly fence: bigint;
   }): Promise<boolean> {
     if (!ownerPattern.test(input.owner)) throw new TypeError("Provider worker owner is invalid.");
-    return this.database.$transaction(async (transaction) => {
+    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
       const row = await lockProviderWorkerLease(transaction, input.role);
       if (row.lease_owner === null) return true;
       if (row.lease_owner !== input.owner || row.lease_fence !== input.fence) return false;
@@ -213,6 +214,6 @@ export class PrismaProviderWorkerLeaseRepository {
         },
       });
       return updated.count === 1;
-    }, TRANSACTION_OPTIONS);
+    });
   }
 }
