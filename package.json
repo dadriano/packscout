@@ -26,6 +26,8 @@
     "ws": "8.21.3"
   },
   "scripts": {
+    "check:admin-deployment:preproduction": "node scripts/preproduction/check-admin-vercel.mjs",
+    "check:admin-deployment:live": "node scripts/live/report-admin-vercel-check.mjs",
     "postinstall": "npm run db:prisma:generate",
     "dev": "npm run dev:frontend",
     "backfill:clutchpacks-chases:local": "node --import tsx scripts/local/backfill-clutchpacks-chase-cards.mts",
