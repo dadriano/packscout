@@ -632,6 +632,31 @@ test("the immediate runtime-closure sandwich refuses code or dependency drift be
   });
 });
 
+test("the late target import refuses an untracked publisher dependency changed after the prior proof", async t => {
+  const f = await recoveryFixture(t), policy = await read(f.executorPolicyPath);
+  const dependency = path.join(f.options.publisherWorktree, "node_modules", "late-target-dependency.mjs");
+  const initialBytes = Buffer.from("export const value = 'initial';\n");
+  await writeFile(dependency, initialBytes, { mode: 0o644 });
+  let inventoryReads = 0;
+  const readInventory = async () => {
+    inventoryReads += 1;
+    const value = (await readFile(dependency)).equals(initialBytes) ? structuredClone(policy.runtimeInventory) :
+      { ...structuredClone(policy.runtimeInventory), totalBytes: policy.runtimeInventory.totalBytes + 1,
+        treeSha256: "e".repeat(64) };
+    if (inventoryReads === 1) {
+      await writeFile(dependency, "export const value = 'changed';\n", { mode: 0o644 });
+    }
+    return value;
+  };
+  let targetImportReached = false;
+  await assert.rejects(recoveryHarness.verifyTrustedTargetRuntimeClosure(f.executionInput.publisher,
+    f.publisherModules.convexRuntime, policy.runtimeInventory, readInventory, f.git).then(() => {
+      targetImportReached = true;
+    }), safelyRecoveryBlocked("POST_HEAD_SUCCESSOR_RUNTIME_CHANGED"));
+  assert.equal(targetImportReached, false);
+  assert.equal(inventoryReads, 2);
+});
+
 test("real release status is fully validated before projection into the signed target proof", async t => {
   const f = await recoveryFixture(t), full = f.fullStatus(f.activePredecessor);
   assert.deepEqual(recoveryHarness.projectReleaseStatus(full), {

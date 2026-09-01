@@ -262,7 +262,9 @@ interface SuccessorDependencies {
     identity?: z.infer<typeof sourceReaderIdentitySchema>, sourceConfig?: z.infer<typeof filePin>,
     publisher?: z.infer<typeof publisherIdentity>, publisherRuntime?: z.infer<typeof runtimeInventorySchema>) =>
     Promise<z.input<typeof recoveryQuietSnapshotSchema>>;
-  readonly readTargetProof?: (environment: NodeJS.ProcessEnv, signal?: AbortSignal) => Promise<z.input<typeof targetSnapshotSchema>>;
+  readonly readTargetProof?: (environment: NodeJS.ProcessEnv, signal: AbortSignal | undefined,
+    publisher: z.infer<typeof publisherIdentity>, publisherRuntime: z.infer<typeof runtimeInventorySchema>) =>
+    Promise<z.input<typeof targetSnapshotSchema>>;
   readonly inspectChildTermination?: (proof: z.infer<typeof childLockProofSchema>,
     executionLock: z.infer<typeof executionLockProofSchema>) =>
     Promise<z.input<typeof childTerminationProofSchema>>;
@@ -622,10 +624,11 @@ async function readRecoveryQuiet(deps: SuccessorDependencies, environment: NodeJ
   }
   return recoveryQuietProofSchema.parse({ startedAt, completedAt, snapshot: parsed.data });
 }
-async function readTarget(deps: SuccessorDependencies, environment: NodeJS.ProcessEnv, now: () => string) {
+async function readTarget(deps: SuccessorDependencies, environment: NodeJS.ProcessEnv, now: () => string,
+  publisher: z.infer<typeof publisherIdentity>, publisherRuntime: z.infer<typeof runtimeInventorySchema>) {
   if (!deps.readTargetProof) refuse("POST_HEAD_SUCCESSOR_TARGET_READER_MISSING");
   const startedAt = now(); let value: unknown;
-  try { value = await deps.readTargetProof(environment, deps.signal); }
+  try { value = await deps.readTargetProof(environment, deps.signal, publisher, publisherRuntime); }
   catch { return refuse("POST_HEAD_SUCCESSOR_TARGET_UNAVAILABLE"); }
   const completedAt = now(), parsed = targetSnapshotSchema.safeParse(value);
   if (!parsed.success || completedAt < startedAt || parsed.data.activeStatus.lifecycle !== "complete" ||
@@ -1188,7 +1191,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
     if (ledgerState.status === "terminal") refuse("POST_HEAD_SUCCESSOR_LEDGER_TERMINAL");
     if (ledgerState.status !== "complete" && ledgerState.status !== "terminal") {
       try {
-        const entryTarget = await readTarget(deps, environment, now);
+        const entryTarget = await readTarget(deps, environment, now, input.publisher,
+          executorPolicy.document.runtimeInventory);
         targetDisposition(entryTarget, old.bundle, input.old.targetPrevious);
       } catch (error) {
         if (!freshRoot) {
@@ -1232,7 +1236,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
         readSource(deps, environment, now, input.head, sourceIdentity),
         readRecoveryQuiet(deps, environment, now, input.head, sourceIdentity, input.old.sourceConfig,
           input.publisher, executorPolicy.document.runtimeInventory),
-        readTarget(deps, environment, now), residencyHandle.refreshProof(),
+        readTarget(deps, environment, now, input.publisher, executorPolicy.document.runtimeInventory),
+        residencyHandle.refreshProof(),
         abandonedRootState(successor.artifactDirectory, deps, now),
         abandonedRootState(successor.proofDirectory, deps, now),
       ]);
@@ -1294,7 +1299,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
       }
       const [sourcePreDispatch, targetPreDispatch, residencyValue] = await Promise.all([
         readSource(deps, environment, now, input.head, executorPolicy.document.sourceReader),
-        readTarget(deps, environment, now), residencyHandle.refreshProof(),
+        readTarget(deps, environment, now, input.publisher, executorPolicy.document.runtimeInventory),
+        residencyHandle.refreshProof(),
       ]);
       targetDisposition(targetPreDispatch, old.bundle, input.old.targetPrevious);
       const residencyPreDispatch = residencyProofSchema.parse(residencyValue);
@@ -1367,7 +1373,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
       artifact.assertReceiptPath(firstOutput, bundlePath);
       firstPublication = await publicationSidecars(bundlePath, old.bundle, input.head, 1, noSidecars, firstOutput);
       firstEvidence = firstPublication.evidence;
-      firstTarget = await readTarget(deps, environment, now);
+      firstTarget = await readTarget(deps, environment, now, input.publisher,
+        executorPolicy.document.runtimeInventory);
       if (targetDisposition(firstTarget, old.bundle, input.old.targetPrevious) !== "candidate") {
         refuse("POST_HEAD_SUCCESSOR_TARGET_CHANGED");
       }
@@ -1402,7 +1409,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
         refuse("POST_HEAD_SUCCESSOR_CHILD_OBSERVABILITY_UNKNOWN");
       }
       const sidecarNames = (await readdir(run)).filter(name => name.startsWith("bundle.json."));
-      firstTarget = await readTarget(deps, environment, now);
+      firstTarget = await readTarget(deps, environment, now, input.publisher,
+        executorPolicy.document.runtimeInventory);
       const disposition = targetDisposition(firstTarget, old.bundle, input.old.targetPrevious);
       if (sidecarNames.length === 0) {
         if (successor.ordinal === 2) {
@@ -1448,7 +1456,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
         await publicationSidecars(bundlePath, old.bundle, input.head, 1, noSidecars) :
         await publicationFromPinnedSet(bundlePath, old.bundle, input.head, verified.sidecars);
       firstEvidence = firstPublication.evidence;
-      firstTarget = await readTarget(deps, environment, now);
+      firstTarget = await readTarget(deps, environment, now, input.publisher,
+        executorPolicy.document.runtimeInventory);
       if (verified.evidenceSha256 !== artifact.digest(firstEvidence) || !same(verified.sidecars, firstPublication.set) ||
         targetDisposition(firstTarget, old.bundle, input.old.targetPrevious) !== "candidate" ||
         !same(verified.bundle, await pin(bundlePath))) refuse("POST_HEAD_SUCCESSOR_LEDGER_INVALID");
@@ -1518,7 +1527,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
           return refuse("POST_HEAD_SUCCESSOR_LEDGER_TERMINAL");
         }
         try {
-          retryTarget = await readTarget(deps, environment, now);
+          retryTarget = await readTarget(deps, environment, now, input.publisher,
+            executorPolicy.document.runtimeInventory);
           if (targetDisposition(retryTarget, old.bundle, input.old.targetPrevious) !== "candidate") throw new Error();
         } catch {
           await appendLedgerRecord(manifest, "adoption_dispatched", "terminal", successor.ordinal,
@@ -1576,7 +1586,8 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
     }
     const reentryPublication = await publicationSidecars(bundlePath, old.bundle, input.head, 2, firstPublication.names);
     if (!same(reentryPublication.evidence, reentryEvidence)) refuse("POST_HEAD_SUCCESSOR_SIDECAR_INVALID");
-    const finalTarget = await readTarget(deps, environment, now);
+    const finalTarget = await readTarget(deps, environment, now, input.publisher,
+      executorPolicy.document.runtimeInventory);
     if (targetDisposition(finalTarget, old.bundle, input.old.targetPrevious) !== "candidate") refuse("POST_HEAD_SUCCESSOR_TARGET_CHANGED");
     const finalOldRootInventory = await rootInventory(input.old.artifactDirectory, deps);
     if (!same(finalOldRootInventory, old.inventory)) refuse("POST_HEAD_SUCCESSOR_OLD_ROOT_CHANGED");
@@ -1912,16 +1923,35 @@ interface ProductionRuntime {
     previousRelease: z.infer<typeof releasePointer> | null }>; status(id: string, signal?: AbortSignal): Promise<unknown> };
   close(): void | Promise<void>;
 }
+async function verifyTrustedTargetRuntimeClosure(publisher: z.infer<typeof publisherIdentity>,
+  runtimePin: z.infer<typeof filePin>, publisherRuntime: z.infer<typeof runtimeInventorySchema>,
+  readInventory: (root: string, allowed: string) => Promise<unknown>, git: GitReader) {
+  await verifyTrustedRuntimeClosure(publisher, publisher.modules, moduleRelativePaths, publisherRuntime,
+    readInventory, async () => {
+      if (!same(await pinTrustedRegular(runtimePin.path, 8 * 1024 * 1024), runtimePin)) {
+        refuse("POST_HEAD_SUCCESSOR_TARGET_READER_CHANGED");
+      }
+    }, git);
+}
 async function productionTargetProof(input: z.infer<typeof successorInputSchema>, environment: NodeJS.ProcessEnv,
-  signal?: AbortSignal) {
+  signal: AbortSignal | undefined, publisher: z.infer<typeof publisherIdentity>,
+  publisherRuntime: z.infer<typeof runtimeInventorySchema>) {
   const runtimePin = { path: path.join(incident.oldWorktree, moduleRelativePaths.convexRuntime),
     sha256: "b7fd402002f142d647727f6158fc49e841917a71e5a855a0896013f015f23d78" };
   if (input.publisher.worktree !== incident.oldWorktree || input.publisher.commit !== incident.oldCommit ||
-    !same(input.publisher.modules.convexRuntime, runtimePin)) refuse("POST_HEAD_SUCCESSOR_TARGET_READER_CHANGED");
-  await verifyTrustedCheckout(input.publisher, input.publisher.modules, moduleRelativePaths, productionGit);
-  if (!same(await pinTrustedRegular(runtimePin.path, 8 * 1024 * 1024), runtimePin)) {
+    !same(input.publisher, publisher) || !same(input.publisher.modules.convexRuntime, runtimePin)) {
     refuse("POST_HEAD_SUCCESSOR_TARGET_READER_CHANGED");
   }
+  const inventoryModulePath = fileURLToPath(new URL("./clutchpacks-production-runtime-inventory.mjs", import.meta.url));
+  if (input.executor.modules.runtimeInventory.path !== inventoryModulePath ||
+    !same(await pinTrustedRegular(inventoryModulePath, 1_048_576), input.executor.modules.runtimeInventory)) {
+    refuse("POST_HEAD_SUCCESSOR_TARGET_READER_CHANGED");
+  }
+  const inventoryModule: unknown = await import(pathToFileURL(inventoryModulePath).href);
+  const inventoryReader = (inventoryModule as { readClutchpacksProductionRuntimeInventory?:
+    (root: string, allowed: string) => Promise<unknown> }).readClutchpacksProductionRuntimeInventory;
+  if (typeof inventoryReader !== "function") refuse("POST_HEAD_SUCCESSOR_TARGET_READER_CHANGED");
+  await verifyTrustedTargetRuntimeClosure(publisher, runtimePin, publisherRuntime, inventoryReader, productionGit);
   const loaded: unknown = await import(pathToFileURL(runtimePin.path).href);
   const openRuntime = (loaded as { openClutchpacksProductionConvexRuntime?:
     (value: NodeJS.ProcessEnv) => Promise<ProductionRuntime> }).openClutchpacksProductionConvexRuntime;
@@ -1971,7 +2001,8 @@ function productionDependencies(input: z.infer<typeof successorInputSchema>, sig
     now: () => new Date().toISOString(),
     readSourceProof: (environment, childSignal, identity) => productionSourceProof(
       input.executor.modules.runtimeInventory, environment, childSignal, identity),
-    readTargetProof: (environment, childSignal) => productionTargetProof(input, environment, childSignal),
+    readTargetProof: (environment, childSignal, publisher, publisherRuntime) =>
+      productionTargetProof(input, environment, childSignal, publisher, publisherRuntime),
     readRecoveryQuietProof: (environment, childSignal, identity, sourceConfig, publisher, publisherRuntime) =>
       productionRecoveryQuietProof(input.executor.modules.runtimeInventory, environment, childSignal, identity,
         sourceConfig, publisher, publisherRuntime),
@@ -2030,6 +2061,9 @@ export const clutchpacksProductionPostHeadRecoveryTestHarness = process.env.NODE
     inventory: z.infer<typeof runtimeInventorySchema>, readInventory: (root: string, allowed: string) => Promise<unknown>,
     git: GitReader) => verifyTrustedRuntimeClosure(identity, identity.modules, moduleRelativePaths,
     inventory, readInventory, async () => undefined, git),
+  verifyTrustedTargetRuntimeClosure: (identity: z.infer<typeof publisherIdentity>, runtimePin: z.infer<typeof filePin>,
+    inventory: z.infer<typeof runtimeInventorySchema>, readInventory: (root: string, allowed: string) => Promise<unknown>,
+    git: GitReader) => verifyTrustedTargetRuntimeClosure(identity, runtimePin, inventory, readInventory, git),
   rootInventory: (root: string, dependencies: SuccessorDependencies = {}) => rootInventory(root, dependencies),
   ledgerSchemaSha256,
   projectReleaseStatus,
