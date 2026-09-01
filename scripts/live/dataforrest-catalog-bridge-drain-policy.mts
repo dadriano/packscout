@@ -190,7 +190,7 @@ function assertPins(pins: CatalogBridgeDrainPins): void {
   }
 }
 
-function assertProcessOnline(boundary: CatalogBridgeDrainBoundary): void {
+export function assertCatalogBridgeProcessOnline(boundary: CatalogBridgeDrainBoundary): void {
   const definition = catalogBridgeProvider(boundary.central.providerKey);
   const process = boundary.process;
   if (process.launchdLabel !== definition.launchdLabel || !process.launchdLoaded || process.processCount !== 1 ||
@@ -283,7 +283,7 @@ export function catalogBridgeDrainStableDatabaseEvidence(boundary: CatalogBridge
 
 export function assertCatalogBridgeRunningEntry(boundary: CatalogBridgeDrainBoundary, pins: CatalogBridgeDrainPins): void {
   assertAuthorityAndCheckpoint(boundary, pins);
-  assertProcessOnline(boundary);
+  assertCatalogBridgeProcessOnline(boundary);
   const { runtime, importLease, run, lastPage } = boundary;
   if (runtime.state !== "running" || runtime.activeRunCount !== 1 || runtime.actionableCommandCount !== 0 ||
     run.state !== "running" || run.reachedSourceHead || run.finishedAt !== null || run.failureCode !== null ||
@@ -345,7 +345,7 @@ export function assertCatalogBridgePausedDrain(boundary: CatalogBridgeDrainBound
 export function assertCatalogBridgePausedTransition(boundary: CatalogBridgeDrainBoundary, pins: CatalogBridgeDrainPins,
   entry: CatalogBridgeDrainBoundary, expectedGeneration: string): void {
   assertAuthorityAndCheckpoint(boundary, pins);
-  assertProcessOnline(boundary);
+  assertCatalogBridgeProcessOnline(boundary);
   const { runtime, importLease, run } = boundary;
   if (runtime.state !== "paused" || runtime.generation !== expectedGeneration || runtime.actionableCommandCount !== 0 ||
     run.id !== entry.run.id || run.workerFence !== entry.run.workerFence ||

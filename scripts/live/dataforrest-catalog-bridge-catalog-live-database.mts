@@ -3789,6 +3789,9 @@ async function releaseResidentAfterJournal(input: Readonly<{
   }
   const integration = providerDataforrestLiveIntegrationRegistry.resolve(
     definition.providerKey, config.adapter_key);
+  if (integration === null) {
+    refuseCatalogBridge("CATALOG_BRIDGE_EVENT_RELEASE_AUTHORITY_CHANGED");
+  }
   const pins: BackfillPins = Object.freeze({ organizationId: definition.organizationId,
     providerId: definition.providerId, providerKey: definition.providerKey,
     configId: plan.eventSuccessor.id,

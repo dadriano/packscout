@@ -32,8 +32,13 @@ import {
   readCatalogBridgeLiveDrainPolicy,
 } from "./dataforrest-catalog-bridge-drain-live-policy.mts";
 import { CatalogBridgeError, catalogBridgeDigest, refuseCatalogBridge } from "./dataforrest-catalog-bridge-plan.mts";
+import {
+  catalogBridgeRepositoryRoot,
+  observeCatalogBridgeCheckout,
+} from "./dataforrest-catalog-bridge-operator-files.mts";
 
 const sha256 = /^[a-f0-9]{64}$/u;
+const drainRunnerModule = "scripts/live/run-dataforrest-catalog-bridge-drain.mts";
 
 export interface CatalogBridgeLiveDrainEnvironment {
   readonly centralDatabaseUrl: string;
@@ -85,6 +90,18 @@ export function parseCatalogBridgeLiveDrainArguments(args: readonly string[]): C
   return Object.freeze({ mode, policyPath: args[2], policySha256: mode === "apply" ? args[4]! : null });
 }
 
+export async function assertCatalogBridgeLiveDrainExecutor(
+  policy: Awaited<ReturnType<typeof readCatalogBridgeLiveDrainPolicy>>,
+  observe: typeof observeCatalogBridgeCheckout = observeCatalogBridgeCheckout,
+): Promise<void> {
+  const checkout = await observe({ checkout: policy.executor.checkout,
+    expectedCommit: policy.executor.commit, executingRoot: catalogBridgeRepositoryRoot(import.meta.url),
+    modules: { runner: drainRunnerModule } });
+  if (checkout.moduleSha256.runner !== policy.executor.runnerModuleSha256) {
+    refuseCatalogBridge("CATALOG_BRIDGE_LIVE_DRAIN_EXECUTOR_CHANGED");
+  }
+}
+
 function authorizeBootout(database: CatalogBridgeLiveDatabaseAdapter,
   pins: ReturnType<typeof catalogBridgeLiveDrainPins>, policy: Awaited<ReturnType<typeof readCatalogBridgeLiveDrainPolicy>>) {
   return async (expected: Readonly<{ launchdLabel: string; expectedPid: number;
@@ -116,6 +133,7 @@ export async function runCatalogBridgeLiveDrain(argumentsValue: CatalogBridgeLiv
   if (argumentsValue.mode === "apply" && argumentsValue.policySha256 !== policyDigest) {
     refuseCatalogBridge("CATALOG_BRIDGE_LIVE_DRAIN_POLICY_DIGEST_MISMATCH");
   }
+  await assertCatalogBridgeLiveDrainExecutor(policy);
   const environment = readCatalogBridgeLiveDrainEnvironment(environmentValue);
   const centralUrl = new URL(environment.centralDatabaseUrl);
   centralUrl.searchParams.set("connect_timeout", "5");

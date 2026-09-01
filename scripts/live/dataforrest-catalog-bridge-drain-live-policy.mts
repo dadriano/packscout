@@ -28,6 +28,11 @@ export const catalogBridgeLiveDrainPolicySchema = z.object({
   providerKey: z.enum(["collector_crypt", "courtyard", "phygitals"]),
   providerId: z.string().uuid(),
   operatorId: z.string().uuid(),
+  executor: z.object({
+    checkout: absolutePath,
+    commit: z.string().regex(/^[a-f0-9]{40}$/u),
+    runnerModuleSha256: sha256,
+  }).strict(),
   entryKind: z.enum(["running", "idle_head"]),
   currentConfigId: z.string().uuid(),
   currentConfigNumber: z.number().int().positive(),

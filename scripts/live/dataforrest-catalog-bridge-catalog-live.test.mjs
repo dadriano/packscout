@@ -136,7 +136,8 @@ function fixture() {
       baselineSha256: plan.catalogBridgeDigest(baseline) },
     utility: { workerId: `catalog-bridge/${operationId}/${definition.providerKey}/catalog-utility`,
       leaseMilliseconds: 60_000, oneShotModuleSha256: hash("e"),
-      executionTimeoutMilliseconds: 60_000, pausePollMilliseconds: 50,
+      executionTimeoutMilliseconds: policyModule.catalogBridgeCatalogExecutionBudget(pins)
+        .executionTimeoutMilliseconds, pausePollMilliseconds: 50,
       pauseMaximumObservations: 2 },
     successorLaunchAgent: {
       stagedPath: `/private/staged/${definition.launchdLabel}.plist`,
@@ -223,6 +224,14 @@ function dependencies(value, overrides = {}) {
   };
   return { calls, value: { ...defaults, ...overrides } };
 }
+
+test("catalog live policy binds its timeout to exact source-head and adapter evidence", () => {
+  const value = fixture();
+  assert.equal(value.policy.utility.executionTimeoutMilliseconds, 90 * 60_000);
+  assert.throws(() => policyModule.catalogBridgeCatalogLivePolicySchema.parse({ ...value.policy,
+    utility: { ...value.policy.utility,
+      executionTimeoutMilliseconds: value.policy.utility.executionTimeoutMilliseconds + 60_000 } }));
+});
 
 test("successor plist proof gates every catalog stage action", async () => {
   const refusedCalls = [];

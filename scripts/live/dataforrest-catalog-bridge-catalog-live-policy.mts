@@ -8,6 +8,11 @@ import {
   refuseCatalogBridge,
   type CatalogBridgeOperationPins,
 } from "./dataforrest-catalog-bridge-plan.mts";
+import {
+  CATALOG_BRIDGE_EXECUTION_TIMEOUT_MAXIMUM_MILLISECONDS,
+  CATALOG_BRIDGE_EXECUTION_TIMEOUT_MINIMUM_MILLISECONDS,
+  deriveCatalogBridgeExecutionBudget,
+} from "./dataforrest-catalog-bridge-execution-budget.mts";
 
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const positiveInteger = z.string().regex(/^[1-9][0-9]*$/u);
@@ -71,7 +76,9 @@ export const catalogBridgeCatalogLivePolicySchema = z.object({
     workerId: safeOwner,
     leaseMilliseconds: z.number().int().min(30_000).max(15 * 60_000),
     oneShotModuleSha256: sha256,
-    executionTimeoutMilliseconds: z.number().int().min(60_000).max(60 * 60_000),
+    executionTimeoutMilliseconds: z.number().int()
+      .min(CATALOG_BRIDGE_EXECUTION_TIMEOUT_MINIMUM_MILLISECONDS)
+      .max(CATALOG_BRIDGE_EXECUTION_TIMEOUT_MAXIMUM_MILLISECONDS),
     pausePollMilliseconds: z.number().int().min(50).max(5_000).default(1_000),
     pauseMaximumObservations: z.number().int().min(1).max(600).default(120),
   }).strict(),
@@ -98,10 +105,30 @@ export const catalogBridgeCatalogLivePolicySchema = z.object({
     path.basename(policy.successorLaunchAgent.installedPath) !== `${definition.launchdLabel}.plist`) {
     context.addIssue({ code: "custom", message: "Catalog bridge definition pins do not match." });
   }
+  try {
+    if (policy.utility.executionTimeoutMilliseconds !==
+      catalogBridgeCatalogExecutionBudget(policy.pins).executionTimeoutMilliseconds) {
+      context.addIssue({ code: "custom", path: ["utility", "executionTimeoutMilliseconds"],
+        message: "Catalog bridge execution timeout does not match its source-head evidence." });
+    }
+  } catch {
+    context.addIssue({ code: "custom", path: ["utility", "executionTimeoutMilliseconds"],
+      message: "Catalog bridge execution timeout evidence is outside the reviewed bounds." });
+  }
 });
 
 export type CatalogBridgeCatalogLivePolicy = z.infer<typeof catalogBridgeCatalogLivePolicySchema> &
   Readonly<{ pins: CatalogBridgeOperationPins }>;
+
+export function catalogBridgeCatalogExecutionBudget(
+  pins: Pick<CatalogBridgeOperationPins, "providerKey" | "sourceHeadCounts">,
+) {
+  const definition = catalogBridgeProvider(pins.providerKey);
+  return deriveCatalogBridgeExecutionBudget({ sourceHeadCardCount: pins.sourceHeadCounts.card,
+    sourceHeadPackCount: pins.sourceHeadCounts.pack,
+    adapterPageLimit: definition.catalogManifest.requestBounds.pageLimit,
+    adapterRequestTimeoutMilliseconds: definition.catalogManifest.requestBounds.timeoutMilliseconds });
+}
 
 export function catalogBridgeCatalogLivePolicyDigest(policy: CatalogBridgeCatalogLivePolicy): string {
   return catalogBridgeDigest(catalogBridgeCatalogLivePolicySchema.parse(policy));

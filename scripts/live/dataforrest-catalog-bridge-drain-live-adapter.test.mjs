@@ -28,6 +28,8 @@ function policy(overrides = {}) {
     providerKey,
     providerId: definition.providerId,
     operatorId,
+    executor: { checkout: "/reviewed/catalog-bridge", commit: "a".repeat(40),
+      runnerModuleSha256: hash("f") },
     entryKind: "running",
     currentConfigId: definition.currentConfigId,
     currentConfigNumber: definition.currentConfigNumber,
@@ -174,10 +176,18 @@ function fakeDatabase(options = {}) {
     cached_configuration: { adapterKey: definition.eventManifest.adapterVersion, settings: { platform: providerKey } },
     source_cursor: { cursor: "opaque" }, source_cursor_hash: hash("d") };
   const transaction = {
+    async $executeRawUnsafe(sql) {
+      if (sql.startsWith("SET TRANSACTION") || sql.startsWith("SET LOCAL")) return 0;
+      throw new Error(`Unexpected statement: ${sql}`);
+    },
     async $queryRaw() { log.push("lease"); return [{ worker_role: "import", lease_owner: "provider-import:collector",
       lease_fence: 14n, heartbeat_at: databaseNow, lease_expires_at: new Date("2026-09-01T03:02:00.000Z"),
       row_version: 9n, database_now: databaseNow }]; },
     async $queryRawUnsafe(sql, parameter) {
+      if (sql.includes("select worker_role")) return [{ worker_role: "import",
+        lease_owner: "provider-import:collector", lease_fence: 14n, heartbeat_at: databaseNow,
+        lease_expires_at: new Date("2026-09-01T03:02:00.000Z"), row_version: 9n,
+        database_now: databaseNow }];
       if (sql.includes("from provider_runs where id")) { log.push("run"); return [{ id: parameter }]; }
       if (sql.includes("from provider_runtime where singleton_key")) { log.push("runtime"); return [{ singleton_key: true }]; }
       if (sql.includes("pg_stat_activity")) return [{ count: 0n }];
@@ -188,12 +198,15 @@ function fakeDatabase(options = {}) {
     provider_runtime: { findUnique: async () => runtime },
     provider_runs: { findUnique: async () => run,
       findFirst: async () => options.queuedRace ? { ...run, id: "40000000-0000-4000-8000-000000000099" } : run,
-      count: async () => 1 },
+      count: async ({ where } = {}) => where?.id ? (options.operationUsed ? 1 : 0) : 1 },
     provider_run_pages: { findFirst: async () => ({ id: pageId, page_number: 1, next_cursor: { cursor: "opaque" },
       next_cursor_hash: hash("d"), continuation: "more" }) },
-    control_commands: { count: async () => 0 },
+    control_commands: { count: async ({ where } = {}) => where?.OR && options.operationUsed ? 1 : 0 },
+    provider_state_events: { count: async () => 0 },
+    quarantine_attempts: { count: async () => 0 },
     provider_worker_states: { findMany: async () => [] },
     local_audit_events: {
+      count: async () => 0,
       findMany: async ({ where }) => audits.filter(row => row.correlation_id === where.correlation_id && row.action === where.action),
       async create({ data }) { audits.push({ sequence: BigInt(audits.length + 1), ...data }); return data; },
     },
@@ -221,13 +234,36 @@ function adapterHarness(options = {}) {
     observeProcess: async () => process,
     now: () => new Date("2026-09-01T03:00:00.000Z"),
   } });
-  return { adapter, fake };
+  return { adapter, fake, authority, process };
 }
 
 test("provider adapter locks lease then exact run then runtime and refuses a queued-head race", async () => {
   const raced = adapterHarness({ queuedRace: true });
   await assert.rejects(raced.adapter.readBoundary(), { code: "CATALOG_BRIDGE_LIVE_DRAIN_QUEUED_RUN_RACE" });
   assert.deepEqual(raced.fake.log.slice(0, 3), ["lease", "run", "runtime"]);
+});
+
+test("read-only drain capture proves a fresh operation before returning the latest boundary", async () => {
+  const harness = adapterHarness();
+  const boundary = await liveDatabase.readCatalogBridgeLiveDrainCaptureBoundary({
+    database: harness.fake.database,
+    authority: harness.authority,
+    process: harness.process,
+    providerKey,
+    operationId,
+    operatorId,
+    now: () => new Date("2026-09-01T03:00:00.000Z"),
+  });
+  assert.equal(boundary.run.id, runId);
+  const used = adapterHarness({ operationUsed: true });
+  await assert.rejects(liveDatabase.readCatalogBridgeLiveDrainCaptureBoundary({
+    database: used.fake.database,
+    authority: used.authority,
+    process: used.process,
+    providerKey,
+    operationId,
+    operatorId,
+  }), { code: "CATALOG_BRIDGE_OPERATION_ID_ALREADY_USED" });
 });
 
 test("provider pause intent is immutable and an exact retry writes no duplicate", async () => {

@@ -1,6 +1,9 @@
 # DataForrest catalog bridge
 
-Status: production drain adapter and resume-guard boundary implemented; catalog mutation driver remains disabled
+Status: production drain, catalog cutover, event successor, and operator artifact producers implemented
+
+The exact operator commands and private-artifact contract are documented in
+[`docs/dataforrest-catalog-bridge-operator-artifacts.md`](../../docs/dataforrest-catalog-bridge-operator-artifacts.md).
 
 Collector Crypt, Courtyard, and Phygitals each have one provider-local runtime
 cursor. A catalog request cursor and the ordinary event request cursor are scoped
@@ -115,7 +118,8 @@ The live drain entry point is `run-dataforrest-catalog-bridge-drain.mts`. Its
 strict mode-`0600`, no-symlink policy pins the exact provider and active config,
 central provider row and authority digest, provider route digest, runtime
 generation and row version, run and worker fence, saved cursor hash, import
-lease owner/fence, launchd PID, process identity, and private receipt path. The
+lease owner/fence, launchd PID, process identity, private receipt path, clean
+executor checkout and commit, and exact drain-runner module SHA-256. The
 policy contains no database URL, credential, or raw cursor. It is provider-data
 driven through `catalogBridgeProviderDefinitions`; the adapter has no
 provider-key branches.
@@ -152,11 +156,10 @@ before bootout, verifies launchd label, PID, process start/command identity and
 the residency listener, executes only `launchctl bootout`, then proves the
 label, process and port are absent. It has no direct-signal path.
 
-## Remaining live stages
+## Live stages
 
-A reviewed follow-up must implement the catalog and event-successor stages below
-without changing their order. The initial provider pause/drain/bootout boundary
-is implemented by the live entry point above:
+The catalog and event-successor stages below are implemented without changing
+their reviewed order:
 
 - a read-only snapshot/canary capture that creates the preparation input;
 - inactive central catalog config creation and activation proof;
@@ -179,7 +182,7 @@ retry after that transition must match the guard audit exactly; queueing must pa
 the same live lease. Do not substitute an unguarded resume or omit the explicit
 null cursor pin.
 
-The driver must keep the resident offline after any refusal. It must never log a
+The driver keeps the resident offline after any refusal. It must never log a
 source credential, response body, authorization header, raw request cursor, or raw
 saved cursor.
 
@@ -205,4 +208,9 @@ saved cursor.
 | Partial journal writes resume only with identical evidence | Automated: `dataforrest-catalog-bridge-journal.test.mjs` |
 | Null-origin resume is atomic, fenced, and exactly replayable | Automated: `provider-runtime-catalog-origin-resume-guard.test.ts` |
 | Live central/provider drain locks, immutable intent/receipt, and macOS bootout | Automated: `dataforrest-catalog-bridge-drain-live-adapter.test.mjs` |
-| Catalog/event-successor central CAS and one-shot process execution | Manual gap: mutation driver intentionally not implemented |
+| Catalog/event-successor central CAS and one-shot process execution | Automated: `dataforrest-catalog-bridge-catalog-live.test.mjs` |
+| Fresh operation identity and every deterministic descendant are unused before drain | Automated: drain live-adapter and operator-materialization tests |
+| Drain executor commit and runner bytes are exact before any live dependency opens | Automated: `dataforrest-catalog-bridge-operator-materialization.test.mjs` |
+| Preparation canaries redact credentials/cursors and zero protected response bytes | Automated: `dataforrest-catalog-bridge-operator-materialization.test.mjs` |
+| Successor plist includes awaited first run and its raw bytes are policy-bound | Automated: operator-materialization and bootstrap-macOS tests |
+| Per-provider full-census timeouts exactly match reviewed counts and adapter bounds | Automated: execution-budget and catalog-live tests |

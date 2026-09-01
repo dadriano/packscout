@@ -15,6 +15,7 @@ import {
 import type { CatalogBridgePauseSubmission } from "./dataforrest-catalog-bridge-drain.mts";
 import {
   catalogBridgeDrainBoundaryEvidence,
+  catalogBridgeDrainIds,
   catalogBridgeDrainReceiptSchema,
   catalogBridgeDrainStableDatabaseEvidence,
   type CatalogBridgeDrainBoundary,
@@ -25,10 +26,14 @@ import {
 } from "./dataforrest-catalog-bridge-drain-policy.mts";
 import type { CatalogBridgeLiveDrainPolicy } from "./dataforrest-catalog-bridge-drain-live-policy.mts";
 import {
+  catalogBridgeCatalogOperationIds,
   catalogBridgeDigest,
+  catalogBridgeOperationIds,
   catalogBridgeProvider,
   refuseCatalogBridge,
+  type CatalogBridgeProviderKey,
 } from "./dataforrest-catalog-bridge-plan.mts";
+import { catalogBridgeResumeRunId } from "./dataforrest-catalog-bridge-state.mts";
 
 const TRANSACTION_OPTIONS = Object.freeze({ isolationLevel: "Serializable" as const, maxWait: 5_000, timeout: 15_000 });
 const PAUSE_INTENT_ACTION = "provider.catalog_bridge.pause_intent";
@@ -68,11 +73,12 @@ function reachable<T>(result: ProviderDatabaseOperationResult<T>): T {
   return result.value;
 }
 
-export async function readCatalogBridgeLiveCentralAuthority(input: Readonly<{
+export async function readCatalogBridgeLiveCentralAuthorityObservation(input: Readonly<{
   central: CentralQueryClient;
-  policy: CatalogBridgeLiveDrainPolicy;
+  providerKey: CatalogBridgeProviderKey;
+  operatorId: string;
 }>): Promise<CatalogBridgeLiveCentralAuthority> {
-  const definition = catalogBridgeProvider(input.policy.providerKey);
+  const definition = catalogBridgeProvider(input.providerKey);
   const [provider, activeConfig, maximum, membership, located] = await Promise.all([
     input.central.providers.findUnique({ where: { id_organization_id: { id: definition.providerId,
       organization_id: definition.organizationId } } }),
@@ -80,7 +86,7 @@ export async function readCatalogBridgeLiveCentralAuthority(input: Readonly<{
     input.central.provider_config_versions.aggregate({ where: { provider_id: definition.providerId },
       _max: { version_number: true } }),
     input.central.operator_memberships.findUnique({ where: { organization_id_operator_id: {
-      organization_id: definition.organizationId, operator_id: input.policy.operatorId } },
+      organization_id: definition.organizationId, operator_id: input.operatorId } },
       select: { role: true, operator: { select: { state: true } } } }),
     locateProviderDatabase(input.central, { organizationId: definition.organizationId, providerId: definition.providerId }),
   ]);
@@ -111,11 +117,7 @@ export async function readCatalogBridgeLiveCentralAuthority(input: Readonly<{
     scheduleSeconds: activeConfig.schedule_seconds, staleAfterSeconds: activeConfig.stale_after_seconds,
     configuration, expiresAt: activeConfig.expires_at, createdByOperatorId: activeConfig.created_by_operator_id,
     createdAt: activeConfig.created_at }, maximumConfigNumber: maximum._max.version_number,
-  operator: { id: input.policy.operatorId, role: membership.role, state: membership.operator.state }, routeDigest });
-  if (provider.row_version.toString() !== input.policy.providerRowVersion ||
-    authorityDigest !== input.policy.centralAuthorityDigest || routeDigest !== input.policy.databaseRouteDigest) {
-    refuseCatalogBridge("CATALOG_BRIDGE_LIVE_DRAIN_POLICY_MISMATCH");
-  }
+  operator: { id: input.operatorId, role: membership.role, state: membership.operator.state }, routeDigest });
   return Object.freeze({
     boundary: Object.freeze({ organizationId: definition.organizationId, providerId: definition.providerId,
       providerKey: definition.providerKey, providerRowVersion: provider.row_version.toString(),
@@ -125,6 +127,46 @@ export async function readCatalogBridgeLiveCentralAuthority(input: Readonly<{
     route: located.route,
     routeDigest,
   });
+}
+
+export async function readCatalogBridgeLiveCentralAuthority(input: Readonly<{
+  central: CentralQueryClient;
+  policy: CatalogBridgeLiveDrainPolicy;
+}>): Promise<CatalogBridgeLiveCentralAuthority> {
+  const authority = await readCatalogBridgeLiveCentralAuthorityObservation({ central: input.central,
+    providerKey: input.policy.providerKey, operatorId: input.policy.operatorId });
+  if (authority.boundary.providerRowVersion !== input.policy.providerRowVersion ||
+    authority.boundary.authorityDigest !== input.policy.centralAuthorityDigest ||
+    authority.routeDigest !== input.policy.databaseRouteDigest) {
+    refuseCatalogBridge("CATALOG_BRIDGE_LIVE_DRAIN_POLICY_MISMATCH");
+  }
+  return authority;
+}
+
+export async function assertCatalogBridgeLiveCentralOperationFresh(input: Readonly<{
+  central: CentralQueryClient;
+  operationId: string;
+  providerKey: CatalogBridgeProviderKey;
+}>): Promise<void> {
+  const operation = catalogBridgeOperationIds(input);
+  const stage = catalogBridgeCatalogOperationIds(input);
+  const [configCount, auditCount, testCount, correlations] = await Promise.all([
+    input.central.provider_config_versions.count({ where: { id: { in: [operation.catalogConfigId,
+      operation.eventSuccessorConfigId] } } }),
+    input.central.audit_events.count({ where: { id: { in: [stage.catalogStageAuditId,
+      stage.catalogActivationAuditId, stage.catalogAdmissionAuditId, stage.eventStageAuditId,
+      stage.eventActivationAuditId] } } }),
+    input.central.provider_connection_tests.count({ where: { id: { in: [stage.catalogActivationTestId,
+      stage.eventActivationTestId] } } }),
+    input.central.$queryRawUnsafe<Array<{ use_count: bigint }>>(`select (
+      (select count(*) from audit_events where metadata_json ->> 'operationId' = $1) +
+      (select count(*) from provider_connection_tests where result_summary ->> 'operationId' = $1)
+    )::bigint as use_count`, input.operationId),
+  ]);
+  if (configCount !== 0 || auditCount !== 0 || testCount !== 0 || correlations.length !== 1 ||
+    correlations[0]?.use_count !== 0n) {
+    refuseCatalogBridge("CATALOG_BRIDGE_OPERATION_ID_ALREADY_USED");
+  }
 }
 
 interface LockedRunRow { readonly id: string }
@@ -184,7 +226,7 @@ async function readLockedBoundary(input: Readonly<{
   lease: CatalogBridgeImportLeaseRow;
   authority: CatalogBridgeLiveCentralAuthority;
   process: CatalogBridgeDrainProcessObservation;
-  policy: CatalogBridgeLiveDrainPolicy;
+  policy: Pick<CatalogBridgeLiveDrainPolicy, "providerKey" | "runId">;
   observedAt: Date;
 }>): Promise<CatalogBridgeDrainBoundary> {
   const { transaction, policy } = input;
@@ -245,6 +287,50 @@ async function readLockedBoundary(input: Readonly<{
     headProof: normalizedHeadProof,
     process: input.process,
   });
+}
+
+/** Captures the current latest-run boundary without acquiring a lock or writing. */
+export async function readCatalogBridgeLiveDrainCaptureBoundary(input: Readonly<{
+  database: ProviderPrismaClient;
+  authority: CatalogBridgeLiveCentralAuthority;
+  process: CatalogBridgeDrainProcessObservation;
+  providerKey: CatalogBridgeProviderKey;
+  operationId: string;
+  operatorId: string;
+  now?: () => Date;
+}>): Promise<CatalogBridgeDrainBoundary> {
+  return input.database.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+    await transaction.$executeRawUnsafe("SET LOCAL statement_timeout = '10000ms'");
+    const operation = catalogBridgeOperationIds(input);
+    const stage = catalogBridgeCatalogOperationIds(input);
+    const drain = catalogBridgeDrainIds(input);
+    const commandIds = [drain.runningPauseCommandId, drain.idlePauseCommandId,
+      stage.catalogResumeCommandId, stage.catalogRunCommandId, stage.postCatalogPauseCommandId,
+      stage.eventResumeCommandId, stage.eventRunCommandId];
+    const runIds = [operation.catalogRunId,
+      catalogBridgeResumeRunId(input.operationId, input.providerKey)];
+    const [lease, latestRun, commandCount, runCount, stateEventCount, quarantineAttemptCount,
+      auditCount] = await Promise.all([
+      readImportLease(transaction),
+      transaction.provider_runs.findFirst({ orderBy: [{ requested_at: "desc" }, { id: "desc" }] }),
+      transaction.control_commands.count({ where: { OR: [
+        { correlation_id: input.operationId }, { id: { in: commandIds } },
+      ] } }),
+      transaction.provider_runs.count({ where: { id: { in: runIds } } }),
+      transaction.provider_state_events.count({ where: { correlation_id: input.operationId } }),
+      transaction.quarantine_attempts.count({ where: { correlation_id: input.operationId } }),
+      transaction.local_audit_events.count({ where: { correlation_id: input.operationId } }),
+    ]);
+    if (commandCount !== 0 || runCount !== 0 || stateEventCount !== 0 ||
+      quarantineAttemptCount !== 0 || auditCount !== 0) {
+      refuseCatalogBridge("CATALOG_BRIDGE_OPERATION_ID_ALREADY_USED");
+    }
+    if (!latestRun) refuseCatalogBridge("CATALOG_BRIDGE_LIVE_DRAIN_RUN_MISSING");
+    return readLockedBoundary({ transaction, lease, authority: input.authority,
+      process: input.process, policy: { providerKey: input.providerKey, runId: latestRun.id },
+      observedAt: input.now?.() ?? new Date() });
+  }, { isolationLevel: "RepeatableRead", maxWait: 5_000, timeout: 15_000 });
 }
 
 function assertProcessUnchanged(left: CatalogBridgeDrainProcessObservation,
