@@ -420,7 +420,7 @@ const incident = Object.freeze({
     generation: "87", runtimeRowVersion: "880", headFinishedAt: "2026-09-01T02:52:20.539Z",
     authorityDigest: "5cc97f73ecefa4e93b7706e37a3dd00a6fddf3b4c397eca9ec4b6bcc01b26384" }),
   freshnessCutoff: "2026-09-02T02:52:20.539Z",
-  oldAttemptId: "c1f1602d-d61d-4699-84cc-a0bd8a3f86c4",
+  oldAttemptDirectoryName: "attempt-c1f1602d-d61d-4699-84cc-a0bd8a3f86c4",
   pendingHeadSha256: "775dae39249407d3718da5cad190644099590ed9458971da6af2cc43dd518029",
   blockedMarkerSha256: "9f186ae8b523973d3684c33189901417e8bf12bbffffb77ae481f0995f6c1046",
   targetHistory: Object.freeze({
@@ -885,11 +885,11 @@ async function validateOld(input: z.infer<typeof successorInputSchema>, deps: Su
   }
   await artifact.directory(old.artifactDirectory); await artifact.directory(run); await artifact.directory(pending);
   if (policy.production) {
-    const expectedRun = [incident.oldAttemptId, "bundle.json", "head.json", "prepared.json", "source-config.json"].sort();
+    const expectedRun = [incident.oldAttemptDirectoryName, "bundle.json", "head.json", "prepared.json", "source-config.json"].sort();
     const expectedAttempt = ["prepare.completed.json", "prepare.started.json", "prepare.stderr", "prepare.stdout",
       "publish.started.json", "publish.stderr", "publish.stdout"].sort();
     const pendingNames = (await readdir(pending)).sort();
-    if (path.basename(attempt) !== incident.oldAttemptId || old.pendingHead.sha256 !== incident.pendingHeadSha256 ||
+    if (path.basename(attempt) !== incident.oldAttemptDirectoryName || old.pendingHead.sha256 !== incident.pendingHeadSha256 ||
       old.failure.pendingBlocked.sha256 !== incident.blockedMarkerSha256 ||
       !same((await readdir(run)).sort(), expectedRun) || !same((await readdir(attempt)).sort(), expectedAttempt) ||
       pendingNames.length !== 2 || !pendingNames.includes("head.json") ||
@@ -2065,6 +2065,7 @@ export const clutchpacksProductionPostHeadRecoveryTestHarness = process.env.NODE
     inventory: z.infer<typeof runtimeInventorySchema>, readInventory: (root: string, allowed: string) => Promise<unknown>,
     git: GitReader) => verifyTrustedTargetRuntimeClosure(identity, runtimePin, inventory, readInventory, git),
   rootInventory: (root: string, dependencies: SuccessorDependencies = {}) => rootInventory(root, dependencies),
+  oldAttemptDirectoryName: incident.oldAttemptDirectoryName,
   ledgerSchemaSha256,
   projectReleaseStatus,
   launchctlServiceIsMissing,

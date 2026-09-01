@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
+process.env.NODE_ENV = "test";
 const { publishClutchpacksProductionPostHead: publish, clutchpacksProductionPostHeadSchema } =
   await tsImport("./clutchpacks-production-post-head.mts", import.meta.url);
 const recoveryModule = await tsImport("./clutchpacks-production-post-head-recovery.mts", import.meta.url);
@@ -30,6 +31,15 @@ const executablePinPromise = readFile(process.execPath).then(bytes => ({ path: p
 const now = "2026-08-31T18:00:00.000Z";
 const save = (file, value) => writeFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
 const read = async file => JSON.parse(await readFile(file, "utf8"));
+
+test("preparer and recovery agree on the frozen prefixed attempt directory", async t => {
+  const run = await realpath(await mkdtemp(path.join(os.tmpdir(), "clutch-c533-cross-attempt-")));
+  t.after(() => rm(run, { recursive: true, force: true }));
+  const expected = path.join(run, recoveryHarness.oldAttemptDirectoryName);
+  await mkdir(expected, { mode: 0o700 });
+  assert.equal(await preparerHarness.frozenAttemptDirectory(run), expected);
+});
+
 async function fixture(t) {
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), "packscout-post-head-")));
   t.after(() => rm(directory, { recursive: true, force: true }));
