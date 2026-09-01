@@ -806,7 +806,7 @@ function canonicalSourceCategory(content: unknown): string | null {
   return category;
 }
 
-function clutchpacksCategoryConfiguration(
+export function clutchpacksCategoryConfiguration(
   namespaceUuid: string,
   entities: readonly ClutchpacksCatalogEntityCandidate[],
 ) {

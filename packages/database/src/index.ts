@@ -46,6 +46,7 @@ export * from "./provider-head-reconciliation-repository.ts";
 export * from "./provider-run-head-proof.ts";
 export * from "./provider-runtime-repository.ts";
 export * from "./provider-worker-lease-repository.ts";
+export * from "./drained-database-transaction.ts";
 export * from "./provider-command-repository.ts";
 export * from "./provider-run-repository.ts";
 export * from "./provider-source-request-audit-repository.ts";

@@ -88,6 +88,8 @@
     "generate:catalog-candidate:clutchpacks:local": "node --import tsx scripts/local/generate-clutchpacks-v3-public-catalog-candidate.mts",
     "approve:catalog-refresh:clutchpacks:local": "node --import tsx scripts/local/approve-clutchpacks-v3-public-catalog-refresh.mts",
     "promote:data-release-v3:clutchpacks:local": "node --import tsx scripts/local/promote-clutchpacks-data-release-v3.mjs",
+    "promote:data-release-v3:clutchpacks:live": "node --import tsx scripts/live/promote-clutchpacks-production.mts",
+    "initialize:convex-retained-ev:clutchpacks:live": "node --import tsx scripts/live/clutchpacks-production-ev-initialization.mts",
     "start:provider-source-task010-configuration:local": "PACKSCOUT_TASK010_SUPERVISOR_PHASE=configuration node --import tsx scripts/local/start-provider-source-task010-supervisor.mts",
     "start:provider-source-task010-backfill:local": "PACKSCOUT_TASK010_SUPERVISOR_PHASE=backfill node --import tsx scripts/local/start-provider-source-task010-supervisor.mts",
     "start:provider-source-task010-admin:local": "node --import tsx scripts/local/start-provider-source-task010-admin.mts",

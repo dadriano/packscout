@@ -169,3 +169,4 @@ export * from "./welcome-dispatch/settings.ts";
 export * from "./welcome-dispatch/directory-client.ts";
 export * from "./welcome-dispatch/dispatch-service.ts";
 export * from "./providers/clutchpacks/public-pack-membership-source-v1.ts";
+export * from "./public-repack-link.ts";
