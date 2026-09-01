@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { providerMixedCursorFingerprint } = await tsImport("@packscout/database", import.meta.url);
+const { DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION } =
+  await tsImport("@packscout/contracts", import.meta.url);
 const { providerDataforrestLiveIntegrationRegistry } = await tsImport("../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
 const { readBackfillSnapshot, readBackfillIntent } = await tsImport("./provider-backfill-supervisor-state.mts", import.meta.url);
 const { assertBackfillOperation, persistBackfillIntent, claimBackfillExecution, assertBackfillRetryPinned } =
@@ -13,7 +15,10 @@ const pins = { organizationId: "6b18e44d-8dbd-4604-bbdf-4e4f84c67c11", providerI
   providerKey: "phygitals", configId: "6b18e44d-8dbd-4604-bbdf-4e4f84c67c13",
   initialRunId: "6b18e44d-8dbd-4604-bbdf-4e4f84c67c14", operationId: "6b18e44d-8dbd-4604-bbdf-4e4f84c67c15",
   operatorId: "6b18e44d-8dbd-4604-bbdf-4e4f84c67c16" };
-const integration = providerDataforrestLiveIntegrationRegistry.resolveProvider("phygitals");
+const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+  "phygitals",
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+);
 const authority = { configNumber: 4n, integration, cachedConfiguration: {
   adapterKey: integration.manifest.adapterVersion, settings: { platform: "phygitals" } },
   expiresAt: null, scheduleSeconds: 60, digest: "d".repeat(64) };

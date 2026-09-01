@@ -3,7 +3,11 @@ import { access } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { test } from "node:test";
-import { DATAFORREST_EVENTS_V1_ENDPOINT } from "@packscout/contracts";
+import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ENDPOINT,
+} from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
   providerMixedCursorFingerprint,
@@ -390,8 +394,11 @@ function parallelProviderSource(
 function requiredLiveIntegration(
   providerKey: "clutchpacks" | "courtyard",
 ): ProviderDataforrestLiveIntegration {
+  const adapterKey = providerKey === "clutchpacks"
+    ? DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    : DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION;
   const integration = providerDataforrestLiveIntegrationRegistry
-    .resolveProvider(providerKey);
+    .resolve(providerKey, adapterKey);
   if (integration === null) {
     throw new TypeError(`Missing ${providerKey} live integration fixture.`);
   }

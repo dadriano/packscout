@@ -9,6 +9,7 @@ import {
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
@@ -18,6 +19,7 @@ import {
   type DataforrestEventRecordV1,
   type DataforrestEventsPageV1,
   type ProviderPageRecordCounts,
+  type ProviderCatalogIdentityCensus,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_MAX_BYTES,
@@ -37,6 +39,7 @@ import type {
 } from
   "./dataforrest-source-authority-resolver.ts";
 import {
+  ProviderCatalogIdentityCensusSession,
   ProviderDataforrestMixedPageSource,
   ProviderDataforrestSourceError,
 } from "./provider-dataforrest-mixed-page-source.ts";
@@ -390,6 +393,7 @@ function sourcePage(input: Readonly<{
 }
 
 function sourceInput(input: Readonly<{
+  runId?: string;
   pageNumber?: number;
   checkpoint?: CanonicalJsonValue | null;
   checkpointFingerprint?: string | null;
@@ -397,7 +401,7 @@ function sourceInput(input: Readonly<{
 }> = {}): ProviderCapturePageSourceInput {
   return {
     authority: input.authority ?? authority,
-    runId,
+    runId: input.runId ?? runId,
     workerFence: 1n,
     pageNumber: input.pageNumber ?? 1,
     sourceCheckpoint: input.checkpoint ?? null,
@@ -420,6 +424,7 @@ function sourceFixture(input: Readonly<{
   integration?: ProviderDataforrestLiveIntegration;
   resolvedAuthority?: ResolvedDataforrestSourceAuthority;
   workerId?: string;
+  catalogIdentityCensusSession?: ProviderCatalogIdentityCensusSession;
   resolver?: (
     request: DataforrestSourceAuthorityRequest,
   ) => Promise<ResolvedDataforrestSourceAuthority>;
@@ -439,6 +444,7 @@ function sourceFixture(input: Readonly<{
     normalizedRecordCount: number;
   }>> = [];
   const recordKindMeasurements: ProviderPageRecordCounts[] = [];
+  const catalogIdentityCensuses: ProviderCatalogIdentityCensus[] = [];
   const pages = [...input.pages];
   const baseIntegration = input.integration
     ?? createProviderDataforrestLiveIntegration(
@@ -496,6 +502,9 @@ function sourceFixture(input: Readonly<{
     translationRecorder: {
       recordPageTranslation(input) {
         recordKindMeasurements.push(input.recordCounts);
+        if (input.catalogIdentityCensus !== null) {
+          catalogIdentityCensuses.push(input.catalogIdentityCensus);
+        }
         translations.push({
           sourceRecordCount: input.sourceRecordCount,
           normalizedRecordCount: input.normalizedRecordCount,
@@ -507,6 +516,9 @@ function sourceFixture(input: Readonly<{
     integration,
     adapter,
     maximumPageRecords: input.maximumPageRecords,
+    ...(input.catalogIdentityCensusSession === undefined ? {} : {
+      catalogIdentityCensusSession: input.catalogIdentityCensusSession,
+    }),
   });
   return {
     source,
@@ -515,6 +527,7 @@ function sourceFixture(input: Readonly<{
     terminalizations,
     translations,
     recordKindMeasurements,
+    catalogIdentityCensuses,
   };
 }
 
@@ -1007,6 +1020,267 @@ function courtyardNativeFixture(
     },
   };
 }
+
+function courtyardCatalogFixture(
+  pages: readonly DataforrestEventsPageV1[],
+  catalogIdentityCensusSession?: ProviderCatalogIdentityCensusSession,
+) {
+  const manifest = dataforrestCourtyardCatalogSourceAdapterManifest;
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration("courtyard", manifest),
+      resolvedAuthority: {
+        ...courtyardResolvedAuthority,
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceConfiguration: { platform: "courtyard", stream: "catalog" },
+      },
+      ...(catalogIdentityCensusSession === undefined ? {} : {
+        catalogIdentityCensusSession,
+      }),
+    }),
+    captureAuthority: {
+      ...courtyardAuthority,
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
+test("catalog identity census exposes duplicates within and across pages without exposing source IDs", async () => {
+  const card = courtyardNativeCard("census-card", { asset: { title: "Census card" } });
+  const pack = courtyardRecords().find((record) =>
+    record.stream === "catalog" && record.entity === "pack");
+  assert.ok(pack);
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "census-more", continuation: "continue",
+      records: [card, card, pack] }),
+    sourcePage({ cursor: "census-head", continuation: "head",
+      records: [card, pack] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority,
+    pageNumber: 2, checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint }));
+  assert.equal(fixture.catalogIdentityCensuses.length, 2);
+  assert.deepEqual({ ...fixture.catalogIdentityCensuses[0]!, identityChainDigest: "digest",
+    pageIdentityMultisetDigest: "digest", pageResponseDigest: "digest" }, {
+    schemaVersion: "provider_catalog_identity_census_v1", pageResponseDigest: "digest",
+    rawCardObservationCount: 2, rawPackObservationCount: 1,
+    distinctCardIdentityCount: 1, distinctPackIdentityCount: 1,
+    identityChainDigest: "digest", pageIdentityMultisetDigest: "digest",
+    identityMultisetDigest: null,
+  });
+  const final = fixture.catalogIdentityCensuses[1]!;
+  assert.equal(final.rawCardObservationCount, 3);
+  assert.equal(final.rawPackObservationCount, 2);
+  assert.equal(final.distinctCardIdentityCount, 1);
+  assert.equal(final.distinctPackIdentityCount, 1);
+  assert.match(final.identityChainDigest, /^[a-f0-9]{64}$/u);
+  assert.match(final.pageIdentityMultisetDigest, /^[a-f0-9]{64}$/u);
+  assert.ok(final.identityMultisetDigest);
+  assert.match(final.identityMultisetDigest, /^[a-f0-9]{64}$/u);
+  assert.equal(JSON.stringify(fixture.catalogIdentityCensuses).includes("census-card"), false);
+  assert.equal(JSON.stringify(fixture.catalogIdentityCensuses).includes("courtyard-pack-001"), false);
+});
+
+test("catalog census counts no identity for an omitted source ID and preserves quarantine evidence", async () => {
+  const invalid = { ...adapterInvalidCatalogRecord(), platform: "courtyard" as const };
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "invalid-head", continuation: "head", records: [invalid] }),
+  ]);
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }));
+  assert.deepEqual(fixture.catalogIdentityCensuses.map((value) => ({
+    rawCardObservationCount: value.rawCardObservationCount,
+    rawPackObservationCount: value.rawPackObservationCount,
+    distinctCardIdentityCount: value.distinctCardIdentityCount,
+    distinctPackIdentityCount: value.distinctPackIdentityCount,
+  })), [{ rawCardObservationCount: 0, rawPackObservationCount: 0,
+    distinctCardIdentityCount: 0, distinctPackIdentityCount: 0 }]);
+  assert.equal(fixture.recordKindMeasurements[0]?.rejectedRecordCount, 1);
+});
+
+test("catalog census replays an exact page idempotently and refuses a conflicting replay", async () => {
+  const exact = sourcePage({ cursor: "replay-more", continuation: "continue",
+    records: [courtyardNativeCard("replay-card", { asset: { title: "Replay" } })] });
+  const fixture = courtyardCatalogFixture([exact, exact,
+    sourcePage({ cursor: "conflict-more", continuation: "continue",
+      records: [courtyardNativeCard("different-card", { asset: { title: "Different" } })] })]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  const replay = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  assert.equal(replay.responseDigest, first.responseDigest);
+  assert.deepEqual(fixture.catalogIdentityCensuses[1], fixture.catalogIdentityCensuses[0]);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+      error.code === "PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+});
+
+test("catalog census refuses interleaved runs until the active run reaches head", async () => {
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "interleaved-more", continuation: "continue",
+      records: [courtyardNativeCard("first-run-card", { asset: { title: "First run" } })] }),
+    sourcePage({ cursor: "second-run-head", continuation: "head",
+      records: [courtyardNativeCard("second-run-card", { asset: { title: "Second run" } })] }),
+  ]);
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }));
+  await assert.rejects(fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    runId: "55555555-5555-4555-8555-555555555555",
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+  assert.equal(fixture.catalogIdentityCensuses.length, 1);
+});
+
+test("catalog census session advances across fresh routed page sources", async () => {
+  const session = new ProviderCatalogIdentityCensusSession();
+  const firstSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "shared-page-2", continuation: "continue",
+      records: [courtyardNativeCard("shared-card-1", {
+        asset: { title: "Shared one" },
+      })] }),
+  ], session);
+  const first = validateProviderMixedPage(await firstSource.source.nextPage(
+    sourceInput({ authority: firstSource.captureAuthority }),
+  ));
+  const secondSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "shared-head", continuation: "head",
+      records: [courtyardNativeCard("shared-card-2", {
+        asset: { title: "Shared two" },
+      })] }),
+  ], session);
+  await secondSource.source.nextPage(sourceInput({
+    authority: secondSource.captureAuthority,
+    pageNumber: 2,
+    checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  }));
+  assert.equal(secondSource.catalogIdentityCensuses[0]?.rawCardObservationCount, 2);
+  assert.equal(secondSource.catalogIdentityCensuses[0]?.distinctCardIdentityCount, 2);
+  assert.equal(session.workSnapshot().finalDigestComputationCount, 1);
+});
+
+test("catalog census refuses a process restart at page K before source I/O", async () => {
+  const firstSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "restart-page-2", continuation: "continue",
+      records: [courtyardNativeCard("restart-card-1", {
+        asset: { title: "Restart one" },
+      })] }),
+  ]);
+  const first = validateProviderMixedPage(await firstSource.source.nextPage(
+    sourceInput({ authority: firstSource.captureAuthority }),
+  ));
+  const restarted = courtyardCatalogFixture([
+    sourcePage({ cursor: "restart-head", continuation: "head",
+      records: [courtyardNativeCard("restart-card-2", {
+        asset: { title: "Restart two" },
+      })] }),
+  ]);
+  await assert.rejects(restarted.source.nextPage(sourceInput({
+    authority: restarted.captureAuthority,
+    pageNumber: 2,
+    checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+  assert.equal(restarted.requestedUrls.length, 0);
+});
+
+test("catalog page 1 refuses a persisted page-K cursor before source I/O", async () => {
+  const prior = courtyardCatalogFixture([
+    sourcePage({ cursor: "persisted-page-k", continuation: "continue",
+      records: [courtyardNativeCard("persisted-card", {
+        asset: { title: "Persisted" },
+      })] }),
+  ]);
+  const page = validateProviderMixedPage(await prior.source.nextPage(
+    sourceInput({ authority: prior.captureAuthority }),
+  ));
+  const freshRun = courtyardCatalogFixture([
+    sourcePage({ cursor: "must-not-read", continuation: "head",
+      records: [courtyardNativeCard("partial-card", {
+        asset: { title: "Partial" },
+      })] }),
+  ]);
+  await assert.rejects(freshRun.source.nextPage(sourceInput({
+    authority: freshRun.captureAuthority,
+    runId: "55555555-5555-4555-8555-555555555555",
+    checkpoint: page.nextCursor,
+    checkpointFingerprint: page.nextCursorFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+  assert.equal(freshRun.requestedUrls.length, 0);
+});
+
+test("catalog later pages require the exact prior cursor chain", async () => {
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "chain-page-2", continuation: "continue",
+      records: [courtyardNativeCard("chain-card-1", {
+        asset: { title: "Chain one" },
+      })] }),
+    sourcePage({ cursor: "chain-head", continuation: "head",
+      records: [courtyardNativeCard("chain-card-2", {
+        asset: { title: "Chain two" },
+      })] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+  assert.ok(first.nextCursor !== null && typeof first.nextCursor === "object" &&
+    !Array.isArray(first.nextCursor));
+  const wrongCheckpoint = { ...first.nextCursor, value: "wrong-chain" };
+  const wrongFingerprint = providerMixedCursorFingerprint(wrongCheckpoint);
+  assert.ok(wrongFingerprint);
+  await assert.rejects(fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    pageNumber: 2,
+    checkpoint: wrongCheckpoint,
+    checkpointFingerprint: wrongFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID");
+  assert.equal(fixture.requestedUrls.length, 1);
+});
+
+test("catalog census digest work stays page-bounded and finalizes once", async () => {
+  const pageCount = 25;
+  const recordsPerPage = 100;
+  const pages = Array.from({ length: pageCount }, (_, pageIndex) =>
+    sourcePage({
+      cursor: pageIndex === pageCount - 1 ? "scale-head" : `scale-${pageIndex + 2}`,
+      continuation: pageIndex === pageCount - 1 ? "head" : "continue",
+      records: Array.from({ length: recordsPerPage }, (_, recordIndex) =>
+        courtyardNativeCard(`scale-${pageIndex}-${recordIndex}`, {
+          asset: { title: `Scale ${pageIndex}-${recordIndex}` },
+        })),
+    }));
+  const fixture = courtyardCatalogFixture(pages);
+  let checkpoint: CanonicalJsonValue | null = null;
+  let checkpointFingerprint: string | null = null;
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const page = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority,
+      pageNumber,
+      checkpoint,
+      checkpointFingerprint,
+    })));
+    checkpoint = page.nextCursor;
+    checkpointFingerprint = page.nextCursorFingerprint;
+  }
+  assert.deepEqual(fixture.source.catalogIdentityCensusWorkSnapshot(), {
+    pageDigestObservationCount: pageCount * recordsPerPage,
+    maximumPageDigestObservationCount: recordsPerPage,
+    finalDigestDistinctIdentityCount: pageCount * recordsPerPage,
+    finalDigestComputationCount: 1,
+  });
+  assert.equal(fixture.catalogIdentityCensuses.slice(0, -1)
+    .every((value) => value.identityMultisetDigest === null), true);
+  assert.ok(fixture.catalogIdentityCensuses.at(-1)?.identityMultisetDigest);
+});
 
 test("versioned Courtyard native cards map reviewed wrappers and quarantine malformed or absent names", async () => {
   const invalidAssets: DataforrestEventRecordV1["data"][string][] = [

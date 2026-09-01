@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { providerMixedCursorFingerprint, PrismaAdminProviderRuntimeRepository } = await tsImport("@packscout/database", import.meta.url);
+const { DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION } = await tsImport("@packscout/contracts", import.meta.url);
 const { providerDataforrestLiveIntegrationRegistry } = await tsImport("../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
 const { readContinuousView, persistContinuousCycle, queueContinuousCycle, findContinuousQueuedRun } = await tsImport("./provider-continuous-persistence.mts", import.meta.url);
 const { continuousQueueOwner, continuousDecision } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
@@ -10,7 +11,10 @@ const pins = { organizationId: "8b333333-3333-4333-8333-333333333331", providerI
   operationId: "8b333333-3333-4333-8333-333333333335", operatorId: "8b333333-3333-4333-8333-333333333336" };
 function fixture() {
   const now = new Date("2026-08-30T06:05:00Z");
-  const integration = providerDataforrestLiveIntegrationRegistry.resolveProvider("clutchpacks");
+  const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+    "clutchpacks",
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  );
   const authority = { configNumber: 4n, integration, cachedConfiguration: { adapterKey: integration.manifest.adapterVersion,
     settings: { platform: "clutchpacks" } }, expiresAt: null, scheduleSeconds: 300, digest: "d".repeat(64) };
   const cursor = { sourceInstanceId: pins.providerId, sourceRevisionId: pins.configId, sourceTypeKey: integration.manifest.sourceTypeKey,

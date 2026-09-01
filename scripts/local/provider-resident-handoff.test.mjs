@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 import { pins, residentFixture } from "./provider-resident-test-fixture.mjs";
-const { readResidentBootstrapView, persistResidentHandoff, readResidentHandoff, residentContinuousPins } =
+const { readResidentBootstrapView, persistResidentHandoff, readResidentHandoff,
+  readResidentRelease, persistResidentRelease, residentContinuousPins } =
   await tsImport("./provider-resident-handoff.mts", import.meta.url);
 const { readBackfillView } = await tsImport("./run-provider-backfill-supervisor.mts", import.meta.url);
 const { readOwnedBackfillLeaseExpiry, releaseExpiredBackfillHeadLease } = await tsImport("./provider-backfill-supervisor-persistence.mts", import.meta.url);
@@ -21,6 +22,73 @@ test("head handoff commits exactly once, restart reuses its original pins after 
   assert.deepEqual(restarted.handoff, handoff); assert.equal(restarted.backfill, null);
   assert.equal(residentContinuousPins(restarted.handoff).initialRunId, pins.initialRunId);
   assert.equal(f.audits.length, 1);
+});
+test("explicit initial-run wait requires the exact paused cursor boundary and performs no write", async () => {
+  const f = residentFixture(); f.runs.clear(); f.runtime.operating_state = "paused";
+  const view = await readResidentBootstrapView(f.database, pins, f.authority, true);
+  assert.deepEqual(view, { handoff: null, backfill: null, awaitingInitialRun: true });
+  assert.deepEqual(f.writes, []);
+  for (const mutate of [value => value.runtime.operating_state = "idle",
+    value => value.runtime.source_cursor = null,
+    value => value.runtime.cached_config_version_id = pins.operatorId,
+    value => value.lease.lease_owner = "foreign",
+    value => value.commands.push({ state: "pending" })]) {
+    const changed = residentFixture(); changed.runs.clear(); changed.runtime.operating_state = "paused";
+    mutate(changed);
+    await assert.rejects(readResidentBootstrapView(changed.database, pins, changed.authority, true),
+      /INITIAL_RUN_WAIT_BOUNDARY_CHANGED/);
+    assert.deepEqual(changed.writes, []);
+  }
+});
+test("awaited resident stays gated after handoff until the exact resumed journal release", async () => {
+  const f = residentFixture();
+  const observed = await readBackfillView(f.database, pins, f.authority);
+  const handoff = await persistResidentHandoff(f.database, pins, f.authority, observed);
+  assert.deepEqual(await readResidentBootstrapView(f.database, pins, f.authority, true),
+    { handoff: null, backfill: null, awaitingInitialRun: true });
+  const receiptDigest = "a".repeat(64);
+  const release = await persistResidentRelease(f.database, pins, f.authority, receiptDigest);
+  assert.ok(release);
+  assert.deepEqual(await persistResidentRelease(f.database, pins, f.authority, receiptDigest), release);
+  assert.deepEqual(await readResidentRelease(f.database, pins, f.authority, handoff, receiptDigest), release);
+  assert.deepEqual((await readResidentBootstrapView(f.database, pins, f.authority, true)).handoff, handoff);
+  f.runs.set(pins.operatorId, { ...f.parent, id: pins.operatorId, state: "running",
+    requested_at: new Date(f.now.getTime() + 1) });
+  f.runtime.operating_state = "running"; f.runtime.state_generation += 4n;
+  f.lease.lease_owner = "local:continuous:later";
+  f.lease.heartbeat_at = f.now; f.lease.lease_expires_at = new Date(f.now.getTime() + 60_000);
+  assert.deepEqual(await persistResidentRelease(f.database, pins, f.authority, receiptDigest), release);
+  assert.equal(f.audits.length, 2);
+  assert.deepEqual(f.writes, ["audit", "audit"]);
+});
+test("resident release refuses a foreign receipt, handoff or changed head without writing", async () => {
+  for (const mutate of [
+    f => f.runs.set(pins.operatorId, { ...f.parent, id: pins.operatorId, requested_at: f.now }),
+    f => f.runtime.operating_state = "paused",
+    f => f.runtime.state_generation += 1n,
+    f => f.runtime.source_cursor_hash = "e".repeat(64),
+  ]) {
+    const f = residentFixture();
+    const observed = await readBackfillView(f.database, pins, f.authority);
+    await persistResidentHandoff(f.database, pins, f.authority, observed);
+    mutate(f);
+    await assert.rejects(persistResidentRelease(f.database, pins, f.authority, "a".repeat(64)));
+    assert.deepEqual(f.writes, ["audit"]);
+  }
+  for (const mutation of [
+    row => row.details.resumedReceiptDigest = "b".repeat(64),
+    row => row.details.handoffDigest = "b".repeat(64),
+    row => row.details.pins.operationId = pins.operatorId,
+    row => row.actor_operator_id = pins.providerId,
+  ]) {
+    const f = residentFixture();
+    const observed = await readBackfillView(f.database, pins, f.authority);
+    const handoff = await persistResidentHandoff(f.database, pins, f.authority, observed);
+    await persistResidentRelease(f.database, pins, f.authority, "a".repeat(64));
+    mutation(f.audits[1]);
+    await assert.rejects(readResidentRelease(f.database, pins, f.authority, handoff,
+      "a".repeat(64)), /RELEASE_DRIFT/);
+  }
 });
 test("handoff refuses changed controls, head/checkpoint, latest run and foreign lease without writes", async () => {
   for (const mutate of [f => f.runtime.operating_state = "paused", f => f.runtime.operating_state = "stopped",

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
 } from "@packscout/contracts";
 import {
@@ -94,11 +95,6 @@ function credentialCipher(): AesGcmProviderCredentialCipher {
 }
 
 async function bootstrapAuthority(): Promise<ResolvedDataforrestSourceAuthority> {
-  const integration = providerDataforrestLiveIntegrationRegistry
-    .resolveProvider(providerKey);
-  if (integration === null) {
-    return refuse("COURTYARD_CENSUS_CAPABILITY_UNAVAILABLE");
-  }
   const central = createCentralDatabaseLifecycle({
     databaseUrl: centralDatabaseUrl(),
     connectionLimit: 1,
@@ -121,6 +117,15 @@ async function bootstrapAuthority(): Promise<ResolvedDataforrestSourceAuthority>
       },
     });
     const config = provider?.active_config_version ?? null;
+    const adapterKey = config?.adapter_key
+      ?? DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION;
+    const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+      providerKey,
+      adapterKey,
+    );
+    if (integration === null) {
+      return refuse("COURTYARD_CENSUS_CAPABILITY_UNAVAILABLE");
+    }
     if (
       provider === null
       || provider.lifecycle !== "active"
@@ -161,12 +166,14 @@ async function run(): Promise<void> {
   if (DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS !== 100) {
     return refuse("COURTYARD_CENSUS_PAGE_BOUND_INVALID");
   }
-  const integration = providerDataforrestLiveIntegrationRegistry
-    .resolveProvider(providerKey);
+  const authority = await bootstrapAuthority();
+  const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+    providerKey,
+    authority.adapterKey,
+  );
   if (integration === null) {
     return refuse("COURTYARD_CENSUS_CAPABILITY_UNAVAILABLE");
   }
-  const authority = await bootstrapAuthority();
   const abort = new AbortController();
   const stop = (): void => abort.abort();
   process.once("SIGINT", stop);
