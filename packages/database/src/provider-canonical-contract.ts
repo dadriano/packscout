@@ -85,6 +85,22 @@ export interface FactReferenceReconciliationResult {
   readonly marketEventCollectibleCount: number;
   readonly materialChangeCount: number;
   readonly promotionRange: PromotionSequenceRange | null;
+  readonly nextScanCursor: ProviderFactReferenceScanCursor | null;
+}
+
+export interface ProviderFactReferenceTargets {
+  readonly packKeys: readonly string[];
+  readonly collectibleKeys: readonly string[];
+}
+
+export interface ProviderFactReferenceScanCursor {
+  readonly packs: Readonly<{ afterKey: string | null; done: boolean }>;
+  readonly collectibles: Readonly<{ afterKey: string | null; done: boolean }>;
+}
+
+export interface ProviderFactReferenceScan {
+  readonly targets?: ProviderFactReferenceTargets;
+  readonly after?: ProviderFactReferenceScanCursor;
 }
 
 export interface MutableWriteControl {

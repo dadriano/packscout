@@ -29,6 +29,7 @@ import {
   type CollectibleNameAliasWriteInput,
   type CollectibleWriteInput,
   type FactReferenceReconciliationResult,
+  type ProviderFactReferenceScan,
   type MarketEventWriteInput,
   type PackContentWriteInput,
   type PackWriteInput,
@@ -293,11 +294,11 @@ async function appendResolvedFactChanges(
   );
 }
 
-async function reconcileFactReferencesBatch(
-  client: ProviderQueryClient,
+export async function reconcileProviderFactReferencesTransaction(
+  client: ProviderQueryClient, scan: ProviderFactReferenceScan,
 ): Promise<FactReferenceReconciliationResult> {
-  const { pulls, pullItems, marketEventPacks, marketEventCollectibles } =
-    await resolveProviderFactReferencesBatch(client);
+  const { pulls, pullItems, marketEventPacks, marketEventCollectibles, nextScanCursor } =
+    await resolveProviderFactReferencesBatch(client, scan);
   const promotionRange = await appendResolvedFactChanges(client, [
     ...pulls.map((row) => ({ ...row, entityType: "pull" as const })),
     ...pullItems.map((row) => ({ ...row, entityType: "pull_item" as const })),
@@ -315,7 +316,7 @@ async function reconcileFactReferencesBatch(
     marketEventPackCount: marketEventPacks.length,
     marketEventCollectibleCount: marketEventCollectibles.length,
     materialChangeCount,
-    promotionRange,
+    promotionRange, nextScanCursor,
   };
 }
 
@@ -1100,7 +1101,7 @@ export class ProviderCanonicalRepository {
    * before this transaction and drain by repeating until the count is zero.
    * A null result means the supplied worker no longer owns a live lease.
    */
-  reconcileFactReferences(input: Readonly<{
+  reconcileFactReferences(input: ProviderFactReferenceScan & Readonly<{
     workerId: string;
     workerFence: bigint;
   }>): Promise<FactReferenceReconciliationResult | null> {
@@ -1116,7 +1117,7 @@ export class ProviderCanonicalRepository {
         owner: input.workerId,
         fence: input.workerFence,
       });
-      return reconcileFactReferencesBatch(client);
+      return reconcileProviderFactReferencesTransaction(client, input);
     }, TRANSACTION_OPTIONS);
   }
 

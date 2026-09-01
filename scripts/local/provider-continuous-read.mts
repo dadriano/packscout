@@ -23,9 +23,9 @@ export function createContinuousProviderReader<A, T>(input: {
   authority(): Promise<A>;
   run(authority: A, read: (database: ProviderPrismaClient) => Promise<T>): Promise<ProviderDatabaseOperationResult<T>>;
   read(database: ProviderPrismaClient, authority: A): Promise<T>;
-}): () => Promise<T> {
-  let pending: { observation: Observation<T> } | null = null;
-  return async () => {
+}): (() => Promise<T>) & { drain(): Promise<void> } {
+  let pending: { observation: Observation<T>; settled: Promise<void> } | null = null;
+  const reader = async () => {
     if (pending !== null) {
       const previous = pending.observation;
       if (previous.state === "pending") throw new ContinuousReadUnavailableError();
@@ -37,14 +37,16 @@ export function createContinuousProviderReader<A, T>(input: {
     const authority = await input.authority();
     let attempt: { observation: Observation<T> } | null = null;
     const result = await input.run(authority, async database => {
-      const current: { observation: Observation<T> } = { observation: { state: "pending" } };
+      let finished!: () => void;
+      const settled = new Promise<void>(resolve => { finished = resolve; });
+      const current: { observation: Observation<T>; settled: Promise<void> } = { observation: { state: "pending" }, settled };
       attempt = current; pending = current;
       try {
         const value = await input.read(database, authority);
         current.observation = { state: "fulfilled", value }; return value;
       } catch (error) {
         current.observation = { state: "rejected", error }; throw error;
-      }
+      } finally { finished(); }
     });
     if (result.state === "reachable") { pending = null; return result.value; }
     if (result.failureCode !== "database_unreachable") refuseBackfill("CONTINUOUS_PROVIDER_UNAVAILABLE");
@@ -54,4 +56,6 @@ export function createContinuousProviderReader<A, T>(input: {
     }
     throw new ContinuousReadUnavailableError();
   };
+  reader.drain = async () => { if (pending) await pending.settled; };
+  return reader;
 }

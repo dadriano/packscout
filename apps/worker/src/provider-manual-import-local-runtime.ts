@@ -278,6 +278,8 @@ export async function runProviderManualImportOnce(input: Readonly<{
       );
     }
     if (result.kind !== "progress") break;
+    // Head receipts advance independently of source-page limits and never refetch the source.
+    if (result.reconciliationPending) step -= 1;
   }
   if (result === null || result.kind === "progress") {
     if (result?.kind === "progress") {

@@ -76,3 +76,12 @@ test("internal terminal decisions are configuration or worker failures", () => {
   assert.equal(providerManualImportTerminalDiagnostic("PROVIDER_IMPORT_PAGE_LIMIT_EXCEEDED")
     .failureClass, "worker");
 });
+
+test("only positively typed page expiration receives the specific expiration diagnostic", async () => {
+  const { ProviderPageTransactionExpiredError } = await import("@packscout/database");
+  const classified = classifyProviderManualImportFailure(new ProviderPageTransactionExpiredError(30_000, 30_001), "page_commit");
+  assert.equal(classified.failureCode, "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED");
+  assert.equal(classified.failureSummary, "Provider import stopped; stage=page_commit; category=transaction_expired.");
+  assert.equal(classifyProviderManualImportFailure({ code: "PROVIDER_PAGE_TRANSACTION_EXPIRED" }, "page_commit").failureCode,
+    "PROVIDER_IMPORT_EXECUTION_FAILED");
+});
