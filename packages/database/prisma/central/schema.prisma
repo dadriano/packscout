@@ -999,10 +999,17 @@ model catalog_publication_operations {
 
 model manifest_activation_state {
   singleton_key                 Boolean   @id @default(true)
+  active_generation             BigInt    @default(0)
   active_manifest_id            String?
   active_manifest_fingerprint   String?   @db.Char(64)
+  active_manifest_bytes         Bytes?
+  active_manifest_bytes_hash    String?   @db.Char(64)
+  active_state_bytes            Bytes?
+  active_state_hash             String?   @db.Char(64)
   previous_manifest_id          String?
   previous_manifest_fingerprint String?   @db.Char(64)
+  previous_manifest_bytes       Bytes?
+  previous_manifest_bytes_hash  String?   @db.Char(64)
   lease_owner                   String?
   lease_fence                   BigInt    @default(0)
   lease_expires_at              DateTime? @db.Timestamptz(6)
@@ -1018,14 +1025,25 @@ model manifest_activation_operations {
   expected_manifest_id       String?
   target_provider_release_id String?                     @db.Uuid
   target_catalog_version_id  String?                     @db.Uuid
+  new_manifest_id            String
   new_manifest_fingerprint   String                      @db.Char(64)
+  new_manifest_bytes         Bytes
+  new_manifest_bytes_hash    String                      @db.Char(64)
   idempotency_key            String                      @unique(map: "manifest_activation_operations_idempotency_unique")
   request_digest             String                      @db.Char(64)
+  request_bytes              Bytes
   lease_fence                BigInt
   state                      publication_operation_state @default(pending)
+  attempt_count              Int                         @default(0)
+  last_attempted_at          DateTime?                    @db.Timestamptz(6)
+  completion_lease_fence     BigInt?
   convex_receipt_id          String?
   receipt_hash               String?                     @db.Char(64)
   receipt                    Json?
+  receipt_bytes              Bytes?
+  response_digest            String?                     @db.Char(64)
+  response_bytes             Bytes?
+  failure_code               String?
   requested_by_operator_id   String?                     @db.Uuid
   requested_at               DateTime                    @db.Timestamptz(6)
   completed_at               DateTime?                   @db.Timestamptz(6)
