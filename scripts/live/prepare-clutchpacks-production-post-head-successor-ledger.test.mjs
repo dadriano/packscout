@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 process.env.NODE_ENV = "test";
 const { clutchpacksProductionPostHeadSuccessorPreparerTestHarness: harness } =
@@ -69,6 +71,27 @@ test("preparer requires the exact direct-Node execution boundary and four-key en
     { modulePath: "/tmp/preparer.mjs" },
   ]) assert.throws(() => harness.parseRuntime(runtime(changed)));
 });
+
+test("pinned Node under env -i normalizes the real macOS-injected environment to four sealed keys",
+  { skip: process.platform !== "darwin" }, async () => {
+    const moduleUrl = new URL("./prepare-clutchpacks-production-post-head-successor-ledger.mjs", import.meta.url).href;
+    const script = `
+      const { clutchpacksProductionPostHeadSuccessorPreparerTestHarness: harness } = await import(${JSON.stringify(moduleUrl)});
+      process.env.NODE_ENV = "production";
+      const injected = process.env.__CF_USER_TEXT_ENCODING ?? null;
+      const normalized = harness.normalizeSealedEnvironment(process.env);
+      process.stdout.write(JSON.stringify({ injected, environment: normalized, keys: Object.keys(normalized).sort() }));
+    `;
+    const { stdout, stderr } = await promisify(execFile)("/usr/bin/env", ["-i",
+      `HOME=${harness.environment.HOME}`, "NODE_ENV=test", `PATH=${harness.environment.PATH}`,
+      `TMPDIR=${harness.environment.TMPDIR}`, harness.settings.node, "--input-type=module", "--eval", script],
+    { cwd: harness.settings.executor, timeout: 10_000, maxBuffer: 1024 * 1024 });
+    const value = JSON.parse(stdout), uid = process.getuid();
+    assert.equal(stderr, "");
+    assert.equal(value.injected, `0x${uid.toString(16).toUpperCase()}:0x0:0x0`);
+    assert.deepEqual(value.keys, Object.keys(harness.environment).sort());
+    assert.deepEqual(value.environment, harness.environment);
+  });
 
 test("preparer refuses an unreviewed self hash and runtime-inventory module before importing it", async () => {
   await assert.rejects(harness.verifySelfPin(fixedHash));

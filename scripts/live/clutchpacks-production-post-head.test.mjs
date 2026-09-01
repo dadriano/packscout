@@ -40,6 +40,26 @@ test("preparer and recovery agree on the frozen prefixed attempt directory", asy
   assert.equal(await preparerHarness.frozenAttemptDirectory(run), expected);
 });
 
+test("all sealed direct boundaries accept only the exact macOS-injected environment key", () => {
+  const expected = structuredClone(launcherHarness.productionSettings.environment), uid = 502;
+  const injected = `0x${uid.toString(16).toUpperCase()}:0x0:0x0`;
+  const normalizers = [preparerHarness.normalizeSealedEnvironment, launcherHarness.normalizeSealedEnvironment,
+    recoveryHarness.normalizeSealedEnvironment, shimHarness.normalizeSealedEnvironment];
+  for (const normalize of normalizers) {
+    assert.deepEqual(normalize({ ...expected }, expected, "linux", uid), expected);
+    assert.deepEqual(normalize({ ...expected, __CF_USER_TEXT_ENCODING: injected }, expected, "darwin", uid), expected);
+    for (const [environment, platform, runtimeUid] of [
+      [{ ...expected, EXTRA: "unexpected" }, "darwin", uid],
+      [{ ...expected, __CF_USER_TEXT_ENCODING: injected }, "linux", uid],
+      [{ ...expected, __CF_USER_TEXT_ENCODING: injected.toLowerCase() }, "darwin", uid],
+      [{ ...expected, __CF_USER_TEXT_ENCODING: injected }, "darwin", -1],
+      [{ ...expected, __CF_USER_TEXT_ENCODING: injected }, "darwin", 1.5],
+      [{ ...expected, __CF_USER_TEXT_ENCODING: injected }, "darwin", Number.MAX_SAFE_INTEGER + 1],
+      [{ ...expected, PATH: "/usr/bin:/bin", __CF_USER_TEXT_ENCODING: injected }, "darwin", uid],
+    ]) assert.throws(() => normalize(environment, expected, platform, runtimeUid));
+  }
+});
+
 async function fixture(t) {
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), "packscout-post-head-")));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -477,6 +497,8 @@ async function recoveryFixture(t) {
     assertionProvenance: "production_source_state_strict_admission_v1" };
   const baseSpawn = f.deps.spawn;
   const spawn = (file, args, input) => {
+    assert.deepEqual(input.env, expectedEnvironment);
+    assert.deepEqual(Object.keys(input.env).sort(), ["HOME", "NODE_ENV", "PATH", "TMPDIR"]);
     const publishOffset = args.indexOf("--publish"), bundlePath = args[publishOffset + 1];
     const handshakePath = args[args.indexOf("--handshake") + 1];
     const continuePath = args[args.indexOf("--continue") + 1];

@@ -291,7 +291,8 @@ interface SuccessorDependencies {
   readonly afterAdoptionAttemptVerified?: () => void | Promise<void>;
   readonly afterAdoptionRunVerified?: () => void | Promise<void>;
 }
-interface SuccessorPolicy { readonly production: boolean; readonly importedModulePath?: string; }
+interface SuccessorPolicy { readonly production: boolean; readonly importedModulePath?: string;
+  readonly environment?: z.infer<typeof environmentSchema>; }
 class SuccessorError extends Error {
   constructor(readonly code: string) { super("ClutchPacks production successor publication was refused safely."); }
 }
@@ -472,6 +473,21 @@ function safeEnvironment(source: NodeJS.ProcessEnv) {
     .passthrough().parse(source);
   return environmentSchema.parse({ HOME: path.resolve(parsed.HOME), NODE_ENV: "production",
     PATH: parsed.PATH, TMPDIR: path.resolve(parsed.TMPDIR) });
+}
+function normalizeSealedEnvironment(source: NodeJS.ProcessEnv, expected = productionEnvironment,
+  platform = process.platform, uid = process.getuid?.()) {
+  const environment = Object.fromEntries(Object.entries(source));
+  const injectedKey = "__CF_USER_TEXT_ENCODING";
+  if (Object.hasOwn(environment, injectedKey)) {
+    if (platform !== "darwin" || typeof uid !== "number" || !Number.isSafeInteger(uid) || uid < 0 ||
+      environment[injectedKey] !== `0x${uid.toString(16).toUpperCase()}:0x0:0x0`) {
+      refuse("POST_HEAD_SUCCESSOR_LAUNCHER_INVALID");
+    }
+    delete environment[injectedKey];
+  }
+  const normalized = environmentSchema.safeParse(environment);
+  if (!normalized.success || !same(normalized.data, expected)) refuse("POST_HEAD_SUCCESSOR_LAUNCHER_INVALID");
+  return Object.freeze(normalized.data);
 }
 async function pin(file: string, maximum = 128 * 1024 * 1024, minimum = 1) {
   return { path: file, sha256: artifact.hashBytes(await artifact.readPrivate(file, maximum, minimum)) };
@@ -1103,7 +1119,7 @@ async function successorCore(raw: ClutchpacksProductionPostHeadSuccessorInput,
   let releaseExecution: (() => void | Promise<void>) | undefined;
   try {
     const now = deps.now ?? (() => new Date().toISOString());
-    const input = successorInputSchema.parse(raw), environment = safeEnvironment(process.env);
+    const input = successorInputSchema.parse(raw), environment = policy.environment ?? safeEnvironment(process.env);
     if (!deps.acquireResidencyExclusion || !deps.acquireExecutionExclusion) {
       if (policy.production) refuse("POST_HEAD_SUCCESSOR_EXCLUSION_MISSING");
     }
@@ -2024,11 +2040,10 @@ type SealedLauncherContext = { readonly residencyServer: Server; readonly acquir
 /** The sole production boundary. The direct-Node launcher owns 56432 before loading this module and closes it. */
 export async function runClutchpacksProductionPostHeadSuccessorFromSealedLauncher(
   raw: ClutchpacksProductionPostHeadSuccessorInput, context: SealedLauncherContext, signal?: AbortSignal) {
-  const input = successorInputSchema.parse(raw);
+  const input = successorInputSchema.parse(raw), environment = normalizeSealedEnvironment(process.env);
   if (context === null || typeof context !== "object" ||
     !same(Object.keys(context).sort(), ["acquiredAt", "incidentManifest", "launcher", "residencyServer"]) ||
-    process.execArgv.length !== 0 || !same(Object.keys(process.env).sort(), ["HOME", "NODE_ENV", "PATH", "TMPDIR"]) ||
-    !same(safeEnvironment(process.env), productionEnvironment) || !context.residencyServer?.listening ||
+    process.execArgv.length !== 0 || !same(environment, productionEnvironment) || !context.residencyServer?.listening ||
     !iso.safeParse(context.acquiredAt).success || !same(filePin.parse(context.incidentManifest), input.incidentManifest)) {
     refuse("POST_HEAD_SUCCESSOR_LAUNCHER_INVALID");
   }
@@ -2050,7 +2065,7 @@ export async function runClutchpacksProductionPostHeadSuccessorFromSealedLaunche
       refreshProof: () => inspectProductionResidency(context.residencyServer, context.acquiredAt),
       release: () => undefined }) };
   return successorCore(input, dependencies,
-    { production: true, importedModulePath: fileURLToPath(import.meta.url) });
+    { production: true, importedModulePath: fileURLToPath(import.meta.url), environment });
 }
 export const clutchpacksProductionPostHeadRecoveryTestHarness = process.env.NODE_ENV === "test" ? Object.freeze({
   execute: (raw: ClutchpacksProductionPostHeadSuccessorInput, dependencies: SuccessorDependencies = {}) =>
@@ -2066,6 +2081,7 @@ export const clutchpacksProductionPostHeadRecoveryTestHarness = process.env.NODE
     git: GitReader) => verifyTrustedTargetRuntimeClosure(identity, runtimePin, inventory, readInventory, git),
   rootInventory: (root: string, dependencies: SuccessorDependencies = {}) => rootInventory(root, dependencies),
   oldAttemptDirectoryName: incident.oldAttemptDirectoryName,
+  normalizeSealedEnvironment,
   ledgerSchemaSha256,
   projectReleaseStatus,
   launchctlServiceIsMissing,

@@ -61,6 +61,7 @@ const EXECUTOR_MODULES = Object.freeze({ recovery: "scripts/live/clutchpacks-pro
 const ENVIRONMENT = Object.freeze({ HOME: "/Users/lains", NODE_ENV: "production",
   PATH: "/Users/lains/.hermes/node/bin:/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR });
 const ENVIRONMENT_KEYS = Object.freeze(Object.keys(ENVIRONMENT).sort());
+const MACOS_INJECTED_ENVIRONMENT_KEY = "__CF_USER_TEXT_ENCODING";
 
 class PreparationRefusal extends Error {
   constructor() { super("CLUTCHPACKS_C533_SUCCESSOR_PREPARATION_REFUSED"); }
@@ -74,6 +75,18 @@ function canonical(value) {
   return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
 }
 function same(left, right) { return canonical(left) === canonical(right); }
+function normalizeSealedEnvironment(source, expected = ENVIRONMENT,
+  platform = process.platform, uid = process.getuid?.()) {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) refuse();
+  const environment = Object.fromEntries(Object.entries(source));
+  if (Object.hasOwn(environment, MACOS_INJECTED_ENVIRONMENT_KEY)) {
+    if (platform !== "darwin" || !Number.isSafeInteger(uid) || uid < 0 ||
+      environment[MACOS_INJECTED_ENVIRONMENT_KEY] !== `0x${uid.toString(16).toUpperCase()}:0x0:0x0`) refuse();
+    delete environment[MACOS_INJECTED_ENVIRONMENT_KEY];
+  }
+  if (!same(Object.keys(environment).sort(), ENVIRONMENT_KEYS) || !same(environment, expected)) refuse();
+  return Object.freeze(Object.fromEntries(ENVIRONMENT_KEYS.map(key => [key, environment[key]])));
+}
 const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
 const hashBytes = value => createHash("sha256").update(value).digest("hex");
 const jsonBytes = value => Buffer.from(`${canonical(value)}\n`);
@@ -176,10 +189,10 @@ function parseRuntime(runtime) {
   const expected = ["--executor-commit", null, "--launcher-sha256", null, "--preparer-sha256", null,
     "--created-at", null];
   const argv = runtime.argv;
+  const environment = normalizeSealedEnvironment(runtime.environment);
   if (!Array.isArray(argv) || !Array.isArray(runtime.execArgv) || runtime.execArgv.length !== 0 ||
     runtime.execPath !== NODE || runtime.cwd !== EXECUTOR || runtime.modulePath !== PREPARER ||
-    !same(runtime.environment, ENVIRONMENT) ||
-    !same(Object.keys(runtime.environment ?? {}).sort(), ENVIRONMENT_KEYS) ||
+    !same(environment, ENVIRONMENT) ||
     argv.length !== expected.length + 2 || argv[0] !== NODE || argv[1] !== PREPARER) refuse();
   for (let index = 0; index < expected.length; index += 1)
     if (expected[index] !== null && argv[index + 2] !== expected[index]) refuse();
@@ -326,7 +339,7 @@ async function main() {
 export const clutchpacksProductionPostHeadSuccessorPreparerTestHarness = process.env.NODE_ENV === "test" ?
   Object.freeze({ installLedger, installOrValidate, cleanupInstallTemps, parseRuntime, canonical, hashBytes,
     verifySelfPin, loadRuntimeInventoryReader, buildSealedDocuments, ensurePrivateDirectory: privateDirectory,
-    frozenAttemptDirectory,
+    frozenAttemptDirectory, normalizeSealedEnvironment,
     environment: ENVIRONMENT, ledgerSchemaSha256: LEDGER_SCHEMA_SHA256,
     settings: { node: NODE, executor: EXECUTOR, preparer: PREPARER } }) : undefined;
 

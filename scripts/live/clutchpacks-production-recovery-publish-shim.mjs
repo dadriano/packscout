@@ -14,6 +14,7 @@ const MAX_POLICY_BYTES = 1024 * 1024;
 const HASH = /^[a-f0-9]{64}$/u;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const SAFE_ENVIRONMENT_KEYS = ["HOME", "NODE_ENV", "PATH", "TMPDIR"];
+const MACOS_INJECTED_ENVIRONMENT_KEY = "__CF_USER_TEXT_ENCODING";
 
 function refuse() { throw new Error("CLUTCHPACKS_RECOVERY_PUBLISH_SHIM_REFUSED"); }
 function absolute(value) {
@@ -96,6 +97,18 @@ async function exists(file) {
   catch (error) { if (error?.code === "ENOENT") return false; throw error; }
 }
 function same(left, right) { return canonical(left) === canonical(right); }
+function normalizeSealedEnvironment(source, expected,
+  platform = process.platform, uid = process.getuid?.()) {
+  const environment = Object.fromEntries(Object.entries(object(source)));
+  if (Object.hasOwn(environment, MACOS_INJECTED_ENVIRONMENT_KEY)) {
+    if (platform !== "darwin" || !Number.isSafeInteger(uid) || uid < 0 ||
+      environment[MACOS_INJECTED_ENVIRONMENT_KEY] !== `0x${uid.toString(16).toUpperCase()}:0x0:0x0`) refuse();
+    delete environment[MACOS_INJECTED_ENVIRONMENT_KEY];
+  }
+  exactKeys(environment, SAFE_ENVIRONMENT_KEYS);
+  if (expected !== undefined && !same(environment, expected)) refuse();
+  return Object.freeze(Object.fromEntries(SAFE_ENVIRONMENT_KEYS.map(key => [key, environment[key]])));
+}
 function validateIncidentManifestDocument(value, rawPin, policy) {
   const manifest = object(value);
   exactKeys(manifest, ["schemaVersion", "createdAt", "incidentId", "ledgerPath", "recordsPath",
@@ -426,6 +439,7 @@ async function closeExecutionServer(server) {
 
 async function execute(runtime, dependencies = {}) {
   object(runtime); exactKeys(runtime, ["argv", "execArgv", "environment", "execPath", "modulePath", "pid"]);
+  const environment = normalizeSealedEnvironment(runtime.environment);
   const argv = runtime.argv;
   if (!Array.isArray(argv) || !Array.isArray(runtime.execArgv) || runtime.execArgv.length !== 0 || argv.length !== 12 ||
     argv[0] !== runtime.execPath || argv[1] !== runtime.modulePath || argv[2] !== "--publish" ||
@@ -461,10 +475,9 @@ async function execute(runtime, dependencies = {}) {
     if (!selectedRoot) refuse();
     const { policySha256, ...policyCore } = policy;
     if (typeof policySha256 !== "string" || !HASH.test(policySha256) || sha256(canonical(policyCore)) !== policySha256) refuse();
-    const environment = object(policy.environment);
-    exactKeys(environment, SAFE_ENVIRONMENT_KEYS);
-    if (Object.keys(runtime.environment).sort().join("\n") !== SAFE_ENVIRONMENT_KEYS.join("\n") ||
-      !same(runtime.environment, environment) || environment.NODE_ENV !== "production") refuse();
+    const policyEnvironment = object(policy.environment);
+    exactKeys(policyEnvironment, SAFE_ENVIRONMENT_KEYS);
+    if (!same(environment, policyEnvironment) || policyEnvironment.NODE_ENV !== "production") refuse();
     const incidentManifestPin = await verifyPrivatePin(policy.incidentManifest,
       path.join(policy.ledgerPath, "incident-manifest.json"), MAX_POLICY_BYTES);
     const incidentManifestBytes = await readRegular(incidentManifestPin.path, MAX_POLICY_BYTES, 1, true);
@@ -527,9 +540,9 @@ async function execute(runtime, dependencies = {}) {
       path.join(sourceReader.worktree, "node_modules"), sourceReader.worktree);
     if (!same(sourceRuntimeInventory, sourceReader.runtimeInventory)) refuse();
     const [publisherCheckout, executorCheckout, sourceCheckout] = await Promise.all([
-      (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, runtime.environment),
-      (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, runtime.environment),
-      (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, runtime.environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, environment),
     ]);
     const bundle = { path: bundlePath, sha256: sha256(await readRegular(bundlePath, 256 * 1024 * 1024, 1, true)) };
     const lockCore = { schemaVersion: "clutchpacks_production_post_head_recovery_child_lock_v1",
@@ -598,9 +611,9 @@ async function execute(runtime, dependencies = {}) {
       !same(finalSourceInventory, sourceRuntimeInventory)) refuse();
     await dependencies.afterPrePublicationInventory?.();
     await Promise.all([
-      (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, runtime.environment),
-      (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, runtime.environment),
-      (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, runtime.environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, environment),
+      (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, environment),
     ]);
     await verifyPrivatePin({ path: bundlePath, sha256: bundle.sha256 }, bundlePath, 256 * 1024 * 1024);
     await verifyPrivatePin({ path: policyPath, sha256: expectedPolicySha256 }, policyPath, MAX_POLICY_BYTES);
@@ -661,16 +674,16 @@ async function execute(runtime, dependencies = {}) {
     (dependencies.registerLoader ?? register)(pathToFileURL(finalLoader.path), import.meta.url);
     const loadedCli = await (dependencies.loadCli ?? (file => import(pathToFileURL(file).href)))(finalCli.path);
     if (typeof loadedCli.runClutchpacksProductionCli !== "function") refuse();
-    const result = await loadedCli.runClutchpacksProductionCli(["--publish", bundlePath], runtime.environment);
+    const result = await loadedCli.runClutchpacksProductionCli(["--publish", bundlePath], environment);
     if (!same(await loadedInventory.readClutchpacksProductionRuntimeInventory(
       path.join(publisher.worktree, "node_modules"), publisher.worktree), runtimeInventory)) refuse();
     if (!same(await loadedInventory.readClutchpacksProductionRuntimeInventory(
       path.join(executor.worktree, "node_modules"), executor.worktree), executorRuntimeInventory)) refuse();
     if (!same(await loadedInventory.readClutchpacksProductionRuntimeInventory(
       path.join(sourceReader.worktree, "node_modules"), sourceReader.worktree), sourceRuntimeInventory)) refuse();
-    await (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, runtime.environment);
-    await (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, runtime.environment);
-    await (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, runtime.environment);
+    await (dependencies.verifyCheckout ?? verifyCheckout)(publisher, publisherModules, environment);
+    await (dependencies.verifyCheckout ?? verifyCheckout)(executor, executorModules, environment);
+    await (dependencies.verifyCheckout ?? verifyCheckout)(sourceReader, { script: sourceReader.script }, environment);
     await verifyPin(policy.executable, runtime.execPath, 256 * 1024 * 1024);
     await verifyPin(policy.loader, loader.path, 8 * 1024 * 1024);
     await verifyPin(executorModules.publishShim, shim.path, 1024 * 1024);
@@ -683,6 +696,7 @@ async function execute(runtime, dependencies = {}) {
 
 export const clutchpacksProductionRecoveryPublishShimTestHarness = process.env.NODE_ENV === "test" ? Object.freeze({
   execute, canonical, sha256, validateIncidentManifestDocument, validateLedgerManifestDomain,
+  normalizeSealedEnvironment,
 }) : undefined;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) execute({ argv: process.argv, execArgv: process.execArgv,

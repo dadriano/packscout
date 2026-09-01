@@ -52,6 +52,7 @@ const ENVIRONMENT = Object.freeze({ HOME: "/Users/lains", NODE_ENV: "production"
   PATH: "/Users/lains/.hermes/node/bin:/usr/bin:/bin:/usr/sbin:/sbin",
   TMPDIR: "/Users/lains/Library/Application Support/PackScout/provider-import-maintenance/clutch-production-successor-tmp-c533e197-v1" });
 const ENVIRONMENT_KEYS = Object.freeze(Object.keys(ENVIRONMENT).sort());
+const MACOS_INJECTED_ENVIRONMENT_KEY = "__CF_USER_TEXT_ENCODING";
 const PUBLISHER_MODULES = Object.freeze({
   promoteCli: "scripts/live/promote-clutchpacks-production.mts",
   convexRuntime: "scripts/live/clutchpacks-production-convex-runtime.mts",
@@ -101,6 +102,18 @@ function canonical(value) {
 }
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 function same(left, right) { return canonical(left) === canonical(right); }
+function normalizeSealedEnvironment(source, expected = ENVIRONMENT,
+  platform = process.platform, uid = process.getuid?.()) {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) refuse();
+  const environment = Object.fromEntries(Object.entries(source));
+  if (Object.hasOwn(environment, MACOS_INJECTED_ENVIRONMENT_KEY)) {
+    if (platform !== "darwin" || !Number.isSafeInteger(uid) || uid < 0 ||
+      environment[MACOS_INJECTED_ENVIRONMENT_KEY] !== `0x${uid.toString(16).toUpperCase()}:0x0:0x0`) refuse();
+    delete environment[MACOS_INJECTED_ENVIRONMENT_KEY];
+  }
+  if (!same(Object.keys(environment).sort(), ENVIRONMENT_KEYS) || !same(environment, expected)) refuse();
+  return Object.freeze(Object.fromEntries(ENVIRONMENT_KEYS.map(key => [key, environment[key]])));
+}
 function iso(value) { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function inside(parent, child) { return child === parent || child.startsWith(`${parent}${path.sep}`); }
 function metadataSame(left, right) {
@@ -474,8 +487,8 @@ const PRODUCTION_SETTINGS = Object.freeze({ executorWorktree: EXECUTOR_WORKTREE,
 async function execute(runtime, dependencies = {}, settings = PRODUCTION_SETTINGS) {
   try {
     const args = parseArguments(runtime, settings);
-    if (!same(runtime.environment, settings.environment) ||
-      !same(Object.keys(runtime.environment).sort(), Object.keys(settings.environment).sort()) ||
+    const environment = normalizeSealedEnvironment(runtime.environment, settings.environment);
+    if (!same(environment, settings.environment) ||
       runtime.execPath !== settings.node || runtime.cwd !== settings.executorWorktree ||
       runtime.launcherModulePath !== settings.launcher || await realpath(settings.launcher) !== settings.launcher) refuse();
     const ownBytes = await readRegular(settings.launcher, { maximum: 1024 * 1024 });
@@ -520,6 +533,7 @@ export const clutchpacksProductionPostHeadSuccessorLauncherTestHarness = process
   verifyRuntimeInventoryTriplet,
   proveRuntimeClosure,
   verifyLedgerLayout,
+  normalizeSealedEnvironment,
   publisherModules: PUBLISHER_MODULES,
   executorModules: EXECUTOR_MODULES,
   productionSettings: PRODUCTION_SETTINGS,

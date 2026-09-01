@@ -135,7 +135,11 @@ async function productionFixture(t, options = {}) {
       if (runtimeChanged && root === publisherInventory.root) value.treeSha256 = "f".repeat(64);
       return value;
     } }),
-    verifyCheckout: async identity => { events.push(`checkout:${path.basename(identity.worktree)}`); return checkout(identity); },
+    verifyCheckout: async (identity, _modules, receivedEnvironment) => {
+      assert.deepEqual(receivedEnvironment, environment);
+      assert.deepEqual(Object.keys(receivedEnvironment).sort(), ["HOME", "NODE_ENV", "PATH", "TMPDIR"]);
+      events.push(`checkout:${path.basename(identity.worktree)}`); return checkout(identity);
+    },
     registerLoader: () => events.push("register"),
     loadCli: async () => ({ runClutchpacksProductionCli: async (args, env) => {
       events.push("publish"); assert.deepEqual(args, ["--publish", bundlePath]); assert.deepEqual(env, environment);
@@ -210,6 +214,16 @@ test("sealed shim accepts one production-shaped offline dispatch only after lock
   assert.ok(fixture.events.indexOf("register") < fixture.events.indexOf("publish"));
   assert.equal(fixture.events.at(-1), 'stdout:{"fixture":true,"status":"verified"}');
 });
+
+test("sealed shim strips the exact macOS injection before every checkout and the child CLI",
+  { skip: process.platform !== "darwin" }, async t => {
+    const fixture = await productionFixture(t), uid = process.getuid();
+    fixture.runtime.environment = { ...fixture.runtime.environment,
+      __CF_USER_TEXT_ENCODING: `0x${uid.toString(16).toUpperCase()}:0x0:0x0` };
+    await harness.execute(fixture.runtime, fixture.dependencies);
+    assert.equal(fixture.events.filter(event => event.startsWith("checkout:")).length, 9);
+    assert.equal(fixture.events.includes("publish"), true);
+  });
 
 test("sealed shim refuses argv, environment, ledger sequence, and mutation during the handshake window", async t => {
   await t.test("argv", async child => {
