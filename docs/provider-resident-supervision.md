@@ -2,7 +2,13 @@
 
 The integration operator owns this explicit local utility. It runs one reviewed
 provider backfill to its committed source head, then uses the existing continuous
-poller at the greater of central cadence and the source's 60-second minimum.
+poller at the greater of central cadence and the source's 60-second minimum by
+default. An explicit `--poll-interval-seconds` selects an audited operational
+interval from 60 through 86,400 seconds without revising source configuration or
+clearing the checkpoint.
+Custom cadence and post-head callbacks apply only to head-only activation;
+combining either with `--bootstrap-backfill` is refused before any database or
+source work because bootstrap's operation receipts do not bind that policy.
 The existing head-only command remains the default. This is an explicit new
 bootstrap capability, not a migration or compatibility alias.
 
@@ -11,7 +17,9 @@ bootstrap capability, not a migration or compatibility alias.
 Use the coherent reviewed checkout and preserve all seven original pins across
 process restarts. Configuration, credentials and exact isolated database routes
 remain central authority; no source-token or provider-DSN override is added.
-No migration, cursor reset, automatic repair of unknown errors or EV publication occurs.
+No migration, cursor reset or automatic repair of unknown errors occurs.
+The default runner has no EV publication step. A reviewed integration wrapper
+can register the bounded, awaited post-head callback described below.
 The existing checkpoint retry policy additionally admits only
 `PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED`, a trusted query-expiry diagnosis
 issued after the failed transaction callback settles. Generic `P2028`, uncertain
@@ -29,7 +37,7 @@ node --import tsx scripts/local/run-provider-continuous-poller.mts \
 Check-only resolves durable state and validates the disposition without claiming
 the health port, launching a worker, queueing a run, calling the source or writing
 any database row. For execution, replace `--check-only` with `--run` using the
-same pins. The original run must already be eligible for the existing backfill
+same pins and cadence. The original run must already be eligible for the existing backfill
 supervisor; a permanent database/execution failure requires separate reviewed
 repair and scoped recovery. There is no automatic resume of paused/stopped work.
 
@@ -51,6 +59,27 @@ After a crash, the receipt selects the same initial continuous pins even when
 later poll cycles exist. A missing receipt repeats head verification; an existing
 receipt never creates a second continuous operation. The established continuous
 cycle receipts and command/lease fencing then own all later work.
+
+Before continuous work, the resident binds its cadence and post-head policy in
+an immutable version-2 operation receipt. Every new cycle repeats these fields.
+A restart must supply exactly the same policy, including callback fingerprint
+and timeout if present; a source-only restart cannot silently remove a registered
+publication step. Legacy version-1 cycle evidence remains available solely to
+the explicit historical failed-head recovery verifier; it is never reinterpreted
+as a version-2 execution receipt.
+
+The optional callback runs only for a verified idle head after import lease
+release, and finishes before another cycle is persisted or queued. Its frozen
+summary binds the head run, checkpoint, generation, runtime row version and
+authority digest without exposing source cursors or credentials. It must own
+durable idempotency across restarts. Timeout/cancellation aborts and drains the
+callback, and any failure blocks future imports. Authority/state are reread after
+success. The generic poller does not implement publication or choose a publisher.
+
+Cadence is measured from the previous head's finish time. A 60-second interval
+permits the next cycle only after that time and any awaited callback have passed;
+it does not overlap long imports or promise wall-clock completion every minute.
+Health and check-only include the selected policy and effective interval.
 
 If a child survives its parent, a live import lease may be observed. Only an exact
 execution-claim receipt with matching operation, operator, owner, fence, authority
@@ -101,6 +130,33 @@ permanent/unknown startup error needs maintenance diagnosis and explicit restart
 missing health must not be reported as a healthy feed. Local launch agents also
 depend on the Mac being awake and the user session existing.
 
+The pure launchd plan accepts the same explicit cadence and includes its CLI
+argument in stable argv. A composed publication wrapper needs a separately
+reviewed entry point and fixed callback settings; switching from that wrapper to
+the default source-only runner under the same operation is rejected by its
+durable policy binding.
+
+`scripts/live/run-clutchpacks-production-poller.mts` is the explicit ClutchPacks
+production wrapper. Its native argv must select head-only operation with a
+60-second interval and exactly match its private policy pins. The environment
+variables `PACKSCOUT_CLUTCHPACKS_POLLER_POLICY_PATH` and
+`PACKSCOUT_CLUTCHPACKS_POLLER_POLICY_SHA256` identify a private mode-0600 policy
+file. That file binds the resident and publisher checkouts/commits, resident
+environment hash, publisher module hash, base source configuration path/hash,
+artifact directory, resident authority digest and callback timeout. Ambient
+source-routing and credential overrides are refused.
+
+The wrapper verifies these settings at startup, before each new cycle admission
+or source execution, and before publication. A changed ignored `.env` therefore
+cannot quietly reroute the next nested backfill. The publisher module is imported
+only inside the awaited callback. Check-only supplies the same registered policy
+without importing or calling the publisher; use this wrapper's check-only after
+activation because the default source-only CLI correctly refuses its different
+policy. Keep the publisher's retained pending/verified artifacts intact and
+reconcile an uncertain publication before another import. The writer census
+recognizes both the wrapper and its publisher subprocess, without granting a
+publisher the peer permissions of an import worker.
+
 ## Acceptance map
 
 | Behavior | Coverage |
@@ -114,6 +170,8 @@ depend on the Mac being awake and the user session existing.
 | Known startup connection retries only, safe getter/proxy-resistant error codes | `provider-resident-errors.test.mjs` |
 | Gateway timeout/rejection drains pending operation; deadline prevents later write stages | `provider-resident-operation.test.mjs` |
 | One port owner and existing queue/crash-gap fencing | Existing `provider-continuous-policy.test.mjs`, `provider-continuous-persistence.test.mjs` |
+| Explicit cadence and callback policy survive restart without changing source identity or permitting policy drift | `provider-continuous-policy.test.mjs`, `provider-continuous-persistence.test.mjs`, `provider-launchd-plan.test.mjs` |
+| Awaited post-head callback receives exact safe head fields; timeout/abort drains before refusing further source work | `provider-continuous-post-head.test.mjs`, `provider-continuous-policy.test.mjs` |
 | Live host job installation/restart and provider checkpoint advancement | Manual gap: integration operator verifies exact installed job/PID/health and durable counters; synthetic tests do not claim live success |
 
 Run focused resident/launchd/continuous/backfill tests and strict TypeScript checks,

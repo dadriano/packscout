@@ -211,14 +211,14 @@ test("CLI is import-side-effect-free and requires one exact installed provider s
     PACKSCOUT_CENTRAL_DATABASE_URL: "postgresql://test:test@127.0.0.1:55431/packscout",
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: Buffer.alloc(32, 1).toString("base64"),
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION: "1", PACKSCOUT_PROVIDER_DATABASE_URL: "must-not-be-used",
-    DATAFORREST_BEARER_TOKEN: "must-not-be-forwarded" });
+    DATAFORREST_BEARER_TOKEN: "must-not-be-forwarded" }, {});
   assert.equal(env.workerEnvironment.PACKSCOUT_PROVIDER_DATABASE_URL, undefined);
   assert.equal(env.workerEnvironment.DATAFORREST_BEARER_TOKEN, undefined);
   for (const url of ["postgresql://test:test@127.0.0.1:5432/packscout", "postgresql://test:test@127.0.0.1/packscout",
     "postgresql://test:test@127.0.0.1:55431/packscout_other"]) {
     await assert.rejects(readBackfillEnvironment({ NODE_ENV: "development",
-      PACKSCOUT_CENTRAL_DATABASE_URL: url }), /LOCAL_CENTRAL_REQUIRED/);
+      PACKSCOUT_CENTRAL_DATABASE_URL: url }, {}), /LOCAL_CENTRAL_REQUIRED/);
   }
-  await assert.rejects(readBackfillEnvironment({ NODE_ENV: "production" }), /LOCAL_SINGLE_PROVIDER_REQUIRED/);
-  await assert.rejects(readBackfillEnvironment({ NODE_ENV: "development", PACKSCOUT_PROVIDER_LANES_JSON: "" }), /LOCAL_SINGLE_PROVIDER_REQUIRED/);
+  await assert.rejects(readBackfillEnvironment({ NODE_ENV: "production" }, {}), /LOCAL_SINGLE_PROVIDER_REQUIRED/);
+  await assert.rejects(readBackfillEnvironment({ NODE_ENV: "development", PACKSCOUT_PROVIDER_LANES_JSON: "" }, {}), /LOCAL_SINGLE_PROVIDER_REQUIRED/);
 });

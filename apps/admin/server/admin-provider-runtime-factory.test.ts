@@ -69,6 +69,28 @@ test("admin provider destination policy requires secure explicit production host
   );
 });
 
+test("admin remote development uses only explicit provider hosts with verified TLS", () => {
+  const environment = {
+    NODE_ENV: "development",
+    PACKSCOUT_DATABASE_MODE: "remote",
+    PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS: "provider.example.test,second.example.test",
+  };
+  const policy = readAdminProviderDestinationPolicy(environment);
+  for (const host of ["provider.example.test", "second.example.test"]) {
+    assert.doesNotThrow(() => policy.assertAllowed({ host, port: 5_432, sslMode: "verify-full" }));
+  }
+  for (const target of [
+    { host: "127.0.0.1", port: 55_432, sslMode: "disable" },
+    { host: "unlisted.example.test", port: 5_432, sslMode: "verify-full" },
+    { host: "child.provider.example.test", port: 5_432, sslMode: "verify-full" },
+    { host: "provider.example.test", port: 55_432, sslMode: "verify-full" },
+    { host: "provider.example.test", port: 5_432, sslMode: "require" },
+  ]) {
+    assert.throws(() => policy.assertAllowed(target), ProviderDatabaseDestinationPolicyError);
+  }
+  assert.equal(environment.NODE_ENV, "development");
+});
+
 test("distributed source overview accepts one bounded ClutchPacks lane with real local evidence", async () => {
   const diagnosticRunId = "10000000-0000-4000-8000-000000000004";
   const central = {

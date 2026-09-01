@@ -4,7 +4,7 @@ import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 import { pins } from "./provider-resident-test-fixture.mjs";
 const { createProviderLaunchdPlan } = await tsImport("./provider-launchd-plan.mts", import.meta.url);
-const { parseContinuousArguments, runContinuousCli } = await tsImport("./run-provider-continuous-poller.mts", import.meta.url);
+const { parseContinuousArguments, runContinuousCli, runContinuousPoller } = await tsImport("./run-provider-continuous-poller.mts", import.meta.url);
 const input = { pins, checkoutRoot: "/synthetic/reviewed & coherent tree", nodeExecutable: "/synthetic/node/bin/node",
   logPath: "/synthetic/private/provider.log", bootstrapBackfill: true, platform: "darwin" };
 test("launchd plan preserves exact pins, checkout and selective crash restart without secrets", () => {
@@ -12,12 +12,47 @@ test("launchd plan preserves exact pins, checkout and selective crash restart wi
   assert.equal(plan.label, "com.packscout.provider-import.clutchpacks");
   assert.equal(plan.workingDirectory, input.checkoutRoot);
   assert.equal(plan.restartPolicy, "unexpected_exit_only");
-  assert.deepEqual(parseContinuousArguments(plan.arguments.slice(4)), { mode: "--run", pins, bootstrapBackfill: true, launchd: true });
+  assert.deepEqual(parseContinuousArguments(plan.arguments.slice(4)), { mode: "--run", pins, bootstrapBackfill: true, launchd: true,
+    cadence: { kind: "central" } });
   assert.match(plan.plist, /<key>KeepAlive<\/key><dict><key>SuccessfulExit<\/key><false\/><\/dict>/);
   assert.match(plan.plist, /reviewed &amp; coherent tree/);
   assert.equal(/DATABASE_URL|CREDENTIAL|TOKEN|PASSWORD|SECRET/u.test(plan.plist), false);
   const headOnly = createProviderLaunchdPlan({ ...input, bootstrapBackfill: false });
   assert.equal(parseContinuousArguments(headOnly.arguments.slice(4)).bootstrapBackfill, false);
+});
+test("explicit minute cadence survives launchd planning with unchanged source and checkpoint pins", () => {
+  const cadence = { kind: "operator_interval", intervalSeconds: 60 };
+  const plan = createProviderLaunchdPlan({ ...input, bootstrapBackfill: false, cadence });
+  const parsed = parseContinuousArguments(plan.arguments.slice(4));
+  assert.deepEqual(parsed.cadence, cadence);
+  assert.deepEqual(parsed.pins, pins);
+  assert.equal(parsed.bootstrapBackfill, false);
+  assert.deepEqual(plan.cadence, cadence);
+  assert.match(plan.plist, /<string>--poll-interval-seconds<\/string><string>60<\/string>/);
+  const check = plan.arguments.slice(4).filter(value => value !== "--launchd").map(value => value === "--run" ? "--check-only" : value);
+  assert.deepEqual(parseContinuousArguments(check).cadence, cadence);
+});
+test("cadence CLI rejects missing, repeated, malformed and out-of-range intervals", () => {
+  const args = createProviderLaunchdPlan(input).arguments.slice(4);
+  for (const value of ["", "0", "59", "86401", "1.5", "NaN", "Infinity", "060", "-60", "9007199254740993"]) {
+    assert.throws(() => parseContinuousArguments([...args, "--poll-interval-seconds", value]));
+  }
+  assert.throws(() => parseContinuousArguments([...args, "--poll-interval-seconds"]));
+  assert.throws(() => parseContinuousArguments([...args, "--poll-interval-seconds", "60", "--poll-interval-seconds", "120"]));
+  for (const intervalSeconds of [0, 59, 86401, NaN]) {
+    assert.throws(() => createProviderLaunchdPlan({ ...input, cadence: { kind: "operator_interval", intervalSeconds } }));
+  }
+});
+test("bootstrap refuses custom policy before environment reads or source work", async () => {
+  const cadence = { kind: "operator_interval", intervalSeconds: 60 };
+  assert.throws(() => createProviderLaunchdPlan({ ...input, cadence }), /CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED/);
+  const argv = createProviderLaunchdPlan(input).arguments.slice(4);
+  assert.throws(() => parseContinuousArguments([...argv, "--poll-interval-seconds", "60"]), /CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED/);
+  const args = parseContinuousArguments(argv);
+  await assert.rejects(runContinuousPoller(args, new AbortController().signal, { postHead: {
+    policyFingerprint: "a".repeat(64), timeoutMilliseconds: 1000, run: async () => assert.fail("callback must not run"),
+  } }), /CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED/);
+  await assert.rejects(runContinuousPoller({ ...args, cadence }, new AbortController().signal), /CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED/);
 });
 test("launchd rejects invalid host/path/pins and CLI rejects duplicated or invalid activation flags", () => {
   for (const changed of [{ platform: "linux" }, { checkoutRoot: "relative" }, { nodeExecutable: "node" },

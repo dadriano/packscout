@@ -17,6 +17,7 @@ import {
   providerSourceLaunchBounds,
   type DataforrestEventRecordV1,
   type DataforrestEventsPageV1,
+  type ProviderPageRecordCounts,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_MAX_BYTES,
@@ -435,6 +436,7 @@ function sourceFixture(input: Readonly<{
     sourceRecordCount: number;
     normalizedRecordCount: number;
   }>> = [];
+  const recordKindMeasurements: ProviderPageRecordCounts[] = [];
   const pages = [...input.pages];
   const baseIntegration = input.integration
     ?? createProviderDataforrestLiveIntegration(
@@ -491,6 +493,7 @@ function sourceFixture(input: Readonly<{
     },
     translationRecorder: {
       recordPageTranslation(input) {
+        recordKindMeasurements.push(input.recordCounts);
         translations.push({
           sourceRecordCount: input.sourceRecordCount,
           normalizedRecordCount: input.normalizedRecordCount,
@@ -508,6 +511,7 @@ function sourceFixture(input: Readonly<{
     authorizationHeaders,
     terminalizations,
     translations,
+    recordKindMeasurements,
   };
 }
 
@@ -576,6 +580,8 @@ test("Collector requests and accepts exactly 1,000 records with an exact version
   assert.equal(cursor.adapterVersion, manifest.adapterVersion);
   assert.equal(cursor.cursorCodecKey, manifest.cursorCodecKey);
   assert.deepEqual(fixture.translations, [{ sourceRecordCount: 1_000, normalizedRecordCount: 1_000 }]);
+  assert.deepEqual(fixture.recordKindMeasurements, [{ catalogRecordCount: 0, collectibleRecordCount: 0,
+    packContentSnapshotCount: 0, pullRecordCount: 1_000, marketEventRecordCount: 0, rejectedRecordCount: 0 }]);
   const historicalCursor = { ...cursor, adapterVersion: dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion };
   await assert.rejects(fixture.source.nextPage(sourceInput({
     authority: fixture.captureAuthority,

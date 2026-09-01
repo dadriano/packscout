@@ -2,6 +2,7 @@ import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js"
 import {
   providerSourceResponseLimitDiagnosticSchema,
   type ProviderSourceResponseLimitDiagnostic,
+  validateProviderPageRecordCounts, type ProviderPageRecordCounts,
 } from "@packscout/contracts";
 import type {
   ProviderPrismaClient,
@@ -181,6 +182,7 @@ export class PrismaProviderSourceRequestAuditRepository {
     pageNumber: number;
     sourceRecordCount: number;
     normalizedRecordCount: number;
+    recordCounts: ProviderPageRecordCounts;
   }>): Promise<ProviderSourceRequestAuditResult> {
     requireUuid(input.runId, "runId");
     requireUuid(input.requestAttemptId, "requestAttemptId");
@@ -193,6 +195,7 @@ export class PrismaProviderSourceRequestAuditRepository {
     }
     requireMeasurement(input.sourceRecordCount, "sourceRecordCount");
     requireMeasurement(input.normalizedRecordCount, "normalizedRecordCount");
+    const recordCounts = validateProviderPageRecordCounts(input.recordCounts, input.normalizedRecordCount);
 
     return this.#recordWithLiveImportAuthority(
       input,
@@ -206,6 +209,7 @@ export class PrismaProviderSourceRequestAuditRepository {
           details: {
             leaseFence: input.workerFence.toString(),
             normalizedRecordCount: input.normalizedRecordCount,
+            ...recordCounts,
             pageNumber: input.pageNumber,
             runId: input.runId,
             sourceRecordCount: input.sourceRecordCount,

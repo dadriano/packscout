@@ -6,7 +6,6 @@ import dotenv from "dotenv";
 import {
   BoundedProviderDatabaseGateway,
   PrismaProviderSourceRequestAuditRepository,
-  ProviderDatabaseDestinationPolicy,
   createCentralDatabaseLifecycle,
   locateProviderDatabase,
 } from "@packscout/database";
@@ -29,6 +28,10 @@ import { createProviderDataforrestRequestTerminalizer } from
   "./provider-dataforrest-request-terminalizer.ts";
 import { createProviderManualImportExecutor } from
   "./provider-manual-import-executor.ts";
+import { providerManualImportExecutionBudget } from
+  "./provider-manual-import-execution-budget.ts";
+import { ProviderManualImportOperationDrain } from
+  "./provider-manual-import-operation-drain.ts";
 import {
   readProviderManualImportLaneSupervisorConfiguration,
   runProviderManualImportLanesOnce,
@@ -40,6 +43,8 @@ import {
   readProviderManualImportLocalConfiguration,
   runProviderManualImportOnce,
 } from "./provider-manual-import-local-runtime.ts";
+import { readProviderManualImportDatabaseConfiguration } from
+  "./provider-manual-import-database-configuration.ts";
 import {
   providerManualImportProcessExitCode,
   type ProviderManualImportProcessResult,
@@ -64,25 +69,6 @@ function required(value: string | undefined): string {
     );
   }
   return normalized;
-}
-
-function centralDatabaseUrl(environment: NodeJS.ProcessEnv): string {
-  try {
-    const parsed = new URL(required(environment.PACKSCOUT_CENTRAL_DATABASE_URL));
-    if (
-      (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:")
-      || parsed.hostname.length === 0
-      || parsed.pathname.length < 2
-    ) {
-      throw new TypeError("invalid central URL");
-    }
-    return parsed.toString();
-  } catch (error) {
-    if (error instanceof ProviderManualImportLocalError) throw error;
-    throw new ProviderManualImportLocalError(
-      "PROVIDER_IMPORT_CONFIGURATION_INVALID",
-    );
-  }
 }
 
 function credentialKey(environment: NodeJS.ProcessEnv): Readonly<{
@@ -111,6 +97,7 @@ function credentialKey(environment: NodeJS.ProcessEnv): Readonly<{
 }
 
 async function run(): Promise<ProviderManualImportProcessResult> {
+  const databaseConfiguration = readProviderManualImportDatabaseConfiguration(process.env);
   const laneSupervisor =
     process.env.PACKSCOUT_PROVIDER_LANES_JSON === undefined
       ? null
@@ -132,21 +119,19 @@ async function run(): Promise<ProviderManualImportProcessResult> {
     keys: new Map([[key.version, key.key]]),
   });
   const central = createCentralDatabaseLifecycle({
-    databaseUrl: centralDatabaseUrl(process.env),
+    databaseUrl: databaseConfiguration.centralDatabaseUrl,
     connectionLimit: maximumConcurrentLanes,
   });
   const gateway = new BoundedProviderDatabaseGateway({
     central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
-    destinationPolicy: new ProviderDatabaseDestinationPolicy({
-      allowedHosts: ["127.0.0.1"],
-      allowedPorts: [55_432, 55_433, 55_434, 55_435],
-      allowedSslModes: ["disable"],
-    }),
+    destinationPolicy: databaseConfiguration.runtimePolicy.destinationPolicy,
     connectionLimitPerProvider: 2,
     maximumCachedProviders: maximumConcurrentLanes,
-    operationTimeoutMs: 60_000,
+    operationProfile: databaseConfiguration.runtimePolicy.mode === "remote" ? "atomic_import_page" : "standard",
+    operationTimeoutMs: providerManualImportExecutionBudget(databaseConfiguration.runtimePolicy.mode).gatewayMilliseconds,
   });
+  const operations = new ProviderManualImportOperationDrain();
   try {
     await central.start();
     const centralAuthorityResolver = new CentralDataforrestSourceAuthorityResolver({
@@ -233,8 +218,9 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               integration,
             });
           },
-          runWithCachedProviderDatabase:
-            gateway.runWithCachedProviderDatabase.bind(gateway),
+          runWithCachedProviderDatabase: (route, operation) =>
+            gateway.runWithCachedProviderDatabase(route, database =>
+              operations.run(() => operation(database))),
           createExecutor(input) {
             const audit = new PrismaProviderSourceRequestAuditRepository(
               input.database,
@@ -255,6 +241,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               actorHmacKey: null,
               workerId: input.workerId,
               liveSource: source,
+              executionMode: databaseConfiguration.runtimePolicy.mode,
             });
           },
           async relayProviderActivity() {
@@ -300,6 +287,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
       runLane,
     });
   } finally {
+    await operations.drain();
     await gateway.close();
     await central.close();
   }

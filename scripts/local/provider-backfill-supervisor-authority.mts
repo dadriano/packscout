@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { locateProviderDatabase, type CentralQueryClient } from "@packscout/database";
+import { locateProviderDatabase, readDatabaseRuntimePolicy, type CentralQueryClient } from "@packscout/database";
 import { AesGcmProviderCredentialCipher } from "@packscout/services";
 import { CentralDataforrestSourceAuthorityResolver } from "../../apps/worker/src/dataforrest-source-authority-resolver.ts";
 import { providerDataforrestLiveIntegrationRegistry } from "../../apps/worker/src/provider-dataforrest-live-integration.ts";
@@ -17,21 +17,32 @@ export function assertLocalBackfillDestination(providerKey: BackfillPins["provid
     refuseBackfill("BACKFILL_LOCAL_PROVIDER_ROUTE_REQUIRED");
   }
 }
-export async function readBackfillEnvironment(environment: NodeJS.ProcessEnv = process.env) {
-  let file: Record<string, string> = {};
-  try { file = dotenv.parse(await readFile(new URL("../../.env", import.meta.url))); }
-  catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+export function assertBackfillDestination(providerKey: BackfillPins["providerKey"], route: {
+  node: { host: string; port: number; sslMode: string }; target: { databaseName: string };
+}, runtimePolicy: ReturnType<typeof readDatabaseRuntimePolicy>) {
+  if (runtimePolicy.mode === "local") return assertLocalBackfillDestination(providerKey, route);
+  if (route.target.databaseName !== `packscout_${providerKey}`) refuseBackfill("BACKFILL_REMOTE_PROVIDER_ROUTE_REQUIRED");
+  try { runtimePolicy.destinationPolicy.assertAllowed(route.node); }
+  catch { refuseBackfill("BACKFILL_REMOTE_PROVIDER_ROUTE_REQUIRED"); }
+}
+export async function readBackfillEnvironment(environment: NodeJS.ProcessEnv = process.env,
+  fileEnvironment?: Readonly<Record<string, string>>) {
+  let file: Readonly<Record<string, string>> = fileEnvironment ?? {};
+  if (fileEnvironment === undefined) {
+    try { file = dotenv.parse(await readFile(new URL("../../.env", import.meta.url))); }
+    catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+  }
   const merged = { ...file, ...environment };
   if (merged.NODE_ENV === "production" || file.PACKSCOUT_PROVIDER_LANES_JSON !== undefined ||
     environment.PACKSCOUT_PROVIDER_LANES_JSON !== undefined) refuseBackfill("BACKFILL_LOCAL_SINGLE_PROVIDER_REQUIRED");
   let url: URL;
   try { url = new URL(merged.PACKSCOUT_CENTRAL_DATABASE_URL ?? ""); }
   catch { return refuseBackfill("BACKFILL_CENTRAL_CONFIGURATION_INVALID"); }
-  if (!["postgres:", "postgresql:"].includes(url.protocol) || url.hostname !== "127.0.0.1" ||
-    url.port !== "55431" || url.pathname !== "/packscout" ||
-    (url.searchParams.has("sslmode") && url.searchParams.get("sslmode") !== "disable")) {
-    refuseBackfill("BACKFILL_LOCAL_CENTRAL_REQUIRED");
-  }
+  let runtimePolicy: ReturnType<typeof readDatabaseRuntimePolicy>;
+  try { runtimePolicy = readDatabaseRuntimePolicy(merged); }
+  catch { return refuseBackfill("BACKFILL_DATABASE_CONFIGURATION_INVALID"); }
+  try { runtimePolicy.assertCentralDatabaseUrl(url.toString()); }
+  catch { refuseBackfill(runtimePolicy.mode === "local" ? "BACKFILL_LOCAL_CENTRAL_REQUIRED" : "BACKFILL_REMOTE_CENTRAL_REQUIRED"); }
   const encoded = merged.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64 ?? "";
   const key = Buffer.from(encoded, "base64");
   const version = Number(merged.PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION ?? "1");
@@ -39,13 +50,28 @@ export async function readBackfillEnvironment(environment: NodeJS.ProcessEnv = p
     !Number.isSafeInteger(version) || version < 1) refuseBackfill("BACKFILL_CREDENTIAL_KEY_INVALID");
   // No provider DSN/source credential environment is read or forwarded.
   const workerEnvironment = { PATH: environment.PATH, NODE_ENV: "development",
+    PACKSCOUT_DATABASE_MODE: runtimePolicy.mode,
+    PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS: merged.PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS,
+    PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS: merged.PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS,
     PACKSCOUT_CENTRAL_DATABASE_URL: url.toString(),
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: encoded,
     PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION: String(version) };
-  return { centralDatabaseUrl: url.toString(), key, version, workerEnvironment };
+  return { centralDatabaseUrl: url.toString(), key, version, workerEnvironment, runtimePolicy };
 }
 
-export async function readBackfillAuthority(central: CentralQueryClient, cipher: AesGcmProviderCredentialCipher, pins: BackfillPins) {
+/** Historical review utilities must refuse cloud access before any client is constructed. */
+export async function readLocalBackfillEnvironment(environment: NodeJS.ProcessEnv = process.env,
+  fileEnvironment?: Readonly<Record<string, string>>) {
+  const resolved = await readBackfillEnvironment(environment, fileEnvironment);
+  if (resolved.runtimePolicy.mode !== "local") {
+    resolved.key.fill(0);
+    refuseBackfill("BACKFILL_LOCAL_CENTRAL_REQUIRED");
+  }
+  return resolved;
+}
+
+export async function readBackfillAuthority(central: CentralQueryClient, cipher: AesGcmProviderCredentialCipher, pins: BackfillPins,
+  runtimePolicy = readDatabaseRuntimePolicy({})) {
   const [provider, membership, located] = await Promise.all([
     central.providers.findUnique({ where: { id: pins.providerId }, include: {
       active_config_version: { include: { source_credential: true } },
@@ -62,7 +88,7 @@ export async function readBackfillAuthority(central: CentralQueryClient, cipher:
     located.state !== "ready" || located.route.configVersionId !== pins.configId ||
     located.route.target.providerId !== pins.providerId || located.route.target.providerKey !== pins.providerKey ||
     located.route.organizationId !== pins.organizationId) refuseBackfill("BACKFILL_CENTRAL_AUTHORITY_UNAVAILABLE");
-  assertLocalBackfillDestination(pins.providerKey, located.route);
+  assertBackfillDestination(pins.providerKey, located.route, runtimePolicy);
   const authority = await new CentralDataforrestSourceAuthorityResolver({ central, credentialCipher: cipher }).resolve({
     providerId: pins.providerId, providerKey: pins.providerKey, configVersionId: config.id,
     configVersionNumber: config.version_number, adapterKey: config.adapter_key,

@@ -4,6 +4,7 @@ import type {
 } from "@packscout/contracts";
 import { isIP } from "node:net";
 import type { CentralDatabaseLifecycle } from "./central-database.ts";
+import { normalizeNativePrismaTlsUrl } from "./native-prisma-tls.ts";
 import {
   assertDatabaseUuid,
   providerDatabaseTarget,
@@ -54,6 +55,8 @@ export interface BoundedProviderDatabaseGatewayOptions {
   readonly maximumCachedProviders?: number;
   readonly idleLifetimeMs?: number;
   readonly connectionTimeoutMs?: number;
+  /** Only atomic import pages may opt into a longer operation window. */
+  readonly operationProfile?: "standard" | "atomic_import_page";
   readonly operationTimeoutMs?: number;
   readonly closeTimeoutMs?: number;
   readonly now?: () => Date;
@@ -194,7 +197,7 @@ function databaseUrl(
   url.pathname = `/${route.target.databaseName}`;
   url.searchParams.set("sslmode", route.node.sslMode);
   url.searchParams.set("connect_timeout", String(Math.max(1, Math.ceil(connectionTimeoutMs / 1_000))));
-  return url.toString();
+  return normalizeNativePrismaTlsUrl(url).toString();
 }
 
 function assertCachedRoute(route: ProviderDatabaseRoute): void {
@@ -250,8 +253,10 @@ export class BoundedProviderDatabaseGateway {
     this.#operationTimeoutMs = options.operationTimeoutMs ?? 10_000;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? 5_000;
     this.#now = options.now ?? (() => new Date());
+    const operationProfile = options.operationProfile ?? "standard";
     if (
-      !Number.isInteger(this.#connectionLimit)
+      (operationProfile !== "standard" && operationProfile !== "atomic_import_page")
+      || !Number.isInteger(this.#connectionLimit)
       || this.#connectionLimit < 1
       || this.#connectionLimit > 16
       || !Number.isInteger(this.#maximumCachedProviders)
@@ -265,7 +270,7 @@ export class BoundedProviderDatabaseGateway {
       || this.#connectionTimeoutMs > 60_000
       || !Number.isInteger(this.#operationTimeoutMs)
       || this.#operationTimeoutMs < 100
-      || this.#operationTimeoutMs > 60_000
+      || this.#operationTimeoutMs > (operationProfile === "atomic_import_page" ? 600_000 : 60_000)
       || !Number.isInteger(this.#closeTimeoutMs)
       || this.#closeTimeoutMs < 100
       || this.#closeTimeoutMs > 60_000

@@ -73,3 +73,30 @@ test("two attempts, remaining operation window and retry authority decisions are
   }), "lease_lost");
   assert.equal(calls, 2);
 });
+
+test("remote page budgets remain deadline-clipped and never retry unknown or commit failures", async () => {
+  let clock = 0;
+  const timeouts: number[] = [];
+  const database = { async $transaction(operation: (tx: ProviderTransactionClient) => Promise<string>, options: { timeout: number }) {
+    timeouts.push(options.timeout); return operation({} as ProviderTransactionClient);
+  } } as unknown as Pick<ProviderPrismaClient, "$transaction">;
+  assert.equal(await runProviderPageTransaction({ database, maximumTransactionMilliseconds: 480_000,
+    deadlineAt: 540_000, now: () => clock,
+    operation: async (_tx, attempt, timeout) => {
+      assert.equal(timeout, timeouts[attempt]);
+      if (!attempt) { clock = 480_000; throw expiration(); }
+      return "committed";
+    },
+  }), "committed");
+  assert.deepEqual(timeouts, [480_000, 55_000]);
+  for (const maximumTransactionMilliseconds of [0, 999, 480_001, Number.NaN]) {
+    await assert.rejects(runProviderPageTransaction({ database, maximumTransactionMilliseconds,
+      deadlineAt: 540_000, now: () => 0, operation: async () => assert.fail("Invalid bounds cannot begin work.") }), RangeError);
+  }
+  for (const failure of [expiration("commit"), { code: "P2028" }]) {
+    const before = timeouts.length;
+    await assert.rejects(runProviderPageTransaction({ database, maximumTransactionMilliseconds: 480_000,
+      deadlineAt: 540_000, now: () => 0, operation: async () => { throw failure; } }));
+    assert.equal(timeouts.length, before + 1);
+  }
+});
