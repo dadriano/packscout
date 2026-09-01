@@ -19,7 +19,7 @@ const RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS = 60_000;
 export function recordUpdateRefreshIntervalMilliseconds(
   status: DataReleaseStatusValue,
 ): number | null {
-  return status.state === "available"
+  return status.state === "available" || status.state === "unavailable"
     ? RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS
     : null;
 }
@@ -49,17 +49,17 @@ export function presentDataReleaseStatus(
 ): DataReleaseStatusPresentation {
   if (status.state === "loading") {
     return {
-      exactLabel: "Catalog record update time is loading",
+      exactLabel: "Latest catalog record update time is loading",
       state: status.state,
-      visibleLabel: "Checking record updates",
+      visibleLabel: "Checking latest record update",
     };
   }
 
   if (status.state === "unavailable") {
     return {
-      exactLabel: "Catalog record update time is unavailable",
+      exactLabel: "Latest catalog record update time is unavailable",
       state: status.state,
-      visibleLabel: "Record update time unavailable",
+      visibleLabel: "Latest record update unavailable",
     };
   }
 
@@ -74,15 +74,15 @@ export function presentDataReleaseStatus(
 
   if (status.dataSource === "mock") {
     return {
-      exactLabel: `Mock catalog records last updated ${exactTime}`,
+      exactLabel: `Latest mock catalog record update ${exactTime}`,
       state: status.state,
-      visibleLabel: `Mock records updated · ${relativeTime}`,
+      visibleLabel: `Latest mock record update · ${relativeTime}`,
     };
   }
 
   return {
-    exactLabel: `Catalog records last updated ${exactTime}`,
+    exactLabel: `Latest catalog record update ${exactTime}`,
     state: status.state,
-    visibleLabel: `Records updated · ${relativeTime}`,
+    visibleLabel: `Latest record update · ${relativeTime}`,
   };
 }

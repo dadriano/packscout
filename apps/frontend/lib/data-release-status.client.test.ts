@@ -20,15 +20,15 @@ test("data release status reports the active record-set update time", () => {
   );
 
   assert.equal(presentation.state, "available");
-  assert.equal(presentation.visibleLabel, "Records updated · 28s ago");
-  assert.match(presentation.exactLabel, /^Catalog records last updated /);
+  assert.equal(presentation.visibleLabel, "Latest record update · 28s ago");
+  assert.match(presentation.exactLabel, /^Latest catalog record update /);
   assert.equal(
     presentDataReleaseStatus({ state: "unavailable" }, NOW).visibleLabel,
-    "Record update time unavailable",
+    "Latest record update unavailable",
   );
   assert.equal(
     presentDataReleaseStatus({ state: "loading" }, NOW).visibleLabel,
-    "Checking record updates",
+    "Checking latest record update",
   );
 });
 
@@ -43,11 +43,11 @@ test("data release status identifies mock records without presenting them as liv
     NOW,
   );
 
-  assert.equal(presentation.visibleLabel, "Mock records updated · 28s ago");
-  assert.match(presentation.exactLabel, /^Mock catalog records last updated /);
+  assert.equal(presentation.visibleLabel, "Latest mock record update · 28s ago");
+  assert.match(presentation.exactLabel, /^Latest mock catalog record update /);
 });
 
-test("available record status refreshes once per minute", () => {
+test("available and transiently unavailable record status refresh once per minute", () => {
   assert.equal(
     recordUpdateRefreshIntervalMilliseconds({
       state: "available",
@@ -58,7 +58,7 @@ test("available record status refreshes once per minute", () => {
   );
   assert.equal(
     recordUpdateRefreshIntervalMilliseconds({ state: "unavailable" }),
-    null,
+    60_000,
   );
   assert.equal(
     recordUpdateRefreshIntervalMilliseconds({ state: "loading" }),

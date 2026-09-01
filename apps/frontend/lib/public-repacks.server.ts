@@ -10,12 +10,14 @@ import {
 import { api } from "../../../convex/_generated/api";
 import {
   parseFindRepacksByDesiredCollectibleV3Result,
+  parseGetPublicCatalogRecordUpdateStatusV3Result,
   parseGetDashboardBundleV3Result,
   parseGetPublicRepackV3Result,
   parseGetPublicShellStatusV3Result,
   parseListPublicRepacksV3Result,
   parseSearchPublicCollectiblesV3Result,
   type FindRepacksByDesiredCollectibleV3Result,
+  type GetPublicCatalogRecordUpdateStatusV3Result,
   type GetDashboardBundleV3Result,
   type GetPublicRepackV3Result,
   type GetPublicShellStatusV3Result,
@@ -103,6 +105,22 @@ export async function readPublicShellStatus(): Promise<GetPublicShellStatusV3Res
     return parseGetPublicShellStatusV3Result(
       await fetchAction(
         api.publicRepacksV3.getPublicShellStatusV3,
+        catalogReadArguments({}),
+        { url },
+      ),
+    );
+  } catch {
+    return publicReadError("RELEASE_UNAVAILABLE");
+  }
+}
+
+export async function readPublicCatalogRecordUpdateStatus(): Promise<GetPublicCatalogRecordUpdateStatusV3Result> {
+  const url = convexUrl();
+  if (url === null) return publicReadError("RELEASE_UNAVAILABLE");
+  try {
+    return parseGetPublicCatalogRecordUpdateStatusV3Result(
+      await fetchAction(
+        api.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3,
         catalogReadArguments({}),
         { url },
       ),

@@ -18,9 +18,12 @@ import {
   serializeCatalogViewState,
 } from "@/lib/catalog-query-state.client";
 import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
-import { readPublicRepacks } from "@/lib/public-repacks.server";
+import {
+  readPublicCatalogRecordUpdateStatus,
+  readPublicRepacks,
+} from "@/lib/public-repacks.server";
 import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
-import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
+import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -65,7 +68,14 @@ export default async function AllRepacksPage({
     throw new Error("A validated catalog view must resolve to a layout.");
   }
 
-  const result = await readPublicRepacks(parsed.query);
+  const [result, recordUpdateResult] = await Promise.all([
+    readPublicRepacks(parsed.query),
+    readPublicCatalogRecordUpdateStatus(),
+  ]);
+  const status = dataReleaseStatusFromRecordUpdateResult(
+    recordUpdateResult,
+    result.ok ? result.data.release.publicReleaseId : undefined,
+  );
   if (!result.ok) {
     const recoveryHref = serializeCatalogViewState(
       catalogQueryAfterReadError(parsed.query, result.code),
@@ -74,17 +84,12 @@ export default async function AllRepacksPage({
     return (
       <>
         <ShellSurfaceReporter mode="product" />
-        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
+        <DataReleaseStatusReporter status={status} />
         <DashboardPageHeader activeView="all-repacks" />
         <CatalogResultRecovery error={result} recoveryHref={recoveryHref} />
       </>
     );
   }
-
-  const status = dataReleaseStatusFromRelease(
-    result.data.release,
-    result.data.providerHealthEvaluatedAt,
-  );
 
   return (
     <>

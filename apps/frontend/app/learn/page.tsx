@@ -9,8 +9,8 @@ import {
   resolveVisitorAccess,
 } from "@/lib/access-gate.server";
 import { LEARN_GUIDES } from "@/lib/learn-content";
-import { readPublicShellStatus } from "@/lib/public-repacks.server";
-import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
+import { readPublicCatalogRecordUpdateStatus } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
@@ -29,7 +29,9 @@ export default async function LearnPage() {
   const route = resolveGatedRoute(await resolveVisitorAccess());
   if (route.kind === "redirect") redirect(route.destination);
 
-  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
+  const status = dataReleaseStatusFromRecordUpdateResult(
+    await readPublicCatalogRecordUpdateStatus(),
+  );
   return (
     <>
       <ShellSurfaceReporter mode="product" />

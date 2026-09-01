@@ -36,8 +36,12 @@ test("every gated page resolves access before any catalog read", () => {
   for (const [name, pageSource, read] of [
     ["root", rootSource, "readDashboardBundle("],
     ["packs", packsSource, "readPublicRepacks("],
-    ["learn", learnSource, "readPublicShellStatus("],
-    ["learn article", learnArticleSource, "readPublicShellStatus("],
+    ["learn", learnSource, "readPublicCatalogRecordUpdateStatus("],
+    [
+      "learn article",
+      learnArticleSource,
+      "readPublicCatalogRecordUpdateStatus(",
+    ],
   ] as const) {
     const body = defaultExportBody(pageSource);
     const gate = body.indexOf("await resolveVisitorAccess()");
@@ -198,6 +202,7 @@ test("the credentialed catalog reads are the ones this enumeration covers", () =
   // exempt every caller below.
   assert.deepEqual(credentialedReadNames(), [
     "readPublicShellStatus",
+    "readPublicCatalogRecordUpdateStatus",
     "readDashboardBundle",
     "readPublicRepacks",
     "readPublicRepack",
@@ -265,7 +270,7 @@ test("the ungated not-found surfaces read the catalog only for admitted visitors
     assert.match(body, /resolveGatedRoute\(await resolveVisitorAccess\(\)\)/u);
     assert.match(
       body,
-      /route\.kind === "render"\s*\?\s*await readPublicShellStatus\(\)\s*:\s*publicReadError\("RELEASE_UNAVAILABLE"\)/u,
+      /route\.kind === "render"\s*\?\s*await readPublicCatalogRecordUpdateStatus\(\)\s*:\s*publicReadError\("RELEASE_UNAVAILABLE"\)/u,
     );
   }
 });

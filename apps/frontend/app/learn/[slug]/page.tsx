@@ -9,8 +9,8 @@ import {
   resolveVisitorAccess,
 } from "@/lib/access-gate.server";
 import { findLearnGuide, LEARN_GUIDES } from "@/lib/learn-content";
-import { readPublicShellStatus } from "@/lib/public-repacks.server";
-import { dataReleaseStatusFromPublicResult } from "@/lib/public-release-status";
+import { readPublicCatalogRecordUpdateStatus } from "@/lib/public-repacks.server";
+import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 
 type LearnArticleProps = Readonly<{
   params: Promise<{ slug: string }>;
@@ -39,7 +39,9 @@ export default async function LearnArticlePage({ params }: LearnArticleProps) {
 
   const guide = findLearnGuide((await params).slug);
   if (!guide) notFound();
-  const status = dataReleaseStatusFromPublicResult(await readPublicShellStatus());
+  const status = dataReleaseStatusFromRecordUpdateResult(
+    await readPublicCatalogRecordUpdateStatus(),
+  );
 
   return (
     <>

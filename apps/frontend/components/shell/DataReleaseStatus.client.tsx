@@ -67,13 +67,15 @@ export function DataReleaseStatus() {
   const updatedAt = "updatedAt" in status ? status.updatedAt : null;
 
   useEffect(() => {
-    if (refreshInterval === null || evaluatedAt === null) return;
+    if (refreshInterval === null) return;
     const startedAt = window.performance.now();
     const timer = window.setInterval(() => {
-      setClock({
-        evaluatedAt,
-        elapsedMilliseconds: Math.max(0, window.performance.now() - startedAt),
-      });
+      if (evaluatedAt !== null) {
+        setClock({
+          evaluatedAt,
+          elapsedMilliseconds: Math.max(0, window.performance.now() - startedAt),
+        });
+      }
       router.refresh();
     }, refreshInterval);
     return () => window.clearInterval(timer);
