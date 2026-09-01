@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/006
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/005
 **Blocks:** convex-promotion-jobs/007, convex-promotion-jobs/008, convex-promotion-jobs/009
-**Status:** todo
+**Status:** in progress
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
