@@ -141,7 +141,7 @@ test("aggregate observation is derived from canonical signed provider selections
   );
 });
 
-test("provider selection sequence and active epoch bounds fail closed", async () => {
+test("provider selection sequence fails closed without a manifest-wide epoch barrier", async () => {
   const manifest = await buildGlobalCatalogManifestFixtureV1();
   const selections = structuredClone(
     buildGlobalCatalogProviderSelectionsFixtureV1(manifest),
@@ -164,8 +164,25 @@ test("provider selection sequence and active epoch bounds fail closed", async ()
   }
   assert.equal(
     activeCatalogManifestStateV1Schema.safeParse(epochAfterSelection).success,
-    false,
+    true,
   );
+});
+
+test("activation accepts provider releases pinned to different catalog epochs", async () => {
+  const manifest = await buildGlobalCatalogManifestFixtureV1("canonical", {
+    mixedProviderEpochs: true,
+    distinctProviderOrigins: true,
+  });
+  const request = {
+    schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
+    operationId: "manifest:activate:mixed-provider-epochs",
+    idempotencyKey: "manifest:activate:mixed-provider-epochs",
+    manifest,
+    observation: buildGlobalCatalogObservationFixtureV1(manifest),
+    expectedActiveState: buildEmptyActiveCatalogManifestStateV1(),
+  };
+
+  assert.equal(catalogManifestActivateRequestSchema.safeParse(request).success, true);
 });
 
 test("activate binds an exact predecessor, immutable manifest, and selection proof", async () => {

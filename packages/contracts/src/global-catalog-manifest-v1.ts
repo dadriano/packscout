@@ -32,7 +32,10 @@ import {
 
 export const GLOBAL_CATALOG_MANIFEST_SCHEMA_VERSION =
   "global_catalog_manifest_v1" as const;
-export const MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES = 8;
+// This is a transaction/manifest-size safety ceiling, not a configured roster.
+// The active provider set is discovered dynamically and is also bounded by the
+// stricter manifest byte and aggregate-document limits below.
+export const MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES = 64;
 export const MAX_GLOBAL_CATALOG_MANIFEST_BYTES = 64 * 1_024;
 // Public composition loads each provider's complete category copy to validate
 // shared identity bytes. Bound the sum of those copies, not only the deduped
@@ -368,23 +371,25 @@ export const globalCatalogManifestV1Schema = z.object(manifestShape).strict()
       });
     }
 
-    const epoch = canonicalJson(manifest.sharedConfigurationEpoch);
+    const composedOrigins = [...new Set(
+      manifest.providerReferences.flatMap((reference) =>
+        reference.publicAssetOrigins
+      ),
+    )].sort();
+    if (
+      canonicalJson(composedOrigins) !== canonicalJson(manifest.publicAssetOrigins)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["publicAssetOrigins"],
+        message: "global_catalog_manifest.origin_union_mismatch",
+      });
+    }
     for (const [index, reference] of manifest.providerReferences.entries()) {
-      if (canonicalJson(reference.sharedConfigurationEpoch) !== epoch) {
-        context.addIssue({
-          code: "custom",
-          path: ["providerReferences", index, "sharedConfigurationEpoch"],
-          message: "global_catalog_manifest.mixed_configuration_epoch",
-        });
-      }
       const sharedHashes = reference.governingHashes;
       if (
-        sharedHashes.originSetHash !==
-          manifest.governingHashes.originSetHash ||
         sharedHashes.confidencePolicyHash !==
-          manifest.governingHashes.confidencePolicyHash ||
-        canonicalJson(reference.publicAssetOrigins) !==
-          canonicalJson(manifest.publicAssetOrigins)
+          manifest.governingHashes.confidencePolicyHash
       ) {
         context.addIssue({
           code: "custom",

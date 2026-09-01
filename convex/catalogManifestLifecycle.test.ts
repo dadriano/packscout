@@ -259,18 +259,21 @@ async function completeNextProviderRelease(
   t: CatalogTest,
   plan: ProviderCatalogReleasePublishPlanV1,
 ): Promise<GlobalCatalogProviderActiveObservationV1> {
-  const expected = await expectedProviderHead(t);
+  const expected = await expectedProviderHead(t, plan.platformKey);
   const context = providerReleaseContext(plan, expected);
   const suffix = `${plan.platformKey}:${plan.providerCheckpoint.settledSequence}`;
+  const authenticatedKeyId = plan.platformKey === "beta"
+    ? PROVIDER_BETA_TEST_KEY_ID
+    : PROVIDER_TEST_KEY_ID;
   await executeProvider(t, internal.providerReleaseStart.start, {
     ...providerOperationEnvelope(`provider:start:${suffix}`),
     ...context,
-  });
+  }, authenticatedKeyId);
   await executeProvider(t, internal.providerReleaseBatch.applyBatch, {
     ...providerOperationEnvelope(`provider:batch:${suffix}:0`),
     ...context,
     batch: plan.batches[0]!,
-  });
+  }, authenticatedKeyId);
   const finalize = await executeProvider(
     t,
     internal.providerReleaseFinalize.finalize,
@@ -278,10 +281,13 @@ async function completeNextProviderRelease(
       ...providerOperationEnvelope(`provider:finalize:${suffix}`),
       ...context,
     },
+    authenticatedKeyId,
   );
   const head = await t.run((ctx) =>
     ctx.db.query("providerCatalogCompletedHeads")
-      .withIndex("by_platform_key", (index) => index.eq("platformKey", "alpha"))
+      .withIndex("by_platform_key", (index) =>
+        index.eq("platformKey", plan.platformKey)
+      )
       .unique()
   );
   if (head === null) throw new Error("Expected advanced provider head.");
@@ -520,6 +526,94 @@ describe("catalog manifest lifecycle", () => {
     expect(
       (await expectedProviderHead(t, "beta")).publicProviderReleaseId,
     ).toBe(betaOne.publicProviderReleaseId);
+  });
+
+  test("advances one provider while another provider has a newer pending head", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const alphaOne = await buildProviderPublishPlan({
+      checkpointSequence: "20",
+      platformKey: "alpha",
+      vendorDisplayName: "Alpha A1",
+    });
+    const betaOne = await buildProviderPublishPlan({
+      checkpointSequence: "20",
+      platformKey: "beta",
+      publicVendorId: "bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
+      vendorDisplayName: "Beta B1",
+    });
+    configureKeys(alphaOne.governingHashes.originSetHash);
+    const t = createTest();
+    const alphaOneCompleted = await seedInitialProvider(t, alphaOne);
+    const betaOneCompleted = await seedInitialProvider(t, betaOne);
+    const initialManifest = await buildCatalogManifestFromProviderPlans(
+      [alphaOne, betaOne],
+      "confidence-v1",
+      "canonical",
+    );
+    await activate(
+      t,
+      initialManifest,
+      [alphaOneCompleted.selection, betaOneCompleted.selection],
+      await activeState(t),
+      "catalog:activate:independent:a1-b1",
+    );
+
+    const betaTwo = await buildProviderPublishPlan({
+      checkpointSequence: "30",
+      platformKey: "beta",
+      publicVendorId: "bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
+      vendorDisplayName: "Beta B2",
+    });
+    const betaTwoSelection = await completeNextProviderRelease(t, betaTwo);
+    const alphaTwo = await buildProviderPublishPlan({
+      checkpointSequence: "30",
+      platformKey: "alpha",
+      vendorDisplayName: "Alpha A2",
+    });
+    const alphaTwoSelection = await completeNextProviderRelease(t, alphaTwo);
+    const bothAdvancedManifest = await buildCatalogManifestFromProviderPlans(
+      [alphaTwo, betaTwo],
+      "confidence-v1",
+      "canonical",
+    );
+    const before = await activeState(t);
+    await expect(activate(
+      t,
+      bothAdvancedManifest,
+      [alphaTwoSelection, betaTwoSelection],
+      before,
+      "catalog:activate:independent:reject-composite",
+    )).rejects.toThrow("CATALOG_MANIFEST_PREDECESSOR_CONFLICT");
+    expect(await activeState(t)).toEqual(before);
+
+    const alphaAdvancedManifest = await buildCatalogManifestFromProviderPlans(
+      [alphaTwo, betaOne],
+      "confidence-v1",
+      "canonical",
+    );
+    const retainedBetaReference = initialManifest.providerReferences[1]!;
+    const retainedBetaSelection = before.observation!.providerSelections[1]!;
+
+    await activate(
+      t,
+      alphaAdvancedManifest,
+      [alphaTwoSelection, retainedBetaSelection],
+      before,
+      "catalog:activate:independent:a2-b1",
+    );
+
+    const active = await t.run((ctx) => loadValidatedCatalogManifest(ctx));
+    expect(canonicalJson(active!.manifest.providerReferences[1])).toBe(
+      canonicalJson(retainedBetaReference),
+    );
+    expect(canonicalJson(active!.state.observation!.providerSelections[1])).toBe(
+      canonicalJson(retainedBetaSelection),
+    );
+    expect((await expectedProviderHead(t, "beta")).publicProviderReleaseId)
+      .toBe(betaTwo.publicProviderReleaseId);
+    expect(active!.manifest.providerReferences[0]!.publicProviderReleaseId)
+      .toBe(alphaTwo.publicProviderReleaseId);
   });
 
   test("refresh keeps immutable identity and historical rollback leaves head advanced", async () => {

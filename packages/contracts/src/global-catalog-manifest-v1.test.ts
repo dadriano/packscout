@@ -109,7 +109,7 @@ test("mock and canonical manifests use the same contract with distinct identitie
   await verifyGlobalCatalogManifestV1(mock);
 });
 
-test("manifest schema rejects noncanonical, duplicate, and mixed-epoch references", async () => {
+test("manifest schema rejects noncanonical and duplicate references", async () => {
   const manifest = await buildGlobalCatalogManifestFixtureV1();
   const reversed = structuredClone(manifest);
   reversed.providerReferences.reverse();
@@ -123,18 +123,28 @@ test("manifest schema rejects noncanonical, duplicate, and mixed-epoch reference
   duplicate.enabledPlatformKeys = ["alpha", "alpha"];
   assert.equal(globalCatalogManifestV1Schema.safeParse(duplicate).success, false);
 
-  const mixedEpoch = structuredClone(manifest);
-  mixedEpoch.providerReferences[1]!.sharedConfigurationEpoch = {
-    ...mixedEpoch.providerReferences[1]!.sharedConfigurationEpoch,
-    revision: 11,
-  };
-  assert.equal(globalCatalogManifestV1Schema.safeParse(mixedEpoch).success, false);
-
   const wrongOrigins = structuredClone(manifest);
   wrongOrigins.providerReferences[1]!.publicAssetOrigins = [
     "https://other.packscout.test",
   ];
   assert.equal(globalCatalogManifestV1Schema.safeParse(wrongOrigins).success, false);
+});
+
+test("providers with different catalog epochs and asset origins compose independently", async () => {
+  const manifest = await buildGlobalCatalogManifestFixtureV1("canonical", {
+    mixedProviderEpochs: true,
+    distinctProviderOrigins: true,
+  });
+
+  assert.notDeepEqual(
+    manifest.providerReferences[0]!.sharedConfigurationEpoch,
+    manifest.providerReferences[1]!.sharedConfigurationEpoch,
+  );
+  assert.deepEqual(manifest.publicAssetOrigins, [
+    "https://cdn.packscout.test",
+    "https://other.packscout.test",
+  ]);
+  assert.deepEqual(await verifyGlobalCatalogManifestV1(manifest), manifest);
 });
 
 test("manifest aggregate limits are global rather than per-provider multiples", async () => {
@@ -155,18 +165,49 @@ test("manifest aggregate limits are global rather than per-provider multiples", 
     "the summed provider copies must stay within the public read bound",
   );
 
-  const ninth = structuredClone(manifest);
-  ninth.providerReferences = Array.from(
+  assert.ok(
+    MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES > 8,
+    "the safety ceiling must not encode the former fixed-eight roster",
+  );
+  const dynamicNine = structuredClone(manifest);
+  dynamicNine.providerReferences = Array.from(
+    { length: 9 },
+    (_, index) => ({
+      ...manifest.providerReferences[0]!,
+      platformKey: `provider-${String(index).padStart(2, "0")}`,
+    }),
+  );
+  dynamicNine.enabledPlatformKeys = dynamicNine.providerReferences.map(
+    ({ platformKey }) => platformKey,
+  );
+  dynamicNine.counts = {
+    vendors: 9,
+    categories: 2,
+    collectibles: 2,
+    repacks: 9,
+    repackChases: 18,
+    searchShards: 9,
+  };
+  assert.equal(
+    globalCatalogManifestV1Schema.safeParse(dynamicNine).success,
+    true,
+  );
+
+  const capacityOverflow = structuredClone(manifest);
+  capacityOverflow.providerReferences = Array.from(
     { length: MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 1 },
     (_, index) => ({
       ...manifest.providerReferences[0]!,
-      platformKey: `provider-${index}`,
+      platformKey: `provider-${String(index).padStart(2, "0")}`,
     }),
   );
-  ninth.enabledPlatformKeys = ninth.providerReferences.map(
+  capacityOverflow.enabledPlatformKeys = capacityOverflow.providerReferences.map(
     ({ platformKey }) => platformKey,
   );
-  assert.equal(globalCatalogManifestV1Schema.safeParse(ninth).success, false);
+  assert.equal(
+    globalCatalogManifestV1Schema.safeParse(capacityOverflow).success,
+    false,
+  );
 });
 
 test("manifest verifier rejects every caller-chosen aggregate digest", async () => {

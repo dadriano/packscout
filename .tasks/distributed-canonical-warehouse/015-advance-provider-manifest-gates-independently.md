@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/016, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including atomic activation, compatibility checks, rollback, and receipt reconciliation
-**Status:** not started
+**Status:** in progress
 
 ## Start Here
 

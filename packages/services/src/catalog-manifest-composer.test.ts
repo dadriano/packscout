@@ -25,9 +25,32 @@ async function providerPlan(
   transform?: (
     projection: ProviderCatalogPublicProjection,
   ) => ProviderCatalogPublicProjection,
+  options: Readonly<{
+    configurationKey?: string;
+    revision?: number;
+    configurationHash?: string;
+    configurationSequence?: bigint;
+    publicAssetOrigins?: readonly string[];
+  }> = {},
 ): Promise<ProviderCatalogReleasePublishPlanV1> {
-  const checkpoint = providerFixtureCheckpoint({ platformKey });
-  const configuration = providerFixtureApprovedConfiguration({ platformKey });
+  const checkpoint = providerFixtureCheckpoint({
+    platformKey,
+    configurationKey: options.configurationKey,
+    revision: options.revision,
+    configurationHash: options.configurationHash,
+    configurationSequence: options.configurationSequence,
+  });
+  const baseConfiguration = providerFixtureApprovedConfiguration({
+    platformKey,
+    configurationKey: options.configurationKey,
+    revision: options.revision,
+  });
+  const configuration = options.publicAssetOrigins === undefined
+    ? baseConfiguration
+    : {
+        ...baseConfiguration,
+        publicAssetOrigins: [...options.publicAssetOrigins],
+      };
   const snapshot = providerFixtureSnapshot({ checkpoint, configuration });
   const projection = projectProviderCatalogRelease({
     configuration,
@@ -173,7 +196,7 @@ test("validates dependency-ordered provider categories through a canonical graph
   assert.equal(canonicalJson(plan.batches), transportBeforeComposition);
 });
 
-test("rejects omitted enabled providers, included disabled providers, and mixed epochs", async () => {
+test("rejects roster mismatch while allowing independently pinned provider epochs", async () => {
   const providerPlans = await plans();
   await assert.rejects(
     () => composeGlobalCatalogManifest({
@@ -197,20 +220,36 @@ test("rejects omitted enabled providers, included disabled providers, and mixed 
     }),
     rejectsWith("MANIFEST_PLATFORM_SET_INVALID"),
   );
-  await assert.rejects(
-    () => composeGlobalCatalogManifest({
-      enabledPlatformKeys: ["alpha", "beta"],
-      approvedConfiguration: {
-        sharedConfigurationEpoch: {
-          ...epoch(providerPlans[0]!),
-          revision: epoch(providerPlans[0]!).revision + 1,
-        },
-        confidencePolicyVersion: "confidence-v1",
-      },
-      providerPlans,
-    }),
-    rejectsWith("MANIFEST_CONFIGURATION_EPOCH_INVALID"),
+
+  const betaAtNextCatalog = await providerPlan("beta", undefined, {
+    configurationKey: "catalog-v2",
+    revision: 2,
+    configurationHash: "b".repeat(64),
+    configurationSequence: 2n,
+    publicAssetOrigins: [
+      ...providerPlans[0]!.publicAssetOrigins,
+      "https://beta-assets.example.com",
+    ].sort(),
+  });
+  const manifest = await composeGlobalCatalogManifest({
+    enabledPlatformKeys: ["alpha", "beta"],
+    approvedConfiguration: {
+      sharedConfigurationEpoch: epoch(providerPlans[0]!),
+      confidencePolicyVersion: "confidence-v1",
+    },
+    providerPlans: [providerPlans[0]!, betaAtNextCatalog],
+  });
+
+  assert.equal(
+    manifest.providerReferences[1]!.sharedConfigurationEpoch.configurationKey,
+    "catalog-v2",
   );
+  assert.deepEqual(manifest.publicAssetOrigins, [
+    ...new Set([
+      ...providerPlans[0]!.publicAssetOrigins,
+      ...betaAtNextCatalog.publicAssetOrigins,
+    ]),
+  ].sort());
 });
 
 test("rejects conflicting shared category bytes before transport", async () => {

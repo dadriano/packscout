@@ -268,29 +268,6 @@ export function buildGlobalCatalogManifestSourceWatermarkV1(
   return `catalog-manifest:${publicReleaseId}:${observationSequence}`;
 }
 
-function validateObservationEpochBounds(
-  observation: GlobalCatalogAggregateObservationV1,
-  sharedConfigurationEpoch: z.infer<
-    typeof providerCatalogSharedConfigurationEpochV1Schema
-  >,
-  context: z.RefinementCtx,
-): void {
-  for (const [index, selection] of
-    observation.providerSelections.entries()) {
-    if (
-      BigInt(sharedConfigurationEpoch.publicChangeSequence) >
-        BigInt(selection.selectedProviderCheckpoint.settledSequence)
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["observation", "providerSelections", index,
-          "selectedProviderCheckpoint", "settledSequence"],
-        message: "catalog_manifest_publication.epoch_after_checkpoint",
-      });
-    }
-  }
-}
-
 export const activeCatalogManifestStateCoreV1Schema = z.union([
   z.object({
     generation: nonNegativeSafeIntegerSchema,
@@ -316,11 +293,6 @@ export const activeCatalogManifestStateCoreV1Schema = z.union([
         message: "catalog_manifest_publication.active_observation_mismatch",
       });
     }
-    validateObservationEpochBounds(
-      state.observation,
-      state.activeManifest.sharedConfigurationEpoch,
-      context,
-    );
     if (
       state.previousManifest?.publicReleaseId ===
         state.activeManifest.publicReleaseId
@@ -368,11 +340,6 @@ export const activeCatalogManifestStateV1Schema = z.union([
         message: "catalog_manifest_publication.active_observation_mismatch",
       });
     }
-    validateObservationEpochBounds(
-      state.observation,
-      state.activeManifest.sharedConfigurationEpoch,
-      context,
-    );
     if (
       state.previousManifest?.publicReleaseId ===
         state.activeManifest.publicReleaseId
@@ -508,11 +475,6 @@ export const catalogManifestActivateRequestSchema = z.object({
     request.observation,
     context,
   );
-  validateObservationEpochBounds(
-    request.observation,
-    request.manifest.sharedConfigurationEpoch,
-    context,
-  );
   validateProtectedFields(request, context);
 });
 
@@ -544,11 +506,6 @@ export const catalogManifestRefreshActiveStateRequestSchema = z.object({
   validateObservationAdvance(
     request.expectedActiveState,
     request.observation,
-    context,
-  );
-  validateObservationEpochBounds(
-    request.observation,
-    request.manifest.sharedConfigurationEpoch,
     context,
   );
   validateProtectedFields(request, context);
@@ -586,11 +543,6 @@ export const catalogManifestRollbackToManifestRequestSchema = z.object({
   validateObservationAdvance(
     request.expectedActiveState,
     request.observation,
-    context,
-  );
-  validateObservationEpochBounds(
-    request.observation,
-    request.targetManifest.sharedConfigurationEpoch,
     context,
   );
   validateProtectedFields(request, context);

@@ -162,6 +162,7 @@ export async function activateCatalogManifestRequest(
     previousDocument === null
       ? null
       : globalCatalogManifestV1Schema.parse(previousDocument.manifest),
+    true,
   );
   const serverTime = new Date().toISOString();
   const manifestDocument = await ensureImmutableCatalogManifest(ctx, {
