@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  promotionJobHistoryQuerySchema,
+  promotionJobMonitoringFilterSchema,
+  promotionJobMonitoringIdSchema,
+} from "./promotion-job-monitoring.ts";
+
+test("promotion monitoring filters accept only manifest or prefixed provider keys", () => {
+  for (const valid of ["manifest", "provider:alpha", "provider:beta_cards"]) {
+    assert.equal(promotionJobMonitoringFilterSchema.safeParse(valid).success, true);
+  }
+  for (const invalid of [
+    "all",
+    "alpha",
+    "provider",
+    "provider:",
+    "provider:Alpha",
+    "provider:packscout_canonical_alpha",
+    "10000000-0000-4000-8000-000000000001",
+  ]) {
+    assert.equal(
+      promotionJobMonitoringFilterSchema.safeParse(invalid).success,
+      false,
+      invalid,
+    );
+  }
+});
+
+test("history query is bounded and never broadens an invalid filter", () => {
+  assert.deepEqual(promotionJobHistoryQuerySchema.parse({}), { limit: 25 });
+  assert.deepEqual(promotionJobHistoryQuerySchema.parse({
+    filter: "provider:alpha",
+    trigger: "reconciliation_cron",
+    outcome: "no_change",
+    limit: "100",
+  }), {
+    filter: "provider:alpha",
+    trigger: "reconciliation_cron",
+    outcome: "no_change",
+    limit: 100,
+  });
+  for (const invalid of [
+    { filter: "all" },
+    { filter: "alpha" },
+    { trigger: "scheduled" },
+    { outcome: "success" },
+    { limit: 101 },
+    { unknown: "value" },
+  ]) assert.equal(promotionJobHistoryQuerySchema.safeParse(invalid).success, false);
+});
+
+test("detail identity is opaque and cannot be a UUID or local run ID", () => {
+  assert.equal(
+    promotionJobMonitoringIdSchema.safeParse(
+      "pj_6HY8d6A1RXq4A1l68cnXPgEVxk0Z_r6g",
+    ).success,
+    true,
+  );
+  for (const invalid of [
+    "10000000-0000-4000-8000-000000000001",
+    "run_6HY8d6A1RXq4A1l68cnXPgEVxk0Z_r6g",
+    "pj_short",
+  ]) {
+    assert.equal(promotionJobMonitoringIdSchema.safeParse(invalid).success, false);
+  }
+});
