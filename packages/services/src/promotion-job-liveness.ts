@@ -160,7 +160,11 @@ export function summarizePromotionJobLivenessCycle(input: Readonly<{
   let overdueCount = 0;
   let alertingCount = 0;
   for (const observation of observations) {
-    if (observation.evidenceSource === "unavailable") {
+    // Only evidence read during this evaluator pass is current. A retained
+    // last-known judgment remains useful to an operator, but counting it as
+    // reachable (or healthy) would turn a provider database outage into a
+    // successful liveness observation.
+    if (observation.evidenceSource !== "live") {
       unavailableCount += 1;
       continue;
     }

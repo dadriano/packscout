@@ -151,3 +151,33 @@ test("dynamic roster summaries preserve one unavailable provider row", () => {
     alertingCount: 1,
   });
 });
+
+test("retained last-known evidence is never counted as currently reachable", () => {
+  const retainedHealthy = evaluatePromotionJobScheduleLiveness(schedule({
+    lastAdmittedWindowIndex: 1n,
+    lastScheduledCheckinAt: new Date("2026-09-01T12:01:00.000Z"),
+  }), new Date("2026-09-01T12:02:00.000Z"));
+  const currentHealthy = evaluatePromotionJobScheduleLiveness(schedule({
+    authority: "manifest_reconciliation",
+    lastAdmittedWindowIndex: 1n,
+    lastScheduledCheckinAt: new Date("2026-09-01T12:01:00.000Z"),
+  }), new Date("2026-09-01T12:02:00.000Z"));
+
+  assert.deepEqual(summarizePromotionJobLivenessCycle({
+    providerObservations: [{
+      evidenceSource: "last_known",
+      judgment: retainedHealthy,
+    }],
+    manifestObservation: {
+      evidenceSource: "live",
+      judgment: currentHealthy,
+    },
+  }), {
+    expectedCount: 2,
+    reachableCount: 1,
+    unavailableCount: 1,
+    healthyCount: 1,
+    overdueCount: 0,
+    alertingCount: 0,
+  });
+});
