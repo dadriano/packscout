@@ -15,6 +15,7 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { refuseProviderRelease } from "./providerReleaseErrors";
+import { assertProviderReleaseFinalization } from "./providerReleaseFinalization";
 import {
   buildProviderReleaseReceipt,
   loadExactProviderOperationReplay,
@@ -205,6 +206,7 @@ export const finalize = internalMutation({
     ) {
       refuseProviderRelease("PROVIDER_RELEASE_RECONCILIATION_FAILED");
     }
+    await assertProviderReleaseFinalization(ctx, release, publication);
 
     const serverTime = new Date().toISOString();
     const completedHead = {
