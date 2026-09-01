@@ -312,6 +312,62 @@ test("provider-local replay, generation, schedule, detail, and retention converg
     });
     assert.equal((await first.loadSchedule()).lastAdmittedWindowIndex, null);
 
+    const acknowledgedAt = new Date(dueAt.getTime() + 5_000);
+    await first.coalesceWake({
+      requestedGeneration: 10n,
+      cause: "canonical_settlement",
+      requestedAt: acknowledgedAt,
+    });
+    const acknowledgeInput = beginInput({
+      opaqueKey: "provider-acknowledge-generation-ten",
+      now: new Date(acknowledgedAt.getTime() + 1_000),
+      trigger: { kind: "change_wake", observedWakeGeneration: 10n },
+    });
+    const acknowledge = await first.beginOrRecoverInvocation(acknowledgeInput);
+    await first.terminalize({
+      runId: acknowledge.invocation!.runId,
+      ownershipToken: acknowledgeInput.ownershipToken,
+      finishedAt: new Date(acknowledgedAt.getTime() + 2_000),
+      outcome: "caught_up",
+      acknowledgeObservedWake: true,
+    });
+    assert.equal((await first.loadWakeIntent()).pending, false);
+
+    const continuationInput = beginInput({
+      opaqueKey: "provider-continuation-after-acknowledged-race",
+      now: new Date(acknowledgedAt.getTime() + 3_000),
+    });
+    const continuation = await first.beginOrRecoverInvocation(
+      continuationInput,
+    );
+    await concurrent.coalesceWake({
+      requestedGeneration: 11n,
+      cause: "canonical_settlement",
+      requestedAt: new Date(acknowledgedAt.getTime() + 3_500),
+    });
+    const continued = await first.terminalize({
+      runId: continuation.invocation!.runId,
+      ownershipToken: continuationInput.ownershipToken,
+      finishedAt: new Date(acknowledgedAt.getTime() + 4_000),
+      outcome: "continuation_required",
+      safeFailureCode: "PROVIDER_PROMOTION_DEADLINE",
+      continuation: {
+        // Deliberately stale: terminalization must advance from the locked
+        // generation rather than closing with an acknowledged continuation.
+        requestedGeneration: 1n,
+        requestedAt: new Date(acknowledgedAt.getTime() + 4_000),
+      },
+    });
+    assert.equal(continued.continuationGeneration, 12n);
+    assert.deepEqual(
+      await first.loadWakeIntent().then((wake) => [
+        wake.requestedGeneration,
+        wake.acknowledgedGeneration,
+        wake.pending,
+      ]),
+      [12n, 10n, true],
+    );
+
     const old = new Date("2026-01-01T00:00:00.000Z");
     const oldInput = beginInput({ opaqueKey: "provider-old", now: old });
     const oldAdmission = await first.beginOrRecoverInvocation(oldInput);

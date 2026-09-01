@@ -1331,8 +1331,18 @@ export class SplitPromotionJobStore {
       <= (current.observedWakeGeneration ?? 0n)) {
       throw new PromotionJobPersistenceError("PROMOTION_JOB_WAKE_INVALID");
     }
+    // A caller computes its continuation from an earlier observation. Lock the
+    // current wake in this terminal transaction and always advance beyond it,
+    // including when a concurrent generation was already acknowledged. This
+    // makes continuation_required imply a pending durable intent.
+    const currentWake = await this.#loadWake(client, true);
+    const requestedGeneration = continuation.requestedGeneration >
+        (currentWake?.requestedGeneration ?? 0n)
+      ? continuation.requestedGeneration
+      : (currentWake?.requestedGeneration ?? 0n) + 1n;
     const wake = await this.coalesceWake(client, {
       ...continuation,
+      requestedGeneration,
       cause: "continuation",
     });
     return wake.requestedGeneration;
