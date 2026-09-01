@@ -1059,7 +1059,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/data-release-status.client.test.ts",
           testName:
-            "data release status exposes stable fresh, delayed, loading, and unavailable copy",
+            "data release status reports the active record-set update time",
         },
         {
           file: "convex/publicRepacksV3.test.ts",

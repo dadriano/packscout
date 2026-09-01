@@ -1,39 +1,20 @@
 import type { DataReleaseStatusValue } from "./data-release-status.client";
-import type {
-  GetPublicShellStatusV3Result,
-  PublicShellStatusV3,
-} from "./public-repacks-v3";
+import type { DataReleaseV3Identity } from "@packscout/contracts";
+import type { GetPublicShellStatusV3Result } from "./public-repacks-v3";
 
 /**
- * Maps the independently refreshed provider-health summary to the shell
- * status. Immutable release age and per-estimate evidence age are deliberately
- * not provider-health proxies.
+ * The shell reports the completion time of the active public record set.
+ * Provider-health observations describe source quality and must not replace
+ * this release clock.
  */
-export function dataReleaseStatusFromProviderHealth(
-  health: PublicShellStatusV3["providerHealthSummary"],
-  providerHealthEvaluatedAt: string,
+export function dataReleaseStatusFromRelease(
+  release: DataReleaseV3Identity,
+  evaluatedAt: string,
 ): DataReleaseStatusValue {
-  if (
-    health.state === "unavailable" ||
-    health.observedAt === null ||
-    health.freshThrough === null
-  ) {
-    return health.nextHealthEvaluationAt === null
-      ? { state: "unavailable" }
-      : {
-          state: "unavailable",
-          evaluatedAt: providerHealthEvaluatedAt,
-          nextHealthEvaluationAt: health.nextHealthEvaluationAt,
-        };
-  }
   return {
-    state: health.state === "healthy" ? "fresh" : "delayed",
-    updatedAt: health.observedAt,
-    freshThrough: health.freshThrough,
-    evaluatedAt: providerHealthEvaluatedAt,
-    nextHealthEvaluationAt: health.nextHealthEvaluationAt,
-    totalProviderCount: health.totalProviderCount,
-    delayedProviderCount: health.delayedProviderCount,
+    state: "available",
+    updatedAt: release.completedAt,
+    evaluatedAt,
   };
 }
 
@@ -41,8 +22,8 @@ export function dataReleaseStatusFromPublicResult(
   result: GetPublicShellStatusV3Result,
 ): DataReleaseStatusValue {
   if (!result.ok) return { state: "unavailable" };
-  return dataReleaseStatusFromProviderHealth(
-    result.data.providerHealthSummary,
+  return dataReleaseStatusFromRelease(
+    result.data.release,
     result.data.providerHealthEvaluatedAt,
   );
 }

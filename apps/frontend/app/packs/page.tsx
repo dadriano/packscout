@@ -20,7 +20,7 @@ import {
 import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
 import { readPublicRepacks } from "@/lib/public-repacks.server";
 import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
-import { dataReleaseStatusFromProviderHealth } from "@/lib/public-release-status";
+import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -81,8 +81,8 @@ export default async function AllRepacksPage({
     );
   }
 
-  const status = dataReleaseStatusFromProviderHealth(
-    result.data.providerHealthSummary,
+  const status = dataReleaseStatusFromRelease(
+    result.data.release,
     result.data.providerHealthEvaluatedAt,
   );
 

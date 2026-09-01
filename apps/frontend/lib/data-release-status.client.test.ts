@@ -3,139 +3,66 @@ import { test } from "node:test";
 import {
   formatRelativeReleaseTime,
   presentDataReleaseStatus,
-  providerHealthRefreshDelayMilliseconds,
+  recordUpdateRefreshIntervalMilliseconds,
 } from "./data-release-status.client";
 
 const NOW = Date.parse("2026-08-11T19:00:00.000Z");
 
-test("data release status exposes stable fresh, delayed, loading, and unavailable copy", () => {
-  assert.equal(
-    presentDataReleaseStatus(
-      {
-        state: "fresh",
-        updatedAt: "2026-08-11T18:59:32.000Z",
-        freshThrough: "2026-08-11T19:15:00.000Z",
-        evaluatedAt: "2026-08-11T19:00:00.000Z",
-        nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
-        dataSource: "canonical",
-      },
-      NOW,
-    ).visibleLabel,
-    "Provider feeds healthy · Checked 28s ago",
-  );
-  assert.equal(
-    presentDataReleaseStatus(
-      {
-        state: "delayed",
-        updatedAt: "2026-08-11T18:38:00.000Z",
-        freshThrough: "2026-08-11T18:53:00.000Z",
-        evaluatedAt: "2026-08-11T18:53:00.000Z",
-        nextHealthEvaluationAt: null,
-        dataSource: "canonical",
-      },
-      NOW,
-    ).visibleLabel,
-    "Provider feeds delayed · Checked 22m ago",
-  );
-  assert.equal(
-    presentDataReleaseStatus({ state: "unavailable" }, NOW).visibleLabel,
-    "Provider feed status unavailable",
-  );
-  assert.equal(
-    presentDataReleaseStatus({ state: "loading" }, NOW).visibleLabel,
-    "Checking repack data",
-  );
-});
-
-test("data release status identifies mock data without presenting it as live", () => {
-  const fresh = presentDataReleaseStatus(
-    {
-      state: "fresh",
-      updatedAt: "2026-08-11T18:59:32.000Z",
-      freshThrough: "2026-08-11T19:15:00.000Z",
-      evaluatedAt: "2026-08-11T19:00:00.000Z",
-      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
-      dataSource: "mock",
-    },
-    NOW,
-  );
-  assert.equal(fresh.visibleLabel, "Mock data · Updated 28s ago");
-  assert.match(fresh.exactLabel, /^Mock repack data updated /);
-
-  const delayed = presentDataReleaseStatus(
-    {
-      state: "delayed",
-      updatedAt: "2026-08-11T18:38:00.000Z",
-      freshThrough: "2026-08-11T18:53:00.000Z",
-      evaluatedAt: "2026-08-11T18:53:00.000Z",
-      nextHealthEvaluationAt: null,
-      dataSource: "mock",
-    },
-    NOW,
-  );
-  assert.equal(delayed.visibleLabel, "Mock data delayed · 22m ago");
-  assert.match(delayed.exactLabel, /^Mock repack data is delayed\./);
-});
-
-test("provider health becomes delayed when its fresh-through time passes", () => {
+test("data release status reports the active record-set update time", () => {
   const presentation = presentDataReleaseStatus(
     {
-      state: "fresh",
-      updatedAt: "2026-08-11T18:38:00.000Z",
-      freshThrough: "2026-08-11T18:53:00.000Z",
-      evaluatedAt: "2026-08-11T18:53:00.000Z",
-      nextHealthEvaluationAt: null,
+      state: "available",
+      updatedAt: "2026-08-11T18:59:32.000Z",
+      evaluatedAt: "2026-08-11T19:00:00.000Z",
       dataSource: "canonical",
     },
     NOW,
   );
-  assert.equal(presentation.state, "delayed");
+
+  assert.equal(presentation.state, "available");
+  assert.equal(presentation.visibleLabel, "Records updated · 28s ago");
+  assert.match(presentation.exactLabel, /^Catalog records last updated /);
   assert.equal(
-    presentation.visibleLabel,
-    "Provider feeds delayed · Checked 22m ago",
+    presentDataReleaseStatus({ state: "unavailable" }, NOW).visibleLabel,
+    "Record update time unavailable",
+  );
+  assert.equal(
+    presentDataReleaseStatus({ state: "loading" }, NOW).visibleLabel,
+    "Checking record updates",
   );
 });
 
-test("provider health refresh delay uses only the trusted server clock pair", () => {
+test("data release status identifies mock records without presenting them as live", () => {
+  const presentation = presentDataReleaseStatus(
+    {
+      state: "available",
+      updatedAt: "2026-08-11T18:59:32.000Z",
+      evaluatedAt: "2026-08-11T19:00:00.000Z",
+      dataSource: "mock",
+    },
+    NOW,
+  );
+
+  assert.equal(presentation.visibleLabel, "Mock records updated · 28s ago");
+  assert.match(presentation.exactLabel, /^Mock catalog records last updated /);
+});
+
+test("available record status refreshes once per minute", () => {
   assert.equal(
-    providerHealthRefreshDelayMilliseconds({
-      state: "fresh",
+    recordUpdateRefreshIntervalMilliseconds({
+      state: "available",
       updatedAt: "2026-08-11T18:59:00.000Z",
       evaluatedAt: "2026-08-11T19:00:00.000Z",
-      freshThrough: "2026-08-11T19:15:00.000Z",
-      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
     }),
-    15 * 60_000,
+    60_000,
   );
   assert.equal(
-    providerHealthRefreshDelayMilliseconds({
-      state: "fresh",
-      updatedAt: "2026-08-11T18:59:00.000Z",
-      evaluatedAt: "2026-08-11T19:15:00.000Z",
-      freshThrough: "2026-08-11T19:15:00.000Z",
-      nextHealthEvaluationAt: "2026-08-11T19:15:00.000Z",
-    }),
-    0,
-  );
-  assert.equal(
-    providerHealthRefreshDelayMilliseconds({
-      state: "delayed",
-      updatedAt: "2026-08-11T18:59:00.000Z",
-      evaluatedAt: "2026-08-11T19:15:00.000Z",
-      freshThrough: "2026-08-11T19:15:00.000Z",
-      nextHealthEvaluationAt: null,
-    }),
+    recordUpdateRefreshIntervalMilliseconds({ state: "unavailable" }),
     null,
   );
   assert.equal(
-    providerHealthRefreshDelayMilliseconds({
-      state: "delayed",
-      updatedAt: "2026-08-11T18:55:00.000Z",
-      evaluatedAt: "2026-08-11T19:00:00.000Z",
-      freshThrough: "2026-08-11T18:59:00.000Z",
-      nextHealthEvaluationAt: "2026-08-11T19:07:00.000Z",
-    }),
-    7 * 60_000,
+    recordUpdateRefreshIntervalMilliseconds({ state: "loading" }),
+    null,
   );
 });
 

@@ -20,7 +20,7 @@ import {
 import { dashboardHrefFor } from "@/lib/provider-banner";
 import { readDashboardBundle } from "@/lib/public-repacks.server";
 import { dashboardCatalogIsEmpty } from "@/lib/public-repacks-v3";
-import { dataReleaseStatusFromProviderHealth } from "@/lib/public-release-status";
+import { dataReleaseStatusFromRelease } from "@/lib/public-release-status";
 import { DashboardOverviewClient } from "./DashboardOverviewClient.client";
 
 /**
@@ -97,8 +97,8 @@ export default async function DashboardOverviewPage({
     );
   }
 
-  const status = dataReleaseStatusFromProviderHealth(
-    result.data.providerHealthSummary,
+  const status = dataReleaseStatusFromRelease(
+    result.data.release,
     result.data.providerHealthEvaluatedAt,
   );
 

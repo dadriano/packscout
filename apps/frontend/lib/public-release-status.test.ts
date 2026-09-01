@@ -6,74 +6,66 @@ import {
 } from "@packscout/contracts";
 import {
   dataReleaseStatusFromPublicResult,
-  dataReleaseStatusFromProviderHealth,
+  dataReleaseStatusFromRelease,
 } from "./public-release-status";
-import { providerHealthRefreshDelayMilliseconds } from "./data-release-status.client";
 import {
   buildV3ProviderHealthSummary,
   buildV3ReleaseIdentity,
   FIXTURE_CURRENT_EVALUATED_AT,
 } from "./packscout-ev-fixtures.test-support";
 
-const release = buildV3ReleaseIdentity();
-const healthy = buildV3ProviderHealthSummary("healthy");
-const delayed = buildV3ProviderHealthSummary("delayed");
+const release = {
+  ...buildV3ReleaseIdentity(),
+  dataAsOf: "2026-08-19T10:00:00.000Z",
+  completedAt: "2026-08-19T10:04:00.000Z",
+};
 const providerHealthEvaluatedAt = "2026-08-19T10:15:00.000Z";
 
-test("shell status maps provider health without using immutable release age", () => {
+function publicResult(
+  providerHealthSummary: ReturnType<typeof buildV3ProviderHealthSummary>,
+) {
+  return {
+    ok: true as const,
+    data: {
+      release,
+      publicFreshnessPolicyVersion:
+        PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
+      confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+      providerHealthEvaluatedAt,
+      providerHealthSummary,
+    },
+  };
+}
+
+test("shell status uses release completion rather than source or health clocks", () => {
   assert.deepEqual(
     dataReleaseStatusFromPublicResult(publicReadError("RELEASE_UNAVAILABLE")),
     { state: "unavailable" },
   );
   assert.deepEqual(
-    dataReleaseStatusFromProviderHealth(healthy, providerHealthEvaluatedAt),
+    dataReleaseStatusFromRelease(release, providerHealthEvaluatedAt),
     {
-      state: "fresh",
-      updatedAt: healthy.observedAt,
-      freshThrough: healthy.freshThrough,
+      state: "available",
+      updatedAt: release.completedAt,
       evaluatedAt: providerHealthEvaluatedAt,
-      nextHealthEvaluationAt: healthy.nextHealthEvaluationAt,
-      totalProviderCount: 1,
-      delayedProviderCount: 0,
     },
   );
-  assert.deepEqual(
-    dataReleaseStatusFromProviderHealth(delayed, providerHealthEvaluatedAt),
-    {
-      state: "delayed",
-      updatedAt: delayed.observedAt,
-      freshThrough: delayed.freshThrough,
-      evaluatedAt: providerHealthEvaluatedAt,
-      nextHealthEvaluationAt: delayed.nextHealthEvaluationAt,
-      totalProviderCount: 1,
-      delayedProviderCount: 1,
-    },
+
+  const healthy = dataReleaseStatusFromPublicResult(
+    publicResult(buildV3ProviderHealthSummary("healthy")),
   );
-  const fromDistinctServerClocks = dataReleaseStatusFromPublicResult({
-      ok: true,
-      data: {
-        release,
-        publicFreshnessPolicyVersion:
-          PACKSCOUT_LAST_KNOWN_EV_CONFIDENCE_POLICY_VERSION,
-        confidenceEvaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
-        providerHealthEvaluatedAt,
-        providerHealthSummary: healthy,
-      },
-    });
-  assert.deepEqual(
-    fromDistinctServerClocks,
-    dataReleaseStatusFromProviderHealth(healthy, providerHealthEvaluatedAt),
+  const delayed = dataReleaseStatusFromPublicResult(
+    publicResult(buildV3ProviderHealthSummary("delayed")),
   );
+
+  assert.deepEqual(healthy, delayed);
   assert.equal(
-    providerHealthRefreshDelayMilliseconds(fromDistinctServerClocks),
-    45 * 60_000,
-    "a later-page reload schedules from the fresh health clock, not pinned confidence",
+    "updatedAt" in delayed ? delayed.updatedAt : null,
+    release.completedAt,
+    "provider health must not replace the public record-set update clock",
   );
-  assert.deepEqual(
-    dataReleaseStatusFromProviderHealth(
-      buildV3ProviderHealthSummary("unavailable"),
-      FIXTURE_CURRENT_EVALUATED_AT,
-    ),
-    { state: "unavailable" },
+  assert.notEqual(
+    "updatedAt" in delayed ? delayed.updatedAt : null,
+    release.dataAsOf,
   );
 });
