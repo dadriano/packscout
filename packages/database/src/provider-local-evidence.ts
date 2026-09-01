@@ -42,15 +42,23 @@ const localAuditEvidenceKeys = new Set([
 ]);
 const activityEvidenceKeys = new Set([
   "attemptNumber",
+  "catalogContentHash",
+  "catalogVersionId",
+  "completedThroughChangeSequence",
   "expiredCount",
   "failureCode",
   "generation",
   "priorRunId",
+  "providerReleaseContentHash",
+  "providerReleaseFingerprint",
+  "providerReleaseId",
+  "publicProviderReleaseId",
   "quarantineState",
   "retentionState",
   "runState",
   "selectedCount",
   "state",
+  "terminalReceiptSha256",
 ]);
 
 function safeText(value: string, field: string): string {

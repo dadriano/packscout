@@ -1,0 +1,998 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import {
+  canonicalJson,
+  providerReleaseApplyBatchRequestSchema,
+  providerReleaseBlockRequestSchema,
+  providerReleaseCompletionReceiptSchema,
+  providerReleaseConfirmReuseRequestSchema,
+  providerReleaseExpectedCompletedHeadV1Schema,
+  providerReleaseFinalizeRequestSchema,
+  providerReleaseReceiptSchema,
+  providerReleaseReuseReceiptSchema,
+  providerReleaseStartRequestSchema,
+  verifyProviderCatalogReleasePlanV1,
+  type ProviderReleaseExpectedCompletedHeadV1,
+  type ProviderCatalogReleaseBatchV1,
+  type ProviderReleaseMutationRequest,
+  type ProviderReleaseReceipt,
+} from "@packscout/contracts";
+import { Prisma as ProviderPrisma } from
+  "../prisma/generated/provider/index.js";
+import type {
+  ProviderPrismaClient,
+  ProviderTransactionClient,
+} from "./provider-database.ts";
+import { appendProviderActivityOutbox } from "./provider-local-evidence.ts";
+import {
+  PrismaProviderWorkerLeaseRepository,
+  lockProviderWorkerLease,
+  providerWorkerLeaseDatabaseNow,
+  providerWorkerLeaseIsLive,
+} from "./provider-worker-lease-repository.ts";
+
+const TRANSACTION_OPTIONS = Object.freeze({
+  maxWait: 5_000,
+  timeout: 20_000,
+  isolationLevel: ProviderPrisma.TransactionIsolationLevel.Serializable,
+});
+const OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
+const HASH_PATTERN = /^[0-9a-f]{64}$/u;
+const FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/u;
+
+export type DistributedProviderPublicationOperationKind =
+  | "start"
+  | "applyBatch"
+  | "finalize"
+  | "confirmReuse"
+  | "block";
+
+export interface DistributedProviderPublicationOperation {
+  readonly operationId: string;
+  readonly operationKind: DistributedProviderPublicationOperationKind;
+  readonly canonicalRequestBody: string;
+  readonly requestSha256: string;
+}
+
+export interface DistributedProviderPublicationReceiptEvidence {
+  readonly canonicalReceiptBody: string;
+  readonly receiptSha256: string;
+}
+
+export interface DistributedProviderPublisherLease {
+  readonly owner: string;
+  readonly operationFence: bigint;
+  readonly checkpointFence: bigint;
+  readonly expiresAt: Date;
+}
+
+export interface DistributedProviderPublicationIntent {
+  readonly id: string;
+  readonly providerReleaseId: string;
+  readonly operationKind: DistributedProviderPublicationOperationKind;
+  readonly idempotencyKey: string;
+  readonly requestDigest: string;
+  readonly canonicalRequestBody: string;
+  readonly leaseFence: bigint;
+  readonly state: "pending" | "accepted" | "ambiguous" | "failed";
+  readonly attemptCount: number;
+  readonly canonicalReceiptBody: string | null;
+  readonly receiptSha256: string | null;
+  readonly failureCode: string | null;
+}
+
+export type ProviderReleasePublicationRepositoryFailureCode =
+  | "PROVIDER_PUBLICATION_LEASE_HELD"
+  | "PROVIDER_PUBLICATION_LEASE_LOST"
+  | "PROVIDER_PUBLICATION_SCOPE_INVALID"
+  | "PROVIDER_PUBLICATION_IDEMPOTENCY_CONFLICT"
+  | "PROVIDER_PUBLICATION_REQUEST_INVALID"
+  | "PROVIDER_PUBLICATION_RECEIPT_INVALID"
+  | "PROVIDER_PUBLICATION_SEQUENCE_CONFLICT";
+
+export class ProviderReleasePublicationRepositoryError extends Error {
+  constructor(readonly code: ProviderReleasePublicationRepositoryFailureCode) {
+    super(`Provider release publication persistence failed (${code}).`);
+    this.name = "ProviderReleasePublicationRepositoryError";
+  }
+}
+
+interface LockedCheckpoint {
+  readonly last_confirmed_sequence: bigint;
+  readonly lease_owner: string | null;
+  readonly lease_fence: bigint;
+  readonly lease_expires_at: Date | null;
+  readonly row_version: bigint;
+  readonly database_now: Date;
+}
+
+function repositoryFailure(
+  code: ProviderReleasePublicationRepositoryFailureCode,
+): never {
+  throw new ProviderReleasePublicationRepositoryError(code);
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function exactText(left: string, right: Uint8Array): boolean {
+  const expected = Buffer.from(left, "utf8");
+  return expected.byteLength === right.byteLength
+    && timingSafeEqual(expected, Buffer.from(right));
+}
+
+function requireOwner(owner: string, leaseMilliseconds: number): void {
+  if (
+    !OWNER_PATTERN.test(owner)
+    || !Number.isInteger(leaseMilliseconds)
+    || leaseMilliseconds < 1_000
+    || leaseMilliseconds > 15 * 60_000
+  ) throw new TypeError("Provider publication lease input is invalid.");
+}
+
+async function lockCheckpoint(
+  transaction: ProviderTransactionClient,
+): Promise<LockedCheckpoint> {
+  const [row] = await transaction.$queryRaw<LockedCheckpoint[]>(ProviderPrisma.sql`
+    select last_confirmed_sequence, lease_owner, lease_fence,
+           lease_expires_at, row_version, clock_timestamp() as database_now
+    from provider_change_consumers
+    where consumer_key = 'provider_release'
+    for update
+  `);
+  if (!row) throw new Error("Provider release checkpoint is missing.");
+  return row;
+}
+
+async function requireLease(
+  transaction: ProviderTransactionClient,
+  lease: DistributedProviderPublisherLease,
+): Promise<Readonly<{
+  checkpoint: LockedCheckpoint;
+  databaseNow: Date;
+}>> {
+  const worker = await lockProviderWorkerLease(transaction, "promotion");
+  const checkpoint = await lockCheckpoint(transaction);
+  if (
+    !providerWorkerLeaseIsLive(worker, {
+      owner: lease.owner,
+      fence: lease.operationFence,
+    })
+    || checkpoint.lease_owner !== lease.owner
+    || checkpoint.lease_fence !== lease.checkpointFence
+    || checkpoint.lease_expires_at === null
+    || checkpoint.lease_expires_at <= checkpoint.database_now
+  ) repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+  const workerNow = providerWorkerLeaseDatabaseNow(worker);
+  return {
+    checkpoint,
+    databaseNow: workerNow > checkpoint.database_now
+      ? workerNow
+      : checkpoint.database_now,
+  };
+}
+
+function parseRequest(
+  operation: DistributedProviderPublicationOperation,
+): ProviderReleaseMutationRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(operation.canonicalRequestBody) as unknown;
+  } catch {
+    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+  }
+  const parsed = operation.operationKind === "start"
+    ? providerReleaseStartRequestSchema.safeParse(value)
+    : operation.operationKind === "applyBatch"
+      ? providerReleaseApplyBatchRequestSchema.safeParse(value)
+      : operation.operationKind === "finalize"
+        ? providerReleaseFinalizeRequestSchema.safeParse(value)
+        : operation.operationKind === "confirmReuse"
+          ? providerReleaseConfirmReuseRequestSchema.safeParse(value)
+          : providerReleaseBlockRequestSchema.safeParse(value);
+  if (
+    !parsed.success
+    || parsed.data.operationId !== operation.operationId
+    || parsed.data.idempotencyKey !== operation.operationId
+    || canonicalJson(parsed.data) !== operation.canonicalRequestBody
+    || sha256(operation.canonicalRequestBody) !== operation.requestSha256
+  ) repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+  return parsed.data;
+}
+
+function requestBodyHash(request: ProviderReleaseMutationRequest): string {
+  if (!("release" in request)) {
+    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+  }
+  return "batch" in request ? request.batch.batchHash : request.release.contentHash;
+}
+
+function requestBatchIndex(request: ProviderReleaseMutationRequest): number | null {
+  return "batch" in request ? request.batch.batchIndex : null;
+}
+
+function releaseContext(request: ProviderReleaseMutationRequest): string {
+  if (!("release" in request)) {
+    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+  }
+  return canonicalJson({
+    release: request.release,
+    providerCheckpoint: request.providerCheckpoint,
+    sourceWatermark: request.sourceWatermark,
+    observation: request.observation,
+    expectedCompletedHead: request.expectedCompletedHead,
+  });
+}
+
+function receiptFrom(
+  operation: DistributedProviderPublicationOperation,
+  evidence: DistributedProviderPublicationReceiptEvidence,
+): ProviderReleaseReceipt {
+  if (
+    !HASH_PATTERN.test(evidence.receiptSha256)
+    || sha256(evidence.canonicalReceiptBody) !== evidence.receiptSha256
+  ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  let value: unknown;
+  try {
+    value = JSON.parse(evidence.canonicalReceiptBody) as unknown;
+  } catch {
+    repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  }
+  const parsed = providerReleaseReceiptSchema.safeParse(value);
+  const request = parseRequest(operation);
+  if (!parsed.success || parsed.data.operationKind === "completedHead") {
+    repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  }
+  if (
+    parsed.data.operationKind !== operation.operationKind
+    || parsed.data.operationId !== operation.operationId
+    || parsed.data.idempotencyKey !== operation.operationId
+    || parsed.data.requestDigest !== operation.requestSha256
+    || !("release" in request)
+    || parsed.data.platformKey !== request.release.platformKey
+    || parsed.data.publicProviderReleaseId !==
+      request.release.publicProviderReleaseId
+    || !("details" in parsed.data)
+    || !("release" in parsed.data.details)
+    || canonicalJson(parsed.data.details.release) !==
+      canonicalJson(request.release)
+    || canonicalJson(parsed.data.details.providerCheckpoint) !==
+      canonicalJson(request.providerCheckpoint)
+    || parsed.data.details.sourceWatermark !== request.sourceWatermark
+    || canonicalJson(parsed.data.details.observation) !==
+      canonicalJson(request.observation)
+    || canonicalJson(parsed.data.details.expectedCompletedHead) !==
+      canonicalJson(request.expectedCompletedHead)
+    || canonicalJson(parsed.data) !== evidence.canonicalReceiptBody
+  ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  if (
+    parsed.data.operationKind === "applyBatch"
+    && "batch" in request
+    && (
+      parsed.data.details.batchIndex !== request.batch.batchIndex
+      || parsed.data.details.kind !== request.batch.kind
+      || parsed.data.details.batchHash !== request.batch.batchHash
+      || parsed.data.details.recordCount !== request.batch.records.length
+      || parsed.data.details.byteCount !== request.batch.byteCount
+    )
+  ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  return parsed.data;
+}
+
+function intentFrom(row: {
+  readonly id: string;
+  readonly provider_release_id: string;
+  readonly operation_kind: string;
+  readonly idempotency_key: string;
+  readonly request_digest: string;
+  readonly request_bytes: Uint8Array;
+  readonly lease_fence: bigint;
+  readonly state: "pending" | "accepted" | "ambiguous" | "failed";
+  readonly attempt_count: number;
+  readonly failure_code: string | null;
+  readonly receipt?: Readonly<{
+    response_bytes: Uint8Array;
+    response_digest: string;
+  }> | null;
+}): DistributedProviderPublicationIntent {
+  return {
+    id: row.id,
+    providerReleaseId: row.provider_release_id,
+    operationKind: row.operation_kind as
+      DistributedProviderPublicationOperationKind,
+    idempotencyKey: row.idempotency_key,
+    requestDigest: row.request_digest,
+    canonicalRequestBody: new TextDecoder().decode(row.request_bytes),
+    leaseFence: row.lease_fence,
+    state: row.state,
+    attemptCount: row.attempt_count,
+    canonicalReceiptBody: row.receipt === undefined || row.receipt === null
+      ? null
+      : new TextDecoder().decode(row.receipt.response_bytes),
+    receiptSha256: row.receipt?.response_digest ?? null,
+    failureCode: row.failure_code,
+  };
+}
+
+async function requireFinalizeTranscript(
+  transaction: ProviderTransactionClient,
+  providerReleaseId: string,
+  terminalRequest: ProviderReleaseMutationRequest,
+): Promise<void> {
+  if (!("release" in terminalRequest)) {
+    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+  }
+  const rows = await transaction.provider_publication_operations.findMany({
+    where: {
+      provider_release_id: providerReleaseId,
+      operation_kind: { in: ["start", "applyBatch"] },
+      state: "accepted",
+    },
+    include: { receipt: true },
+  });
+  const expectedContext = releaseContext(terminalRequest);
+  let startCount = 0;
+  const batches: ProviderCatalogReleaseBatchV1[] = [];
+  for (const row of rows) {
+    if (
+      row.receipt === null
+      || (row.operation_kind !== "start" && row.operation_kind !== "applyBatch")
+    ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+    const operation: DistributedProviderPublicationOperation = {
+      operationId: row.idempotency_key,
+      operationKind: row.operation_kind,
+      canonicalRequestBody: new TextDecoder().decode(row.request_bytes),
+      requestSha256: row.request_digest,
+    };
+    const request = parseRequest(operation);
+    receiptFrom(operation, {
+      canonicalReceiptBody: new TextDecoder().decode(row.receipt.response_bytes),
+      receiptSha256: row.receipt.response_digest,
+    });
+    if (releaseContext(request) !== expectedContext) {
+      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+    }
+    if (row.operation_kind === "start") {
+      startCount += 1;
+    } else if ("batch" in request) {
+      batches.push(request.batch);
+    } else {
+      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+    }
+  }
+  batches.sort((left, right) => left.batchIndex - right.batchIndex);
+  if (
+    startCount !== 1
+    || batches.length !== terminalRequest.release.batchCount
+    || batches.some((batch, index) => batch.batchIndex !== index)
+  ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  try {
+    const verified = await verifyProviderCatalogReleasePlanV1({
+      schemaVersion: "provider_catalog_release_v1",
+      classification: "publish",
+      ...terminalRequest.release,
+      providerCheckpoint: terminalRequest.providerCheckpoint,
+      sourceWatermark: terminalRequest.sourceWatermark,
+      observation: terminalRequest.observation,
+      batches,
+    });
+    if (verified.classification !== "publish") {
+      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+    }
+  } catch (error) {
+    if (error instanceof ProviderReleasePublicationRepositoryError) throw error;
+    repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+  }
+}
+
+function emptyExpectedHead(platformKey: string): ProviderReleaseExpectedCompletedHeadV1 {
+  return providerReleaseExpectedCompletedHeadV1Schema.parse({
+    platformKey,
+    publicProviderReleaseId: null,
+    sharedConfigurationEpoch: null,
+    providerCheckpoint: { settledSequence: "0", settledAt: null },
+    observation: null,
+    terminalReceiptSha256: null,
+  });
+}
+
+async function setReconciliationContext(
+  transaction: ProviderTransactionClient,
+  lease: DistributedProviderPublisherLease,
+  intentFence: bigint,
+): Promise<void> {
+  if (intentFence === lease.operationFence) return;
+  await transaction.$queryRaw(ProviderPrisma.sql`
+    select set_config(
+             'packscout.provider_publication_reconciliation_owner',
+             ${lease.owner}, true
+           ),
+           set_config(
+             'packscout.provider_publication_reconciliation_fence',
+             ${lease.operationFence.toString()}, true
+           )
+  `);
+}
+
+export class ProviderReleasePublicationRepository {
+  readonly #workerLeases: PrismaProviderWorkerLeaseRepository;
+
+  constructor(private readonly provider: ProviderPrismaClient) {
+    this.#workerLeases = new PrismaProviderWorkerLeaseRepository(provider);
+  }
+
+  async claimLease(
+    owner: string,
+    leaseMilliseconds: number,
+  ): Promise<DistributedProviderPublisherLease> {
+    requireOwner(owner, leaseMilliseconds);
+    const worker = await this.#workerLeases.acquire({
+      role: "promotion",
+      owner,
+      leaseMilliseconds,
+    });
+    if (worker.kind === "held") {
+      repositoryFailure("PROVIDER_PUBLICATION_LEASE_HELD");
+    }
+    try {
+      const checkpoint = await this.provider.$transaction(async (transaction) => {
+        let row = await lockCheckpoint(transaction);
+        const active = row.lease_owner !== null
+          && row.lease_expires_at !== null
+          && row.lease_expires_at > row.database_now;
+        if (active && row.lease_owner !== owner) {
+          repositoryFailure("PROVIDER_PUBLICATION_LEASE_HELD");
+        }
+        const takeover = !active || row.lease_owner === null;
+        const expiresAt = new Date(
+          row.database_now.getTime() + leaseMilliseconds,
+        );
+        const changed = await transaction.provider_change_consumers.updateMany({
+          where: {
+            consumer_key: "provider_release",
+            row_version: row.row_version,
+          },
+          data: {
+            lease_owner: owner,
+            lease_fence: takeover ? row.lease_fence + 1n : row.lease_fence,
+            lease_expires_at: expiresAt,
+            row_version: { increment: 1n },
+            updated_at: row.database_now,
+          },
+        });
+        if (changed.count !== 1) {
+          repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+        }
+        row = await lockCheckpoint(transaction);
+        return row;
+      }, TRANSACTION_OPTIONS);
+      if (
+        checkpoint.lease_owner !== owner
+        || checkpoint.lease_expires_at === null
+      ) repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+      return {
+        owner,
+        operationFence: worker.lease.fence,
+        checkpointFence: checkpoint.lease_fence,
+        expiresAt: worker.lease.expiresAt < checkpoint.lease_expires_at
+          ? worker.lease.expiresAt
+          : checkpoint.lease_expires_at,
+      };
+    } catch (error) {
+      await this.#workerLeases.release({
+        role: "promotion",
+        owner,
+        fence: worker.lease.fence,
+      });
+      throw error;
+    }
+  }
+
+  async renewLease(
+    lease: DistributedProviderPublisherLease,
+    leaseMilliseconds: number,
+  ): Promise<DistributedProviderPublisherLease> {
+    requireOwner(lease.owner, leaseMilliseconds);
+    const worker = await this.#workerLeases.renew({
+      role: "promotion",
+      owner: lease.owner,
+      fence: lease.operationFence,
+      leaseMilliseconds,
+    });
+    if (worker === null) repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+    const checkpoint = await this.provider.$transaction(async (transaction) => {
+      let row = await lockCheckpoint(transaction);
+      if (
+        row.lease_owner !== lease.owner
+        || row.lease_fence !== lease.checkpointFence
+        || row.lease_expires_at === null
+        || row.lease_expires_at <= row.database_now
+      ) repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+      const expiresAt = new Date(row.database_now.getTime() + leaseMilliseconds);
+      const changed = await transaction.provider_change_consumers.updateMany({
+        where: {
+          consumer_key: "provider_release",
+          lease_owner: lease.owner,
+          lease_fence: lease.checkpointFence,
+          row_version: row.row_version,
+        },
+        data: {
+          lease_expires_at: expiresAt,
+          row_version: { increment: 1n },
+          updated_at: row.database_now,
+        },
+      });
+      if (changed.count !== 1) {
+        repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+      }
+      row = await lockCheckpoint(transaction);
+      return row;
+    }, TRANSACTION_OPTIONS);
+    if (checkpoint.lease_expires_at === null) {
+      repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
+    }
+    return {
+      ...lease,
+      expiresAt: worker.expiresAt < checkpoint.lease_expires_at
+        ? worker.expiresAt
+        : checkpoint.lease_expires_at,
+    };
+  }
+
+  async releaseLease(lease: DistributedProviderPublisherLease): Promise<void> {
+    await Promise.all([
+      this.#workerLeases.release({
+        role: "promotion",
+        owner: lease.owner,
+        fence: lease.operationFence,
+      }),
+      this.provider.$transaction(async (transaction) => {
+        const row = await lockCheckpoint(transaction);
+        if (row.lease_owner === null) return;
+        if (
+          row.lease_owner !== lease.owner
+          || row.lease_fence !== lease.checkpointFence
+        ) return;
+        await transaction.provider_change_consumers.updateMany({
+          where: {
+            consumer_key: "provider_release",
+            lease_owner: lease.owner,
+            lease_fence: lease.checkpointFence,
+            row_version: row.row_version,
+          },
+          data: {
+            lease_owner: null,
+            lease_expires_at: null,
+            row_version: { increment: 1n },
+            updated_at: row.database_now,
+          },
+        });
+      }, TRANSACTION_OPTIONS),
+    ]);
+  }
+
+  async loadExpectedCompletedHead(): Promise<ProviderReleaseExpectedCompletedHeadV1> {
+    return this.provider.$transaction(async (transaction) => {
+      const identity = await transaction.database_identity.findUniqueOrThrow({
+        where: { singleton_key: true },
+        select: { provider_key: true },
+      });
+      const state = await transaction.provider_publication_state.findUniqueOrThrow({
+        where: { singleton_key: true },
+        include: {
+          completion_receipt: {
+            include: { operation: true, provider_release: true },
+          },
+        },
+      });
+      if (
+        state.completed_release_id === null
+        || state.completion_receipt_id === null
+        || state.completed_at === null
+      ) {
+        if (state.completed_through_change_sequence !== 0n) {
+          repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+        }
+        return emptyExpectedHead(identity.provider_key);
+      }
+      const stored = state.completion_receipt;
+      if (
+        stored === null
+        || stored.provider_release_id !== state.completed_release_id
+        || stored.operation.provider_release_id !== state.completed_release_id
+        || stored.provider_release.lifecycle !== "complete"
+      ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      const canonicalReceiptBody = new TextDecoder().decode(stored.response_bytes);
+      if (sha256(canonicalReceiptBody) !== stored.response_digest) {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(canonicalReceiptBody) as unknown;
+      } catch {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+      const parsed = stored.operation.operation_kind === "finalize"
+        ? providerReleaseCompletionReceiptSchema.safeParse(value)
+        : stored.operation.operation_kind === "confirmReuse"
+          ? providerReleaseReuseReceiptSchema.safeParse(value)
+          : null;
+      if (
+        parsed === null
+        || !parsed.success
+        || parsed.data.platformKey !== identity.provider_key
+        || parsed.data.providerCheckpoint.settledSequence !==
+          state.completed_through_change_sequence.toString()
+        || parsed.data.receiptDigest !== stored.remote_receipt_id
+        || canonicalJson(parsed.data) !== canonicalReceiptBody
+      ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      return providerReleaseExpectedCompletedHeadV1Schema.parse({
+        platformKey: parsed.data.platformKey,
+        publicProviderReleaseId: parsed.data.publicProviderReleaseId,
+        sharedConfigurationEpoch: parsed.data.sharedConfigurationEpoch,
+        providerCheckpoint: parsed.data.providerCheckpoint,
+        observation: parsed.data.details.observation,
+        terminalReceiptSha256: stored.response_digest,
+      });
+    }, {
+      ...TRANSACTION_OPTIONS,
+      isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  async recordIntent(input: {
+    readonly lease: DistributedProviderPublisherLease;
+    readonly providerReleaseId: string;
+    readonly operation: DistributedProviderPublicationOperation;
+  }): Promise<DistributedProviderPublicationIntent> {
+    const request = parseRequest(input.operation);
+    if (!("release" in request)) {
+      repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+    }
+    return this.provider.$transaction(async (transaction) => {
+      const { databaseNow } = await requireLease(transaction, input.lease);
+      const identity = await transaction.database_identity.findUniqueOrThrow({
+        where: { singleton_key: true },
+        select: { provider_id: true, provider_key: true },
+      });
+      const release = await transaction.provider_releases.findUnique({
+        where: { id: input.providerReleaseId },
+      });
+      const existing = await transaction.provider_publication_operations.findUnique({
+        where: { idempotency_key: request.idempotencyKey },
+        include: { receipt: true },
+      });
+      if (
+        release === null
+        || release.provider_id !== identity.provider_id
+        || release.provider_key !== identity.provider_key
+        || request.release.platformKey !== identity.provider_key
+      ) repositoryFailure("PROVIDER_PUBLICATION_SCOPE_INVALID");
+      if (existing !== null) {
+        if (
+          existing.provider_release_id !== input.providerReleaseId
+          || existing.operation_kind !== input.operation.operationKind
+          || existing.request_digest !== input.operation.requestSha256
+          || !exactText(
+            input.operation.canonicalRequestBody,
+            existing.request_bytes,
+          )
+        ) repositoryFailure("PROVIDER_PUBLICATION_IDEMPOTENCY_CONFLICT");
+        return intentFrom(existing);
+      }
+      const reuse = input.operation.operationKind === "confirmReuse";
+      const block = input.operation.operationKind === "block";
+      if (
+        (reuse && release.lifecycle !== "complete")
+        || (block
+          && release.lifecycle !== "assembled"
+          && release.lifecycle !== "publishing"
+          && release.lifecycle !== "blocked")
+        || (!reuse && !block
+          && release.lifecycle !== "assembled"
+          && release.lifecycle !== "publishing")
+      ) repositoryFailure("PROVIDER_PUBLICATION_SCOPE_INVALID");
+      if (!reuse && !block && release.lifecycle === "assembled") {
+        await transaction.provider_releases.update({
+          where: { id: release.id },
+          data: { lifecycle: "publishing" },
+        });
+      }
+      const created = await transaction.provider_publication_operations.create({
+        data: {
+          provider_release_id: release.id,
+          operation_kind: input.operation.operationKind,
+          batch_index: requestBatchIndex(request),
+          idempotency_key: request.idempotencyKey,
+          request_digest: input.operation.requestSha256,
+          request_bytes: Buffer.from(
+            input.operation.canonicalRequestBody,
+            "utf8",
+          ),
+          body_hash: requestBodyHash(request),
+          lease_fence: input.lease.operationFence,
+          requested_at: databaseNow,
+        },
+        include: { receipt: true },
+      });
+      return intentFrom(created);
+    }, TRANSACTION_OPTIONS);
+  }
+
+  async recordAttempt(input: {
+    readonly lease: DistributedProviderPublisherLease;
+    readonly idempotencyKey: string;
+  }): Promise<void> {
+    await this.provider.$transaction(async (transaction) => {
+      const { databaseNow } = await requireLease(transaction, input.lease);
+      const changed = await transaction.provider_publication_operations.updateMany({
+        where: {
+          idempotency_key: input.idempotencyKey,
+          state: { in: ["pending", "ambiguous"] },
+        },
+        data: {
+          attempt_count: { increment: 1 },
+          last_attempted_at: databaseNow,
+        },
+      });
+      if (changed.count !== 1) {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+    }, TRANSACTION_OPTIONS);
+  }
+
+  async markAmbiguous(input: {
+    readonly lease: DistributedProviderPublisherLease;
+    readonly idempotencyKey: string;
+  }): Promise<void> {
+    await this.provider.$transaction(async (transaction) => {
+      await requireLease(transaction, input.lease);
+      const operation = await transaction.provider_publication_operations.findUnique({
+        where: { idempotency_key: input.idempotencyKey },
+      });
+      if (operation === null || operation.state === "accepted") return;
+      if (operation.state === "failed") {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+      if (operation.state === "pending") {
+        await transaction.provider_publication_operations.update({
+          where: { id: operation.id },
+          data: { state: "ambiguous" },
+        });
+      }
+    }, TRANSACTION_OPTIONS);
+  }
+
+  async fail(input: {
+    readonly lease: DistributedProviderPublisherLease;
+    readonly idempotencyKey: string;
+    readonly failureCode: string;
+  }): Promise<void> {
+    if (!FAILURE_CODE_PATTERN.test(input.failureCode)) {
+      throw new TypeError("Provider publication failure code is invalid.");
+    }
+    await this.provider.$transaction(async (transaction) => {
+      const { databaseNow } = await requireLease(transaction, input.lease);
+      const row = await transaction.provider_publication_operations.findUnique({
+        where: { idempotency_key: input.idempotencyKey },
+        include: { provider_release: true },
+      });
+      if (row === null || row.state === "accepted") {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+      if (row.state === "failed") return;
+      await setReconciliationContext(
+        transaction,
+        input.lease,
+        row.lease_fence,
+      );
+      await transaction.provider_publication_operations.update({
+        where: { id: row.id },
+        data: {
+          state: "failed",
+          failure_code: input.failureCode,
+          completed_at: databaseNow,
+        },
+      });
+      if (
+        row.operation_kind !== "confirmReuse"
+        && row.provider_release.lifecycle !== "complete"
+        && row.provider_release.lifecycle !== "blocked"
+        && row.provider_release.lifecycle !== "failed"
+      ) {
+        await transaction.provider_releases.update({
+          where: { id: row.provider_release_id },
+          data: { lifecycle: "blocked" },
+        });
+      }
+    }, TRANSACTION_OPTIONS);
+  }
+
+  async accept(input: {
+    readonly lease: DistributedProviderPublisherLease;
+    readonly providerReleaseId: string;
+    readonly operation: DistributedProviderPublicationOperation;
+    readonly evidence: DistributedProviderPublicationReceiptEvidence;
+  }): Promise<Readonly<{
+    receipt: ProviderReleaseReceipt;
+    completed: boolean;
+  }>> {
+    const receipt = receiptFrom(input.operation, input.evidence);
+    const request = parseRequest(input.operation);
+    if (!("release" in request)) {
+      repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+    }
+    return this.provider.$transaction(async (transaction) => {
+      const { checkpoint, databaseNow } = await requireLease(
+        transaction,
+        input.lease,
+      );
+      const row = await transaction.provider_publication_operations.findUnique({
+        where: { idempotency_key: request.idempotencyKey },
+        include: { receipt: true, provider_release: true },
+      });
+      if (
+        row === null
+        || row.provider_release_id !== input.providerReleaseId
+        || row.operation_kind !== input.operation.operationKind
+        || row.request_digest !== input.operation.requestSha256
+        || !exactText(input.operation.canonicalRequestBody, row.request_bytes)
+      ) repositoryFailure("PROVIDER_PUBLICATION_IDEMPOTENCY_CONFLICT");
+      if (row.state === "accepted") {
+        if (
+          row.receipt === null
+          || row.receipt.response_digest !== input.evidence.receiptSha256
+          || !exactText(
+            input.evidence.canonicalReceiptBody,
+            row.receipt.response_bytes,
+          )
+        ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+        return {
+          receipt,
+          completed: input.operation.operationKind === "finalize"
+            || input.operation.operationKind === "confirmReuse",
+        };
+      }
+      if (row.state === "failed") {
+        repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      }
+      if (input.operation.operationKind === "finalize") {
+        await requireFinalizeTranscript(
+          transaction,
+          row.provider_release_id,
+          request,
+        );
+      }
+      await setReconciliationContext(
+        transaction,
+        input.lease,
+        row.lease_fence,
+      );
+      await transaction.provider_publication_operations.update({
+        where: { id: row.id },
+        data: {
+          state: "accepted",
+          failure_code: null,
+          completed_at: databaseNow,
+        },
+      });
+      const terminal = input.operation.operationKind === "finalize"
+        || input.operation.operationKind === "confirmReuse";
+      const localRecordCount = terminal
+        ? await transaction.provider_release_batches.aggregate({
+            where: { provider_release_id: row.provider_release_id },
+            _sum: { record_count: true },
+          }).then(({ _sum }) => _sum.record_count ?? 0)
+        : "batch" in request
+          ? request.batch.records.length
+          : 0;
+      const acceptedContentHash = terminal
+        ? row.provider_release.content_hash
+        : requestBodyHash(request);
+      const localReceipt = await transaction.provider_publication_receipts.create({
+        data: {
+          operation_id: row.id,
+          provider_release_id: row.provider_release_id,
+          remote_receipt_id: receipt.receiptDigest,
+          outcome: "accepted",
+          response_digest: input.evidence.receiptSha256,
+          response_bytes: Buffer.from(
+            input.evidence.canonicalReceiptBody,
+            "utf8",
+          ),
+          accepted_content_hash: acceptedContentHash,
+          accepted_record_count: localRecordCount,
+          received_at: databaseNow,
+        },
+      });
+      if (input.operation.operationKind === "block") {
+        if (row.provider_release.lifecycle !== "blocked") {
+          await transaction.provider_releases.update({
+            where: { id: row.provider_release_id },
+            data: { lifecycle: "blocked" },
+          });
+        }
+        return { receipt, completed: false };
+      }
+      if (!terminal) return { receipt, completed: false };
+      if (
+        receipt.operationKind !== "finalize"
+        && receipt.operationKind !== "confirmReuse"
+      ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+      const completedSequence = BigInt(
+        receipt.providerCheckpoint.settledSequence,
+      );
+      if (
+        completedSequence <= checkpoint.last_confirmed_sequence
+        || (receipt.operationKind === "finalize"
+          && completedSequence !== row.provider_release.through_change_sequence)
+        || (receipt.operationKind === "confirmReuse"
+          && completedSequence <= row.provider_release.through_change_sequence)
+      ) repositoryFailure("PROVIDER_PUBLICATION_SEQUENCE_CONFLICT");
+      const ledger = await transaction.promotion_ledger.findUniqueOrThrow({
+        where: { singleton_key: true },
+        select: { last_sequence: true },
+      });
+      if (completedSequence > ledger.last_sequence) {
+        repositoryFailure("PROVIDER_PUBLICATION_SEQUENCE_CONFLICT");
+      }
+      if (receipt.operationKind === "finalize") {
+        if (row.provider_release.lifecycle !== "publishing") {
+          repositoryFailure("PROVIDER_PUBLICATION_SCOPE_INVALID");
+        }
+        await transaction.provider_releases.update({
+          where: { id: row.provider_release_id },
+          data: { lifecycle: "complete", completed_at: databaseNow },
+        });
+      } else if (row.provider_release.lifecycle !== "complete") {
+        repositoryFailure("PROVIDER_PUBLICATION_SCOPE_INVALID");
+      }
+      await transaction.provider_publication_state.update({
+        where: { singleton_key: true },
+        data: {
+          completed_release_id: row.provider_release_id,
+          completed_through_change_sequence: completedSequence,
+          completion_receipt_id: localReceipt.id,
+          completed_at: databaseNow,
+          row_version: { increment: 1n },
+          updated_at: databaseNow,
+        },
+      });
+      await transaction.provider_change_consumers.update({
+        where: { consumer_key: "provider_release" },
+        data: {
+          last_confirmed_sequence: completedSequence,
+          confirmation_kind: "provider_publication_receipt",
+          confirmation_id: localReceipt.id,
+          row_version: { increment: 1n },
+          updated_at: databaseNow,
+        },
+      });
+      await appendProviderActivityOutbox(transaction, {
+        eventType: "provider_release_completed",
+        severity: "info",
+        dedupeKey:
+          `provider-release-completed:${row.provider_release_id}:${completedSequence}`,
+        recoveryKey: `provider-release:${row.provider_release_id}`,
+        title: "Provider release publication completed",
+        summary: receipt.operationKind === "finalize"
+          ? "An immutable provider release completed publication."
+          : "An unchanged immutable provider release confirmed a newer boundary.",
+        evidence: {
+          state: receipt.operationKind === "finalize" ? "complete" : "reused",
+          providerReleaseId: row.provider_release_id,
+          publicProviderReleaseId: receipt.publicProviderReleaseId,
+          catalogVersionId: row.provider_release.catalog_version_id,
+          catalogContentHash: row.provider_release.catalog_content_hash,
+          providerReleaseContentHash: row.provider_release.content_hash,
+          providerReleaseFingerprint:
+            receipt.details.release.providerReleaseFingerprint,
+          completedThroughChangeSequence: completedSequence.toString(),
+          terminalReceiptSha256: input.evidence.receiptSha256,
+        },
+        eventAt: databaseNow,
+      });
+      return { receipt, completed: true };
+    }, TRANSACTION_OPTIONS);
+  }
+}
