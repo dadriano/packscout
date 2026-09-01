@@ -69,6 +69,42 @@ function activity(): ProviderActivityEvent {
   };
 }
 
+function completionActivity(
+  sequence = "21",
+  id = "71000000-0000-4000-8000-000000000006",
+): ProviderActivityEvent {
+  const providerReleaseId = "71000000-0000-5000-8000-000000000007";
+  const identity = {
+    id,
+    eventType: "provider_release_completed",
+    severity: "info" as const,
+    dedupeKey: `provider-release-completed:${providerReleaseId}:${sequence}`,
+    recoveryKey: `provider-release:${providerReleaseId}`,
+    localRunId: null,
+    localQuarantineId: null,
+    title: "Provider release publication completed",
+    summary: "An immutable provider release completed publication.",
+    evidence: {
+      state: "complete",
+      providerReleaseId,
+      publicProviderReleaseId: "71000000-0000-5000-8000-000000000008",
+      catalogVersionId: "71000000-0000-4000-8000-000000000009",
+      catalogContentHash: "a".repeat(64),
+      providerReleaseContentHash: "b".repeat(64),
+      providerReleaseFingerprint: "c".repeat(64),
+      completedThroughChangeSequence: sequence,
+      terminalReceiptSha256: "d".repeat(64),
+    },
+    eventAt: observedAt,
+  } as const;
+  return {
+    ...identity,
+    eventDigest: providerActivityEventDigest(identity),
+    deliveryAttemptCount: 0,
+    lastFailureCode: null,
+  };
+}
+
 test("an unreachable provider is isolated while another outbox delivers", async () => {
   const calls: string[] = [];
   const logs: Parameters<ProviderActivityRelayObservability["log"]>[0][] = [];
@@ -314,4 +350,257 @@ test("provider outboxes use the validated admin route so disabled lanes drain", 
   await local.markDelivered(providerB, activity(), observedAt);
   await local.markFailed(providerB, activity(), observedAt, "CENTRAL_UNAVAILABLE");
   assert.equal(adminCalls, 3);
+});
+
+test("completion acceptance acknowledges locally even when immediate delivery drops", async () => {
+  const event = completionActivity();
+  const marks: string[] = [];
+  const notifications: unknown[] = [];
+  const logs: Parameters<ProviderActivityRelayObservability["log"]>[0][] = [];
+  const relay = new ProviderActivityRelayCoordinator({
+    directory: {
+      listRelayTargets: () => Promise.resolve({
+        targets: [providerA],
+        nextCursor: null,
+      }),
+      observeReachableHealth: () => Promise.resolve(),
+      recordDirectProbe: () => Promise.resolve(),
+      acceptProviderActivity: () => Promise.resolve({
+        state: "accepted",
+        completionGate: {
+          providerId: providerA.providerId,
+          observedCompletionGeneration: 21n,
+          requestedGeneration: 21n,
+          acknowledgedGeneration: 20n,
+          evidenceDigest: event.eventDigest,
+          pending: true,
+        },
+      }),
+    },
+    local: {
+      read: () => Promise.resolve({
+        state: "reachable",
+        batch: {
+          providerId: providerA.providerId,
+          health: health(providerA.providerId),
+          events: [event],
+        },
+      }),
+      markDelivered: () => {
+        marks.push("delivered");
+        return Promise.resolve();
+      },
+      markFailed: () => {
+        marks.push("failed");
+        return Promise.resolve();
+      },
+    },
+    immediateDelivery: {
+      request(input) {
+        notifications.push(input);
+        return Promise.reject(new Error("hosting transport unavailable"));
+      },
+    },
+    clock: () => new Date("2026-08-29T12:01:00.000Z"),
+    observability: { log: (entry) => void logs.push(entry) },
+  });
+
+  assert.deepEqual(await relay.runCycle(), {
+    providers: 1,
+    delivered: 1,
+    deduplicated: 0,
+    unreachable: 0,
+    failures: 0,
+    backpressured: 0,
+  });
+  assert.deepEqual(marks, ["delivered"]);
+  assert.equal(notifications.length, 1);
+  assert.deepEqual(notifications[0], {
+    authority: "manifest_reconciliation",
+    cause: "provider_completion",
+    scopeId: providerA.providerId,
+    sourceGeneration: 21n,
+    sourceEvidenceDigest: event.eventDigest,
+    requestedAt: new Date("2026-08-29T12:01:00.000Z"),
+  });
+  assert.ok(logs.some((entry) =>
+    entry.outcome === "immediate_delivery_failed"
+    && entry.failureCode === "IMMEDIATE_DELIVERY_FAILED"
+  ));
+});
+
+test("a lost local acknowledgement replays central completion and reissues one safe hint", async () => {
+  const event = completionActivity();
+  let clock = new Date("2026-08-29T12:01:00.000Z");
+  let acceptances = 0;
+  let acknowledgements = 0;
+  let notifications = 0;
+  const relay = new ProviderActivityRelayCoordinator({
+    directory: {
+      listRelayTargets: () => Promise.resolve({
+        targets: [providerA],
+        nextCursor: null,
+      }),
+      observeReachableHealth: () => Promise.resolve(),
+      recordDirectProbe: () => Promise.resolve(),
+      acceptProviderActivity: () => {
+        acceptances += 1;
+        return Promise.resolve({
+          state: acceptances === 1 ? "accepted" : "deduplicated",
+          completionGate: {
+            providerId: providerA.providerId,
+            observedCompletionGeneration: 21n,
+            requestedGeneration: 21n,
+            acknowledgedGeneration: 0n,
+            evidenceDigest: event.eventDigest,
+            pending: true,
+          },
+        });
+      },
+    },
+    local: {
+      read: () => Promise.resolve({
+        state: "reachable",
+        batch: {
+          providerId: providerA.providerId,
+          health: health(providerA.providerId),
+          events: [event],
+        },
+      }),
+      markDelivered: () => {
+        acknowledgements += 1;
+        return acknowledgements === 1
+          ? Promise.reject(new Error("provider acknowledgement lost"))
+          : Promise.resolve();
+      },
+      markFailed: () => Promise.resolve(),
+    },
+    immediateDelivery: {
+      request() {
+        notifications += 1;
+        return Promise.resolve();
+      },
+    },
+    baseBackoffMilliseconds: 100,
+    clock: () => new Date(clock),
+  });
+
+  assert.equal((await relay.runCycle()).failures, 1);
+  assert.equal(notifications, 0);
+  clock = new Date(clock.getTime() + 101);
+  const replay = await relay.runCycle();
+  assert.equal(replay.deduplicated, 1);
+  assert.equal(replay.failures, 0);
+  assert.equal(acceptances, 2);
+  assert.equal(acknowledgements, 2);
+  assert.equal(notifications, 1);
+});
+
+test("central restart accepts a pending completion after an isolated outage", async () => {
+  const event = completionActivity();
+  let clock = new Date("2026-08-29T12:01:00.000Z");
+  let centralAvailable = false;
+  let delivered = 0;
+  const relay = new ProviderActivityRelayCoordinator({
+    directory: {
+      listRelayTargets: () => Promise.resolve({
+        targets: [providerB],
+        nextCursor: null,
+      }),
+      observeReachableHealth: () => centralAvailable
+        ? Promise.resolve()
+        : Promise.reject(new Error("central unavailable")),
+      recordDirectProbe: () => Promise.resolve(),
+      acceptProviderActivity: () => Promise.resolve({
+        state: "accepted",
+        completionGate: {
+          providerId: providerB.providerId,
+          observedCompletionGeneration: 21n,
+          requestedGeneration: 21n,
+          acknowledgedGeneration: 0n,
+          evidenceDigest: event.eventDigest,
+          pending: true,
+        },
+      }),
+    },
+    local: {
+      read: () => Promise.resolve({
+        state: "reachable",
+        batch: {
+          providerId: providerB.providerId,
+          health: health(providerB.providerId),
+          events: [event],
+        },
+      }),
+      markDelivered: () => {
+        delivered += 1;
+        return Promise.resolve();
+      },
+      markFailed: () => Promise.resolve(),
+    },
+    baseBackoffMilliseconds: 100,
+    clock: () => new Date(clock),
+  });
+
+  assert.equal((await relay.runCycle()).failures, 1);
+  assert.equal(delivered, 0);
+  centralAvailable = true;
+  clock = new Date(clock.getTime() + 101);
+  assert.equal((await relay.runCycle()).delivered, 1);
+  assert.equal(delivered, 1);
+});
+
+test("a cross-provider completion receipt fails before local delivery acknowledgement", async () => {
+  const event = completionActivity();
+  let delivered = 0;
+  let failed = 0;
+  let notified = 0;
+  const relay = new ProviderActivityRelayCoordinator({
+    directory: {
+      listRelayTargets: () => Promise.resolve({
+        targets: [providerA],
+        nextCursor: null,
+      }),
+      observeReachableHealth: () => Promise.resolve(),
+      recordDirectProbe: () => Promise.resolve(),
+      acceptProviderActivity: () => Promise.resolve({
+        state: "accepted",
+        completionGate: {
+          providerId: providerB.providerId,
+          observedCompletionGeneration: 21n,
+          requestedGeneration: 21n,
+          acknowledgedGeneration: 0n,
+          evidenceDigest: event.eventDigest,
+          pending: true,
+        },
+      }),
+    },
+    local: {
+      read: () => Promise.resolve({
+        state: "reachable",
+        batch: {
+          providerId: providerA.providerId,
+          health: health(providerA.providerId),
+          events: [event],
+        },
+      }),
+      markDelivered: () => {
+        delivered += 1;
+        return Promise.resolve();
+      },
+      markFailed: () => {
+        failed += 1;
+        return Promise.resolve();
+      },
+    },
+    immediateDelivery: {
+      request() {
+        notified += 1;
+        return Promise.resolve();
+      },
+    },
+  });
+
+  assert.equal((await relay.runCycle()).failures, 1);
+  assert.deepEqual([delivered, failed, notified], [0, 1, 0]);
 });

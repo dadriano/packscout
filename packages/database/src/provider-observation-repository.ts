@@ -8,12 +8,15 @@ import {
 import {
   assertProviderActivityEvent,
   assertProviderHealthObservation,
+  assertProviderReleaseCompletedActivity,
   providerActivityEventDigest,
   sanitizeProviderActivityEvidence,
   type ProviderActivityEvidenceValue,
   type ProviderActivityEvent,
   type ProviderLocalHealthObservation,
 } from "./provider-activity-contract.ts";
+import { PrismaManifestGateIntentRepository } from
+  "./manifest-gate-intent-repository.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -43,6 +46,14 @@ export interface ProviderActivityObservationReceipt {
   readonly eventId: string;
   readonly alertIds: readonly string[];
   readonly receivedAt: Date;
+  readonly completionGate: Readonly<{
+    readonly providerId: string;
+    readonly observedCompletionGeneration: bigint;
+    readonly requestedGeneration: bigint;
+    readonly acknowledgedGeneration: bigint;
+    readonly evidenceDigest: string;
+    readonly pending: boolean;
+  }> | null;
 }
 
 export type ProviderLocalReferenceResolution =
@@ -69,6 +80,52 @@ async function assertProviderOwnership(
   });
   if (provider === null) {
     throw new Error("Provider activity target is not registered.");
+  }
+}
+
+async function assertCompletionGenerationConsistent(
+  transaction: CentralQueryClient,
+  input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    eventId: string;
+    eventDigest: string;
+    completedThroughChangeSequence: string;
+  }>,
+): Promise<void> {
+  const [lockedProvider] = await transaction.$queryRaw<readonly {
+    id: string;
+  }[]>(CentralPrisma.sql`
+    select id::text as id
+    from providers
+    where id = ${input.providerId}::uuid
+      and organization_id = ${input.organizationId}::uuid
+    for update
+  `);
+  if (!lockedProvider) {
+    throw new Error("Provider activity target is not registered.");
+  }
+  const [existing] = await transaction.$queryRaw<readonly {
+    id: string;
+    event_digest: string;
+  }[]>(CentralPrisma.sql`
+    select id::text as id, event_digest
+    from provider_activity_events
+    where provider_id = ${input.providerId}::uuid
+      and event_type = 'provider_release_completed'
+      and evidence ->> 'completedThroughChangeSequence' =
+        ${input.completedThroughChangeSequence}
+    order by received_at, id
+    limit 1
+  `);
+  if (
+    existing
+    && (
+      existing.id !== input.eventId
+      || existing.event_digest !== input.eventDigest
+    )
+  ) {
+    throw new Error("Provider completion generation is inconsistent.");
   }
 }
 
@@ -468,12 +525,29 @@ export class CentralProviderObservationRepository {
     }
     const event = assertProviderActivityEvent(input.event);
     const health = assertProviderHealthObservation(input.health);
+    const completion = event.eventType === "provider_release_completed"
+      ? assertProviderReleaseCompletedActivity(event)
+      : null;
+    const completionGeneration = completion === null
+      ? null
+      : BigInt(completion.completedThroughChangeSequence);
+    const gateRepository = new PrismaManifestGateIntentRepository(this.central);
     return this.central.$transaction(async (transaction) => {
       await assertProviderOwnership(
         transaction,
         input.organizationId,
         input.providerId,
       );
+      if (completion !== null) {
+        await assertCompletionGenerationConsistent(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          eventId: event.id,
+          eventDigest: event.eventDigest,
+          completedThroughChangeSequence:
+            completion.completedThroughChangeSequence,
+        });
+      }
       const storedAt = new Date(
         Math.max(input.receivedAt.getTime(), event.eventAt.getTime()),
       );
@@ -518,11 +592,40 @@ export class CentralProviderObservationRepository {
         lastActivityEventId: event.id,
         lastActivityAt: event.eventAt,
       });
+      const gate = completion === null
+        ? null
+        : await gateRepository.coalesce({
+            providerId: input.providerId,
+            requestedGeneration: completionGeneration!,
+            cause: "provider_completion",
+            evidenceDigest: event.eventDigest,
+            requestedAt: event.eventAt,
+          }, transaction);
+      if (
+        gate !== null
+        && (
+          gate.latestEvidenceDigest === null
+          || completionGeneration === null
+          || gate.requestedGeneration < completionGeneration
+        )
+      ) {
+        throw new Error("Provider completion gate did not retain its evidence.");
+      }
       return {
         state: isNew ? "accepted" : "deduplicated",
         eventId: event.id,
         alertIds: [],
         receivedAt: storedAt,
+        completionGate: gate === null
+          ? null
+          : {
+              providerId: gate.providerId,
+              observedCompletionGeneration: completionGeneration!,
+              requestedGeneration: gate.requestedGeneration,
+              acknowledgedGeneration: gate.acknowledgedGeneration,
+              evidenceDigest: gate.latestEvidenceDigest!,
+              pending: gate.pending,
+            },
       };
     }, CENTRAL_TRANSACTION_OPTIONS);
   }

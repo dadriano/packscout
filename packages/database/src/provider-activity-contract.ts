@@ -91,6 +91,8 @@ export interface ProviderReleaseCompletedActivityEvidence {
   readonly terminalReceiptSha256: string;
 }
 
+const maximumPostgresBigint = 9_223_372_036_854_775_807n;
+
 function validDate(value: Date): boolean {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
@@ -182,6 +184,7 @@ export function providerReleaseCompletedActivityEvidence(
     || !/^[1-9][0-9]{0,18}$/u.test(
       evidence.completedThroughChangeSequence,
     )
+    || BigInt(evidence.completedThroughChangeSequence) > maximumPostgresBigint
     || typeof evidence.terminalReceiptSha256 !== "string"
     || !digestPattern.test(evidence.terminalReceiptSha256)
   ) throw new TypeError("Provider release completion evidence is invalid.");
@@ -197,6 +200,34 @@ export function providerReleaseCompletedActivityEvidence(
       evidence.completedThroughChangeSequence,
     terminalReceiptSha256: evidence.terminalReceiptSha256,
   });
+}
+
+/**
+ * Validates the fixed provider-owned envelope as well as its typed evidence.
+ * Central uses this before treating a general activity event as manifest work.
+ */
+export function assertProviderReleaseCompletedActivity(
+  event: ProviderActivityEvent,
+): ProviderReleaseCompletedActivityEvidence {
+  const validated = assertProviderActivityEvent(event);
+  const evidence = providerReleaseCompletedActivityEvidence(validated);
+  const expectedSummary = evidence.state === "complete"
+    ? "An immutable provider release completed publication."
+    : "An unchanged immutable provider release confirmed a newer boundary.";
+  if (
+    validated.severity !== "info"
+    || validated.localRunId !== null
+    || validated.localQuarantineId !== null
+    || validated.dedupeKey !==
+      `provider-release-completed:${evidence.providerReleaseId}:${evidence.completedThroughChangeSequence}`
+    || validated.recoveryKey !==
+      `provider-release:${evidence.providerReleaseId}`
+    || validated.title !== "Provider release publication completed"
+    || validated.summary !== expectedSummary
+  ) {
+    throw new TypeError("Provider release completion envelope is invalid.");
+  }
+  return evidence;
 }
 
 function safeSentence(value: string, maximum: number): boolean {

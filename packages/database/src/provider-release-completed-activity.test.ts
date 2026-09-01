@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertProviderReleaseCompletedActivity,
   providerActivityEventDigest,
   providerReleaseCompletedActivityEvidence,
   type ProviderActivityEvent,
@@ -54,5 +55,50 @@ test("provider completion relay evidence is exact, typed, and digest-bound", () 
       evidence: { ...event.evidence, terminalReceiptSha256: "0" },
     }),
     /invalid/u,
+  );
+  assert.deepEqual(assertProviderReleaseCompletedActivity(event), {
+    ...identity.evidence,
+  });
+  const reusedIdentity = {
+    ...identity,
+    id: "10000000-0000-4000-8000-000000000002",
+    summary:
+      "An unchanged immutable provider release confirmed a newer boundary.",
+    evidence: { ...identity.evidence, state: "reused" },
+  } as const;
+  assert.equal(assertProviderReleaseCompletedActivity({
+    ...reusedIdentity,
+    eventDigest: providerActivityEventDigest(reusedIdentity),
+    deliveryAttemptCount: 1,
+    lastFailureCode: "CENTRAL_ACTIVITY_UNAVAILABLE",
+  }).state, "reused");
+  for (const invalid of [
+    { ...event, severity: "warning" as const },
+    { ...event, dedupeKey: "provider-release-completed:other" },
+    { ...event, recoveryKey: "provider-release:other" },
+    { ...event, summary: "A generic completion occurred." },
+  ]) {
+    const redigested = {
+      ...invalid,
+      eventDigest: providerActivityEventDigest(invalid),
+    };
+    assert.throws(
+      () => assertProviderReleaseCompletedActivity(redigested),
+      /envelope is invalid/u,
+    );
+  }
+  const overflow = {
+    ...event,
+    evidence: {
+      ...event.evidence,
+      completedThroughChangeSequence: "9223372036854775808",
+    },
+  };
+  assert.throws(
+    () => assertProviderReleaseCompletedActivity({
+      ...overflow,
+      eventDigest: providerActivityEventDigest(overflow),
+    }),
+    /evidence is invalid/u,
   );
 });

@@ -8,8 +8,29 @@ import {
   type ProviderActivityEvent,
   type ProviderActivityRelayTarget,
   type ProviderActivityRelayTargetPage,
+  type ProviderActivityObservationReceipt,
   type ProviderLocalHealthObservation,
 } from "@packscout/database";
+
+export type ProviderActivityRelayAcceptance = Readonly<{
+  readonly state: "accepted" | "deduplicated";
+  readonly completionGate?: ProviderActivityObservationReceipt["completionGate"];
+}>;
+
+/**
+ * Generic low-latency hint. Durable central gate state remains authoritative,
+ * so implementations may drop or duplicate this request safely.
+ */
+export interface PromotionJobImmediateDeliveryPort {
+  request(input: Readonly<{
+    readonly authority: "manifest_reconciliation";
+    readonly cause: "provider_completion";
+    readonly scopeId: string;
+    readonly sourceGeneration: bigint;
+    readonly sourceEvidenceDigest: string;
+    readonly requestedAt: Date;
+  }>): Promise<void>;
+}
 
 export interface ProviderActivityRelayDirectory {
   listRelayTargets(input: {
@@ -28,7 +49,7 @@ export interface ProviderActivityRelayDirectory {
     readonly event: ProviderActivityEvent;
     readonly health: ProviderLocalHealthObservation;
     readonly receivedAt: Date;
-  }): Promise<{ readonly state: "accepted" | "deduplicated" }>;
+  }): Promise<ProviderActivityRelayAcceptance>;
   recordDirectProbe(input: {
     readonly organizationId: string;
     readonly providerId: string;
@@ -87,6 +108,35 @@ interface BackoffState {
 }
 
 const noopObservability: ProviderActivityRelayObservability = { log() {} };
+const digestPattern = /^[0-9a-f]{64}$/u;
+
+function completionGateFromAcceptance(
+  target: ProviderActivityRelayTarget,
+  event: ProviderActivityEvent,
+  acceptance: ProviderActivityRelayAcceptance,
+): NonNullable<ProviderActivityRelayAcceptance["completionGate"]> | null {
+  const gate = acceptance.completionGate ?? null;
+  if (event.eventType !== "provider_release_completed") {
+    if (gate !== null) {
+      throw new Error("Provider activity acceptance scope is invalid.");
+    }
+    return null;
+  }
+  if (
+    gate === null
+    || gate.providerId !== target.providerId
+    || gate.observedCompletionGeneration < 1n
+    || gate.requestedGeneration < gate.observedCompletionGeneration
+    || gate.acknowledgedGeneration < 0n
+    || gate.acknowledgedGeneration > gate.requestedGeneration
+    || gate.pending !==
+      (gate.requestedGeneration > gate.acknowledgedGeneration)
+    || !digestPattern.test(gate.evidenceDigest)
+  ) {
+    throw new Error("Provider completion acceptance scope is invalid.");
+  }
+  return gate;
+}
 
 function boundedInteger(
   value: number | undefined,
@@ -207,6 +257,7 @@ export class ProviderActivityRelayCoordinator {
     maximumBackoffMilliseconds?: number;
     clock?: () => Date;
     observability?: ProviderActivityRelayObservability;
+    immediateDelivery?: PromotionJobImmediateDeliveryPort;
     providerId?: string;
   }>) {
     this.#batchSize = boundedInteger(dependencies.batchSize, 25, 1, 100);
@@ -354,9 +405,32 @@ export class ProviderActivityRelayCoordinator {
           health: read.batch.health,
           receivedAt: attemptedAt,
         });
+        const completionGate = completionGateFromAcceptance(
+          target,
+          event,
+          accepted,
+        );
         await this.dependencies.local.markDelivered(target, event, attemptedAt);
         if (accepted.state === "accepted") delivered += 1;
         else deduplicated += 1;
+        if (completionGate?.pending === true) {
+          await this.dependencies.immediateDelivery?.request({
+            authority: "manifest_reconciliation",
+            cause: "provider_completion",
+            scopeId: completionGate.providerId,
+            sourceGeneration: completionGate.requestedGeneration,
+            sourceEvidenceDigest: completionGate.evidenceDigest,
+            requestedAt: attemptedAt,
+          }).catch(() => {
+            this.#observability.log({
+              level: "warning",
+              event: "provider_activity_relay",
+              providerId: target.providerId,
+              outcome: "immediate_delivery_failed",
+              failureCode: "IMMEDIATE_DELIVERY_FAILED",
+            });
+          });
+        }
       } catch {
         await this.dependencies.local.markFailed(
           target,
@@ -411,6 +485,7 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
   maximumBackoffMilliseconds?: number;
   clock?: () => Date;
   observability?: ProviderActivityRelayObservability;
+  immediateDelivery?: PromotionJobImmediateDeliveryPort;
   providerId?: string;
 }>): ProviderActivityRelayCoordinator {
   return new ProviderActivityRelayCoordinator({
@@ -433,6 +508,9 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
     ...(input.observability === undefined
       ? {}
       : { observability: input.observability }),
+    ...(input.immediateDelivery === undefined
+      ? {}
+      : { immediateDelivery: input.immediateDelivery }),
     ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
   });
 }
