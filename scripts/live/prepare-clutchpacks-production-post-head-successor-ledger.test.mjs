@@ -83,3 +83,13 @@ test("preparer creates an initially absent private TMPDIR before loader work", a
   assert.equal((await stat(directory)).mode & 0o777, 0o700);
   assert.equal(await realpath(directory), directory);
 });
+
+test("preparer resolves the frozen prefixed attempt and refuses an unprefixed decoy", async t => {
+  const run = await realpath(await mkdtemp(path.join(os.tmpdir(), "clutch-c533-attempt-")));
+  t.after(() => rm(run, { recursive: true, force: true }));
+  const expected = path.join(run, "attempt-c1f1602d-d61d-4699-84cc-a0bd8a3f86c4");
+  await mkdir(expected, { mode: 0o700 });
+  assert.equal(await harness.frozenAttemptDirectory(run), expected);
+  await mkdir(path.join(run, "c1f1602d-d61d-4699-84cc-a0bd8a3f86c4"), { mode: 0o700 });
+  await assert.rejects(harness.frozenAttemptDirectory(run));
+});

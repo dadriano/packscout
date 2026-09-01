@@ -81,6 +81,10 @@ async function exists(file) {
   try { await lstat(file); return true; }
   catch (error) { if (error.code === "ENOENT") return false; throw error; }
 }
+async function frozenAttemptDirectory(run) {
+  if (await exists(path.join(run, OLD_ATTEMPT_ID))) refuse();
+  return path.join(run, `attempt-${OLD_ATTEMPT_ID}`);
+}
 async function syncDirectory(directory) {
   const handle = await open(directory, constants.O_RDONLY);
   try { await handle.sync(); } finally { await handle.close(); }
@@ -240,7 +244,8 @@ async function productionDocuments(args) {
   ]);
   for (const item of Object.values(TARGET_CHAIN)) await requirePin(item, 128 * 1024 * 1024,
     item === TARGET_CHAIN.preflightStderr ? 0 : 1, true);
-  const run = path.join(OLD_ROOT, RUN_ID), attempt = path.join(run, OLD_ATTEMPT_ID), pending = path.join(OLD_ROOT, "pending");
+  const run = path.join(OLD_ROOT, RUN_ID), attempt = await frozenAttemptDirectory(run),
+    pending = path.join(OLD_ROOT, "pending");
   const pendingNames = (await readdir(pending)).sort(), blocked = pendingNames.find(name => name.startsWith("blocked-"));
   if (!blocked || pendingNames.length !== 2 || !pendingNames.includes("head.json")) refuse();
   const old = { artifactDirectory: OLD_ROOT, publisherWorktree: PUBLISHER, publisherCommit: PUBLISHER_COMMIT,
@@ -321,6 +326,7 @@ async function main() {
 export const clutchpacksProductionPostHeadSuccessorPreparerTestHarness = process.env.NODE_ENV === "test" ?
   Object.freeze({ installLedger, installOrValidate, cleanupInstallTemps, parseRuntime, canonical, hashBytes,
     verifySelfPin, loadRuntimeInventoryReader, buildSealedDocuments, ensurePrivateDirectory: privateDirectory,
+    frozenAttemptDirectory,
     environment: ENVIRONMENT, ledgerSchemaSha256: LEDGER_SCHEMA_SHA256,
     settings: { node: NODE, executor: EXECUTOR, preparer: PREPARER } }) : undefined;
 
