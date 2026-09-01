@@ -34,6 +34,7 @@ export function MetricValue({
       className={styles.root}
       data-density={compact ? "compact" : "default"}
       data-state={metric.semanticState ?? "plain"}
+      data-tone={metric.tone ?? "plain"}
     >
       {showLabelRow ? (
         <div className={styles.labelRow}>

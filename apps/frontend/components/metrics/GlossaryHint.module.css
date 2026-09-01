@@ -73,6 +73,44 @@
   line-height: 1.48;
 }
 
+.details {
+  display: grid;
+  gap: 0.38rem;
+  border-block-start: 1px solid var(--color-border);
+  padding-block-start: 0.5rem;
+}
+
+.detailsHeading {
+  font-size: 0.68rem;
+  font-weight: 780;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.detailsList {
+  display: grid;
+  gap: 0.34rem;
+}
+
+.detail {
+  position: relative;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.42;
+  padding-inline-start: 0.72rem;
+}
+
+.detail::before {
+  position: absolute;
+  inset-block-start: 0.55em;
+  inset-inline-start: 0;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: var(--color-warning-strong);
+  content: "";
+}
+
 .learnLink {
   width: fit-content;
   margin-block-start: 0.18rem;

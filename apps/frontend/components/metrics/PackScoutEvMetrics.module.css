@@ -89,8 +89,20 @@
   text-transform: capitalize;
 }
 
-.confidence[data-band="high"] strong {
+.confidence[data-tone="positive"] strong {
   color: var(--color-positive);
+}
+
+.confidence[data-tone="caution"] strong {
+  color: var(--color-caution);
+}
+
+.confidence[data-tone="warning"] strong {
+  color: var(--color-warning-strong);
+}
+
+.confidence[data-tone="unavailable"] strong {
+  color: var(--color-status-neutral);
 }
 
 .note,

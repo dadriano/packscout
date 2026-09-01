@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { containsProtectedEvPublicationKeyV3 } from "@packscout/contracts";
 import {
+  evToneForSignedBasisPoints,
   MetricPresentationConsistencyError,
   formatMoneyMinorUnits,
   formatSignedEvPercent,
@@ -58,6 +59,9 @@ test("renders the approved $100 / 85% example with all four exact metrics", () =
   assert.equal(presentation.packPrice.displayValue, "$100.00");
   assert.equal(presentation.semanticState, "negative");
   assert.equal(presentation.semanticLabel, "Negative");
+  assert.equal(presentation.tone, "negative");
+  assert.equal(presentation.evDollars.tone, "negative");
+  assert.equal(presentation.evPercent.tone, "negative");
   assert.equal(
     presentation.sourceLine,
     "PackScout Gross EV — calculated from platform-provided data",
@@ -98,7 +102,33 @@ test("break-even estimates present a neutral state without invented signs", () =
   assert.equal(presentation.evPercent.displayValue, "0.00%");
   assert.equal(presentation.semanticState, "neutral");
   assert.equal(presentation.semanticLabel, "Neutral");
+  assert.equal(presentation.tone, "positive");
   assert.equal(presentation.zeroPayout, false);
+});
+
+test("uses selective EV tones without changing signed semantics", () => {
+  const cases = [
+    { basisPoints: 0, semanticState: "neutral", tone: "positive" },
+    { basisPoints: -499, semanticState: "negative", tone: "positive" },
+    { basisPoints: -500, semanticState: "negative", tone: "caution" },
+    { basisPoints: -999, semanticState: "negative", tone: "caution" },
+    { basisPoints: -1_000, semanticState: "negative", tone: "warning" },
+    { basisPoints: -1_499, semanticState: "negative", tone: "warning" },
+    { basisPoints: -1_500, semanticState: "negative", tone: "negative" },
+  ] as const;
+
+  assert.equal(evToneForSignedBasisPoints(1), "positive");
+  for (const { basisPoints, semanticState, tone } of cases) {
+    const presentation = presentPackScoutEvV3(
+      input(buildV3CurrentEv(10_000 + basisPoints)),
+    );
+
+    assert.equal(evToneForSignedBasisPoints(basisPoints), tone);
+    assert.equal(presentation.semanticState, semanticState);
+    assert.equal(presentation.tone, tone);
+    assert.equal(presentation.evDollars.tone, tone);
+    assert.equal(presentation.evPercent.tone, tone);
+  }
 });
 
 test("a valid zero payout renders $0.00 with an explicit zero-payout note", () => {
@@ -131,6 +161,7 @@ test("unavailable estimates never render zero, metrics, or a vendor fallback", (
   ]) {
     assert.equal(metric.availability, "unavailable");
     assert.equal(metric.displayValue, "Unavailable");
+    assert.equal(metric.tone, "unavailable");
     assert.doesNotMatch(metric.displayValue, /0/);
   }
   assert.equal(presentation.reason, "BUYBACK_UNAVAILABLE");
@@ -139,6 +170,8 @@ test("unavailable estimates never render zero, metrics, or a vendor fallback", (
     "Unavailable: documented buyback terms are unavailable.",
   );
   assert.equal(presentation.confidence.availability, "unavailable");
+  assert.equal(presentation.tone, "unavailable");
+  assert.equal(presentation.confidence.tone, "unavailable");
   // The Pack Price itself stays visible: unavailability is about the estimate.
   assert.equal(presentation.packPrice.displayValue, "$100.00");
 });
@@ -329,11 +362,35 @@ test("confidence copy describes evidence reliability, never profit likelihood", 
 
   assert.equal(confidence.displayValue, "High · 100%");
   assert.equal(confidence.scoreBasisPoints, 10_000);
+  assert.equal(confidence.tone, "positive");
   assert.match(confidence.accessibleLabel, /reliable and fresh/);
   assert.match(
     confidence.accessibleLabel,
     /not profit likelihood or whether EV is positive/,
   );
+});
+
+test("maps authoritative confidence bands to non-red tones", () => {
+  const current = buildV3CurrentEv(8_500);
+  assert.equal(current.status, "current");
+  if (current.status !== "current") return;
+  const cases = [
+    { scoreBasisPoints: 8_000, band: "high", tone: "positive" },
+    { scoreBasisPoints: 5_000, band: "medium", tone: "caution" },
+    { scoreBasisPoints: 4_999, band: "low", tone: "warning" },
+  ] as const;
+
+  for (const { scoreBasisPoints, band, tone } of cases) {
+    assert.equal(
+      presentPackScoutConfidence({
+        ...current.confidence,
+        scoreBasisPoints,
+        band,
+      }).tone,
+      tone,
+    );
+  }
+  assert.equal(presentPackScoutConfidence(null).tone, "unavailable");
 });
 
 test("buyback summaries show exact percent only for a documented uniform rate", () => {
@@ -470,6 +527,7 @@ test("server aggregates format through the same signed-percent presentation", ()
   );
   assert.equal(available.displayValue, "-7.75%");
   assert.equal(available.semanticState, "negative");
+  assert.equal(available.tone, "caution");
 
   const unavailable = presentSignedEvPercentMetric(
     { status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE" },
@@ -477,6 +535,7 @@ test("server aggregates format through the same signed-percent presentation", ()
   );
   assert.equal(unavailable.availability, "unavailable");
   assert.equal(unavailable.displayValue, "Unavailable");
+  assert.equal(unavailable.tone, "unavailable");
 
   const forbiddenPositive = presentSignedEvPercentMetric(
     { status: "available", basisPoints: 100 },

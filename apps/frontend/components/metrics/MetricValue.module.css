@@ -65,16 +65,27 @@
   content: "";
 }
 
-.root[data-state="negative"] .value,
-.root[data-state="negative"] .stateLabel {
+.root[data-tone="positive"] .value,
+.root[data-tone="positive"] .stateLabel {
+  color: var(--color-positive);
+}
+
+.root[data-tone="caution"] .value,
+.root[data-tone="caution"] .stateLabel {
+  color: var(--color-caution);
+}
+
+.root[data-tone="warning"] .value,
+.root[data-tone="warning"] .stateLabel {
+  color: var(--color-warning-strong);
+}
+
+.root[data-tone="negative"] .value,
+.root[data-tone="negative"] .stateLabel {
   color: var(--color-negative);
 }
 
-.root[data-state="neutral"] .stateLabel {
-  color: var(--color-status-neutral);
-}
-
-.root[data-state="unavailable"] .value {
+.root[data-tone="unavailable"] .value {
   color: var(--color-status-neutral);
   font-weight: 650;
 }

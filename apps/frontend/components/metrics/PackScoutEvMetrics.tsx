@@ -61,7 +61,7 @@ export function PackScoutEvMetrics({
       <div
         aria-label={presentation.confidence.accessibleLabel}
         className={styles.confidence}
-        data-band={presentation.confidence.band ?? "unavailable"}
+        data-tone={presentation.confidence.tone}
       >
         <span className={styles.confidenceLabel}>
           EV confidence
@@ -71,6 +71,7 @@ export function PackScoutEvMetrics({
               definition: METRIC_TRUST_COPY.confidenceExplanation,
               learnHref: EXPECTED_VALUE_ARTICLE_HREF,
             }}
+            details={presentation.confidence.limitations}
             field="evConfidence"
           />
         </span>

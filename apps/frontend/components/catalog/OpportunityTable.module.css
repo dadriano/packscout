@@ -234,18 +234,34 @@
   white-space: nowrap;
 }
 
-.metric[data-state="negative"] .metricValue,
-.metric[data-state="negative"] .metricState {
+.metric[data-tone="positive"] .metricValue,
+.metric[data-tone="positive"] .metricState {
+  color: var(--color-positive);
+}
+
+.metric[data-tone="caution"] .metricValue,
+.metric[data-tone="caution"] .metricState {
+  color: var(--color-caution);
+}
+
+.metric[data-tone="warning"] .metricValue,
+.metric[data-tone="warning"] .metricState {
+  color: var(--color-warning-strong);
+}
+
+.metric[data-tone="negative"] .metricValue,
+.metric[data-tone="negative"] .metricState {
   color: var(--color-negative);
 }
 
-.metric[data-state="unavailable"] .metricValue,
-.metric[data-state="unavailable"] .metricState {
+.metric[data-tone="unavailable"] .metricValue,
+.metric[data-tone="unavailable"] .metricState {
   color: var(--color-status-neutral);
 }
 
 .metricState,
-.unavailableReason {
+.unavailableReason,
+.confidence {
   color: var(--color-text-muted);
   font-size: 0.58rem;
   line-height: 1.35;
@@ -253,6 +269,27 @@
 
 .metricState {
   font-weight: 720;
+}
+
+.confidence {
+  display: block;
+  font-weight: 680;
+}
+
+.confidence[data-tone="positive"] {
+  color: var(--color-positive);
+}
+
+.confidence[data-tone="caution"] {
+  color: var(--color-caution);
+}
+
+.confidence[data-tone="warning"] {
+  color: var(--color-warning-strong);
+}
+
+.confidence[data-tone="unavailable"] {
+  color: var(--color-status-neutral);
 }
 
 .unavailableReason {

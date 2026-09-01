@@ -123,7 +123,11 @@ function RepackCard({
       <dl className={styles.details}>
         <div>
           <dt>EV confidence</dt>
-          <dd aria-label={estimate.confidence.accessibleLabel}>
+          <dd
+            aria-label={estimate.confidence.accessibleLabel}
+            className={styles.confidence}
+            data-tone={estimate.confidence.tone}
+          >
             {estimate.confidence.displayValue}
           </dd>
         </div>
