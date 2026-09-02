@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { tsImport } from "tsx/esm/api";
 const { providerMixedCursorFingerprint } = await tsImport("@packscout/database", import.meta.url);
+const { DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION } = await tsImport("@packscout/contracts", import.meta.url);
 const { providerDataforrestLiveIntegrationRegistry } = await tsImport("../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
 export const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
   operationId: "2a333333-3333-4333-8333-333333333335", operatorId: "2a333333-3333-4333-8333-333333333336" };
 export function residentFixture() {
   const now = new Date("2026-08-30T06:05:00Z");
-  const integration = providerDataforrestLiveIntegrationRegistry.resolveProvider("clutchpacks");
+  const integration = providerDataforrestLiveIntegrationRegistry.resolve(
+    "clutchpacks",
+    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  );
   const authority = { configNumber: 4n, integration, cachedConfiguration: { adapterKey: integration.manifest.adapterVersion,
     settings: { platform: "clutchpacks" } }, expiresAt: null, scheduleSeconds: 300, digest: "d".repeat(64) };
   const cursor = { sourceInstanceId: pins.providerId, sourceRevisionId: pins.configId, sourceTypeKey: integration.manifest.sourceTypeKey,
@@ -24,7 +28,8 @@ export function residentFixture() {
     failure_code: null, finished_at: new Date("2026-08-30T06:00:00Z"), requested_at: new Date("2026-08-30T05:59:00Z"), recovery_of_run_id: null };
   const last = { id: "2a333333-3333-4333-8333-333333333339", page_number: 1, continuation: "head", next_cursor: cursor, next_cursor_hash: hash };
   const runs = new Map([[parent.id, parent]]); const commands = []; const audits = []; const writes = [];
-  const lease = { worker_role: "import", lease_owner: null, lease_fence: 459n, lease_expires_at: null, row_version: 1n, database_now: now };
+  const lease = { worker_role: "import", lease_owner: null, lease_fence: 459n,
+    heartbeat_at: null, lease_expires_at: null, row_version: 1n, database_now: now };
   const filterAudit = where => audits.filter(row => (!where.action || row.action === where.action) &&
     (!where.correlation_id || row.correlation_id === where.correlation_id) &&
     (!where.target_id || row.target_id === where.target_id) &&
@@ -50,9 +55,11 @@ export function residentFixture() {
       findFirst: async () => [...runs.values()].sort((a, b) => b.requested_at - a.requested_at)[0],
       findMany: async ({ where }) => [...runs.values()].filter(row => where.recovery_of_run_id
         ? row.recovery_of_run_id === where.recovery_of_run_id : ["queued", "running"].includes(row.state)),
+      count: async ({ where }) => [...runs.values()].filter(row => where.state.in.includes(row.state)).length,
     },
     provider_run_pages: { findFirst: async ({ where }) => where.provider_run_id === parent.id ? last : null },
-    control_commands: { findMany: async () => commands, findUnique: async () => null },
+    control_commands: { findMany: async () => commands, findUnique: async () => null,
+      count: async ({ where }) => commands.filter(row => where.state.in.includes(row.state)).length },
     local_audit_events: {
       findMany: async ({ where, take }) => filterAudit(where).slice(0, take),
       findFirst: async ({ where }) => filterAudit(where)[0] ?? null,

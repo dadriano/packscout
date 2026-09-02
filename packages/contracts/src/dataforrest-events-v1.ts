@@ -20,13 +20,16 @@ import {
 } from "./provider-source-facts-v1.ts";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
@@ -41,13 +44,16 @@ export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
   "dataforrest-events-v1" as const;
 export {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
@@ -61,13 +67,13 @@ export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
 export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
 export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS = 1_000;
 export const DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS = 100;
-// Only the reviewed Courtyard-v2 profile admits this response budget. Historical
-// profiles retain their exact 8 MiB budget and cursor-version interpretation.
+// Only the reviewed Courtyard-v2 profile and its catalog-filter derivative admit
+// this response budget. Historical profiles retain their exact 8 MiB budget.
 export const DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES =
   32 * 1024 * 1024;
 export const DATAFORREST_EVENTS_V1_HISTORICAL_MAXIMUM_JSON_NODES = 480_000;
 // The exact blocked 100-record Courtyard page has 598,207 JSON values. Only
-// this capacity revision admits more; older adapter histories remain unchanged.
+// this capacity revision and its catalog derivative admit more.
 export const DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES = 640_000;
 
 export const dataforrestIdentityNamespaceByProvider =
@@ -176,6 +182,39 @@ export const dataforrestEventsSourceConfigurationV1Schema = z
   .object({ platform: z.enum(launchProviderKeys) })
   .strict();
 
+export const dataforrestEventsCatalogSourceConfigurationV1Schema = z
+  .object({
+    platform: z.enum(launchProviderKeys),
+    stream: z.literal("catalog"),
+  })
+  .strict();
+
+export function dataforrestEventsSourceConfigurationSchemaForAdapter(
+  adapterVersion: string,
+):
+  | typeof dataforrestEventsSourceConfigurationV1Schema
+  | typeof dataforrestEventsCatalogSourceConfigurationV1Schema {
+  switch (adapterVersion) {
+    case DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION:
+      return dataforrestEventsCatalogSourceConfigurationV1Schema;
+    case DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION:
+    case DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION:
+    case DATAFORREST_EVENTS_V1_ADAPTER_VERSION:
+    case DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION:
+    case DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION:
+      return dataforrestEventsSourceConfigurationV1Schema;
+    default:
+      throw new RangeError("dataforrest_events.adapter_version_unsupported");
+  }
+}
+
 const dataforrestProviderDeclarations = launchProviderKeys.map((provider) => ({
   provider,
   identityNamespaceKey: dataforrestIdentityNamespaceByProvider[provider],
@@ -188,10 +227,13 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
     | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION
     | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION
     | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION
     | typeof DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   options: Readonly<{
@@ -289,6 +331,18 @@ export const dataforrestCollectorCryptDistributedSourceAdapterManifest =
     },
   );
 
+/** Catalog-only Collector Crypt profile; distributed-v1 remains unfiltered. */
+export const dataforrestCollectorCryptCatalogSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "collector_crypt",
+      ),
+    },
+  );
+
 /** Courtyard-only native-card interpretation; shared launch-v1 stays immutable. */
 export const dataforrestCourtyardDistributedSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
@@ -305,6 +359,19 @@ export const dataforrestCourtyardDistributedSourceAdapterManifest =
 export const dataforrestCourtyardDistributedV2SourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
     DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      maximumResponseBytes: DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "courtyard",
+      ),
+    },
+  );
+
+/** Catalog-only Courtyard profile with the reviewed distributed-v2 bounds. */
+export const dataforrestCourtyardCatalogSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
     {
       pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
       maximumResponseBytes: DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
@@ -338,6 +405,18 @@ export const dataforrestPhygitalsDistributedV2SourceAdapterManifest =
     },
   );
 
+/** Catalog-only Phygitals profile with distributed-v2 native semantics. */
+export const dataforrestPhygitalsCatalogSourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "phygitals",
+      ),
+    },
+  );
+
 export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1V2SourceAdapterManifest,
@@ -345,16 +424,20 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
 ]);
 
 const dataforrestJsonNodeBudgets = new Map<string, number>([
   ...dataforrestEventsV1SourceAdapterManifests.map((manifest): [string, number] =>
     [manifest.adapterVersion, DATAFORREST_EVENTS_V1_HISTORICAL_MAXIMUM_JSON_NODES]),
   [DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION, DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES],
+  [DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION, DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES],
 ]);
 /** Exact immutable adapter admission, not a caller-selected or central mutable limit. */
 export function dataforrestEventsJsonNodeBudget(adapterVersion: string): number | null {
@@ -443,10 +526,13 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION
   ) {

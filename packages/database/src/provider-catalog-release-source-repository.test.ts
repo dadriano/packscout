@@ -2224,11 +2224,21 @@ async function addWriterPullAssetPackAssociation(
   };
 }
 
+function runSourceNativeReleaseTransaction<Result>(
+  harness: MigratedTestDatabase,
+  operation: (transaction: PackscoutTransactionClient) => Promise<Result>,
+): Promise<Result> {
+  return harness.client.$transaction(
+    operation,
+    { maxWait: 5_000, timeout: 30_000 },
+  );
+}
+
 test("provider snapshot accepts production-writer V1 pull causality and pairs its relationships", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(harness);
-    const association = await harness.client.$transaction((transaction) =>
+    const association = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture));
     const snapshot = await fixture.alphaRepository.loadProviderSnapshot({
       checkpoint: await currentAlphaCheckpoint(harness),
@@ -2252,7 +2262,7 @@ test("a post-read-clock V1 confirmation stays out even when its sequence is elig
     const fixture = await seedProviderRelease(harness);
     const associatedAt = new Date("2026-08-16T11:41:00.000Z");
     const readAt = new Date("2026-08-16T11:40:00.000Z");
-    const association = await harness.client.$transaction((transaction) =>
+    const association = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "later-than-read-clock",
         relationshipAt: associatedAt,
@@ -2296,16 +2306,16 @@ test("resolved one-sided V1 pulls remain valid while only complete pairs associa
   const harness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(harness);
-    const complete = await harness.client.$transaction((transaction) =>
+    const complete = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "complete",
       }));
-    const cardOnly = await harness.client.$transaction((transaction) =>
+    const cardOnly = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "card-only",
         includePack: false,
       }));
-    const packOnly = await harness.client.$transaction((transaction) =>
+    const packOnly = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "pack-only",
         includeCard: false,
@@ -2334,13 +2344,13 @@ test("multiple latest V1 pulls stay paired within their confirmation sets", asyn
   const harness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(harness);
-    const dash = await harness.client.$transaction((transaction) =>
+    const dash = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "grouped-dash",
         packExternalId: "a-1",
         relationshipAt: new Date("2026-08-16T11:41:00.000Z"),
       }));
-    const underscore = await harness.client.$transaction((transaction) =>
+    const underscore = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "grouped-underscore",
         packExternalId: "a_1",
@@ -2382,13 +2392,13 @@ test("a newer one-sided V1 set replaces an older complete set for the same pull"
     const pullExternalId = `pull-${associationKey}`;
     const firstAt = new Date("2026-08-16T11:41:00.000Z");
     const secondAt = new Date("2026-08-16T11:42:00.000Z");
-    const first = await harness.client.$transaction((transaction) =>
+    const first = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey,
         relationshipAt: firstAt,
       }));
 
-    await harness.client.$transaction(async (transaction) => {
+    await runSourceNativeReleaseTransaction(harness, async (transaction) => {
       await writeSourceNativeReleasePage(
         transaction,
         fixture,
@@ -2452,7 +2462,7 @@ test("retained legacy pull edges are audit-only beside the latest V1 relationshi
   const harness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(harness);
-    const association = await harness.client.$transaction(async (transaction) => {
+    const association = await runSourceNativeReleaseTransaction(harness, async (transaction) => {
       await addLegacyPullRelationshipSet(
         transaction,
         fixture,
@@ -2500,7 +2510,7 @@ test("duplicate V1 pull evidence returns one stable asset-pack establishment", a
   const harness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(harness);
-    const first = await harness.client.$transaction((transaction) =>
+    const first = await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "pair-first",
         assetExternalId: "asset-shared-pair",
@@ -2518,7 +2528,7 @@ test("duplicate V1 pull evidence returns one stable asset-pack establishment", a
       publicChangeSequence: first.publicChangeSequence,
     }]);
 
-    await harness.client.$transaction((transaction) =>
+    await runSourceNativeReleaseTransaction(harness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "pair-later",
         assetExternalId: "asset-shared-pair",
@@ -2561,7 +2571,7 @@ test("unresolved V1 pull edges are non-contributing and invalid future resolutio
   const unresolvedHarness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(unresolvedHarness);
-    await unresolvedHarness.client.$transaction((transaction) =>
+    await runSourceNativeReleaseTransaction(unresolvedHarness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "unresolved-pack",
         packExternalId: "missing-pack",
@@ -2577,7 +2587,7 @@ test("unresolved V1 pull edges are non-contributing and invalid future resolutio
   const lateHarness = await createMigratedTestDatabase();
   try {
     const fixture = await seedProviderRelease(lateHarness);
-    const association = await lateHarness.client.$transaction((transaction) =>
+    const association = await runSourceNativeReleaseTransaction(lateHarness, (transaction) =>
       addWriterPullAssetPackAssociation(transaction, fixture, {
         associationKey: "late-pack",
         packExternalId: "pack-created-late",

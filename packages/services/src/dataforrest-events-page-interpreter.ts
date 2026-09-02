@@ -3,11 +3,12 @@ import { isUtf8 } from "node:buffer";
 import { JSONParser, TokenType } from "@streamparser/json";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  dataforrestEventsCatalogSourceConfigurationV1Schema,
   dataforrestEventsJsonNodeBudget,
   dataforrestContinuation,
   dataforrestEventRecordV1Schema,
   dataforrestEventsPageV1Schema,
-  dataforrestEventsSourceConfigurationV1Schema,
+  dataforrestEventsSourceConfigurationSchemaForAdapter,
   dataforrestNextCursor,
   dataforrestEventsV1SourceAdapterManifests,
   normalizeDataforrestEventRecordForAdapter,
@@ -43,6 +44,20 @@ function dataforrestManifest(adapterVersion: string) {
   return dataforrestEventsV1SourceAdapterManifests.find(
     (manifest) => manifest.adapterVersion === adapterVersion,
   ) ?? null;
+}
+
+function dataforrestSourceConfigurationSchema(adapterVersion: string) {
+  try {
+    return dataforrestEventsSourceConfigurationSchemaForAdapter(adapterVersion);
+  } catch (error) {
+    if (
+      error instanceof RangeError &&
+      error.message === "dataforrest_events.adapter_version_unsupported"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 const knownStreams = new Set(["catalog", "pulls", "trades"]);
@@ -477,12 +492,16 @@ function sourceContextIsValid(
   const manifest = dataforrestManifest(context.adapterVersion);
   const declaration = manifest?.supportedProviders
     .find(({ provider }) => provider === context.provider);
-  const configuration = dataforrestEventsSourceConfigurationV1Schema.safeParse(
+  const configurationSchema = dataforrestSourceConfigurationSchema(
+    context.adapterVersion,
+  );
+  const configuration = configurationSchema?.safeParse(
     context.sourceConfiguration,
   );
   if (
     manifest === null ||
     declaration === undefined ||
+    configuration === undefined ||
     !configuration.success ||
     configuration.data.platform !== context.provider ||
     context.normalizedContractVersion !== manifest.normalizedContractVersion ||
@@ -507,6 +526,18 @@ function sourceContextIsValid(
         scope.catalogEntity === candidate.catalogEntity &&
         scope.canonicalKind === candidate.canonicalKind;
     });
+}
+
+function pageMatchesAdapterStreamFilter(
+  page: DataforrestEventsPageV1,
+  adapterVersion: string,
+): boolean {
+  const configurationSchema = dataforrestSourceConfigurationSchema(adapterVersion);
+  if (configurationSchema === null) return false;
+  if (configurationSchema !== dataforrestEventsCatalogSourceConfigurationV1Schema) {
+    return true;
+  }
+  return page.records.every((record) => record.stream === "catalog");
 }
 
 // Mirrors the outcome contract's safe-reference constraint so record-local
@@ -704,7 +735,9 @@ export function inspectDataforrestRawResponse(
   }
   try {
     const parsed = parseRawPage(input.protectedRawResponse, input.pageLimit, input.adapterVersion);
-    if (!parsed.ok) return Object.freeze({ kind, ok: false, code: "inspection_response_invalid" });
+    if (!parsed.ok || !pageMatchesAdapterStreamFilter(parsed.page, input.adapterVersion)) {
+      return Object.freeze({ kind, ok: false, code: "inspection_response_invalid" });
+    }
     return Object.freeze({ kind, ok: true, recordCount: parsed.page.records.length,
       outcomes: interpretRecords(parsed.page, input.provider, input.adapterVersion),
       continuation: dataforrestContinuation(parsed.page) });
@@ -766,6 +799,14 @@ async function interpretDataforrestSourceTestUnsafe(
       diagnostics: [diagnostic("source_response_invalid")],
     };
   }
+  if (!pageMatchesAdapterStreamFilter(parsed.page, context.adapterVersion)) {
+    return {
+      ok: false,
+      failure: failure("invalid_response"),
+      recordCount: parsed.page.records.length,
+      diagnostics: [diagnostic("catalog_stream_filter_violated")],
+    };
+  }
   const outcomes = interpretRecords(
     parsed.page,
     context.provider,
@@ -811,6 +852,13 @@ async function interpretDataforrestPageUnsafe(
       ok: false,
       failure: failure("invalid_response"),
       diagnostics: [diagnostic("page_wrapper_invalid")],
+    };
+  }
+  if (!pageMatchesAdapterStreamFilter(parsed.page, context.adapterVersion)) {
+    return {
+      ok: false,
+      failure: failure("invalid_response"),
+      diagnostics: [diagnostic("catalog_stream_filter_violated")],
     };
   }
   const continuation = dataforrestContinuation(parsed.page);

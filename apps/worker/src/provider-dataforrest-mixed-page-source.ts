@@ -3,7 +3,15 @@ import {
   opaqueCursorEnvelopeSchema,
   type OpaqueCursorEnvelope,
   type SourceAdapterFailure,
-  countProviderPageRecords, type ProviderPageRecordCounts,
+  countProviderPageRecords,
+  providerCatalogIdentityCensusSchema,
+  providerCatalogIdentityChainDigest,
+  providerCatalogIdentityCountMapDigest,
+  providerCatalogIdentityMultisetDigest,
+  providerCatalogSourceIdentityDigest,
+  type NormalizedProviderObservationPage,
+  type ProviderCatalogIdentityCensus,
+  type ProviderPageRecordCounts,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
@@ -53,6 +61,7 @@ export type ProviderDataforrestSourceFailureCode =
   | "PROVIDER_DATAFORREST_AUTHORITY_INVALID"
   | "PROVIDER_DATAFORREST_AUTHORITY_UNAVAILABLE"
   | "PROVIDER_DATAFORREST_CURSOR_INVALID"
+  | "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED"
   | "PROVIDER_DATAFORREST_PAGE_INVALID"
   | "PROVIDER_DATAFORREST_RESPONSE_INVALID"
   | "PROVIDER_DATAFORREST_TERMINALIZATION_FAILED"
@@ -83,6 +92,7 @@ export interface ProviderDataforrestPageTranslationRecorder {
     sourceRecordCount: number;
     normalizedRecordCount: number;
     recordCounts: ProviderPageRecordCounts;
+    catalogIdentityCensus: ProviderCatalogIdentityCensus | null;
   }>): Promise<Readonly<{
     kind: "recorded" | "lease_lost" | "run_not_running";
   }>>;
@@ -160,6 +170,262 @@ interface DataforrestOperationIdentity {
   readonly connectionProfileId: string;
   readonly connectionProfileRevisionId: string;
   readonly identityNamespaceKey: string;
+}
+
+interface CatalogIdentityCensusState {
+  readonly runId: string;
+  readonly pages: Map<number, Readonly<{
+    responseDigest: string;
+    requestedCheckpointFingerprint: string | null;
+    nextCheckpointFingerprint: string;
+    census: ProviderCatalogIdentityCensus;
+  }>>;
+  readonly identityCounts: Map<string, number>;
+  rawCardObservationCount: number;
+  rawPackObservationCount: number;
+  distinctCardIdentityCount: number;
+  distinctPackIdentityCount: number;
+  identityChainDigest: string | null;
+  reachedHead: boolean;
+}
+
+export interface ProviderCatalogIdentityCensusWorkSnapshot {
+  readonly pageDigestObservationCount: number;
+  readonly maximumPageDigestObservationCount: number;
+  readonly finalDigestDistinctIdentityCount: number;
+  readonly finalDigestComputationCount: number;
+}
+
+function isCatalogSource(
+  resolved: ResolvedDataforrestSourceAuthority,
+): boolean {
+  return "stream" in resolved.sourceConfiguration
+    && resolved.sourceConfiguration.stream === "catalog";
+}
+
+function catalogPageIdentityDigests(
+  page: NormalizedProviderObservationPage,
+): Readonly<{ cards: readonly string[]; packs: readonly string[] }> {
+  const cards: string[] = [];
+  const packs: string[] = [];
+  for (const outcome of page.outcomes) {
+    if (outcome.status !== "valid") continue;
+    const observation = outcome.observation;
+    if (observation.kind !== "catalog") {
+      failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+    }
+    const recordIdScopeKey = observation.entity === "card"
+      ? "catalog-card-v1" as const
+      : "catalog-pack-v1" as const;
+    if (observation.providerRecordIdentity.recordIdScopeKey !== recordIdScopeKey) {
+      failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+    }
+    const digest = providerCatalogSourceIdentityDigest({ recordIdScopeKey,
+      providerRecordId: observation.providerRecordIdentity.providerRecordId });
+    if (observation.entity === "card") cards.push(digest);
+    else packs.push(digest);
+  }
+  return Object.freeze({ cards: Object.freeze(cards), packs: Object.freeze(packs) });
+}
+
+function safeIdentityCount(left: number, right: number): number {
+  const sum = left + right;
+  if (!Number.isSafeInteger(sum)) {
+    failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+  }
+  return sum;
+}
+
+/** One process-scoped catalog census. A restarted page-K run is deliberately terminal. */
+export class ProviderCatalogIdentityCensusSession {
+  #state: CatalogIdentityCensusState | null = null;
+  #pageDigestObservationCount = 0;
+  #maximumPageDigestObservationCount = 0;
+  #finalDigestDistinctIdentityCount = 0;
+  #finalDigestComputationCount = 0;
+
+  assertCanRequest(input: Readonly<{
+    runId: string;
+    pageNumber: number;
+    sourceCheckpoint: CanonicalJsonValue | null;
+    sourceCheckpointFingerprint: string | null;
+  }>): void {
+    if (input.pageNumber === 1) {
+      if (input.sourceCheckpoint !== null ||
+        input.sourceCheckpointFingerprint !== null) {
+        failure("PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+      }
+    } else if (input.sourceCheckpoint === null ||
+      input.sourceCheckpointFingerprint === null ||
+      providerMixedCursorFingerprint(input.sourceCheckpoint) !==
+        input.sourceCheckpointFingerprint) {
+      failure("PROVIDER_DATAFORREST_CURSOR_INVALID");
+    }
+    const state = this.#state;
+    if (state === null) {
+      if (input.pageNumber !== 1) {
+        failure("PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+      }
+      return;
+    }
+    if (state.runId !== input.runId) {
+      if (!state.reachedHead) failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+      if (input.pageNumber !== 1) {
+        failure("PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+      }
+      return;
+    }
+    const prior = state.pages.get(input.pageNumber);
+    if (input.pageNumber > 1) {
+      const previousPage = state.pages.get(input.pageNumber - 1);
+      if (previousPage === undefined ||
+        input.sourceCheckpointFingerprint !==
+          previousPage.nextCheckpointFingerprint) {
+        failure("PROVIDER_DATAFORREST_CURSOR_INVALID");
+      }
+    }
+    if (prior !== undefined) {
+      if (prior.requestedCheckpointFingerprint !==
+        input.sourceCheckpointFingerprint) {
+        failure("PROVIDER_DATAFORREST_CURSOR_INVALID");
+      }
+      return;
+    }
+    if (state.reachedHead || input.pageNumber !== state.pages.size + 1) {
+      failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+    }
+  }
+
+  recordPage(input: Readonly<{
+    runId: string;
+    pageNumber: number;
+    pageResponseDigest: string;
+    reachedHead: boolean;
+    normalizedPage: NormalizedProviderObservationPage;
+    sourceCheckpoint: CanonicalJsonValue | null;
+    sourceCheckpointFingerprint: string | null;
+  }>): ProviderCatalogIdentityCensus {
+    this.assertCanRequest(input);
+    let state = this.#state;
+    if (state === null || state.runId !== input.runId) {
+      this.#pageDigestObservationCount = 0;
+      this.#maximumPageDigestObservationCount = 0;
+      this.#finalDigestDistinctIdentityCount = 0;
+      this.#finalDigestComputationCount = 0;
+      state = {
+        runId: input.runId,
+        pages: new Map(),
+        identityCounts: new Map(),
+        rawCardObservationCount: 0,
+        rawPackObservationCount: 0,
+        distinctCardIdentityCount: 0,
+        distinctPackIdentityCount: 0,
+        identityChainDigest: null,
+        reachedHead: false,
+      };
+      this.#state = state;
+    }
+    const nextCheckpointFingerprint = providerMixedCursorFingerprint(
+      input.normalizedPage.nextCursor as unknown as CanonicalJsonValue,
+    );
+    if (nextCheckpointFingerprint === null) {
+      failure("PROVIDER_DATAFORREST_CURSOR_INVALID");
+    }
+    const prior = state.pages.get(input.pageNumber);
+    if (prior !== undefined) {
+      if (prior.responseDigest !== input.pageResponseDigest ||
+        prior.nextCheckpointFingerprint !== nextCheckpointFingerprint) {
+        failure("PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+      }
+      return prior.census;
+    }
+    const identities = catalogPageIdentityDigests(input.normalizedPage);
+    const pageIdentities = [...identities.cards, ...identities.packs];
+    this.#pageDigestObservationCount = safeIdentityCount(
+      this.#pageDigestObservationCount,
+      pageIdentities.length,
+    );
+    this.#maximumPageDigestObservationCount = Math.max(
+      this.#maximumPageDigestObservationCount,
+      pageIdentities.length,
+    );
+    state.rawCardObservationCount = safeIdentityCount(
+      state.rawCardObservationCount,
+      identities.cards.length,
+    );
+    state.rawPackObservationCount = safeIdentityCount(
+      state.rawPackObservationCount,
+      identities.packs.length,
+    );
+    for (const digest of identities.cards) {
+      const priorCount = state.identityCounts.get(digest) ?? 0;
+      state.identityCounts.set(digest, safeIdentityCount(priorCount, 1));
+      if (priorCount === 0) {
+        state.distinctCardIdentityCount = safeIdentityCount(
+          state.distinctCardIdentityCount,
+          1,
+        );
+      }
+    }
+    for (const digest of identities.packs) {
+      const priorCount = state.identityCounts.get(digest) ?? 0;
+      state.identityCounts.set(digest, safeIdentityCount(priorCount, 1));
+      if (priorCount === 0) {
+        state.distinctPackIdentityCount = safeIdentityCount(
+          state.distinctPackIdentityCount,
+          1,
+        );
+      }
+    }
+    const pageIdentityMultisetDigest = providerCatalogIdentityMultisetDigest(
+      pageIdentities,
+    );
+    const identityChainDigest = providerCatalogIdentityChainDigest({
+      previousChainDigest: state.identityChainDigest,
+      pageNumber: input.pageNumber,
+      pageResponseDigest: input.pageResponseDigest,
+      pageIdentityMultisetDigest,
+    });
+    const identityMultisetDigest = input.reachedHead
+      ? providerCatalogIdentityCountMapDigest(state.identityCounts)
+      : null;
+    if (input.reachedHead) {
+      this.#finalDigestDistinctIdentityCount = state.identityCounts.size;
+      this.#finalDigestComputationCount = safeIdentityCount(
+        this.#finalDigestComputationCount,
+        1,
+      );
+    }
+    const census = providerCatalogIdentityCensusSchema.parse({
+      schemaVersion: "provider_catalog_identity_census_v1",
+      pageResponseDigest: input.pageResponseDigest,
+      rawCardObservationCount: state.rawCardObservationCount,
+      rawPackObservationCount: state.rawPackObservationCount,
+      distinctCardIdentityCount: state.distinctCardIdentityCount,
+      distinctPackIdentityCount: state.distinctPackIdentityCount,
+      identityChainDigest,
+      pageIdentityMultisetDigest,
+      identityMultisetDigest,
+    });
+    state.identityChainDigest = identityChainDigest;
+    state.reachedHead = input.reachedHead;
+    state.pages.set(input.pageNumber, Object.freeze({
+      responseDigest: input.pageResponseDigest,
+      requestedCheckpointFingerprint: input.sourceCheckpointFingerprint,
+      nextCheckpointFingerprint,
+      census,
+    }));
+    return census;
+  }
+
+  workSnapshot(): ProviderCatalogIdentityCensusWorkSnapshot {
+    return Object.freeze({
+      pageDigestObservationCount: this.#pageDigestObservationCount,
+      maximumPageDigestObservationCount: this.#maximumPageDigestObservationCount,
+      finalDigestDistinctIdentityCount: this.#finalDigestDistinctIdentityCount,
+      finalDigestComputationCount: this.#finalDigestComputationCount,
+    });
+  }
 }
 
 function operationIdentity(
@@ -449,6 +715,7 @@ export class ProviderDataforrestMixedPageSource
   readonly #workerId: string;
   readonly #integration: ProviderDataforrestLiveIntegration;
   readonly #maximumPageRecords: number | undefined;
+  readonly #catalogIdentityCensusSession: ProviderCatalogIdentityCensusSession;
 
   constructor(input: Readonly<{
     authorityResolver: DataforrestSourceAuthorityResolver;
@@ -457,6 +724,7 @@ export class ProviderDataforrestMixedPageSource
     workerId: string;
     integration: ProviderDataforrestLiveIntegration;
     adapter?: SourceAdapter;
+    catalogIdentityCensusSession?: ProviderCatalogIdentityCensusSession;
     /** Runtime resource ceiling; never changes the adapter's maximum or identity. */
     maximumPageRecords?: number;
   }>) {
@@ -470,6 +738,8 @@ export class ProviderDataforrestMixedPageSource
     this.#translationRecorder = input.translationRecorder;
     this.#workerId = input.workerId;
     this.#integration = input.integration;
+    this.#catalogIdentityCensusSession = input.catalogIdentityCensusSession ??
+      new ProviderCatalogIdentityCensusSession();
     this.#adapter = input.adapter ?? new DataforrestEventsSourceAdapter(
       {},
       input.integration.manifest,
@@ -483,6 +753,10 @@ export class ProviderDataforrestMixedPageSource
     return adapterKey === this.#integration.manifest.adapterVersion
       && providerKey === this.#integration.providerKey
       && adapterMatchesIntegration(this.#adapter, this.#integration);
+  }
+
+  catalogIdentityCensusWorkSnapshot(): ProviderCatalogIdentityCensusWorkSnapshot {
+    return this.#catalogIdentityCensusSession.workSnapshot();
   }
 
   async nextPage(input: ProviderCapturePageSourceInput): Promise<unknown> {
@@ -513,6 +787,15 @@ export class ProviderDataforrestMixedPageSource
       failure("PROVIDER_DATAFORREST_AUTHORITY_UNAVAILABLE");
     }
     validateResolvedAuthority(input, adapterKey, resolved, this.#integration);
+    const catalogSource = isCatalogSource(resolved);
+    if (catalogSource) {
+      this.#catalogIdentityCensusSession.assertCanRequest({
+        runId: input.runId,
+        pageNumber: input.pageNumber,
+        sourceCheckpoint: input.sourceCheckpoint,
+        sourceCheckpointFingerprint: input.sourceCheckpointFingerprint,
+      });
+    }
     const identity = operationIdentity(resolved, this.#integration);
     const cursor = requestedCursor({
       checkpoint: input.sourceCheckpoint,
@@ -668,6 +951,22 @@ export class ProviderDataforrestMixedPageSource
         captured: completed.value,
         translation,
       });
+      const pageResponseDigest = page.responseDigest;
+      if (typeof pageResponseDigest !== "string") {
+        failure("PROVIDER_DATAFORREST_PAGE_INVALID");
+      }
+      const catalogIdentityCensus = catalogSource
+        ? this.#catalogIdentityCensusSession.recordPage({
+            runId: input.runId,
+            pageNumber: input.pageNumber,
+            pageResponseDigest,
+            reachedHead:
+              completed.value.normalizedPage.continuation.kind !== "continue",
+            normalizedPage: completed.value.normalizedPage,
+            sourceCheckpoint: input.sourceCheckpoint,
+            sourceCheckpointFingerprint: input.sourceCheckpointFingerprint,
+          })
+        : null;
       let translationReceipt: Awaited<ReturnType<
         ProviderDataforrestPageTranslationRecorder["recordPageTranslation"]
       >>;
@@ -683,6 +982,7 @@ export class ProviderDataforrestMixedPageSource
             sourceRecordCount: completed.value.normalizedPage.outcomes.length,
             normalizedRecordCount: translation.records.length,
             recordCounts: countProviderPageRecords(translation.records),
+            catalogIdentityCensus,
           });
       } catch {
         failure("PROVIDER_DATAFORREST_TERMINALIZATION_FAILED");

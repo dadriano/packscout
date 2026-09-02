@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DATAFORREST_EVENTS_V1_ENDPOINT } from "@packscout/contracts";
+import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_EVENTS_V1_ENDPOINT,
+} from "@packscout/contracts";
 import {
   providerDatabaseTarget,
   type ProviderDatabaseRoute,
@@ -31,16 +35,25 @@ const nodeId = "00000000-0000-4000-8000-000000000025";
 const runId = "00000000-0000-4000-8000-000000000031";
 const initialNow = new Date("2026-08-29T18:00:00.000Z");
 
-function integrationFor(providerKey: string): ProviderDataforrestLiveIntegration {
+function integrationFor(
+  providerKey: string,
+  adapterKey: string,
+): ProviderDataforrestLiveIntegration {
   const integration = providerDataforrestLiveIntegrationRegistry
-    .resolveProvider(providerKey);
+    .resolve(providerKey, adapterKey);
   if (integration === null) {
     throw new TypeError(`${providerKey} integration fixture is unavailable.`);
   }
   return integration;
 }
-const courtyardIntegration = integrationFor("courtyard");
-const clutchIntegration = integrationFor("clutchpacks");
+const courtyardIntegration = integrationFor(
+  "courtyard",
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+);
+const clutchIntegration = integrationFor(
+  "clutchpacks",
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+);
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
