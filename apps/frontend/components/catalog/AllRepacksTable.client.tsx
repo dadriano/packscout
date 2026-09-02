@@ -19,7 +19,6 @@ import {
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
-import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -28,6 +27,7 @@ import {
   type CatalogSortDirection,
 } from "@/lib/all-repacks-table";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
+import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
@@ -106,8 +106,6 @@ function RepackRow({
     : null;
   const actions = publicRowActions(repack);
   const availability = presentPackAvailability(repack.availability);
-  const providerHealth = presentProviderHealthV3(repack.providerHealth);
-  const showStatusNote = estimate.status !== "current";
 
   return (
     <tr className={styles.row} data-selected={selected ? "true" : "false"}>
@@ -144,11 +142,6 @@ function RepackRow({
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={estimate.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-        {showStatusNote ? (
-          <span className={styles.chaseEvidence} title={[
-            estimate.freshness.dataAsOfLabel, estimate.reasonCopy, estimate.calculationPriceNote,
-          ].filter(Boolean).join(" ")}>{estimate.statusLabel}</span>
-        ) : null}
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={estimate.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
@@ -160,33 +153,11 @@ function RepackRow({
         <MetricValue compact metric={estimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <span
-          aria-label={estimate.confidence.accessibleLabel}
-          className={styles.confidence}
-          data-tone={estimate.confidence.tone}
-          title={estimate.confidence.accessibleLabel}
-        >
-          {estimate.confidence.displayValue}
-        </span>
-        {estimate.status === "last_known" &&
-        estimate.freshness.sourceAgeLabel ? (
-          <span className={styles.evidenceNote}>
-            {estimate.freshness.sourceAgeLabel}
-          </span>
-        ) : null}
-        {estimate.status === "last_known" && estimate.freshness.dataAsOf ? (
-          <time
-            className={styles.evidenceNote}
-            dateTime={estimate.freshness.dataAsOf}
-          >
-            {estimate.freshness.dataAsOfLabel}
-          </time>
-        ) : null}
-        {providerHealth.state !== "healthy" ? (
-          <span className={styles.providerWarning}>
-            {providerHealth.statusCopy}
-          </span>
-        ) : null}
+        <CatalogConfidenceEvidence
+          estimate={estimate}
+          providerHealth={repack.providerHealth}
+          repackName={repack.name}
+        />
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />

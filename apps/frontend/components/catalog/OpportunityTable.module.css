@@ -275,34 +275,6 @@
   font-weight: 720;
 }
 
-.confidenceCell {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-}
-
-.confidence {
-  display: block;
-  font-weight: 680;
-  white-space: nowrap;
-}
-
-.confidence[data-tone="positive"] {
-  color: var(--color-positive);
-}
-
-.confidence[data-tone="caution"] {
-  color: var(--color-caution);
-}
-
-.confidence[data-tone="warning"] {
-  color: var(--color-warning-strong);
-}
-
-.confidence[data-tone="unavailable"] {
-  color: var(--color-status-neutral);
-}
-
 .unavailableReason {
   overflow: hidden;
   max-width: 100%;

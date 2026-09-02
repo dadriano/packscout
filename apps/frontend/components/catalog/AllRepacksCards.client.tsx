@@ -16,8 +16,8 @@ import {
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
-import { presentProviderHealthV3 } from "@/lib/provider-health-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
+import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
@@ -55,7 +55,6 @@ function RepackCard({
     desiredSearchActive ? "Desired Chase Value" : "Top Chase Value",
   );
   const availability = presentPackAvailability(repack.availability);
-  const providerHealth = presentProviderHealthV3(repack.providerHealth);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -96,49 +95,17 @@ function RepackCard({
         <MetricValue compact metric={buyback} showReason={false} />
       </div>
 
-      {estimate.status === "last_known" || providerHealth.state !== "healthy" ? (
-        <div
-          className={styles.evidence}
-          data-health={providerHealth.state}
-        >
-          {estimate.status === "last_known" ? (
-            <>
-              <strong>{estimate.statusLabel}</strong>
-              {estimate.freshness.sourceAgeLabel ? (
-                <span>{estimate.freshness.sourceAgeLabel}</span>
-              ) : null}
-              {estimate.freshness.dataAsOf ? (
-                <time dateTime={estimate.freshness.dataAsOf}>
-                  {estimate.freshness.dataAsOfLabel}
-                </time>
-              ) : null}
-            </>
-          ) : null}
-          {providerHealth.state !== "healthy" ? (
-            <span>{providerHealth.statusCopy}</span>
-          ) : null}
-        </div>
-      ) : null}
-
       <dl className={styles.details}>
         <div>
           <dt>EV confidence</dt>
-          <dd
-            aria-label={estimate.confidence.accessibleLabel}
-            className={styles.confidence}
-            data-tone={estimate.confidence.tone}
-          >
-            {estimate.confidence.displayValue}
+          <dd>
+            <CatalogConfidenceEvidence
+              estimate={estimate}
+              providerHealth={repack.providerHealth}
+              repackName={repack.name}
+            />
           </dd>
         </div>
-        {estimate.status !== "current" ? (
-          <div>
-            <dt>Estimate</dt>
-            <dd title={[
-              estimate.freshness.dataAsOfLabel, estimate.reasonCopy, estimate.calculationPriceNote,
-            ].filter(Boolean).join(" ")}>{estimate.statusLabel}</dd>
-          </div>
-        ) : null}
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
           <dd>{displayedChase?.collectible.name ?? "Unavailable"}</dd>

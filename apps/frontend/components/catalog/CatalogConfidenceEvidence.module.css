@@ -1,0 +1,28 @@
+.root {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+}
+
+.value {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.value[data-tone="positive"] {
+  color: var(--color-positive);
+}
+
+.value[data-tone="caution"] {
+  color: var(--color-caution);
+}
+
+.value[data-tone="warning"] {
+  color: var(--color-warning-strong);
+}
+
+.value[data-tone="unavailable"] {
+  color: var(--color-status-neutral);
+}

@@ -29,6 +29,7 @@ type GlossaryHintProps = Readonly<{
   align?: "start" | "end";
   content?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
   details?: readonly string[];
+  detailsHeading?: string;
   trigger?: ReactNode;
   triggerAriaLabel?: string;
   triggerClassName?: string;
@@ -39,6 +40,7 @@ export function GlossaryHint({
   align = "start",
   content,
   details = [],
+  detailsHeading = "Confidence limitations",
   trigger,
   triggerAriaLabel,
   triggerClassName,
@@ -165,9 +167,7 @@ export function GlossaryHint({
           <span className={styles.definition}>{definition.definition}</span>
           {details.length > 0 ? (
             <span className={styles.details}>
-              <span className={styles.detailsHeading}>
-                Confidence limitations
-              </span>
+              <span className={styles.detailsHeading}>{detailsHeading}</span>
               <span className={styles.detailsList} role="list">
                 {details.map((detail) => (
                   <span

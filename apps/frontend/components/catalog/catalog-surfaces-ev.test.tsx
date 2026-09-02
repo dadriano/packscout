@@ -109,7 +109,7 @@ test("all four catalog surfaces render the same values from the shared boundary"
   }
   assert.match(
     surfaces.cards,
-    /<dd[^>]*data-tone="positive"[^>]*>High · 100%<\/dd>/,
+    /<dd><span[^>]*><span[^>]*data-tone="positive"[^>]*>High · 100%<\/span>/,
   );
   for (const value of EXPECTED_METRIC_VALUES) {
     assert.ok(surfaces.allRepacks.includes(value), `all repacks ${value}`);
@@ -201,34 +201,27 @@ test("last-known EV stays visible and sortable after the former 60-minute bounda
     evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
   });
   const opportunity = renderOpportunityTable(detail);
-  const detailSurfaces = [
+  const listSurfaces = [
     renderAllRepacksTable([detail]),
     renderAllRepacksCards([detail]),
-    renderInspector(detail),
   ];
-  for (const markup of [opportunity, ...detailSurfaces]) {
+  const inspector = renderInspector(detail);
+  for (const markup of [opportunity, ...listSurfaces, inspector]) {
     assert.ok(markup.includes("Last-known estimate"));
     assert.ok(markup.includes("Medium · 50%"));
     assert.ok(markup.includes("-$15.00"));
     assert.equal(markup.includes("Expired"), false);
   }
-  for (const markup of detailSurfaces) {
-    assert.ok(
-      markup.includes(
-        "Source data over 60 minutes old; last known values retained",
-      ),
+  for (const markup of [opportunity, ...listSurfaces]) {
+    assert.match(markup, /aria-label="View evidence for Last-known estimate: [^"]+"/);
+    assert.equal(
+      markup.includes("Source data over 60 minutes old; last known values retained"),
+      false,
     );
-    assert.ok(markup.includes("Source evidence last observed"));
+    assert.equal(markup.includes("Source evidence last observed"), false);
   }
-  assert.match(
-    opportunity,
-    /aria-label="View evidence for Last-known estimate: [^"]+"/,
-  );
-  assert.equal(
-    opportunity.includes("Source data over 60 minutes old; last known values retained"),
-    false,
-  );
-  assert.equal(opportunity.includes("Source evidence last observed"), false);
+  assert.ok(inspector.includes("Source data over 60 minutes old; last known values retained"));
+  assert.ok(inspector.includes("Source evidence last observed"));
   assert.ok(renderAllRepacksTable([detail]).includes("$85.00"));
   assert.ok(renderInspector(detail).includes("$85.00"));
 });
@@ -258,21 +251,21 @@ test("provider delay is informational and last-known EV remains rankable", () =>
     evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
     providerHealth: buildV3DelayedProviderHealth(),
   });
-  for (const markup of [
+  const listSurfaces = [
+    renderOpportunityTable(detail),
     renderAllRepacksTable([detail]),
     renderAllRepacksCards([detail]),
-    renderInspector(detail),
-  ]) {
-    assert.ok(
-      markup.includes(
-        "Provider feed delayed; displaying the latest available data.",
-      ),
-    );
+  ];
+  for (const markup of listSurfaces) {
+    assert.equal(markup.includes("Provider feed delayed; displaying the latest available data."), false);
+    assert.match(markup, /aria-label="View evidence for Last-known estimate: [^"]+"/);
     assert.ok(markup.includes("Last-known estimate"));
     assert.ok(markup.includes("-$15.00"));
   }
+  const inspector = renderInspector(detail);
+  assert.ok(inspector.includes("Provider feed delayed; displaying the latest available data."));
 
-  const opportunities = renderOpportunityTable(detail);
+  const opportunities = listSurfaces[0]!;
   assert.ok(opportunities.includes("Last-known estimate"));
   assert.ok(opportunities.includes("-$15.00"));
   assert.equal(opportunities.includes("excluded from Top Opportunities"), false);
@@ -322,12 +315,13 @@ test("all four catalog surfaces retain aged values with delayed feeds, failed up
     }) },
   });
   const opportunity = renderOpportunityTable(detail);
-  const detailSurfaces = [
-    renderAllRepacksTable([detail]), renderInspector(detail),
+  const listSurfaces = [
+    renderAllRepacksTable([detail]),
     renderStatic(<AllRepacksCards controls={null} onSelect={noop}
       page={buildV3ListPage([detail])} selectedPublicRepackId={null} />),
   ];
-  for (const markup of [opportunity, ...detailSurfaces]) {
+  const inspector = renderInspector(detail);
+  for (const markup of [opportunity, ...listSurfaces, inspector]) {
     assert.ok(markup.includes("-$15.00"));
     assert.ok(markup.includes("-15.00%"));
     assert.ok(markup.includes("Low · 0%"));
@@ -336,17 +330,14 @@ test("all four catalog surfaces retain aged values with delayed feeds, failed up
     assert.equal(markup.includes("excluded from Top Opportunities"), false);
     assert.equal(markup.includes("Expired"), false);
   }
-  for (const markup of detailSurfaces) {
-    assert.ok(markup.includes("Fresh calculation unavailable"));
-    assert.ok(markup.includes("calculation-time Pack Price of $100.00"));
+  for (const markup of [opportunity, ...listSurfaces]) {
+    assert.match(markup, /aria-label="View evidence for Last-known estimate: [^"]+"/);
+    assert.equal(markup.includes("Fresh calculation unavailable"), false);
+    assert.equal(
+      markup.includes("calculation-time Pack Price of $100.00"),
+      false,
+    );
   }
-  assert.match(
-    opportunity,
-    /aria-label="View evidence for Last-known estimate: [^"]+"/,
-  );
-  assert.equal(opportunity.includes("Fresh calculation unavailable"), false);
-  assert.equal(
-    opportunity.includes("calculation-time Pack Price of $100.00"),
-    false,
-  );
+  assert.ok(inspector.includes("Fresh calculation unavailable"));
+  assert.ok(inspector.includes("calculation-time Pack Price of $100.00"));
 });

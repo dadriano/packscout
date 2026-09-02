@@ -11,15 +11,13 @@ const styles = readFileSync(
   "utf8",
 );
 
-test("non-current opportunity evidence is passed to the shared accessible hint", () => {
+test("opportunities delegate confidence and evidence to the shared component", () => {
+  assert.match(source, /import \{ CatalogConfidenceEvidence \}/);
   assert.match(
     source,
-    /const estimateEvidence = \[[\s\S]*?statusLabel[\s\S]*?reasonCopy[\s\S]*?sourceAgeLabel[\s\S]*?dataAsOfLabel[\s\S]*?calculationPriceNote[\s\S]*?\]\.filter/,
+    /<CatalogConfidenceEvidence[\s\S]*?estimate=\{row\.packScoutEv\}[\s\S]*?providerHealth=\{repack\.providerHealth\}[\s\S]*?repackName=\{row\.name\}/,
   );
-  assert.match(
-    source,
-    /status !== "current"[\s\S]*?<GlossaryHint[\s\S]*?details=\{estimateEvidence\}[\s\S]*?field="evConfidence"/,
-  );
+  assert.doesNotMatch(source, /const estimateEvidence/);
 });
 
 test("the ten-column table scrolls without containing fixed hint panels", () => {
