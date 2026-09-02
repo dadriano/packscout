@@ -66,8 +66,8 @@ const providerConfigVersionId = "92000000-0000-4000-8000-000000000001";
 const publicProfileVersionId = "92000000-0000-4000-8000-000000000002";
 const catalogVersionId = "92000000-0000-4000-8000-000000000003";
 const globalCategoryId = "92000000-0000-4000-8000-000000000004";
-const providerKeyId = "local.provider-worker.e2e.v1";
-const dataReleaseV3KeyId = "local.provider-worker.v3.e2e.v1";
+export const providerKeyId = "local.provider-worker.e2e.v1";
+export const dataReleaseV3KeyId = "local.provider-worker.v3.e2e.v1";
 const packKey = "provider-worker-frontend-e2e";
 const displayName = "Promoted by the provider worker E2E";
 const authorityEnvironmentKeys = Object.freeze([
@@ -91,7 +91,7 @@ function refuse(code: string): never {
   throw new LocalProviderPromotionE2eError(code);
 }
 
-function loopbackSiteUrl(environment: NodeJS.ProcessEnv): string {
+export function loopbackSiteUrl(environment: NodeJS.ProcessEnv): string {
   const configured = environment.CONVEX_SITE_URL?.trim() ?? "";
   try {
     const parsed = new URL(configured);
@@ -141,7 +141,7 @@ async function runConvex(
   });
 }
 
-async function installPublicationAuthorities(input: Readonly<{
+export async function installPublicationAuthorities(input: Readonly<{
   environment: NodeJS.ProcessEnv;
   providerKey: string;
   providerSecret: Uint8Array;
@@ -313,14 +313,14 @@ async function releasePin(input: Readonly<{
   };
 }
 
-type CapturedProviderRows = {
+export type CapturedProviderRows = {
   categories: PublicCategory[];
   collectibles: PublicCollectible[];
   repacks: PublicRepackDetail[];
   chases: PublicRepackChase[];
 };
 
-function captureProviderBatch(
+export function captureProviderBatch(
   rows: CapturedProviderRows,
   canonicalRequestBody: string,
 ): void {
