@@ -16,10 +16,12 @@ import {
   type CanonicalObservationPackCandidate,
   type CanonicalPullCandidate,
   type ProductionProviderObservationMapperRegistry,
+  type ProviderObservationMappingOutcome,
 } from "@packscout/services";
 import type { ProviderDataforrestLiveIntegration } from
   "./provider-dataforrest-live-integration.ts";
 import {
+  ProviderCaptureSourceError,
   type ProviderCaptureTranslation,
   type ProviderMixedPageRecordDraft,
 } from "./provider-capture-source-contract.ts";
@@ -70,9 +72,63 @@ function sourceRecordKey(
     .digest("hex")}`;
 }
 
+type MapperRejection = Extract<
+  ProviderObservationMappingOutcome,
+  { status: "quarantined" }
+>;
+
+interface QuarantineFailure {
+  readonly reasonCode: string;
+  readonly fieldPath: string | null;
+}
+
+const unrecognizedMappingFailure: QuarantineFailure = Object.freeze({
+  reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
+  fieldPath: null,
+});
+
+/**
+ * Exact public-safe failures. A mapper reason is translated through this table
+ * rather than reformatted, so neither mapper text nor provider-native evidence
+ * can reach the quarantine record. A new mapper reason fails this file's build
+ * until it declares its own public-safe failure.
+ */
+const failureByMapperReason = Object.freeze({
+  availability_contradiction: Object.freeze({
+    reasonCode: "SOURCE_RECORD_AVAILABILITY_CONTRADICTION",
+    fieldPath: "providerFacts.authoritativeAvailability",
+  }),
+  mapper_input_incompatible: Object.freeze({
+    reasonCode: "SOURCE_RECORD_MAPPER_INPUT_INCOMPATIBLE",
+    fieldPath: null,
+  }),
+  pack_display_name_required: Object.freeze({
+    reasonCode: "SOURCE_RECORD_PACK_DISPLAY_NAME_REQUIRED",
+    fieldPath: "providerFacts.displayName",
+  }),
+  platform_mismatch: Object.freeze({
+    reasonCode: "SOURCE_RECORD_PLATFORM_MISMATCH",
+    fieldPath: null,
+  }),
+} as const satisfies Readonly<
+  Record<MapperRejection["reasonCode"], QuarantineFailure>
+>);
+
+function mapperRejectionFailure(outcome: MapperRejection): QuarantineFailure {
+  return failureByMapperReason[outcome.reasonCode];
+}
+
+/** Draft and projection rejections already carry a public-safe failure code. */
+function thrownRejectionFailure(error: unknown): QuarantineFailure {
+  return error instanceof ProviderCaptureSourceError
+    ? Object.freeze({ reasonCode: error.code, fieldPath: null })
+    : unrecognizedMappingFailure;
+}
+
 function mappingQuarantine(
   providerId: string,
   observation: NormalizedProviderObservation,
+  failure: QuarantineFailure,
 ): ProviderMixedPageRecordDraft {
   return Object.freeze({
     kind:
@@ -80,8 +136,8 @@ function mappingQuarantine(
     disposition: "quarantine" as const,
     candidate: Object.freeze({}),
     sourceRecordKey: sourceRecordKey(providerId, observation),
-    reasonCode: "SOURCE_RECORD_MAPPING_INVALID",
-    fieldPath: null,
+    reasonCode: failure.reasonCode,
+    fieldPath: failure.fieldPath,
     sanitizedSummary:
       "The validated source record could not be mapped; no retry artifact is retained.",
   });
@@ -154,7 +210,14 @@ export function translateProviderNormalizedObservations(input: Readonly<{
         identityNamespaceKey: input.integration.mapper.identityNamespaceKey,
         observation,
       });
-      if (mapped.status !== "mapped") throw new TypeError("mapping rejected");
+      if (mapped.status !== "mapped") {
+        quarantines.push(mappingQuarantine(
+          input.providerId,
+          observation,
+          mapperRejectionFailure(mapped),
+        ));
+        continue;
+      }
       providerSourceCanonicalProjectionsForValidatedMapping(mapped, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -230,8 +293,12 @@ export function translateProviderNormalizedObservations(input: Readonly<{
           events.push(candidate);
           break;
       }
-    } catch {
-      quarantines.push(mappingQuarantine(input.providerId, observation));
+    } catch (error) {
+      quarantines.push(mappingQuarantine(
+        input.providerId,
+        observation,
+        thrownRejectionFailure(error),
+      ));
     }
   }
 

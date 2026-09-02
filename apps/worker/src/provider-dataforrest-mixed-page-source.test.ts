@@ -1018,7 +1018,7 @@ test("Phygitals wrapper ambiguity and malformed names stay record-local quaranti
   assert.equal(page.records.filter(({ disposition }) => disposition === "quarantine").length, 3);
   assert.equal(page.records.filter(({ disposition }) => disposition !== "quarantine").length, 1);
   assert.equal(page.records.filter(({ disposition }) => disposition === "quarantine")
-    .every(({ reasonCode }) => reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+    .every(({ reasonCode }) => reasonCode === "PROVIDER_CAPTURE_RECORD_INVALID"), true);
 });
 
 test("historical shared launch Phygitals normalization remains unchanged", async () => {
@@ -1028,7 +1028,7 @@ test("historical shared launch Phygitals normalization remains unchanged", async
   ], dataforrestLaunchDistributedSourceAdapterManifest);
   assert.equal(page.records.length, 2);
   assert.equal(page.records.every(({ disposition, reasonCode }) =>
-    disposition === "quarantine" && reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+    disposition === "quarantine" && reasonCode === "PROVIDER_CAPTURE_RECORD_INVALID"), true);
 });
 
 test("Phygitals V2 inventory and NFT wrappers preserve envelope identity with explicit label precedence", async () => {
@@ -1503,7 +1503,7 @@ test("versioned Courtyard native cards map reviewed wrappers and quarantine malf
   const quarantines = page.records.filter(({ disposition }) => disposition === "quarantine");
   assert.equal(accepted.length, 4);
   assert.equal(quarantines.length, 6);
-  assert.equal(quarantines.every(({ reasonCode }) => reasonCode === "SOURCE_RECORD_MAPPING_INVALID"), true);
+  assert.equal(quarantines.every(({ reasonCode }) => reasonCode === "PROVIDER_CAPTURE_RECORD_INVALID"), true);
   assert.deepEqual(accepted.map(({ candidate }) => candidate.displayName),
     ["Asset title", "Selected asset", "Reveal title", "Safe name"]);
   assert.deepEqual(accepted.map(({ candidate }) => candidate.collectibleKey),
@@ -1639,7 +1639,7 @@ test("Courtyard native profile preserves canonical pull and event identity and h
   ] })], dataforrestLaunchDistributedSourceAdapterManifest);
   const page = validateProviderMixedPage(await historical.source.nextPage(sourceInput({ authority: historical.captureAuthority })));
   assert.equal(page.records[0]?.disposition, "quarantine");
-  assert.equal(page.records[0]?.reasonCode, "SOURCE_RECORD_MAPPING_INVALID");
+  assert.equal(page.records[0]?.reasonCode, "PROVIDER_CAPTURE_RECORD_INVALID");
 });
 
 test("historical Courtyard shared-launch mapping retains the 100-record manifest and unchanged 8 MiB cap", async () => {
@@ -1719,7 +1719,7 @@ test("historical Courtyard shared-launch mapping retains the 100-record manifest
   );
   assert.ok(quarantine);
   assert.equal(quarantine.kind, "catalog");
-  assert.equal(quarantine.reasonCode, "SOURCE_RECORD_MAPPING_INVALID");
+  assert.equal(quarantine.reasonCode, "PROVIDER_CAPTURE_RECORD_INVALID");
   assert.match(quarantine.sourceRecordKey ?? "", /^source:[a-f0-9]{64}$/u);
   assert.equal(first.records.some((record) =>
     record.kind === "catalog"
@@ -1960,10 +1960,14 @@ test("mapper-invalid records quarantine independently with entity-scoped source 
   assert.equal(quarantines.length, 2);
   assert.equal(quarantines.every((record) =>
     record.kind === "catalog"
-    && record.reasonCode === "SOURCE_RECORD_MAPPING_INVALID"
     && /^source:[0-9a-f]{64}$/u.test(record.sourceRecordKey ?? "")
     && JSON.stringify(record.candidate) === "{}"
   ), true);
+  // The pack and the card fail for different reasons, and each keeps its own.
+  assert.deepEqual(quarantines.map(({ reasonCode }) => reasonCode).sort(), [
+    "PROVIDER_CAPTURE_RECORD_INVALID",
+    "SOURCE_RECORD_PACK_DISPLAY_NAME_REQUIRED",
+  ]);
   assert.notEqual(
     quarantines[0]?.sourceRecordKey,
     quarantines[1]?.sourceRecordKey,
