@@ -5,6 +5,7 @@ import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
+import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { CatalogImage } from "./CatalogImage.client";
 import { presentOpportunityRow } from "./overview-presentation";
 import styles from "./OpportunityTable.module.css";
@@ -85,15 +86,6 @@ function OpportunityRow({
 }>) {
   const estimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const row = presentOpportunityRow(repack, rank, estimate);
-  const estimateEvidence = [
-    row.packScoutEv.statusLabel,
-    row.packScoutEv.reasonCopy,
-    row.packScoutEv.freshness.sourceAgeLabel,
-    row.packScoutEv.freshness.dataAsOf
-      ? row.packScoutEv.freshness.dataAsOfLabel
-      : null,
-    row.packScoutEv.calculationPriceNote,
-  ].filter((detail): detail is string => Boolean(detail));
 
   return (
     <tr data-selected={selected ? "true" : "false"}>
@@ -149,23 +141,11 @@ function OpportunityRow({
         <MetricCell metric={row.packScoutEv.evPercent} />
       </td>
       <td>
-        <span className={styles.confidenceCell}>
-          <span
-            aria-label={row.packScoutEv.confidence.accessibleLabel}
-            className={styles.confidence}
-            data-tone={row.packScoutEv.confidence.tone}
-          >
-            {row.packScoutEv.confidence.displayValue}
-          </span>
-          {row.packScoutEv.status !== "current" ? (
-            <GlossaryHint
-              align="end"
-              details={estimateEvidence}
-              field="evConfidence"
-              triggerAriaLabel={`View evidence for ${row.packScoutEv.statusLabel}: ${row.name}`}
-            />
-          ) : null}
-        </span>
+        <CatalogConfidenceEvidence
+          estimate={row.packScoutEv}
+          providerHealth={repack.providerHealth}
+          repackName={row.name}
+        />
       </td>
       <td>
         <MetricCell metric={row.buyback} />

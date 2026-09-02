@@ -38,7 +38,6 @@
 }
 
 .scroller {
-  contain: layout paint inline-size;
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
@@ -207,27 +206,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.confidence {
-  color: var(--color-text-muted);
-  font-weight: 680;
-}
-
-.confidence[data-tone="positive"] {
-  color: var(--color-positive);
-}
-
-.confidence[data-tone="caution"] {
-  color: var(--color-caution);
-}
-
-.confidence[data-tone="warning"] {
-  color: var(--color-warning-strong);
-}
-
-.confidence[data-tone="unavailable"] {
-  color: var(--color-status-neutral);
-}
-
 .chaseName {
   display: block;
   max-width: 170px;
@@ -244,25 +222,6 @@
   color: var(--color-text-muted);
   font-size: 0.66rem;
   white-space: normal;
-}
-
-.evidenceNote,
-.providerWarning {
-  display: block;
-  max-width: 15rem;
-  margin-top: 0.18rem;
-  font-size: 0.62rem;
-  line-height: 1.35;
-  white-space: normal;
-}
-
-.evidenceNote {
-  color: var(--color-text-muted);
-}
-
-.providerWarning {
-  color: var(--color-warning-strong);
-  font-weight: 650;
 }
 
 .unavailable,
