@@ -75,7 +75,7 @@ type CountsRow = {
   readonly measured_at: Date;
 } & { readonly [Key in Exclude<keyof ProviderPulseCounts, "total">]: bigint };
 
-type EstimateRow = CountsRow & { readonly scan_bytes: bigint };
+type EstimateRow = CountsRow & { readonly scan_bytes: bigint; readonly readable_tables: bigint };
 
 interface RecordTotalsRow {
   readonly measured_at: Date;
@@ -110,6 +110,25 @@ function safeCount(value: bigint): number {
   return count;
 }
 
+function own(value: unknown, name: string): unknown {
+  if (value === null || typeof value !== "object") return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, name);
+  return field && "value" in field ? field.value : undefined;
+}
+
+/**
+ * True only for a statement the database cancelled against its own budget,
+ * identified by SQLSTATE 57014. Every other failure — a missing relation, a
+ * revoked privilege, a broken connection — is a different fact about the
+ * provider and must not be mistaken for a scan that merely ran long. No error
+ * text, SQL or metadata is read beyond this code.
+ */
+function isStatementCancellation(error: unknown): boolean {
+  if (!(error instanceof ProviderPrisma.PrismaClientKnownRequestError)) return false;
+  if (own(error, "code") !== "P2010") return false;
+  return own(own(error, "meta"), "code") === "57014";
+}
+
 /**
  * Reads one canonical table's row estimate. The collector's live-tuple count
  * is the fresher of the two sources but is zeroed by a statistics reset, so
@@ -131,22 +150,26 @@ function storageCounts(
   row: CountsRow,
   precision: ProviderPulseCountPrecision,
 ): ProviderPulseStorageCounts {
-  const { measured_at, ...counts } = row;
+  // Summed from the named entity columns rather than every column of the row,
+  // so a column added to either statement cannot silently inflate the total.
+  const counts = {
+    categories: safeCount(row.categories),
+    packs: safeCount(row.packs),
+    collectibles: safeCount(row.collectibles),
+    aliases: safeCount(row.aliases),
+    instances: safeCount(row.instances),
+    packContents: safeCount(row.packContents),
+    accounts: safeCount(row.accounts),
+    pulls: safeCount(row.pulls),
+    pullItems: safeCount(row.pullItems),
+    marketEvents: safeCount(row.marketEvents),
+  };
   return {
-    measuredAt: measured_at.toISOString(),
+    measuredAt: row.measured_at.toISOString(),
     precision,
     counts: {
-      total: safeCount(Object.values(counts).reduce((sum, count) => sum + count, 0n)),
-      categories: safeCount(counts.categories),
-      packs: safeCount(counts.packs),
-      collectibles: safeCount(counts.collectibles),
-      aliases: safeCount(counts.aliases),
-      instances: safeCount(counts.instances),
-      packContents: safeCount(counts.packContents),
-      accounts: safeCount(counts.accounts),
-      pulls: safeCount(counts.pulls),
-      pullItems: safeCount(counts.pullItems),
-      marketEvents: safeCount(counts.marketEvents),
+      total: safeCount(Object.values(counts).reduce((sum, count) => sum + BigInt(count), 0n)),
+      ...counts,
     },
   };
 }
@@ -192,7 +215,13 @@ export class PrismaProviderPulseMetricsRepository {
   async readStorageCounts(): Promise<ProviderPulseStorageCounts> {
     const estimated = await this.readEstimatedStorageCounts();
     if (estimated.scanBytes > EXACT_STORAGE_SCAN_BYTE_CEILING) return estimated.counted;
-    return this.readExactStorageCounts().catch(() => estimated.counted);
+    return this.readExactStorageCounts().catch((error: unknown) => {
+      // Only a scan the database cancelled against its budget downgrades to
+      // the estimate. Anything else is a fact about the provider that the
+      // estimate cannot stand in for, so it is reported as a failure.
+      if (!isStatementCancellation(error)) throw error;
+      return estimated.counted;
+    });
   }
 
   private async readEstimatedStorageCounts(): Promise<{
@@ -220,11 +249,26 @@ export class PrismaProviderPulseMetricsRepository {
             from pg_catalog.pg_class catalog
             join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
             where space.nspname = 'public' and catalog.relkind = 'r'
+              and pg_catalog.has_table_privilege(catalog.oid, 'SELECT')
               and catalog.relname = any(${CANONICAL_TABLES})
-          ), 0)::bigint as scan_bytes
+          ), 0)::bigint as scan_bytes,
+          (
+            select count(*)
+            from pg_catalog.pg_class catalog
+            join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
+            where space.nspname = 'public' and catalog.relkind = 'r'
+              and pg_catalog.has_table_privilege(catalog.oid, 'SELECT')
+              and catalog.relname = any(${CANONICAL_TABLES})
+          )::bigint as readable_tables
       `);
       if (row === undefined) throw new Error("Provider pulse storage estimates are unavailable.");
-      const { scan_bytes, ...counts } = row;
+      const { scan_bytes, readable_tables, ...counts } = row;
+      // A canonical table that is absent or unreadable estimates zero rows and
+      // contributes no bytes, which would read as a measured empty table. The
+      // schema is checked so that is reported as a failure instead.
+      if (safeCount(readable_tables) !== CANONICAL_TABLES.length) {
+        throw new Error("Provider pulse storage counts are unavailable: canonical tables are missing or unreadable.");
+      }
       return { counted: storageCounts(counts, "estimated"), scanBytes: safeCount(scan_bytes) };
     });
   }
