@@ -640,7 +640,7 @@ test("remote page ceiling preserves the opaque Collector cursor, canonical order
     })));
     assert.equal(second.continuation, "head");
     assert.deepEqual(fixture.requestedUrls.map(url => url.searchParams.get("cursor")), [checkpoint.value, "collector-bounded-next"]);
-    const limit = 1_000;
+    const limit = mode === "remote" ? 100 : 1_000;
     assert.equal(fixture.requestedUrls.every(url => url.searchParams.get("limit") === String(limit)), true);
     assert.equal(fixture.terminalizations.every(({ operationScope }) =>
       operationScope.operationKind === "page_read" && operationScope.pageLimit === limit
