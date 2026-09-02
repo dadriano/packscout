@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/001
 **Depends on:** distributed-canonical-warehouse/013, distributed-canonical-warehouse/014, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/003, convex-promotion-jobs/004, convex-promotion-jobs/006, convex-promotion-jobs/007
-**Status:** complete
+**Status:** in_progress
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -69,5 +69,11 @@ typecheck/lint, and `npm run test:prisma-schema`.
 
 ## Spec Compliance
 
-Implementation must satisfy `tech-001-distributed-promotion-jobs.md`. The
-verified legacy ledger is a port source, not completion evidence.
+- Related specs reviewed: `tech-001-distributed-promotion-jobs.md`
+- Alignment: split provider-local and central records, replay handling,
+  monotonic wakes, and bounded retention are implemented and verified.
+- Divergences: none.
+- Verification: Prisma schema checks, database integration tests, workspace
+  lint/typecheck/tests, and `npm run verify:framework` pass.
+- Remaining gate: prerequisite distributed Tasks 014 and 015 are still in
+  progress, so this task remains `in_progress` despite its checked criteria.

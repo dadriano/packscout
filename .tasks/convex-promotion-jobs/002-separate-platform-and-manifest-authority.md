@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/002
 **Depends on:** distributed-canonical-warehouse/014, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/003, convex-promotion-jobs/004
-**Status:** todo
+**Status:** in_progress
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -54,5 +54,13 @@ and the framework boundary ratchet.
 
 ## Spec Compliance
 
-Provider is the canonical internal term. Existing Convex public-contract field
-names may be adapted only at the transport boundary.
+- Related specs reviewed: `tech-001-distributed-promotion-jobs.md`
+- Alignment: provider and manifest authorities are split, routed by trusted
+  server configuration, and fail closed without a legacy composite fallback.
+- Divergences: an already-running provider retains its last verified pin during
+  a central outage, but a cold-started provider cannot reconstruct that full
+  pin locally and therefore fails closed.
+- Verification: focused authority, relay, rotation, worker, and framework
+  checks pass.
+- Remaining gate: durable provider-local cold-start pinning and complete live
+  rotation/recovery evidence require approved distributed topology work.

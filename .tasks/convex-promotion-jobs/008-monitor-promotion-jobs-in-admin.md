@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/008
 **Depends on:** convex-promotion-jobs/006, convex-promotion-jobs/007, distributed-canonical-warehouse/022
 **Blocks:** convex-promotion-jobs/009
-**Status:** todo
+**Status:** blocked
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -92,3 +92,9 @@ at the group gate.
 
 The UI renders server judgments and never derives tenancy, routing, liveness, or
 checkpoint comparisons.
+
+## Blocker
+
+The read-only pages, polling, error states, accessibility semantics, responsive
+layout, and browser verification are complete. The task remains blocked on
+Tasks 006 and 007 and the unfinished distributed Admin parity dependency.

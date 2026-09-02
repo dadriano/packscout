@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/006
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/005
 **Blocks:** convex-promotion-jobs/007, convex-promotion-jobs/008, convex-promotion-jobs/009
-**Status:** in progress
+**Status:** blocked
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -88,3 +88,9 @@ watchdog auth/lifecycle tests, service/worker/database typecheck/lint, and
 
 The liveness evaluator observes split authorities; it never becomes a central
 command queue or provider schedule owner.
+
+## Blocker
+
+The evaluator, watchdog, conditions, and focused tests are implemented, but
+Task 005 and its live schedule/relay proof are not complete. The full declared
+verification anchor therefore remains open.

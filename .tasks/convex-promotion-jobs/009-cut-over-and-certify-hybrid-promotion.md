@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/009
 **Depends on:** convex-promotion-jobs/005, convex-promotion-jobs/006, convex-promotion-jobs/007, convex-promotion-jobs/008, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018
 **Blocks:** distributed-canonical-warehouse/020
-**Status:** todo
+**Status:** blocked
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective

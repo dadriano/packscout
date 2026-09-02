@@ -6,7 +6,7 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 8/23 tasks complete; provider release assembly/publication is being ported to current main
+**Progress:** 9/23 tasks complete; provider release assembly/publication is being ported to current main
 
 ## Current Build Checkpoint
 
@@ -195,7 +195,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 012 | Publish shared catalog versions safely | large | 3–5 days | done | 006 |
 | 013 | Assemble immutable provider releases | large | 5–7 days | done | 006, 007, 012 |
 | 014 | Publish provider releases safely | large | 4–6 days | in progress | 013 |
-| 015 | Advance provider manifest gates independently | large | 4–6 days | not started | 012, 014 |
+| 015 | Advance provider manifest gates independently | large | 4–6 days | in progress | 012, 014 |
 
 ### Delivery and proof
 

@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/007
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/006, distributed-canonical-warehouse/010
 **Blocks:** convex-promotion-jobs/008
-**Status:** todo
+**Status:** blocked
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -90,3 +90,9 @@ typecheck/lint, and the standards ratchet.
 
 The monitoring service joins observations in memory from bounded independent
 reads; it performs no cross-database query or transaction.
+
+## Blocker
+
+The contracts, provider projections, central monitoring runtime, and Admin API
+routes are implemented and pass their focused checks. Completion still depends
+on Tasks 001 and 006 plus the unresolved distributed health dependency.
