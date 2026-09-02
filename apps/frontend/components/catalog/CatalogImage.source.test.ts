@@ -9,22 +9,30 @@ function source(relative: string): string {
 const catalogImageStyles = source("./CatalogImage.module.css");
 const allRepacksTableStyles = source("./AllRepacksTable.module.css");
 
-test("pack artwork stays fully visible without changing chase image framing", () => {
+test("catalog artwork fills its frame and stays fully visible", () => {
   assert.match(
     catalogImageStyles,
-    /\.image\s*\{[^}]*object-fit: cover;/,
+    /\.frame\s*\{[^}]*position: relative;[^}]*overflow: hidden;/,
   );
   assert.match(
     catalogImageStyles,
-    /\.frame\[data-variant="thumbnail"\] \.image,\s*\.frame\[data-variant="pack"\] \.image\s*\{[^}]*object-fit: contain;/,
+    /\.image\s*\{[^}]*position: absolute;[^}]*inset: 0;[^}]*width: 100%;[^}]*height: 100%;[^}]*object-fit: contain;[^}]*object-position: center;/,
   );
   assert.match(
     catalogImageStyles,
-    /\.frame\[data-variant="vendor"\] \.image\s*\{[^}]*object-fit: contain;/,
+    /\.frame\[data-variant="thumbnail"\]\s*\{[^}]*width: 2\.45rem;[^}]*aspect-ratio: 3 \/ 4;/,
+  );
+  assert.match(
+    catalogImageStyles,
+    /\.frame\[data-variant="pack"\]\s*\{[^}]*width: clamp\(6\.5rem, 8vw, 8rem\);[^}]*aspect-ratio: 8 \/ 11;/,
+  );
+  assert.match(
+    catalogImageStyles,
+    /\.frame\[data-variant="chase"\]\s*\{[^}]*width: 4\.5rem;[^}]*aspect-ratio: 3 \/ 4;/,
   );
   assert.doesNotMatch(
     catalogImageStyles,
-    /\.frame\[data-variant="chase"\] \.image\s*\{[^}]*object-fit: contain;/,
+    /object-fit: cover;/,
   );
   assert.match(
     allRepacksTableStyles,

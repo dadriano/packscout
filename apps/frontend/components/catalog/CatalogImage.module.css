@@ -36,18 +36,12 @@
 }
 
 .image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-}
-
-.frame[data-variant="thumbnail"] .image,
-.frame[data-variant="pack"] .image {
   object-fit: contain;
-}
-
-.frame[data-variant="vendor"] .image {
-  object-fit: contain;
+  object-position: center;
 }
 
 .placeholderMark {
