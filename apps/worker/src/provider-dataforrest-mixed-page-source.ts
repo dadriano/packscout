@@ -3,6 +3,7 @@ import {
   opaqueCursorEnvelopeSchema,
   type OpaqueCursorEnvelope,
   type SourceAdapterFailure,
+  countProviderPageRecords, type ProviderPageRecordCounts,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_CONTRACT_VERSION,
@@ -81,6 +82,7 @@ export interface ProviderDataforrestPageTranslationRecorder {
     pageNumber: number;
     sourceRecordCount: number;
     normalizedRecordCount: number;
+    recordCounts: ProviderPageRecordCounts;
   }>): Promise<Readonly<{
     kind: "recorded" | "lease_lost" | "run_not_running";
   }>>;
@@ -446,6 +448,7 @@ export class ProviderDataforrestMixedPageSource
   readonly #translationRecorder: ProviderDataforrestPageTranslationRecorder;
   readonly #workerId: string;
   readonly #integration: ProviderDataforrestLiveIntegration;
+  readonly #maximumPageRecords: number | undefined;
 
   constructor(input: Readonly<{
     authorityResolver: DataforrestSourceAuthorityResolver;
@@ -454,7 +457,14 @@ export class ProviderDataforrestMixedPageSource
     workerId: string;
     integration: ProviderDataforrestLiveIntegration;
     adapter?: SourceAdapter;
+    /** Runtime resource ceiling; never changes the adapter's maximum or identity. */
+    maximumPageRecords?: number;
   }>) {
+    if (input.maximumPageRecords !== undefined &&
+      (!Number.isSafeInteger(input.maximumPageRecords) || input.maximumPageRecords < 1)) {
+      throw new TypeError("DataForrest page record ceiling is invalid.");
+    }
+    this.#maximumPageRecords = input.maximumPageRecords;
     this.#authorityResolver = input.authorityResolver;
     this.#terminalizeRequest = input.terminalizeRequest;
     this.#translationRecorder = input.translationRecorder;
@@ -511,6 +521,9 @@ export class ProviderDataforrestMixedPageSource
       integration: this.#integration,
     });
     const manifest = this.#adapter.manifest;
+    const bounds = Object.freeze({ ...manifest.requestBounds,
+      pageLimit: Math.min(manifest.requestBounds.pageLimit,
+        this.#maximumPageRecords ?? manifest.requestBounds.pageLimit) });
     const declaration = manifest.supportedProviders.find(
       ({ provider }) => provider === this.#integration.providerKey,
     );
@@ -551,7 +564,7 @@ export class ProviderDataforrestMixedPageSource
       runClaimLeaseId: `${input.runId}:${input.workerFence.toString()}`,
       pageAttemptId: randomUUID(),
       pageNumber: input.pageNumber,
-      pageLimit: manifest.requestBounds.pageLimit,
+      pageLimit: bounds.pageLimit,
       cursorGeneration: 1,
       requestedCursorFingerprint: input.sourceCheckpointFingerprint,
     });
@@ -576,7 +589,7 @@ export class ProviderDataforrestMixedPageSource
         connectionProfileRevisionId: identity.connectionProfileRevisionId,
         connectionConfiguration: resolved.connectionConfiguration,
         requestLease,
-        bounds: manifest.requestBounds,
+        bounds,
         operationKind: "page_read",
         provider: this.#integration.providerKey,
         providerId: resolved.providerId,
@@ -596,7 +609,7 @@ export class ProviderDataforrestMixedPageSource
           cursorGeneration: 1,
           requestedCursorFingerprint: input.sourceCheckpointFingerprint,
           requestedCursor: cursor,
-          pageLimit: manifest.requestBounds.pageLimit,
+          pageLimit: bounds.pageLimit,
         },
       });
       const request = await captureAndTerminalizeSourceAdapterRequest(
@@ -669,6 +682,7 @@ export class ProviderDataforrestMixedPageSource
             pageNumber: input.pageNumber,
             sourceRecordCount: completed.value.normalizedPage.outcomes.length,
             normalizedRecordCount: translation.records.length,
+            recordCounts: countProviderPageRecords(translation.records),
           });
       } catch {
         failure("PROVIDER_DATAFORREST_TERMINALIZATION_FAILED");

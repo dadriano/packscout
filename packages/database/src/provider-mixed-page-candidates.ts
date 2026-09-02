@@ -266,7 +266,7 @@ function packCandidate(value: CanonicalJsonObject, categoryId: string | null): P
   };
 }
 
-function collectibleCandidate(
+export function collectibleCandidate(
   value: CanonicalJsonObject,
   categoryId: string | null,
 ): CollectibleWriteInput {

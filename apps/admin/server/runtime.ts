@@ -6,6 +6,7 @@ import {
   CentralWorkerPresenceRepository,
   ProviderReleaseCentralRepository,
   createCentralDatabaseLifecycle,
+  readDatabaseRuntimePolicy,
   type CentralPrismaClient,
   type PrismaWorkerFleetReadRepository,
 } from "@packscout/database";
@@ -178,6 +179,7 @@ export async function createAdminRuntime(
     environment.PACKSCOUT_CONTROL_DATABASE_URL,
     "PACKSCOUT_CONTROL_DATABASE_URL",
   );
+  readDatabaseRuntimePolicy(environment).assertCentralDatabaseUrl(centralDatabaseUrl);
   const sessionSecret = readRequiredSecret(
     environment.PACKSCOUT_SESSION_HASHING_SECRET,
     "PACKSCOUT_SESSION_HASHING_SECRET",

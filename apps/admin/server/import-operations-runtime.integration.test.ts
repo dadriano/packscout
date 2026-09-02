@@ -397,7 +397,7 @@ test("real admin composition reads safe operations, queues source runs, and excl
   }
 });
 
-test("admin entrypoint uses concrete provider routing and never falls back to the legacy database", async () => {
+test("admin entrypoint rejects a disallowed central destination before connecting and never falls back to legacy", async () => {
   let child: ChildProcess | undefined;
   try {
     const controlDatabaseUrl =
@@ -412,6 +412,9 @@ test("admin entrypoint uses concrete provider routing and never falls back to th
         env: {
           ...process.env,
           NODE_ENV: "production",
+          PACKSCOUT_DATABASE_MODE: "remote",
+          PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS: "127.0.0.1",
+          PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS: "provider.example.test",
           PACKSCOUT_CONTROL_DATABASE_URL: controlDatabaseUrl,
           PACKSCOUT_DATABASE_URL: legacyDatabaseUrl,
           PACKSCOUT_ADMIN_HOST: "127.0.0.1",
@@ -447,7 +450,8 @@ test("admin entrypoint uses concrete provider routing and never falls back to th
     });
     assert.notEqual(exit.code, 0);
     assert.equal(exit.signal, null);
-    assert.match(output, /central database is unavailable/i);
+    assert.match(output, /Remote central database destination is not allowed/i);
+    assert.doesNotMatch(output, /central database is unavailable/i);
     assert.doesNotMatch(output, /provider runtime composition is required/i);
     assert.doesNotMatch(output, /control-secret|legacy-secret|packscout_dev/);
     child = undefined;

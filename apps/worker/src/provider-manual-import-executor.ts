@@ -35,8 +35,9 @@ import {
   createProviderCanonicalPromotionImmediateDelivery,
   type ProviderCanonicalPromotionImmediateDelivery,
 } from "./provider-canonical-promotion-immediate-delivery.ts";
+import { providerManualImportExecutionBudget, providerManualImportLeaseMilliseconds,
+  type ProviderImportExecutionMode } from "./provider-manual-import-execution-budget.ts";
 
-const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
 
 export type ProviderManualImportExecutionResult =
@@ -122,6 +123,7 @@ export class ProviderManualImportExecutor {
   >;
   readonly #leaseMilliseconds: number;
   readonly #workerId: string;
+  readonly #budget: ReturnType<typeof providerManualImportExecutionBudget>;
 
   constructor(private readonly dependencies: Readonly<{
     database: ProviderPrismaClient;
@@ -129,17 +131,11 @@ export class ProviderManualImportExecutor {
     workerId: string;
     leaseMilliseconds?: number;
     immediateDelivery?: ProviderPromotionImmediateDeliveryPort;
+    executionMode?: ProviderImportExecutionMode;
   }>) {
-    const leaseMilliseconds = dependencies.leaseMilliseconds
-      ?? DEFAULT_LEASE_MILLISECONDS;
-    if (
-      !Number.isInteger(leaseMilliseconds)
-      || leaseMilliseconds < 30_000
-      || leaseMilliseconds > 15 * 60_000
-    ) {
-      throw new TypeError("Provider import lease duration is invalid.");
-    }
-    this.#leaseMilliseconds = leaseMilliseconds;
+    const mode = dependencies.executionMode ?? "local";
+    this.#budget = providerManualImportExecutionBudget(mode);
+    this.#leaseMilliseconds = providerManualImportLeaseMilliseconds(mode, dependencies.leaseMilliseconds);
     this.#workerId = dependencies.workerId;
     this.#immediateDelivery = createProviderCanonicalPromotionImmediateDelivery(
       dependencies.database,
@@ -400,7 +396,7 @@ export class ProviderManualImportExecutor {
           );
         index += 1
       ) {
-        const pageDeadlineAt = Date.now() + 55_000;
+        const pageDeadlineAt = Date.now() + this.#budget.pageMilliseconds;
         if (signal.aborted) {
           return await this.failRun(runs, runId, fence, "PROVIDER_CAPTURE_ABORTED");
         }
@@ -439,7 +435,7 @@ export class ProviderManualImportExecutor {
         stage = "page_commit";
         const committed = await pages.commit({
           workerId: this.#workerId,
-          page, deadlineAt: pageDeadlineAt,
+          page, deadlineAt: pageDeadlineAt, maximumTransactionMilliseconds: this.#budget.transactionMilliseconds,
         });
         if (committed.kind !== "committed" && committed.kind !== "replayed") {
           return await this.failRun(
@@ -587,6 +583,7 @@ export function createProviderManualImportExecutor(input: Readonly<{
   liveSource?: ProviderManualImportPageSource;
   leaseMilliseconds?: number;
   immediateDelivery?: ProviderPromotionImmediateDeliveryPort;
+  executionMode?: ProviderImportExecutionMode;
 }>): ProviderManualImportExecutor {
   const source = input.liveSource ?? (() => {
     if (input.captureRoot === null || input.actorHmacKey === null) {
@@ -603,6 +600,7 @@ export function createProviderManualImportExecutor(input: Readonly<{
     database: input.database,
     source,
     workerId: input.workerId,
+    ...(input.executionMode === undefined ? {} : { executionMode: input.executionMode }),
     ...(input.leaseMilliseconds === undefined
       ? {}
       : { leaseMilliseconds: input.leaseMilliseconds }),
