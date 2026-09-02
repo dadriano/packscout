@@ -4,10 +4,12 @@ import test from "node:test";
 import type { PinnedProviderReleaseInputs } from "@packscout/database";
 import {
   PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS,
+  publicCatalogCollectibleSchema,
 } from "@packscout/contracts";
 import {
   ProviderPromotionBootstrapService,
@@ -253,6 +255,73 @@ test("bootstrap reads one pin and emits a graph larger than 16 MiB in bounded fr
   assert.ok(pages.length > 1);
   assert.equal(pages.reduce((total, frame) =>
     total + (frame.kind === "page" ? frame.records.length : 0), 0), 20_000);
+});
+
+test("bootstrap rejects a wide catalog before returning a header stream", {
+  timeout: 30_000,
+}, async () => {
+  const nameAliases = Array.from({ length: 32 }, (_, index) =>
+    `Alias ${String(index).padStart(2, "0")} ${"x".repeat(231)}`);
+  const representative = {
+    publicCollectibleId: "56000000-0000-5000-8000-000000000001",
+    identityState: "canonical" as const,
+    collectibleType: "card" as const,
+    displayName: "Card",
+    normalizedName: "card",
+    nameAliases,
+    normalizedNameAliases: nameAliases.map((alias) => alias.toLowerCase()),
+    publicCategoryIds: [],
+    year: null,
+    brand: null,
+    setOrSeries: null,
+    cardNumber: null,
+    referenceNumber: null,
+    subject: null,
+    grade: null,
+    grader: null,
+    primaryImageUrl: null,
+    primaryImageAlt: null,
+    valuationAmount: null,
+    valuationCurrency: null,
+    valuationUsdAmount: null,
+    valuationUnavailableReason: null,
+    valuationType: null,
+    valuationObservedAt: null,
+    dataAsOf: "2026-09-01T12:00:00.000Z",
+  };
+  assert.equal(
+    publicCatalogCollectibleSchema.safeParse(representative).success,
+    true,
+  );
+  const recordCount = Math.ceil(
+    PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES /
+      Buffer.byteLength(JSON.stringify(representative), "utf8"),
+  ) + 1;
+  const catalogCollectibles = Array.from({ length: recordCount },
+    (_, index) => ({
+      ...representative,
+      publicCollectibleId: `56000000-0000-5000-8000-${String(index + 1)
+        .padStart(12, "0")}`,
+    }));
+  let reads = 0;
+  const service = new ProviderPromotionBootstrapService({
+    credentials: credentials(),
+    repository: {
+      async pin() {
+        reads += 1;
+        return { ...pin(), catalogCollectibles };
+      },
+    },
+  });
+
+  await assert.rejects(service.stream({
+    providerId: providerA,
+    bearerTokenBase64: tokenBase64,
+    ...ownership(),
+  }), {
+    code: "PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE",
+  });
+  assert.equal(reads, 1);
 });
 
 test("bootstrap stops awaiting a central pin when request ownership aborts", async () => {

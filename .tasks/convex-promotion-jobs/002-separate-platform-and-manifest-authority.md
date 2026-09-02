@@ -62,12 +62,22 @@ and the framework boundary ratchet.
   its last verified pin through a transient central outage. A durable cold-start
   cache was not part of the approved contract and would require separate
   revocation, expiry, and storage semantics.
-- Capacity boundary: bootstrap accepts the catalog contract's 100,000
-  collectibles and matching collectible correlations, at most 50,000 records
-  for each other retained section, and 128 MiB on the wire. Larger graphs fail
-  closed and require a future streaming-to-persistence design; the 102.9 MiB
-  maximum-count representative graph passes the real worker consumer under
-  256 MiB V8 old-space, and every section rejects its declared or produced
+- Capacity boundary: bootstrap retains the catalog contract's 100,000
+  collectible count and matching collectible correlations, at most 50,000
+  records for each other retained section, a shared 100 MiB aggregate budget
+  for serialized catalog page frames, and 128 MiB on the wire. The 100 MiB
+  catalog budget plus maximum fixed-width correlations, a maximum-size header,
+  and completion frame remains below the wire limit with 3.5 MiB reserved.
+  Compact 100,000-collectible catalogs remain admissible; schema-valid catalogs
+  whose variable-width aliases exceed the byte budget fail closed. Central
+  prevents an oversized catalog from leaving `building`, preflights exact
+  stored JSON bytes before hydrating pin payloads, and rechecks exact bootstrap
+  framing after full hash verification. The bootstrap service repeats the exact
+  check before returning a header stream. The separate Task 012 catalog-version
+  assembler is absent from this branch and must apply the same admission rule
+  before constructing or storing an oversized artifact when that branch is
+  restored or merged. Catalogs beyond this retained-array envelope require a
+  future streaming-to-persistence design; every section also rejects its count
   limit plus one.
 - Authority capacity: publication configuration accepts the 64-provider roster
   with one distinct 32-byte provider key each plus all 24 ancillary authority

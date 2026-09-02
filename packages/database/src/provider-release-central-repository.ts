@@ -1,5 +1,6 @@
 import {
   CATALOG_BATCH_HASH_DOMAIN,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES,
   PROVIDER_PUBLIC_PROFILE_HASH_DOMAIN,
   canonicalJsonBytes,
   catalogContentSeedHash,
@@ -7,6 +8,7 @@ import {
   extendCatalogContentHash,
   globalCategoryPublicId,
   packscoutPublicIdentityUuid,
+  providerPromotionBootstrapCatalogSectionsWithinByteBudget,
   providerReleaseCatalogPinHash,
   providerReleaseCorrelationSnapshotHash,
   publicVendorSchema,
@@ -101,6 +103,10 @@ interface StoredBatch {
   readonly record_count: number;
   readonly byte_count: number;
   readonly body_hash: string;
+}
+
+interface StoredCatalogPayloadSize {
+  readonly payloadBytes: bigint | null;
 }
 
 function exactArray(value: unknown): readonly unknown[] {
@@ -280,6 +286,11 @@ async function verifyCatalogArtifact(input: {
       aliases,
     })
   ) throw new ProviderReleasePinError("CATALOG_ARTIFACT_INVALID");
+  if (!providerPromotionBootstrapCatalogSectionsWithinByteBudget({
+    catalogCategories: categories,
+    catalogCollectibles: collectibles,
+    catalogAliases: aliases,
+  })) throw new ProviderReleasePinError("CATALOG_ARTIFACT_INVALID");
   return { categories, collectibles, aliases };
 }
 
@@ -368,24 +379,45 @@ async function loadPin(
   const catalog = input.catalogVersionId
     ? await transaction.catalog_versions.findUnique({
         where: { id: input.catalogVersionId },
-        include: { batches: true },
       })
     : await transaction.catalog_versions.findFirst({
         where: { lifecycle: "complete" },
         orderBy: [{ through_change_sequence: "desc" }, { completed_at: "desc" }, { id: "asc" }],
-        include: { batches: true },
       });
   if (!catalog) throw new ProviderReleasePinError("CATALOG_VERSION_MISSING");
   if (catalog.lifecycle !== "complete") {
     throw new ProviderReleasePinError("CATALOG_VERSION_INCOMPLETE");
   }
+  const [{ payloadBytes } = { payloadBytes: null }] =
+    await transaction.$queryRaw<StoredCatalogPayloadSize[]>(CentralPrisma.sql`
+      SELECT COALESCE(SUM(octet_length(batch.payload::text)), 0)::bigint
+        AS "payloadBytes"
+      FROM catalog_version_batches batch
+      WHERE batch.catalog_version_id = ${catalog.id}::uuid
+    `);
+  if (
+    payloadBytes === null || payloadBytes < 0n ||
+    payloadBytes >
+      BigInt(PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES)
+  ) throw new ProviderReleasePinError("CATALOG_ARTIFACT_INVALID");
+  const batches = await transaction.catalog_version_batches.findMany({
+    where: { catalog_version_id: catalog.id },
+    select: {
+      batch_kind: true,
+      batch_index: true,
+      payload: true,
+      record_count: true,
+      byte_count: true,
+      body_hash: true,
+    },
+  });
   const artifact = await verifyCatalogArtifact({
     schemaVersion: catalog.schema_version,
     contentHash: catalog.content_hash,
     categoryCount: catalog.category_count,
     collectibleCount: catalog.collectible_count,
     aliasCount: catalog.alias_count,
-    batches: catalog.batches,
+    batches,
   });
   if (
     catalog.schema_version !== "catalog-v1"

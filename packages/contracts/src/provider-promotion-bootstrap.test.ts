@@ -6,12 +6,15 @@ import {
 } from "./provider-catalog-release-v1.ts";
 import { globalCatalogManifestCountsV1Schema } from
   "./global-catalog-manifest-v1.ts";
+import { publicCatalogCollectibleSchema } from "./provider-release.ts";
 import {
   PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_RECORDS_PER_FRAME,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
+  providerPromotionBootstrapCatalogSectionsWithinByteBudget,
 } from "./provider-promotion-bootstrap.ts";
 
 const MAXIMUM_COLLECTIBLE_CORRELATION_RECORD = {
@@ -65,7 +68,7 @@ function sectionBytes(input: Readonly<{
   return { bytes, frames, maximumFrameBytes };
 }
 
-test("bootstrap fixed-width limits fit the bounded frame and stream budgets", () => {
+test("bootstrap catalog and fixed-width sections fit the stream budget", () => {
   assert.deepEqual(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS, {
     catalogCategories: 50_000,
     catalogCollectibles: 100_000,
@@ -73,12 +76,12 @@ test("bootstrap fixed-width limits fit the bounded frame and stream budgets", ()
     categoryCorrelations: 50_000,
     collectibleCorrelations: 100_000,
   });
-  const sections = [
-    sectionBytes({
-      section: "catalogAliases",
-      record: MAXIMUM_CATALOG_ALIAS_RECORD,
-      count: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases,
-    }),
+  const catalogAliases = sectionBytes({
+    section: "catalogAliases",
+    record: MAXIMUM_CATALOG_ALIAS_RECORD,
+    count: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases,
+  });
+  const correlationSections = [
     sectionBytes({
       section: "categoryCorrelations",
       record: MAXIMUM_CATEGORY_CORRELATION_RECORD,
@@ -90,11 +93,11 @@ test("bootstrap fixed-width limits fit the bounded frame and stream budgets", ()
       count: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.collectibleCorrelations,
     }),
   ];
-  assert.ok(sections.every(({ maximumFrameBytes }) =>
+  assert.ok([catalogAliases, ...correlationSections].every(({ maximumFrameBytes }) =>
     maximumFrameBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES));
   assert.equal(
-    sections.reduce((total, section) => total + section.bytes, 0),
-    31_560_662,
+    correlationSections.reduce((total, section) => total + section.bytes, 0),
+    24_646_708,
   );
   const completionBytes = Buffer.byteLength(`${JSON.stringify({
     kind: "complete",
@@ -102,14 +105,77 @@ test("bootstrap fixed-width limits fit the bounded frame and stream budgets", ()
   })}\n`, "utf8");
   assert.equal(completionBytes, 109);
   assert.ok(
-    sections.reduce((total, section) => total + section.bytes, 0) +
+    PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES +
+      correlationSections.reduce((total, section) => total + section.bytes, 0) +
       PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES + completionBytes <
       PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
   );
   assert.ok(
-    sections.reduce((total, section) => total + section.frames, 2) <=
+    [catalogAliases, ...correlationSections]
+      .reduce((total, section) => total + section.frames, 2) <=
       PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
   );
+});
+
+function collectible(nameAliases: readonly string[] = []) {
+  return {
+    publicCollectibleId: "56000000-0000-5000-8000-000000000001",
+    identityState: "canonical" as const,
+    collectibleType: "card" as const,
+    displayName: "Card",
+    normalizedName: "card",
+    nameAliases,
+    normalizedNameAliases: nameAliases.map((alias) => alias.toLowerCase()),
+    publicCategoryIds: [],
+    year: null,
+    brand: null,
+    setOrSeries: null,
+    cardNumber: null,
+    referenceNumber: null,
+    subject: null,
+    grade: null,
+    grader: null,
+    primaryImageUrl: null,
+    primaryImageAlt: null,
+    valuationAmount: null,
+    valuationCurrency: null,
+    valuationUsdAmount: null,
+    valuationUnavailableReason: null,
+    valuationType: null,
+    valuationObservedAt: null,
+    dataAsOf: "2026-09-01T12:00:00.000Z",
+  };
+}
+
+test("bootstrap admits a compact catalog at the 100k collectible count", () => {
+  const compact = collectible();
+  assert.equal(publicCatalogCollectibleSchema.safeParse(compact).success, true);
+  assert.equal(providerPromotionBootstrapCatalogSectionsWithinByteBudget({
+    catalogCategories: [],
+    catalogCollectibles: Array(
+      PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles,
+    ).fill(compact),
+    catalogAliases: [],
+  }), true);
+});
+
+test("bootstrap rejects a schema-valid wide-alias catalog above its byte budget", () => {
+  const aliases = Array.from({ length: 32 }, (_, index) =>
+    `Alias ${String(index).padStart(2, "0")} ${"x".repeat(231)}`);
+  const wide = collectible(aliases);
+  assert.equal(publicCatalogCollectibleSchema.safeParse(wide).success, true);
+  const recordBytes = Buffer.byteLength(JSON.stringify(wide), "utf8");
+  const recordCount = Math.ceil(
+    PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES / recordBytes,
+  ) + 1;
+  assert.ok(
+    recordCount < PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles,
+  );
+  assert.equal(providerPromotionBootstrapCatalogSectionsWithinByteBudget({
+    catalogCategories: [],
+    catalogCollectibles: Array(recordCount).fill(wide),
+    catalogAliases: [],
+  }), false);
 });
 
 test("bootstrap admits the full collectible count accepted by catalog contracts", () => {

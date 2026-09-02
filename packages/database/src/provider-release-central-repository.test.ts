@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CATALOG_BATCH_HASH_DOMAIN,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES,
   PROVIDER_PUBLIC_PROFILE_HASH_DOMAIN,
   canonicalJsonBytes,
   catalogContentSeedHash,
@@ -129,6 +130,8 @@ async function fakeCentral(input: {
   readonly configExpiresAt?: Date | null;
   readonly identityRole?: "central" | "provider";
   readonly identitySchemaVersion?: string;
+  readonly catalogPayloadBytes?: bigint;
+  readonly observeCatalogPayloadRead?: () => void;
   readonly observeTransactionOptions?: (options: unknown) => void;
 } = {}): Promise<CentralPrismaClient> {
   const built = await artifact();
@@ -167,6 +170,7 @@ async function fakeCentral(input: {
     byte_count: batch.byteCount,
     body_hash: batch.bodyHash,
   }));
+  let rawQueryCount = 0;
   const transaction = {
     providers: {
       async findUnique() {
@@ -210,10 +214,15 @@ async function fakeCentral(input: {
           collectible_count: built.descriptor.collectibleCount,
           alias_count: built.descriptor.aliasCount,
           lifecycle: "complete",
-          batches: storedBatches,
         };
       },
       async findFirst() { return null; },
+    },
+    catalog_version_batches: {
+      async findMany() {
+        input.observeCatalogPayloadRead?.();
+        return storedBatches;
+      },
     },
     catalog_ledger: {
       async findUniqueOrThrow() { return { last_sequence: 19n }; },
@@ -237,7 +246,15 @@ async function fakeCentral(input: {
       },
     },
     async $queryRaw() {
-      return [{ database_now: dataAsOf }];
+      rawQueryCount += 1;
+      if (rawQueryCount % 2 === 1) return [{ database_now: dataAsOf }];
+      return [{
+        payloadBytes: input.catalogPayloadBytes ?? storedBatches.reduce(
+          (total, batch) => total +
+            BigInt(Buffer.byteLength(JSON.stringify(batch.payload), "utf8")),
+          0n,
+        ),
+      }];
     },
   };
   return {
@@ -279,6 +296,28 @@ test("central pin rejects catalog bytes that do not match the complete descripto
     (error: unknown) => error instanceof ProviderReleasePinError
       && error.code === "CATALOG_ARTIFACT_INVALID",
   );
+});
+
+test("central pin rejects an oversized stored catalog before hydrating payloads", async () => {
+  const built = await artifact();
+  let payloadReads = 0;
+  const central = await fakeCentral({
+    catalogPayloadBytes:
+      BigInt(PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_CATALOG_SECTION_BYTES) + 1n,
+    observeCatalogPayloadRead() {
+      payloadReads += 1;
+    },
+  });
+
+  await assert.rejects(
+    new ProviderReleaseCentralRepository(central).pin({
+      providerId: ids.provider,
+      catalogVersionId: built.descriptor.catalogVersionId,
+    }),
+    (error: unknown) => error instanceof ProviderReleasePinError
+      && error.code === "CATALOG_ARTIFACT_INVALID",
+  );
+  assert.equal(payloadReads, 0);
 });
 
 test("central pin rejects a missing or invalid authoritative freshness configuration", async () => {

@@ -8,6 +8,7 @@ import {
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS,
   PROVIDER_PROMOTION_BOOTSTRAP_STREAM_VERSION,
+  providerPromotionBootstrapCatalogSectionsWithinByteBudget,
   providerPromotionBootstrapSnapshotFingerprint,
   type ProviderPromotionBootstrapCounts,
   type ProviderPromotionBootstrapSection,
@@ -335,6 +336,10 @@ async function streamFrames(
   assertAvailable(signal, deadlineAt);
   const metadata = pinMetadata(pin);
   const counts = streamCounts(pin);
+  if (!providerPromotionBootstrapCatalogSectionsWithinByteBudget(pin)) {
+    fail("PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE");
+  }
+  assertAvailable(signal, deadlineAt);
   const snapshotFingerprint = await awaitWhileAvailable(
     providerPromotionBootstrapSnapshotFingerprint({
       pin: metadata,
