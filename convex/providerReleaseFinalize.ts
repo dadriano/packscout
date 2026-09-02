@@ -190,23 +190,10 @@ export const finalize = internalMutation({
     await assertExpectedProviderHead(ctx, request);
     const previous = await oneProviderCompletedHead(ctx, release.platformKey);
     assertNewReleaseTransition(previous, request);
-    if (
-      publication.acceptedBatchCount !== publication.expectedBatchCount ||
-      publication.acceptedBatchChainHash !==
-        publication.expectedBatchChainHash ||
-      canonicalJson(publication.acceptedCounts) !==
-        canonicalJson(publication.expectedCounts) ||
-      canonicalJson(publication.acceptedEntityHashes) !==
-        canonicalJson(release.entityHashes) ||
-      publication.acceptedSearchRowCount !== release.counts.repacks ||
-      publication.unresolvedRepackCount !== 0 ||
-      (publication.latestEvidenceAt !== null &&
-        Date.parse(publication.latestEvidenceAt) > Date.now()) ||
-      !(await reconcileProviderSearchProof(ctx, release))
-    ) {
+    await assertProviderReleaseFinalization(ctx, release, publication);
+    if (!(await reconcileProviderSearchProof(ctx, release))) {
       refuseProviderRelease("PROVIDER_RELEASE_RECONCILIATION_FAILED");
     }
-    await assertProviderReleaseFinalization(ctx, release, publication);
 
     const serverTime = new Date().toISOString();
     const completedHead = {

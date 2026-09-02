@@ -47,9 +47,11 @@ function describeFailure(reason: unknown, subject: string): string {
 
 /**
  * A bounded, visibility-aware reader. Evidence is retained after a failure
- * only while the exact scope key is unchanged. Every new request aborts and
- * supersedes the previous one, so a slow old filter cannot replace a newer
- * result.
+ * only while the exact scope key is unchanged. Manual and scope-changing
+ * requests abort and supersede the previous one, while automatic polling
+ * waits for the active request to settle. A slow old filter therefore cannot
+ * replace a newer result, and a slow healthy read cannot be starved by the
+ * polling cadence.
  */
 function useLiveRead<T>(
   scope: string,
@@ -67,10 +69,12 @@ function useLiveRead<T>(
     rateLimitedUntil: null,
   });
   const requestSequence = useRef(0);
+  const pendingRequestSequence = useRef<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     const sequence = ++requestSequence.current;
+    pendingRequestSequence.current = sequence;
     void read(controller.signal)
       .then((data) => {
         if (controller.signal.aborted || sequence !== requestSequence.current) {
@@ -117,6 +121,11 @@ function useLiveRead<T>(
               : null,
           };
         });
+      })
+      .finally(() => {
+        if (pendingRequestSequence.current === sequence) {
+          pendingRequestSequence.current = null;
+        }
       });
 
     return () => controller.abort();
@@ -145,6 +154,7 @@ function useLiveRead<T>(
   useEffect(() => {
     const poll = () => {
       if (document.visibilityState !== "visible") return;
+      if (pendingRequestSequence.current !== null) return;
       if (
         state.rateLimitedUntil !== null
         && Date.now() < state.rateLimitedUntil

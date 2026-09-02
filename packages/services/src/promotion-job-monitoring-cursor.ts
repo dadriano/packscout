@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { PromotionJobHistoryQuery } from "@packscout/contracts";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const MONITORING_ID_PATTERN = /^pj_[A-Za-z0-9_-]{24,120}$/u;
+const MONITORING_ID_PATTERN = /^pj_[A-Za-z0-9_-]{24,160}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 

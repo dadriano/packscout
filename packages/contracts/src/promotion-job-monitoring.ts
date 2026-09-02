@@ -92,7 +92,7 @@ export const promotionJobMonitoringFilterSchema = z.union([
 /** Opaque central reference. UUIDs and provider-local run IDs are rejected. */
 export const promotionJobMonitoringIdSchema = z
   .string()
-  .regex(/^pj_[A-Za-z0-9_-]{24,120}$/u);
+  .regex(/^pj_[A-Za-z0-9_-]{24,160}$/u);
 
 export const promotionJobHistoryQuerySchema = z
   .object({

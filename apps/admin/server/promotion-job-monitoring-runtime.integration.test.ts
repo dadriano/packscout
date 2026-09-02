@@ -7,10 +7,14 @@ import {
   PrismaManifestReconciliationJobRepository,
   PrismaProviderPromotionInvocationProjectionRepository,
   promotionJobSha256,
+  type BoundedProviderDatabaseGateway,
 } from "@packscout/database";
 import { createMigratedCentralTestDatabase } from
   "@packscout/database/test-support";
-import { PrismaPromotionJobMonitoringReadRepository } from
+import {
+  PrismaPromotionJobMonitoringReadRepository,
+  PromotionJobMonitoringReadService,
+} from
   "./promotion-job-monitoring-runtime.ts";
 
 const organizationId = "91000000-0000-4000-8000-000000000001";
@@ -189,6 +193,119 @@ test("real central repository scopes roster, merged history, and provider detail
       expectedAttemptSetDigest,
     );
     assert.notEqual(expectedAttemptSetDigest, projected.canonicalDetailDigest);
+
+    const tiedStartedAt = new Date(base.getTime() + 5_000);
+    const emptyDetailDigest = promotionJobSha256("[]");
+    await harness.client.provider_promotion_invocation_projections.createMany({
+      data: Array.from({ length: 125 }, (_, index) => ({
+        id: `94000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
+        provider_id: providerId,
+        provider_invocation_id_digest: promotionJobSha256(
+          `monitoring-bulk-invocation-${index}`,
+        ),
+        projection_digest: promotionJobSha256(
+          `monitoring-bulk-projection-${index}`,
+        ),
+        trigger_kind: "manual",
+        outcome: "no_change",
+        scheduled_checkin_at: null,
+        started_at: tiedStartedAt,
+        finished_at: new Date(tiedStartedAt.getTime() + 1_000),
+        before_lane_position: null,
+        after_lane_position: null,
+        before_settled_position: null,
+        after_settled_position: null,
+        cycle_count: 1,
+        promotion_attempt_count: 0,
+        publication_count: 0,
+        operation_count: 0,
+        safe_failure_code: null,
+        canonical_detail_body: "[]",
+        canonical_detail_digest: emptyDetailDigest,
+        projected_at: new Date(tiedStartedAt.getTime() + 2_000),
+      })),
+    });
+    const deliveryIssuedAt = new Date(tiedStartedAt.getTime() - 1_000);
+    await harness.client.manifest_reconciliation_job_invocations.createMany({
+      data: Array.from({ length: 5 }, (_, index) => ({
+        run_id: `95000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
+        delivery_key_digest: promotionJobSha256(
+          `monitoring-manifest-delivery-${index}`,
+        ),
+        trigger_evidence_digest: promotionJobSha256(
+          `monitoring-manifest-trigger-${index}`,
+        ),
+        delivery_issued_at: deliveryIssuedAt,
+        delivery_expires_at: new Date(
+          deliveryIssuedAt.getTime() + PROMOTION_JOB_DELIVERY_RETENTION_MS,
+        ),
+        trigger_kind: "manual",
+        lifecycle_state: "terminal",
+        outcome: "no_change",
+        requested_at: deliveryIssuedAt,
+        started_at: tiedStartedAt,
+        finished_at: new Date(tiedStartedAt.getTime() + 1_000),
+        related_attempt_set_digest: emptyDetailDigest,
+      })),
+    });
+    const service = new PromotionJobMonitoringReadService({
+      repository,
+      gateway: {} as Pick<
+        BoundedProviderDatabaseGateway,
+        "runWithAdminProviderDatabase"
+      >,
+      deployment: "test",
+      secret: new Uint8Array(32).fill(7),
+      now: () => new Date(tiedStartedAt.getTime() + 3_000),
+    });
+    const monitoringIds: string[] = [];
+    const tiedRows: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.history({
+        organizationId,
+        query: {
+          filter: "provider:monitoring_alpha",
+          limit: 25,
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+      });
+      monitoringIds.push(...page.items.map((item) => item.monitoringId));
+      tiedRows.push(...page.items.filter((item) =>
+        item.startedAt === tiedStartedAt.toISOString()
+      ).map((item) => item.monitoringId));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined);
+    assert.equal(tiedRows.length, 125);
+    assert.equal(monitoringIds.length, 126);
+    assert.equal(new Set(monitoringIds).size, 126);
+    assert.deepEqual(tiedRows, [...tiedRows].sort((left, right) =>
+      right.localeCompare(left)
+    ));
+
+    const allMonitoringIds: string[] = [];
+    const allTiedIds: string[] = [];
+    cursor = undefined;
+    do {
+      const page = await service.history({
+        organizationId,
+        query: {
+          limit: 25,
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+      });
+      allMonitoringIds.push(...page.items.map((item) => item.monitoringId));
+      allTiedIds.push(...page.items.filter((item) =>
+        item.startedAt === tiedStartedAt.toISOString()
+      ).map((item) => item.monitoringId));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined);
+    assert.equal(allTiedIds.length, 130);
+    assert.equal(allMonitoringIds.length, 132);
+    assert.equal(new Set(allMonitoringIds).size, 132);
+    assert.deepEqual(allTiedIds, [...allTiedIds].sort((left, right) =>
+      right.localeCompare(left)
+    ));
   } finally {
     await harness.close();
   }

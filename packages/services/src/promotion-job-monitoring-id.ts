@@ -1,6 +1,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   createHmac,
   timingSafeEqual,
 } from "node:crypto";
@@ -8,7 +9,8 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DEPLOYMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
-const MONITORING_ID_PATTERN = /^pj_[A-Za-z0-9_-]{24,120}$/u;
+const MONITORING_ID_PATTERN = /^pj_[A-Za-z0-9_-]{24,160}$/u;
+const MONITORING_ORDER_KEY_PATTERN = /^[0-9a-f]{64}$/u;
 const ENVELOPE_LENGTH = 46;
 
 export type PromotionJobMonitoringRecordKind = "manifest" | "provider";
@@ -21,6 +23,26 @@ export interface PromotionJobMonitoringIdScope {
 export interface PromotionJobMonitoringRecordReference {
   readonly kind: PromotionJobMonitoringRecordKind;
   readonly centralId: string;
+}
+
+/**
+ * Public only as an ordering primitive for the central monitoring index. The
+ * digest is not an identity or an authorization token; detail lookup still
+ * requires the authenticated encrypted monitoring ID.
+ */
+export function promotionJobMonitoringOrderKey(
+  reference: PromotionJobMonitoringRecordReference,
+): string {
+  const kind = reference.kind === "manifest"
+    ? "manifest"
+    : reference.kind === "provider"
+      ? "provider"
+      : notFound();
+  if (!UUID_PATTERN.test(reference.centralId)) notFound();
+  return createHash("sha256")
+    .update(`promotion-job-monitoring-order-v1:${kind}:`, "utf8")
+    .update(Buffer.from(reference.centralId.replaceAll("-", ""), "hex"))
+    .digest("hex");
 }
 
 /** Missing, forged, and cross-scope identities intentionally share one code. */
@@ -112,7 +134,9 @@ export class PromotionJobMonitoringIdCodec {
       encrypted,
       cipher.getAuthTag(),
     ]);
-    return `pj_${envelope.toString("base64url")}`;
+    return `pj_${promotionJobMonitoringOrderKey(reference)}_${
+      envelope.toString("base64url")
+    }`;
   }
 
   decode(
@@ -121,9 +145,16 @@ export class PromotionJobMonitoringIdCodec {
   ): PromotionJobMonitoringRecordReference {
     if (!MONITORING_ID_PATTERN.test(monitoringId)) notFound();
     const aad = scopeBytes(scope);
+    const body = monitoringId.slice(3);
+    const separator = body.indexOf("_");
+    const orderKey = body.slice(0, separator);
+    if (
+      separator !== 64
+      || !MONITORING_ORDER_KEY_PATTERN.test(orderKey)
+    ) notFound();
     let envelope: Buffer;
     try {
-      envelope = Buffer.from(monitoringId.slice(3), "base64url");
+      envelope = Buffer.from(body.slice(separator + 1), "base64url");
     } catch {
       return notFound();
     }
@@ -159,6 +190,9 @@ export class PromotionJobMonitoringIdCodec {
       kind,
       centralId: uuidFromBytes(plaintext.subarray(1)),
     };
+    if (promotionJobMonitoringOrderKey(reference) !== orderKey) {
+      return notFound();
+    }
     const canonical = Buffer.from(this.encode(scope, reference));
     const supplied = Buffer.from(monitoringId);
     if (

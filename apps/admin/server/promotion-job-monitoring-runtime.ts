@@ -32,11 +32,13 @@ import {
   type ProviderPrismaClient,
 } from "@packscout/database";
 import {
+  InvalidPromotionJobMonitoringCursorError,
   PromotionJobMonitoringCursorCodec,
   PromotionJobMonitoringIdCodec,
   PromotionJobMonitoringNotFoundError,
   evaluatePromotionJobScheduleLiveness,
   judgeProviderPromotionMonitoring,
+  promotionJobMonitoringOrderKey,
   type ProviderPromotionMonitoringCentralFacts,
   type ProviderPromotionMonitoringLocalFacts,
 } from "@packscout/services";
@@ -74,6 +76,12 @@ export interface CentralPromotionJobMonitoringInvocationRecord {
   readonly attemptSetDigest: string;
   readonly canonicalDetailBody: string | null;
   readonly canonicalDetailDigest: string | null;
+}
+
+interface PromotionJobHistoryRepositoryPosition {
+  readonly startedAt: Date;
+  readonly monitoringId: string;
+  readonly monitoringOrderKey: string;
 }
 
 export interface CentralProviderPromotionMonitoringEvidence {
@@ -677,11 +685,16 @@ export class PrismaPromotionJobMonitoringReadRepository {
   async listHistory(input: Readonly<{
     organizationId: string;
     query: PromotionJobHistoryQuery;
-    before: Readonly<{ startedAt: Date }> | null;
+    before: PromotionJobHistoryRepositoryPosition | null;
   }>): Promise<readonly CentralPromotionJobMonitoringInvocationRecord[]> {
     const before = input.before === null
       ? {}
-      : { started_at: { lte: input.before.startedAt } };
+      : {
+          OR: [{ started_at: { lt: input.before.startedAt } }, {
+            started_at: input.before.startedAt,
+            monitoring_order_key: { lt: input.before.monitoringOrderKey },
+          }],
+        };
     const providerFilter = input.query.filter?.startsWith("provider:")
       ? input.query.filter.slice("provider:".length)
       : null;
@@ -698,7 +711,10 @@ export class PrismaPromotionJobMonitoringReadRepository {
                 ? {}
                 : { outcome: input.query.outcome }),
             },
-            orderBy: [{ started_at: "desc" }, { run_id: "desc" }],
+            orderBy: [
+              { started_at: "desc" },
+              { monitoring_order_key: "desc" },
+            ],
             take: HISTORY_SIDE_LIMIT,
             include: { detail: true },
           }),
@@ -720,7 +736,10 @@ export class PrismaPromotionJobMonitoringReadRepository {
                 ? {}
                 : { outcome: input.query.outcome }),
             },
-            orderBy: [{ started_at: "desc" }, { id: "desc" }],
+            orderBy: [
+              { started_at: "desc" },
+              { monitoring_order_key: "desc" },
+            ],
             take: HISTORY_SIDE_LIMIT,
             include: { provider: { select: { provider_key: true } } },
           }),
@@ -776,7 +795,7 @@ export interface PromotionJobMonitoringReadRepository {
   listHistory(input: Readonly<{
     organizationId: string;
     query: PromotionJobHistoryQuery;
-    before: Readonly<{ startedAt: Date }> | null;
+    before: PromotionJobHistoryRepositoryPosition | null;
   }>): Promise<readonly CentralPromotionJobMonitoringInvocationRecord[]>;
   readDetail(input: Readonly<{
     organizationId: string;
@@ -924,7 +943,7 @@ function evaluatorView(
 
 function olderThan(
   item: PromotionJobInvocationMonitoring,
-  position: Readonly<{ startedAt: Date; monitoringId: string }> | null,
+  position: PromotionJobHistoryRepositoryPosition | null,
 ): boolean {
   if (position === null) return true;
   const time = new Date(item.startedAt).getTime();
@@ -1121,33 +1140,57 @@ export class PromotionJobMonitoringReadService {
       rosterDigest: roster.rosterDigest,
       query: input.query,
     };
-    const position = input.query.cursor === undefined
+    const cursorPosition = input.query.cursor === undefined
       ? null
       : this.#cursor.decode(input.query.cursor, scope);
+    const idScope = {
+      organizationId: input.organizationId,
+      deployment: this.options.deployment,
+    };
+    let position: PromotionJobHistoryRepositoryPosition | null = null;
+    if (cursorPosition !== null) {
+      try {
+        const reference = this.#ids.decode(
+          idScope,
+          cursorPosition.monitoringId,
+        );
+        position = {
+          startedAt: cursorPosition.startedAt,
+          monitoringId: cursorPosition.monitoringId,
+          monitoringOrderKey: promotionJobMonitoringOrderKey(reference),
+        };
+      } catch (error) {
+        if (error instanceof PromotionJobMonitoringNotFoundError) {
+          throw new InvalidPromotionJobMonitoringCursorError();
+        }
+        throw error;
+      }
+    }
     const records = await this.options.repository.listHistory({
       organizationId: input.organizationId,
       query: input.query,
       before: position,
     });
-    const idScope = {
-      organizationId: input.organizationId,
-      deployment: this.options.deployment,
-    };
-    const mapped = records.map((record) =>
-      mapInvocation(record, this.#ids, idScope)
-    ).filter((item) => olderThan(item, position)).sort((left, right) =>
-      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
-      || right.monitoringId.localeCompare(left.monitoringId)
+    const mapped = records.map((record) => ({
+      record,
+      invocation: mapInvocation(record, this.#ids, idScope),
+    })).filter(({ invocation }) => olderThan(invocation, position)).sort(
+      (left, right) =>
+        right.record.startedAt.getTime() - left.record.startedAt.getTime()
+        || right.invocation.monitoringId.localeCompare(
+          left.invocation.monitoringId,
+        ),
     );
-    const items = mapped.slice(0, input.query.limit);
-    const last = items.at(-1);
+    const page = mapped.slice(0, input.query.limit);
+    const items = page.map(({ invocation }) => invocation);
+    const last = page.at(-1);
     return {
       items,
       nextCursor: mapped.length <= input.query.limit || last === undefined
         ? null
         : this.#cursor.encode(scope, {
-            startedAt: new Date(last.startedAt),
-            monitoringId: last.monitoringId,
+            startedAt: last.record.startedAt,
+            monitoringId: last.invocation.monitoringId,
           }),
       rosterDigest: roster.rosterDigest,
     };
