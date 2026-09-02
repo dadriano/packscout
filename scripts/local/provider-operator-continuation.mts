@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy, createCentralDatabaseLifecycle } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
-import { localBackfillProviderPorts, readBackfillAuthority, readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+import { localBackfillProviderPorts, readBackfillAuthority, readLocalBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
 import { claimContinuousResidency } from "./provider-continuous-residency.mts";
 import { createOperatorContinuation } from "./provider-operator-continuation-control.mts";
 import { assertNoContinuationWriter, continuationDigest, continuationIds, continuationReviewSchema,
@@ -65,7 +65,7 @@ export async function runOperatorContinuation(args: ReturnType<typeof parseOpera
     assertNoContinuationWriter(result.stdout, review);
   };
   await checkProcess();
-  const environment = await readBackfillEnvironment();
+  const environment = await readLocalBackfillEnvironment();
   const cipher = new AesGcmProviderCredentialCipher({ primaryVersion: environment.version,
     keys: new Map([[environment.version, environment.key]]) });
   const central = createCentralDatabaseLifecycle({ databaseUrl: environment.centralDatabaseUrl, connectionLimit: 1 });

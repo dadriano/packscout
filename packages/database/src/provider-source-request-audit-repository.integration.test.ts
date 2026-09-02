@@ -228,6 +228,8 @@ test("request and page translation audits require the exact live import lease an
       pageNumber: 4,
       sourceRecordCount: 2_000,
       normalizedRecordCount: 1_987,
+      recordCounts: { catalogRecordCount: 1_500, collectibleRecordCount: 1_490, packContentSnapshotCount: 7,
+        pullRecordCount: 400, marketEventRecordCount: 80, rejectedRecordCount: 7 },
     });
     assert.equal(translated.kind, "recorded");
     if (translated.kind !== "recorded") {
@@ -259,12 +261,23 @@ test("request and page translation audits require the exact live import lease an
       details: {
         leaseFence: firstLease.lease.fence.toString(),
         normalizedRecordCount: 1_987,
+        catalogRecordCount: 1_500, collectibleRecordCount: 1_490, packContentSnapshotCount: 7,
+        pullRecordCount: 400, marketEventRecordCount: 80, rejectedRecordCount: 7,
         pageNumber: 4,
         runId: runningRunId,
         sourceRecordCount: 2_000,
       },
       occurred_at: translated.occurredAt,
     });
+    await assert.rejects(requestAudits.recordPageTranslation({
+      runId: runningRunId, workerId: firstWorkerId, workerFence: firstLease.lease.fence,
+      requestAttemptId: randomUUID(), pageAttemptId: randomUUID(), pageNumber: 5,
+      sourceRecordCount: 1, normalizedRecordCount: 1,
+      recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
+        pullRecordCount: 0, marketEventRecordCount: 0, rejectedRecordCount: 0 },
+    }), /counts do not match/);
+    assert.equal(await harness.client.local_audit_events.count(), 2,
+      "Invalid measurements must not append misleading audit evidence.");
     assert.equal(
       /authorization|bearer|credential|cursor|payload|secret|token/iu.test(
         JSON.stringify(translationAudit.details),
@@ -308,6 +321,8 @@ test("request and page translation audits require the exact live import lease an
       pageNumber: 5,
       sourceRecordCount: 1,
       normalizedRecordCount: 1,
+      recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
+        pullRecordCount: 1, marketEventRecordCount: 0, rejectedRecordCount: 0 },
     });
     assert.deepEqual(staleTranslation, { kind: "lease_lost" });
 
@@ -352,6 +367,8 @@ test("request and page translation audits require the exact live import lease an
       pageNumber: 1,
       sourceRecordCount: 1,
       normalizedRecordCount: 1,
+      recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
+        pullRecordCount: 1, marketEventRecordCount: 0, rejectedRecordCount: 0 },
     });
     assert.deepEqual(terminalTranslation, { kind: "run_not_running" });
     assert.equal(await harness.client.local_audit_events.count(), 2);

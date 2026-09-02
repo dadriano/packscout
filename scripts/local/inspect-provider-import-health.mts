@@ -9,7 +9,7 @@ import { BoundedProviderDatabaseGateway, ProviderDatabaseDestinationPolicy,
   type ProviderPrismaClient, type ProviderDatabaseOperationResult } from "@packscout/database";
 import { AesGcmProviderCredentialCipher, CipherProviderDatabaseCredentialResolver } from "@packscout/services";
 import { assertLocalBackfillDestination, localBackfillProviderPorts,
-  readBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
+  readLocalBackfillEnvironment } from "./provider-backfill-supervisor-authority.mts";
 import { providerImportHealth, type ProviderHeadReconciliationHealth } from "./provider-import-health-policy.mts";
 
 const residentSchema = z.object({ providerId: z.string().uuid(), providerKey: z.string(),
@@ -103,7 +103,7 @@ export function providerHealthConfigurationMatches(input: {
 
 export async function inspectProviderImportHealth(organizationId: string) {
   z.string().uuid().parse(organizationId);
-  const environment = await readBackfillEnvironment();
+  const environment = await readLocalBackfillEnvironment();
   const central = createCentralDatabaseLifecycle({ databaseUrl: environment.centralDatabaseUrl, connectionLimit: 1 });
   const cipher = new AesGcmProviderCredentialCipher({ primaryVersion: environment.version,
     keys: new Map([[environment.version, environment.key]]) });
