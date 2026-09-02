@@ -71,6 +71,7 @@ const CENTRAL_RUNTIME_TABLES = Object.freeze([
   "provider_database_nodes",
   "provider_connection_tests",
   "provider_activity_events",
+  "provider_completion_publish_plans",
   "provider_health",
   "admin_alerts",
   "global_categories",
@@ -93,7 +94,19 @@ const CENTRAL_RUNTIME_TABLES = Object.freeze([
   "catalog_publication_operations",
   "manifest_activation_state",
   "manifest_activation_operations",
+  "manifest_activation_status_observations",
+  "manifest_activation_state_observations",
   "artifact_retention_executions",
+  "manifest_reconciliation_job_wake",
+  "manifest_reconciliation_job_schedule",
+  "promotion_job_liveness_evaluator_state",
+  "promotion_job_liveness_observations",
+  "promotion_job_liveness_conditions",
+  "manifest_reconciliation_job_invocations",
+  "manifest_reconciliation_job_delivery_tombstones",
+  "manifest_reconciliation_invocation_details",
+  "manifest_gate_intents",
+  "provider_promotion_invocation_projections",
 ]);
 const CENTRAL_DELETE_TABLES = Object.freeze([
   "auth_rate_limits",
@@ -101,6 +114,9 @@ const CENTRAL_DELETE_TABLES = Object.freeze([
   "email_message_intents",
   "email_message_attempts",
   "email_link_tokens",
+  "manifest_reconciliation_job_invocations",
+  "manifest_reconciliation_job_delivery_tombstones",
+  "provider_promotion_invocation_projections",
 ]);
 const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "categories",
@@ -134,6 +150,15 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "provider_publication_operations",
   "provider_publication_receipts",
   "provider_publication_state",
+  "provider_promotion_job_wake",
+  "provider_promotion_job_schedule",
+  "provider_promotion_job_invocations",
+  "provider_promotion_job_delivery_tombstones",
+  "provider_promotion_invocation_details",
+]);
+const PROVIDER_DELETE_TABLES = Object.freeze([
+  "provider_promotion_job_invocations",
+  "provider_promotion_job_delivery_tombstones",
 ]);
 const PROVIDER_RUNTIME_SEQUENCES = Object.freeze([
   "provider_state_events_sequence_seq",
@@ -335,6 +360,10 @@ export async function grantExplicitReviewRuntimeAccess(input: {
         to ${quoteIdentifier(input.cluster.appRoleName)}
       `);
     } else {
+      await pool.query(`
+        grant delete on table ${qualifiedTables(PROVIDER_DELETE_TABLES)}
+        to ${quoteIdentifier(input.cluster.appRoleName)}
+      `);
       await pool.query(`
         grant usage, select on sequence ${qualifiedTables(PROVIDER_RUNTIME_SEQUENCES)}
         to ${quoteIdentifier(input.cluster.appRoleName)}
