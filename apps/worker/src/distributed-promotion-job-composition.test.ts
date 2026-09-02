@@ -193,7 +193,7 @@ test("resident provider publication continues from its verified pin during a cen
   assert.equal(result.failureCode, "CACHED_PIN_REACHED");
 });
 
-test("resident provider bootstrap and publication share one absolute runtime budget", async () => {
+test("resident provider pin refresh preserves a bounded assembly window", async () => {
   const initialPin = {
     providerId,
     providerKey: "alpha",
@@ -242,7 +242,7 @@ test("resident provider bootstrap and publication share one absolute runtime bud
 
   assert.equal(result.state, "failed");
   assert.equal(result.failureCode, "CACHED_PIN_REACHED");
-  assert.deepEqual(timerDelays, [60, 20]);
+  assert.deepEqual(timerDelays, [20, 60]);
 });
 
 test("resident provider refuses an authoritative malformed bootstrap response", async () => {

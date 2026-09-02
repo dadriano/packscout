@@ -62,11 +62,13 @@ and the framework boundary ratchet.
   its last verified pin through a transient central outage. A durable cold-start
   cache was not part of the approved contract and would require separate
   revocation, expiry, and storage semantics.
-- Capacity boundary: bootstrap accepts at most 50,000 records per retained
-  section and 128 MiB on the wire. Larger graphs fail closed and require a
-  future streaming-to-persistence design; the maximum-count representative
-  graph passes the real worker consumer under 256 MiB V8 old-space, and every
-  section rejects a declared or produced 50,001st record.
+- Capacity boundary: bootstrap accepts the catalog contract's 100,000
+  collectibles and matching collectible correlations, at most 50,000 records
+  for each other retained section, and 128 MiB on the wire. Larger graphs fail
+  closed and require a future streaming-to-persistence design; the 102.9 MiB
+  maximum-count representative graph passes the real worker consumer under
+  256 MiB V8 old-space, and every section rejects its declared or produced
+  limit plus one.
 - Authority capacity: publication configuration accepts the 64-provider roster
   with one distinct 32-byte provider key each plus all 24 ancillary authority
   slots in 6,029 UTF-8 bytes. It permits at most two current/previous keys per

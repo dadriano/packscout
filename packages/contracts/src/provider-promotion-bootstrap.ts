@@ -1,4 +1,6 @@
 import { sha256CanonicalJson } from "./data-release-v2-canonical.ts";
+import { MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES } from
+  "./provider-catalog-release-v1.ts";
 
 export const PROVIDER_PROMOTION_BOOTSTRAP_STREAM_VERSION =
   "provider-promotion-bootstrap-v1" as const;
@@ -7,8 +9,9 @@ export const PROVIDER_PROMOTION_BOOTSTRAP_STREAM_CONTENT_TYPE =
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES =
   1 * 1_024 * 1_024;
 // The worker retains, validates, and hashes the decoded arrays. The constrained
-// 256 MiB V8 old-space consumer proof covers the accepted 50k-per-section
-// graph within this aggregate wire bound.
+// 256 MiB V8 old-space consumer proof covers the maximum accepted graph,
+// including the 100k collectible catalog and correlation sections, within
+// this aggregate wire bound.
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES =
   128 * 1_024 * 1_024;
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_RECORDS_PER_FRAME = 250;
@@ -37,10 +40,10 @@ export interface ProviderPromotionBootstrapCounts {
 
 export const PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS = Object.freeze({
   catalogCategories: 50_000,
-  catalogCollectibles: 50_000,
+  catalogCollectibles: MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
   catalogAliases: 50_000,
   categoryCorrelations: 50_000,
-  collectibleCorrelations: 50_000,
+  collectibleCorrelations: MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
 } satisfies ProviderPromotionBootstrapCounts);
 
 export function providerPromotionBootstrapSnapshotFingerprint(input: {

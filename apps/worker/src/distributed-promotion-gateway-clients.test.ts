@@ -491,7 +491,7 @@ test("gateway refuses redirects and non-framed response shapes", async () => {
   assert.equal(redirect, "error");
 });
 
-test("gateway rejects every declared section count at the shared limit plus one", async (context) => {
+test("gateway rejects every declared section count at its limit plus one", async (context) => {
   const serialized = await serializedPin();
   const metadata = { ...serialized };
   for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
@@ -500,7 +500,6 @@ test("gateway rejects every declared section count at the shared limit plus one"
 
   for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
     await context.test(section, async () => {
-      assert.equal(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[section], 50_000);
       const counts = Object.fromEntries(
         PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS.map((candidate) => [
           candidate,
@@ -634,7 +633,7 @@ test("bootstrap accepts the maximum-count representative consumer graph", {
   }
   assert.equal(childMode, "consume");
   const totalBytes = (await stat(fixturePath)).size;
-  assert.ok(totalBytes > 64 * 1_024 * 1_024);
+  assert.ok(totalBytes > 100 * 1_024 * 1_024);
   assert.ok(totalBytes < PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES);
 
   const fixtureStream = createReadStream(fixturePath);

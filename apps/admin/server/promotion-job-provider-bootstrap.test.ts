@@ -163,10 +163,9 @@ test("bootstrap rejects a repository response for another provider", async () =>
   });
 });
 
-test("bootstrap rejects every retained section at the shared count limit plus one", async (context) => {
+test("bootstrap rejects every retained section at its count limit plus one", async (context) => {
   for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
     await context.test(section, async () => {
-      assert.equal(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[section], 50_000);
       let reads = 0;
       const service = new ProviderPromotionBootstrapService({
         credentials: credentials(),

@@ -154,9 +154,14 @@ export function createProviderPromotionJobRuntime(input: Readonly<{
         request.deadlineAt ?? Number.MAX_SAFE_INTEGER,
         startedAt + maximumMilliseconds,
       );
+      // A resident already has a verified pin. Bound its freshness probe to
+      // one reserve and preserve another reserve for work before completion.
       const bootstrapDeadlineAt = Math.max(
         startedAt,
-        deadlineAt - completionReserveMilliseconds * 2,
+        Math.min(
+          startedAt + completionReserveMilliseconds,
+          deadlineAt - completionReserveMilliseconds * 2,
+        ),
       );
       let pin: PinnedProviderReleaseInputs;
       try {

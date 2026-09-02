@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+  providerCatalogReleaseCountsV1Schema,
+} from "./provider-catalog-release-v1.ts";
+import { globalCatalogManifestCountsV1Schema } from
+  "./global-catalog-manifest-v1.ts";
+import {
   PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
@@ -62,10 +68,10 @@ function sectionBytes(input: Readonly<{
 test("bootstrap fixed-width limits fit the bounded frame and stream budgets", () => {
   assert.deepEqual(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS, {
     catalogCategories: 50_000,
-    catalogCollectibles: 50_000,
+    catalogCollectibles: 100_000,
     catalogAliases: 50_000,
     categoryCorrelations: 50_000,
-    collectibleCorrelations: 50_000,
+    collectibleCorrelations: 100_000,
   });
   const sections = [
     sectionBytes({
@@ -88,7 +94,7 @@ test("bootstrap fixed-width limits fit the bounded frame and stream budgets", ()
     maximumFrameBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES));
   assert.equal(
     sections.reduce((total, section) => total + section.bytes, 0),
-    23_244_862,
+    31_560_662,
   );
   const completionBytes = Buffer.byteLength(`${JSON.stringify({
     kind: "complete",
@@ -103,5 +109,47 @@ test("bootstrap fixed-width limits fit the bounded frame and stream budgets", ()
   assert.ok(
     sections.reduce((total, section) => total + section.frames, 2) <=
       PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
+  );
+});
+
+test("bootstrap admits the full collectible count accepted by catalog contracts", () => {
+  const providerCounts = {
+    vendors: 1,
+    categories: 0,
+    collectibles: MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+    repacks: 0,
+    repackChases: 0,
+    searchShards: 0,
+  } as const;
+  const globalCounts = { ...providerCounts, vendors: 1 };
+
+  assert.equal(
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles,
+    MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+  );
+  assert.equal(
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.collectibleCorrelations,
+    MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+  );
+  assert.equal(
+    providerCatalogReleaseCountsV1Schema.safeParse(providerCounts).success,
+    true,
+  );
+  assert.equal(
+    globalCatalogManifestCountsV1Schema.safeParse(globalCounts).success,
+    true,
+  );
+
+  const overflow = {
+    ...providerCounts,
+    collectibles: MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES + 1,
+  };
+  assert.equal(
+    providerCatalogReleaseCountsV1Schema.safeParse(overflow).success,
+    false,
+  );
+  assert.equal(
+    globalCatalogManifestCountsV1Schema.safeParse(overflow).success,
+    false,
   );
 });

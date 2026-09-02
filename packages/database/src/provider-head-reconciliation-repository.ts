@@ -63,6 +63,8 @@ export class PrismaProviderHeadReconciliationRepository {
       if ((receipt && (receipt.outcome !== "success" || receipt.targetType !== "provider_run"))
         || state.headPageId !== proof.headPageId || state.configVersionId !== run.config_id
         || state.checkpointHash !== run.checkpoint_hash || state.leaseFence !== (receipt?.workerFence ?? input.workerFence).toString()) return invalid();
+      // Recovery inherits the scan position, but its audit batches belong to the new fenced run.
+      if (receipt && receipt.workerFence !== input.workerFence) state.batchNumber = 0;
       if (state.phase === "complete") return "complete";
       state.leaseFence = input.workerFence.toString();
       if (state.phase === "facts") {

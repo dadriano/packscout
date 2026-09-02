@@ -16,6 +16,7 @@ import {
   sha256Schema,
 } from "./data-release-v2-values.ts";
 import {
+  MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
   providerCatalogPlatformKeyV1Schema,
   providerCatalogReleaseCountsV1Schema,
   providerCatalogReleaseEntityHashesV1Schema,
@@ -75,7 +76,9 @@ export const globalCatalogManifestCountsV1Schema = z.object({
   categories: nonNegativeSafeIntegerSchema.max(
     MAX_GLOBAL_CATALOG_CATEGORY_DOCUMENTS,
   ),
-  collectibles: nonNegativeSafeIntegerSchema.max(100_000),
+  collectibles: nonNegativeSafeIntegerSchema.max(
+    MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+  ),
   repacks: nonNegativeSafeIntegerSchema.max(
     MAX_PUBLIC_REPACKS_PER_RELEASE,
   ),
