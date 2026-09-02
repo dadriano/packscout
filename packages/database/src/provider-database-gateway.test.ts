@@ -36,12 +36,14 @@ const credential = { username: "synthetic@role", password: "synthetic:@/?#passwo
 function fixture(input: {
   allowedModes?: ("disable" | "require" | "verify-ca" | "verify-full")[];
   allowedHost?: string;
+  central?: CentralDatabaseLifecycle;
+  operationTimeoutMs?: number;
 } = {}) {
   const opened: { databaseUrl: string; providerId: string; providerKey: string; connectionLimit: number }[] = [];
   let resolved = 0;
   let closed = 0;
   const gateway = new BoundedProviderDatabaseGateway({
-    central: {} as CentralDatabaseLifecycle,
+    central: input.central ?? {} as CentralDatabaseLifecycle,
     credentialResolver: {
       async resolve(request) {
         resolved += 1;
@@ -70,7 +72,7 @@ function fixture(input: {
     connectionLimitPerProvider: 2,
     maximumCachedProviders: 1,
     connectionTimeoutMs: 1500,
-    operationTimeoutMs: 1000,
+    operationTimeoutMs: input.operationTimeoutMs ?? 1000,
   });
   return { gateway, opened, resolved: () => resolved, closed: () => closed };
 }
@@ -140,4 +142,29 @@ test("gateway retains explicit destination-approved plaintext behavior for local
     assert.equal(url.searchParams.get("sslmode"), "disable");
     assert.equal(url.searchParams.has("sslaccept"), false);
   } finally { await state.gateway.close(); }
+});
+
+test("admin provider reads honor an earlier caller-wide deadline", {
+  timeout: 1_000,
+}, async () => {
+  const state = fixture({
+    operationTimeoutMs: 15_000,
+    central: {
+      async start() { return new Promise<void>(() => undefined); },
+    } as CentralDatabaseLifecycle,
+  });
+  const startedAt = performance.now();
+  try {
+    const result = await state.gateway.runWithAdminProviderDatabase({
+      organizationId: route.organizationId,
+      providerId: route.target.providerId,
+      deadlineAt: Date.now() + 25,
+    }, async () => {
+      assert.fail("An expired request deadline must not reach a provider operation.");
+    });
+    assert.equal(result.state, "unreachable");
+    assert.ok(performance.now() - startedAt < 500);
+  } finally {
+    await state.gateway.close();
+  }
 });

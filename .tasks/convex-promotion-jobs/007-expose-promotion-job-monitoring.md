@@ -25,6 +25,9 @@ schedule, publication, and activation facts.
   route failure.
 - Gateway failure retains only the last sanitized central projection and never
   fabricates healthy/current evidence.
+- All live provider probes share one 15-second overview deadline. Once that
+  budget expires, no queued probe starts and every remaining row falls back to
+  its sanitized central evidence.
 - Provider view separates local schedule, settled/completed/retry state, central
   active manifest selection, pending activation, and lifecycle.
 - Manifest view is central-only: active/previous manifest, serialized operation,
@@ -66,6 +69,8 @@ schedule, publication, and activation facts.
   hardcoded provider count.
 - [x] One unavailable provider leaves healthy provider and manifest results
   readable and explicitly labels live versus last-known evidence.
+- [x] A 64-provider outage returns every stable last-known row within one
+  overview probe budget rather than multiplying the timeout by roster size.
 - [x] Completed local release newer than central active selection reads
   `awaiting_activation`; unrelated providers remain current.
 - [x] Disabled/archived providers preserve truthful retained active selection

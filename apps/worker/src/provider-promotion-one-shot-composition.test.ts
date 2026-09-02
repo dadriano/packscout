@@ -192,6 +192,159 @@ test("bounded provider reads normalize Prisma transaction expiry", async () => {
   );
 });
 
+test("post-publication evidence reads only compact operation digest fields", async () => {
+  const releaseId = "00000000-0000-4000-8000-000000000206";
+  const startId = "00000000-0000-4000-8000-000000000207";
+  const batchId = "00000000-0000-4000-8000-000000000208";
+  const finalizeId = "00000000-0000-4000-8000-000000000209";
+  const startRequestedAt = new Date(base.getTime() + 3_000);
+  const batchRequestedAt = new Date(base.getTime() + 2_000);
+  const finalizeRequestedAt = new Date(base.getTime() + 1_000);
+  const batchAttemptedAt = new Date(base.getTime() + 4_000);
+  const finalizeAttemptedAt = new Date(base.getTime() + 5_000);
+  const finalizeCompletedAt = new Date(base.getTime() + 6_000);
+  const receiptDigest = promotionJobSha256("finalize receipt");
+  const rows = [{
+    id: finalizeId,
+    operation_kind: "finalize",
+    batch_index: null,
+    request_digest: promotionJobSha256("finalize request"),
+    state: "accepted",
+    attempt_count: 1,
+    last_attempted_at: finalizeAttemptedAt,
+    requested_at: finalizeRequestedAt,
+    completed_at: finalizeCompletedAt,
+    receipt: { response_digest: receiptDigest },
+  }, {
+    id: batchId,
+    operation_kind: "applyBatch",
+    batch_index: 0,
+    request_digest: promotionJobSha256("batch request"),
+    state: "ambiguous",
+    attempt_count: 2,
+    last_attempted_at: batchAttemptedAt,
+    requested_at: batchRequestedAt,
+    completed_at: null,
+    receipt: null,
+  }, {
+    id: startId,
+    operation_kind: "start",
+    batch_index: null,
+    request_digest: promotionJobSha256("start request"),
+    state: "pending",
+    attempt_count: 0,
+    last_attempted_at: null,
+    requested_at: startRequestedAt,
+    completed_at: null,
+    receipt: null,
+  }];
+  let receivedQuery: unknown;
+  const provider = {
+    async $transaction(
+      operation: (transaction: Readonly<{
+        provider_publication_operations: Readonly<{
+          findMany(query: unknown): Promise<typeof rows>;
+        }>;
+      }>) => Promise<unknown>,
+    ) {
+      return operation({
+        provider_publication_operations: {
+          async findMany(query: unknown) {
+            receivedQuery = query;
+            return rows;
+          },
+        },
+      });
+    },
+  } as unknown as ProviderPrismaClient;
+  const work = new PrismaBoundProviderPromotionWork({
+    provider,
+    providerId: providerA,
+    pin: pin({
+      providerId: providerA,
+      providerKey: "courtyard",
+      configVersionId: configA,
+    }),
+    workerId: "promotion:compact-evidence-test",
+    transport: inertTransport,
+  });
+
+  const evidence = await (work as unknown as Readonly<{
+    operationEvidence(
+      providerReleaseId: string,
+      deadlineAt: number,
+      signal: AbortSignal,
+    ): Promise<unknown>;
+  }>).operationEvidence(
+    releaseId,
+    Date.now() + 10_000,
+    new AbortController().signal,
+  );
+
+  assert.deepEqual(receivedQuery, {
+    where: { provider_release_id: releaseId },
+    select: {
+      id: true,
+      operation_kind: true,
+      batch_index: true,
+      request_digest: true,
+      state: true,
+      attempt_count: true,
+      last_attempted_at: true,
+      requested_at: true,
+      completed_at: true,
+      receipt: { select: { response_digest: true } },
+    },
+  });
+  const recentOperations = [{
+    operationIndex: 0,
+    operationKind: "start",
+    state: "pending",
+    sendCount: 0,
+    sentAt: null,
+    acknowledgedAt: null,
+    operationIdDigest: promotionJobSha256(startId),
+    requestDigest: promotionJobSha256("start request"),
+    receiptDigest: null,
+  }, {
+    operationIndex: 1,
+    operationKind: "applyBatch",
+    state: "sent",
+    sendCount: 2,
+    sentAt: batchAttemptedAt,
+    acknowledgedAt: null,
+    operationIdDigest: promotionJobSha256(batchId),
+    requestDigest: promotionJobSha256("batch request"),
+    receiptDigest: null,
+  }, {
+    operationIndex: 2,
+    operationKind: "finalize",
+    state: "acknowledged",
+    sendCount: 1,
+    sentAt: finalizeAttemptedAt,
+    acknowledgedAt: finalizeCompletedAt,
+    operationIdDigest: promotionJobSha256(finalizeId),
+    requestDigest: promotionJobSha256("finalize request"),
+    receiptDigest,
+  }];
+  const orderedOperationDigest = promotionJobSha256(recentOperations.map(
+    (operation) => [
+      operation.operationIndex,
+      operation.operationKind,
+      operation.state,
+      operation.sendCount,
+      operation.operationIdDigest,
+      operation.requestDigest,
+      operation.receiptDigest ?? "",
+    ].join(":"),
+  ).join("\n"));
+  assert.deepEqual(evidence, {
+    totalOperationCount: 3,
+    orderedOperationDigest,
+    recentOperations,
+  });
+});
+
 test("provider A completes from its cached pin while provider B is independently unreachable", async () => {
   const authorityA = authority(providerA, 1);
   const authorityB = authority(providerB, 2);

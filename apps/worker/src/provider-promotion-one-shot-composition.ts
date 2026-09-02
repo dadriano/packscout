@@ -420,7 +420,18 @@ implements ProviderPromotionJobWorkPort {
       () => this.dependencies.provider.$transaction(
         (transaction) => transaction.provider_publication_operations.findMany({
           where: { provider_release_id: providerReleaseId },
-          include: { receipt: true },
+          select: {
+            id: true,
+            operation_kind: true,
+            batch_index: true,
+            request_digest: true,
+            state: true,
+            attempt_count: true,
+            last_attempted_at: true,
+            requested_at: true,
+            completed_at: true,
+            receipt: { select: { response_digest: true } },
+          },
         }),
         boundedReadOptions(deadlineAt),
       ),

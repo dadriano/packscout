@@ -29,6 +29,7 @@ import {
   type PromotionJobLivenessRosterSnapshotRecord,
   type PromotionJobSchedule,
   type PromotionWakeIntent,
+  type ProviderDatabaseOperationResult,
   type ProviderPrismaClient,
 } from "@packscout/database";
 import {
@@ -45,6 +46,7 @@ import {
 
 const PROVIDER_LIMIT = 256;
 const DISTRIBUTED_READ_CONCURRENCY = 4;
+const OVERVIEW_PROVIDER_READ_TIMEOUT_MS = 15_000;
 const HISTORY_SIDE_LIMIT = 101;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
@@ -377,6 +379,44 @@ async function mapBounded<T, U>(
     },
   ));
   return results;
+}
+
+type DeadlineSettlement<T> =
+  | { readonly state: "fulfilled"; readonly value: T }
+  | { readonly state: "rejected" }
+  | { readonly state: "timed_out" };
+
+async function settleByDeadline<T>(
+  operation: () => Promise<T>,
+  deadlineAt: number,
+): Promise<DeadlineSettlement<T>> {
+  const remainingMs = deadlineAt - Date.now();
+  // Do not launch more provider work after the roster-wide budget expires.
+  // Those rows still retain their central last-known evidence below.
+  if (remainingMs <= 0) return { state: "timed_out" };
+  const pending = Promise.resolve().then(operation);
+  return new Promise((resolve) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      resolve({ state: "timed_out" });
+    }, remainingMs);
+    void pending.then(
+      (value) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        resolve({ state: "fulfilled", value });
+      },
+      () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        resolve({ state: "rejected" });
+      },
+    );
+  });
 }
 
 /** Central-only repository; no provider route or credential enters a query. */
@@ -1056,6 +1096,7 @@ export class PromotionJobMonitoringReadService {
   readonly #cursor: PromotionJobMonitoringCursorCodec;
   readonly #ids: PromotionJobMonitoringIdCodec;
   readonly #now: () => Date;
+  readonly #overviewProviderReadTimeoutMs: number;
   readonly #readLiveProvider: (
     database: ProviderPrismaClient,
     observedAt: Date,
@@ -1067,6 +1108,7 @@ export class PromotionJobMonitoringReadService {
     deployment: string;
     secret: Uint8Array;
     now?: () => Date;
+    overviewProviderReadTimeoutMs?: number;
     readLiveProvider?: (
       database: ProviderPrismaClient,
       observedAt: Date,
@@ -1075,6 +1117,15 @@ export class PromotionJobMonitoringReadService {
     this.#cursor = new PromotionJobMonitoringCursorCodec(options.secret);
     this.#ids = new PromotionJobMonitoringIdCodec(options.secret);
     this.#now = options.now ?? (() => new Date());
+    this.#overviewProviderReadTimeoutMs = options.overviewProviderReadTimeoutMs
+      ?? OVERVIEW_PROVIDER_READ_TIMEOUT_MS;
+    if (
+      !Number.isInteger(this.#overviewProviderReadTimeoutMs)
+      || this.#overviewProviderReadTimeoutMs < 1
+      || this.#overviewProviderReadTimeoutMs > 60_000
+    ) {
+      throw new TypeError("Promotion monitoring overview timeout is invalid.");
+    }
     this.#readLiveProvider = options.readLiveProvider ?? readLiveProvider;
   }
 
@@ -1082,6 +1133,8 @@ export class PromotionJobMonitoringReadService {
     organizationId: string;
   }>): Promise<PromotionJobMonitoringOverview> {
     const now = this.#now();
+    const providerReadDeadline = Date.now()
+      + this.#overviewProviderReadTimeoutMs;
     const [roster, providers, evaluator] = await Promise.all([
       this.options.repository.captureEligibleRoster(),
       this.options.repository.listRoster(input.organizationId),
@@ -1105,12 +1158,29 @@ export class PromotionJobMonitoringReadService {
         provider,
         active: manifest.activeReleases.get(provider.providerKey) ?? null,
       });
-      const routed = provider.lifecycle === "active"
-        ? await this.options.gateway.runWithAdminProviderDatabase(
-            { organizationId: input.organizationId, providerId: provider.id },
+      let routed: ProviderDatabaseOperationResult<LiveProviderPromotionMonitoringSnapshot>
+        | null = null;
+      let probeFailureCode: string | null = null;
+      if (provider.lifecycle === "active") {
+        const settlement = await settleByDeadline(
+          () => this.options.gateway.runWithAdminProviderDatabase(
+            {
+              organizationId: input.organizationId,
+              providerId: provider.id,
+              deadlineAt: providerReadDeadline,
+            },
             (database) => this.#readLiveProvider(database, this.#now()),
-          )
-        : null;
+          ),
+          providerReadDeadline,
+        );
+        if (settlement.state === "fulfilled") {
+          routed = settlement.value;
+        } else {
+          probeFailureCode = settlement.state === "timed_out"
+            ? "MONITORING_PROBE_BUDGET_EXHAUSTED"
+            : "MONITORING_PROBE_FAILED";
+        }
+      }
       const centralFacts: ProviderPromotionMonitoringCentralFacts = {
         activeRelease: central.activeRelease,
         pendingGate: central.pendingGate,
@@ -1122,9 +1192,9 @@ export class PromotionJobMonitoringReadService {
           : null,
         lastKnown: lastKnownFacts(central, this.#ids, scope),
         central: centralFacts,
-        routeFailureCode: routed === null || routed.state === "reachable"
-          ? null
-          : asFailureCode(routed.failureCode),
+        routeFailureCode: routed?.state === "unreachable"
+          ? asFailureCode(routed.failureCode)
+          : probeFailureCode,
         evaluatorCurrent,
       });
     });

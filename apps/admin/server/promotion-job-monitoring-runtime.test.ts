@@ -4,6 +4,7 @@ import {
   canonicalJson,
   promotionJobInvocationDetailSchema,
   promotionJobMonitoringOverviewSchema,
+  type PromotionJobPublicReleaseMonitoring,
 } from "@packscout/contracts";
 import {
   promotionJobSha256,
@@ -241,6 +242,79 @@ function live(providerKey: string): LiveProviderPromotionMonitoringSnapshot {
   };
 }
 
+function providerAt(index: number): PromotionJobMonitoringRosterProvider {
+  const suffix = String(index + 1).padStart(12, "0");
+  return {
+    id: `21000000-0000-4000-8000-${suffix}`,
+    providerKey: `provider_${String(index + 1).padStart(2, "0")}`,
+    displayName: `Provider ${index + 1}`,
+    lifecycle: "active",
+  };
+}
+
+function releaseAt(index: number): PromotionJobPublicReleaseMonitoring {
+  const fingerprintPart = index.toString(16).padStart(2, "0");
+  return {
+    publicReleaseId: `release-provider-${index + 1}`,
+    fingerprint: fingerprintPart.repeat(32),
+    position: "2",
+  };
+}
+
+function capacityRepository(
+  providerRows: readonly PromotionJobMonitoringRosterProvider[],
+): PromotionJobMonitoringReadRepository {
+  const rosterSnapshot: PromotionJobLivenessRosterSnapshotRecord = {
+    ...roster,
+    providers: providerRows.map((provider) => ({
+      organizationId,
+      providerId: provider.id,
+      providerKey: provider.providerKey,
+    })),
+  };
+  return {
+    async captureEligibleRoster() { return rosterSnapshot; },
+    async readEvaluator() {
+      return {
+        ...evaluator,
+        expectedCount: providerRows.length + 1,
+        reachableCount: 0,
+        unavailableCount: providerRows.length,
+      };
+    },
+    async listRoster(scope) {
+      assert.equal(scope, organizationId);
+      return providerRows;
+    },
+    async readManifestEvidence() {
+      const evidence = manifestEvidence();
+      return {
+        ...evidence,
+        activeReleases: new Map(providerRows.map((provider, index) => [
+          provider.providerKey,
+          releaseAt(index),
+        ])),
+      };
+    },
+    async readProviderEvidence(input) {
+      const index = providerRows.indexOf(input.provider);
+      assert.notEqual(index, -1);
+      const completedRelease = releaseAt(index);
+      return {
+        observation: null,
+        latestProjection: null,
+        completedRelease,
+        completionObservedAt: observedAt,
+        activeRelease: completedRelease,
+        pendingGate: null,
+        projectedAt: null,
+      };
+    },
+    async listHistory() { return []; },
+    async readDetail() { return null; },
+  };
+}
+
 test("overview isolates a provider outage and retains archived truth without live routing", async () => {
   const routed: string[] = [];
   const gateway = {
@@ -288,6 +362,89 @@ test("overview isolates a provider outage and retains archived truth without liv
   assert.equal(overview.providers[2]?.lifecycle, "archived");
   assert.equal(overview.providers[2]?.state, "last_known");
   assert.deepEqual(routed, [alphaId, betaId]);
+});
+
+test("overview bounds a 64-provider outage with one deadline and preserves every last-known row", {
+  timeout: 1_000,
+}, async () => {
+  const providerRows = Array.from({ length: 64 }, (_, index) =>
+    providerAt(index)
+  );
+  const routed: string[] = [];
+  const deadlines = new Set<number>();
+  const gateway = {
+    runWithAdminProviderDatabase(input) {
+      routed.push(input.providerId);
+      assert.equal(typeof input.deadlineAt, "number");
+      deadlines.add(input.deadlineAt!);
+      return new Promise<never>(() => undefined);
+    },
+  } satisfies Pick<BoundedProviderDatabaseGateway, "runWithAdminProviderDatabase">;
+  const service = new PromotionJobMonitoringReadService({
+    repository: capacityRepository(providerRows),
+    gateway,
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => observedAt,
+    overviewProviderReadTimeoutMs: 25,
+    readLiveProvider: async () => live("alpha"),
+  });
+
+  const startedAt = performance.now();
+  const overview = promotionJobMonitoringOverviewSchema.parse(
+    await service.overview({ organizationId }),
+  );
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(elapsedMs < 500, `overview took ${elapsedMs}ms`);
+  assert.equal(routed.length, 4);
+  assert.equal(deadlines.size, 1);
+  assert.equal(overview.roster.providerCount, 64);
+  assert.deepEqual(
+    overview.providers.map((provider) => provider.providerKey),
+    providerRows.map((provider) => provider.providerKey),
+  );
+  for (const provider of overview.providers) {
+    assert.equal(provider.state, "last_known");
+    assert.equal(provider.evidenceSource, "last_known");
+    assert.equal(
+      provider.routeFailureCode,
+      "MONITORING_PROBE_BUDGET_EXHAUSTED",
+    );
+  }
+});
+
+test("overview isolates a rejected provider route from healthy peers", async () => {
+  const service = new PromotionJobMonitoringReadService({
+    repository: repository(),
+    gateway: {
+      async runWithAdminProviderDatabase(input, operation) {
+        if (input.providerId === alphaId) {
+          throw new Error("provider route failed");
+        }
+        return {
+          state: "reachable" as const,
+          providerId: input.providerId,
+          observedAt: observedAt.toISOString(),
+          value: await operation({} as ProviderPrismaClient),
+        };
+      },
+    },
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => observedAt,
+    readLiveProvider: async () => live("beta"),
+  });
+
+  const overview = promotionJobMonitoringOverviewSchema.parse(
+    await service.overview({ organizationId }),
+  );
+
+  assert.equal(overview.providers[0]?.state, "last_known");
+  assert.equal(overview.providers[0]?.routeFailureCode, "MONITORING_PROBE_FAILED");
+  assert.equal(overview.providers[1]?.state, "current");
+  assert.equal(overview.providers[1]?.routeFailureCode, null);
+  assert.equal(overview.providers[2]?.state, "last_known");
 });
 
 test("overview marks an active evaluator stale after two missed windows", async () => {
