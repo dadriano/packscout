@@ -32,13 +32,21 @@ export interface ProviderPulseRecordTotals {
   readonly accepted: number;
 }
 
+/** The canonical tables a stored-row count reads, in count-key order. */
+const CANONICAL_TABLES = [
+  "categories", "packs", "collectibles", "collectible_name_aliases",
+  "collectible_instances", "pack_contents", "provider_accounts",
+  "pulls", "pull_items", "market_events",
+];
+
 /**
- * Stored rows at or below this ceiling are counted exactly; above it the
- * collector's estimate is reported instead. An exact count of the canonical
- * tables was measured at roughly seven microseconds per row against a remote
- * provider database, so this ceiling keeps that scan inside its budget.
+ * Canonical tables totalling at or below this many bytes are counted exactly;
+ * above it their row estimate is reported instead. Counting every row of a
+ * 3,388 MB provider was measured at 40 to 57 seconds against a remote
+ * database, so this ceiling keeps a scan well inside its six-second budget.
+ * Bytes, not rows, because bytes are what a scan actually reads.
  */
-export const EXACT_STORAGE_COUNT_CEILING = 250_000;
+export const EXACT_STORAGE_SCAN_BYTE_CEILING = 128 * 1024 * 1024;
 
 export interface ProviderPulseLease {
   readonly state: "active" | "expired" | "unowned";
@@ -66,6 +74,8 @@ export interface ProviderPulseHistory {
 type CountsRow = {
   readonly measured_at: Date;
 } & { readonly [Key in Exclude<keyof ProviderPulseCounts, "total">]: bigint };
+
+type EstimateRow = CountsRow & { readonly scan_bytes: bigint };
 
 interface RecordTotalsRow {
   readonly measured_at: Date;
@@ -101,15 +111,19 @@ function safeCount(value: bigint): number {
 }
 
 /**
- * Reads one canonical table's live-tuple estimate from the statistics view.
- * A table the collector has not yet reported estimates zero, which keeps the
- * caller on the exact path rather than reporting an absent table as measured.
+ * Reads one canonical table's row estimate. The collector's live-tuple count
+ * is the fresher of the two sources but is zeroed by a statistics reset, so
+ * the planner's own estimate in pg_class — which a reset does not touch — is
+ * taken whenever it is larger. A table that genuinely holds no rows reports
+ * zero from both.
  */
-function liveTupleEstimate(relname: string): ProviderPrisma.Sql {
+function rowEstimate(relname: string): ProviderPrisma.Sql {
   return ProviderPrisma.sql`coalesce((
-    select greatest(statistics.n_live_tup, 0)::bigint
-    from pg_catalog.pg_stat_user_tables statistics
-    where statistics.schemaname = 'public' and statistics.relname = ${relname}
+    select greatest(statistics.n_live_tup, catalog.reltuples, 0)::bigint
+    from pg_catalog.pg_class catalog
+    join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
+    left join pg_catalog.pg_stat_user_tables statistics on statistics.relid = catalog.oid
+    where space.nspname = 'public' and catalog.relname = ${relname}
   ), 0)::bigint`;
 }
 
@@ -168,39 +182,50 @@ export class PrismaProviderPulseMetricsRepository {
   /**
    * Exact counts scan every canonical row, so their cost grows without bound
    * and a large provider cannot be counted inside any request budget. The
-   * collector's live-tuple statistics answer in constant time, so they decide
-   * which measurement is affordable before one is attempted: at or below the
-   * ceiling the exact scan runs and reports "exact"; above it the estimate is
-   * reported as "estimated" rather than withheld. A provider whose statistics
-   * are absent or not yet collected estimates zero and so takes the exact
-   * path, which is cheap at that size and keeps a new database truthful.
+   * decision to attempt one is made on the bytes those scans would read, not
+   * on an estimated row count: relation size comes from the catalog, is always
+   * truthful, and predicts scan cost directly, whereas a row estimate can be
+   * zeroed by a statistics reset and would route a large provider into a scan
+   * that cannot finish. Whatever happens, an estimate is already in hand, so a
+   * scan that still fails downgrades to it rather than withholding everything.
    */
   async readStorageCounts(): Promise<ProviderPulseStorageCounts> {
     const estimated = await this.readEstimatedStorageCounts();
-    if (estimated.counts.total > EXACT_STORAGE_COUNT_CEILING) return estimated;
-    return this.readExactStorageCounts();
+    if (estimated.scanBytes > EXACT_STORAGE_SCAN_BYTE_CEILING) return estimated.counted;
+    return this.readExactStorageCounts().catch(() => estimated.counted);
   }
 
-  private async readEstimatedStorageCounts(): Promise<ProviderPulseStorageCounts> {
+  private async readEstimatedStorageCounts(): Promise<{
+    readonly counted: ProviderPulseStorageCounts;
+    readonly scanBytes: number;
+  }> {
     return this.readOnly(2_000, async (transaction) => {
-      // Live-tuple statistics are maintained incrementally by the collector,
-      // so these are catalog lookups rather than scans. They are approximate
-      // between collections and are reported as estimates, never as counts.
-      const [row] = await transaction.$queryRaw<CountsRow[]>(ProviderPrisma.sql`
+      // Row estimates and relation sizes are catalog lookups, not scans. The
+      // estimates are approximate between collections and are always reported
+      // as estimates; the sizes are exact and decide only what is affordable.
+      const [row] = await transaction.$queryRaw<EstimateRow[]>(ProviderPrisma.sql`
         select statement_timestamp() as measured_at,
-          ${liveTupleEstimate("categories")} as categories,
-          ${liveTupleEstimate("packs")} as packs,
-          ${liveTupleEstimate("collectibles")} as collectibles,
-          ${liveTupleEstimate("collectible_name_aliases")} as aliases,
-          ${liveTupleEstimate("collectible_instances")} as instances,
-          ${liveTupleEstimate("pack_contents")} as "packContents",
-          ${liveTupleEstimate("provider_accounts")} as accounts,
-          ${liveTupleEstimate("pulls")} as pulls,
-          ${liveTupleEstimate("pull_items")} as "pullItems",
-          ${liveTupleEstimate("market_events")} as "marketEvents"
+          ${rowEstimate("categories")} as categories,
+          ${rowEstimate("packs")} as packs,
+          ${rowEstimate("collectibles")} as collectibles,
+          ${rowEstimate("collectible_name_aliases")} as aliases,
+          ${rowEstimate("collectible_instances")} as instances,
+          ${rowEstimate("pack_contents")} as "packContents",
+          ${rowEstimate("provider_accounts")} as accounts,
+          ${rowEstimate("pulls")} as pulls,
+          ${rowEstimate("pull_items")} as "pullItems",
+          ${rowEstimate("market_events")} as "marketEvents",
+          coalesce((
+            select sum(pg_catalog.pg_relation_size(catalog.oid))
+            from pg_catalog.pg_class catalog
+            join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
+            where space.nspname = 'public' and catalog.relkind = 'r'
+              and catalog.relname = any(${CANONICAL_TABLES})
+          ), 0)::bigint as scan_bytes
       `);
       if (row === undefined) throw new Error("Provider pulse storage estimates are unavailable.");
-      return storageCounts(row, "estimated");
+      const { scan_bytes, ...counts } = row;
+      return { counted: storageCounts(counts, "estimated"), scanBytes: safeCount(scan_bytes) };
     });
   }
 
