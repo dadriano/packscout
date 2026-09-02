@@ -59,6 +59,7 @@ function ColumnLabel({
     | "repackPrice"
     | "evDollars"
     | "evPercent"
+    | "evConfidence"
     | "buybackPercent"
     | "topChaseValue";
   align?: "start" | "end";
@@ -84,6 +85,15 @@ function OpportunityRow({
 }>) {
   const estimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const row = presentOpportunityRow(repack, rank, estimate);
+  const estimateEvidence = [
+    row.packScoutEv.statusLabel,
+    row.packScoutEv.reasonCopy,
+    row.packScoutEv.freshness.sourceAgeLabel,
+    row.packScoutEv.freshness.dataAsOf
+      ? row.packScoutEv.freshness.dataAsOfLabel
+      : null,
+    row.packScoutEv.calculationPriceNote,
+  ].filter((detail): detail is string => Boolean(detail));
 
   return (
     <tr data-selected={selected ? "true" : "false"}>
@@ -137,30 +147,25 @@ function OpportunityRow({
       </td>
       <td>
         <MetricCell metric={row.packScoutEv.evPercent} />
-        <span
-          aria-label={row.packScoutEv.confidence.accessibleLabel}
-          className={styles.confidence}
-          data-tone={row.packScoutEv.confidence.tone}
-        >
-          Confidence: {row.packScoutEv.confidence.displayValue}
-        </span>
-        {row.packScoutEv.status !== "current" ? (
-          <span className={styles.estimateEvidence} title={[
-            row.packScoutEv.freshness.dataAsOfLabel,
-            row.packScoutEv.reasonCopy,
-            row.packScoutEv.calculationPriceNote,
-          ].filter(Boolean).join(" ")}>
-            {row.packScoutEv.statusLabel}
-            {row.packScoutEv.freshness.sourceAgeLabel ? (
-              <span>{row.packScoutEv.freshness.sourceAgeLabel}</span>
-            ) : null}
-            {row.packScoutEv.freshness.dataAsOf ? (
-              <time dateTime={row.packScoutEv.freshness.dataAsOf}>
-                {row.packScoutEv.freshness.dataAsOfLabel}
-              </time>
-            ) : null}
+      </td>
+      <td>
+        <span className={styles.confidenceCell}>
+          <span
+            aria-label={row.packScoutEv.confidence.accessibleLabel}
+            className={styles.confidence}
+            data-tone={row.packScoutEv.confidence.tone}
+          >
+            {row.packScoutEv.confidence.displayValue}
           </span>
-        ) : null}
+          {row.packScoutEv.status !== "current" ? (
+            <GlossaryHint
+              align="end"
+              details={estimateEvidence}
+              field="evConfidence"
+              triggerAriaLabel={`View evidence for ${row.packScoutEv.statusLabel}: ${row.name}`}
+            />
+          ) : null}
+        </span>
       </td>
       <td>
         <MetricCell metric={row.buyback} />
@@ -221,6 +226,9 @@ export function OpportunityTable({
               </th>
               <th scope="col">
                 <ColumnLabel field="evPercent">EV %</ColumnLabel>
+              </th>
+              <th scope="col">
+                <ColumnLabel field="evConfidence">Confidence</ColumnLabel>
               </th>
               <th scope="col">
                 <ColumnLabel field="buybackPercent">Buyback %</ColumnLabel>

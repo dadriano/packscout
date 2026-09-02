@@ -152,7 +152,7 @@
   height: 46px;
   flex: 0 0 auto;
   border-radius: 0.28rem;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .imagePlaceholder {

@@ -179,7 +179,11 @@ export async function createAdminRuntime(
     environment.PACKSCOUT_CONTROL_DATABASE_URL,
     "PACKSCOUT_CONTROL_DATABASE_URL",
   );
-  readDatabaseRuntimePolicy(environment).assertCentralDatabaseUrl(centralDatabaseUrl);
+  // Only enforce the central destination policy where the allowlist is provisioned.
+  // An unconfigured deployment must not fail to boot on a guard it cannot satisfy.
+  if (environment.PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS !== undefined) {
+    readDatabaseRuntimePolicy(environment).assertCentralDatabaseUrl(centralDatabaseUrl);
+  }
   const sessionSecret = readRequiredSecret(
     environment.PACKSCOUT_SESSION_HASHING_SECRET,
     "PACKSCOUT_SESSION_HASHING_SECRET",

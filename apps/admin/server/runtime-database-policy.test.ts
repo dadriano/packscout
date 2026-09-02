@@ -61,3 +61,22 @@ test("admin startup rejects a disallowed central port before opening any socket"
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("admin startup skips the central destination guard when no allowlist is provisioned", async () => {
+  // Regression: PR #67 made this guard unconditional, so a deployment without
+  // PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS could not boot at all.
+  const unconfigured: Record<string, string> = { ...remoteEnvironment };
+  delete unconfigured.PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS;
+  delete unconfigured.PACKSCOUT_SESSION_HASHING_SECRET;
+  await assert.rejects(createAdminRuntime({
+    environment: {
+      ...unconfigured,
+      PACKSCOUT_CONTROL_DATABASE_URL: `${centralUrl.replace("central.example.test", "unlisted.example.test")}?sslmode=verify-full`,
+    },
+    providerRuntimeFactory() { assert.fail("Startup must not compose providers in this case."); },
+  }), (error: unknown) => {
+    // It must fail on the NEXT required secret, never on the skipped destination guard.
+    assert.match(String((error as Error).message), /PACKSCOUT_SESSION_HASHING_SECRET/u);
+    return true;
+  });
+});
