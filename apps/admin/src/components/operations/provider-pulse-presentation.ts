@@ -32,8 +32,20 @@ const states: Record<string, PulseState> = {
   Idle: { label: "Idle", description: "The processor is not reporting active work. Check its schedule and last committed page before assuming it is caught up.", tone: "neutral" },
 };
 
+/**
+ * The three measurements an operator is shown. Rows left uncounted because
+ * counting would exceed its budget are still reported, through the estimate,
+ * so that case is evidence rather than missing evidence.
+ */
+function measurementEvidence(source: ProviderSourceOperationsSource) {
+  const { storage, storageEstimate, records, activity } = source.measurements;
+  const measured = storage.state === "unavailable"
+    && storage.reason === "count_exceeds_budget" && storageEstimate !== null;
+  return [measured ? ({ state: "available" } as const) : storage, records, activity];
+}
+
 export function isUnsupportedSource(source: ProviderSourceOperationsSource): boolean {
-  return !source.configured && Object.values(source.measurements).some(
+  return !source.configured && measurementEvidence(source).some(
     (measurement) => measurement.state === "unavailable" && measurement.reason === "unsupported",
   );
 }
@@ -72,7 +84,7 @@ export function pulseNeedsAttention(source: ProviderSourceOperationsSource): boo
     || ["Not configured", "Draft", "No processor state", "Retrying"].includes(status.label)
     || (source.freshness.state === "stale" && source.source?.lifecycle === "active" && !source.source.pauseRequested && source.processor?.activity !== "paused")
     || source.quality.state === "warning" || source.quality.state === "degraded"
-    || Object.values(source.measurements).some((measurement) => measurement.state === "unavailable")
+    || measurementEvidence(source).some((measurement) => measurement.state === "unavailable")
     || (source.measurements.activity.state === "available" && source.measurements.activity.quarantine.open > 0);
 }
 
@@ -90,7 +102,7 @@ export function pulseIssue(source: ProviderSourceOperationsSource): string | nul
   if (status.label === "Not configured") return "Configure this provider to begin importing.";
   if (status.label === "No processor state") return "Processor activity is unavailable.";
   if (source.freshness.state === "stale" && source.source?.lifecycle === "active" && !source.source.pauseRequested && source.processor?.activity !== "paused") return "Source freshness is outside its configured window.";
-  if (Object.values(source.measurements).some((measurement) => measurement.state === "unavailable")) return "Some measurements are unavailable.";
+  if (measurementEvidence(source).some((measurement) => measurement.state === "unavailable")) return "Some measurements are unavailable.";
   if (source.quality.state === "degraded") return "Repeated failures have degraded data quality.";
   if (source.quality.state === "warning") return "Data quality needs review.";
   return null;
@@ -102,15 +114,10 @@ export function sortPulseSources(sources: readonly ProviderSourceOperationsSourc
 }
 
 export function measurementTotal(sources: readonly ProviderSourceOperationsSource[], metric: "storage" | "records") {
-  const values = sources.flatMap((source) => {
-    const measurement = source.measurements[metric];
-    return measurement.state === "available"
-      ? ["counts" in measurement ? measurement.counts.total : measurement.processed]
-      : [];
-  });
+  const readings = sources.map((source) => storedReading(source, metric));
+  const values = readings.flatMap((reading) => reading.value === null ? [] : [reading.value]);
   // A total that mixes counted and estimated providers is itself an estimate.
-  const estimated = sources.some((source) => source.measurements[metric].state === "available"
-    && isEstimatedStorage(source.measurements[metric]));
+  const estimated = readings.some((reading) => reading.value !== null && reading.estimated);
   const total = values.reduce((sum, value) => sum + value, 0);
   const safeTotal = Number.isSafeInteger(total);
   return {
@@ -122,13 +129,43 @@ export function measurementTotal(sources: readonly ProviderSourceOperationsSourc
   };
 }
 
-/** True only for a storage measurement the database reported as estimated. */
-export function isEstimatedStorage(
-  measurement: ProviderSourceOperationsSource["measurements"]["storage" | "records"],
-): boolean {
-  return measurement.state === "available" && "precision" in measurement
-    && measurement.precision === "estimated";
+/**
+ * Resolves the one storage answer to show. An exact count is preferred; the
+ * estimate is used only where the server left the count unavailable because
+ * counting would exceed its budget, and is always flagged as an estimate.
+ */
+export function storedReading(
+  source: ProviderSourceOperationsSource,
+  metric: "storage" | "records" = "storage",
+): { value: number | null; estimated: boolean; measuredAt: string | null } {
+  if (metric === "records") {
+    const records = source.measurements.records;
+    return { value: records.state === "available" ? records.processed : null,
+      estimated: false, measuredAt: records.state === "available" ? records.measuredAt : null };
+  }
+  const { storage, storageEstimate } = source.measurements;
+  if (storage.state === "available") {
+    return { value: storage.counts.total, estimated: false, measuredAt: storage.measuredAt };
+  }
+  if (storageEstimate) {
+    return { value: storageEstimate.counts.total, estimated: true, measuredAt: storageEstimate.measuredAt };
+  }
+  return { value: null, estimated: false, measuredAt: null };
 }
+
+/** The per-entity rows to show, preferring an exact count over an estimate. */
+export function storedEntityCounts(
+  source: ProviderSourceOperationsSource,
+): { counts: ProviderStorageCounts | null; estimated: boolean } {
+  const { storage, storageEstimate } = source.measurements;
+  if (storage.state === "available") return { counts: storage.counts, estimated: false };
+  if (storageEstimate) return { counts: storageEstimate.counts, estimated: true };
+  return { counts: null, estimated: false };
+}
+
+type ProviderStorageCounts = Extract<
+  ProviderSourceOperationsSource["measurements"]["storage"], { state: "available" }
+>["counts"];
 
 /**
  * Estimated rows are marked so a reader never mistakes a statistics estimate

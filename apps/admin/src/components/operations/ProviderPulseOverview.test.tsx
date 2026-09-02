@@ -226,7 +226,11 @@ test("estimated stored rows are marked as estimates everywhere they are shown", 
   const exact = operationSource(0);
   const estimated = operationSource(1);
   if (estimated.measurements.storage.state !== "available") throw new Error("fixture must be measured");
-  estimated.measurements.storage = { ...estimated.measurements.storage, precision: "estimated" };
+  estimated.measurements.storageEstimate = {
+    measuredAt: estimated.measurements.storage.measuredAt,
+    counts: estimated.measurements.storage.counts,
+  };
+  estimated.measurements.storage = { state: "unavailable", reason: "count_exceeds_budget" };
   overview.sources = [exact, estimated];
   const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
   cleanupPage(context, rendered);

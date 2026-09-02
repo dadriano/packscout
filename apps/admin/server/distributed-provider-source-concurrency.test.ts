@@ -28,7 +28,7 @@ const evidence: LocalSourceEvidence = {
   runs: [],
   details: [],
   measurements: {
-    storage: { state: "available", measuredAt: observedAt, precision: "exact", counts: {
+    storage: { state: "available", measuredAt: observedAt, counts: {
       total: 10, categories: 1, packs: 1, collectibles: 1, aliases: 1, instances: 1,
       packContents: 1, accounts: 1, pulls: 1, pullItems: 1, marketEvents: 1,
     } },

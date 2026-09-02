@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { ProviderPulseDetails } from "./ProviderPulseDetails";
 import type { SourceOperationControlsProps } from "./SourceOperationControls";
-import { count, isEstimatedStorage, measuredAge, metricDescriptions, pulseIssue, pulseNeedsAttention, pulseState, storedCount } from "./provider-pulse-presentation";
+import { count, measuredAge, metricDescriptions, pulseIssue, pulseNeedsAttention, pulseState, storedCount, storedReading } from "./provider-pulse-presentation";
 import { isRecentRateEligible, recentRateDescription, recentRateValue, type RecentRateReading } from "./provider-recent-rate";
 
 function Metric({ label, description, children }: { label: string; description: string; children: ReactNode }) {
@@ -14,7 +14,8 @@ export function ProviderPulseCard(props: SourceOperationControlsProps & { observ
   const { source, observedAt, recentRate = { state: "unavailable" } } = props;
   const state = pulseState(source);
   const issue = pulseIssue(source);
-  const { storage, records, activity } = source.measurements;
+  const { records, activity } = source.measurements;
+  const stored = storedReading(source);
   return (
     <article className={`admin-surface provider-pulse__card${pulseNeedsAttention(source) ? " provider-pulse__card--attention" : ""}`}
       aria-labelledby={`provider-pulse-${source.providerId}`} data-provider-id={source.providerId}>
@@ -34,8 +35,8 @@ export function ProviderPulseCard(props: SourceOperationControlsProps & { observ
         ) : null}
         <dl className="provider-pulse__metrics">
           <Metric label="Stored rows" description={metricDescriptions.stored}>
-            {storedCount(storage.state === "available" ? storage.counts.total : null, isEstimatedStorage(storage))}
-            {isEstimatedStorage(storage) ? <span className="provider-pulse__subtext">Estimated</span> : null}
+            {storedCount(stored.value, stored.estimated)}
+            {stored.estimated ? <span className="provider-pulse__subtext">Estimated</span> : null}
           </Metric>
           <Metric label="Records processed" description={metricDescriptions.processed}>
             {count(records.state === "available" ? records.processed : null)}

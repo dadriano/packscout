@@ -146,7 +146,7 @@ test("a shared transient count failure retries on the next refresh before sixty 
   now += 5_000;
   const recovered = await reader.read(client, identity);
   assert.equal(scans, 2, "the next refresh retries instead of waiting for cache expiry");
-  assert.deepEqual(recovered.storage, { state: "available", measuredAt: new Date(now).toISOString(), precision: "exact", counts: storage.counts });
+  assert.deepEqual(recovered.storage, { state: "available", measuredAt: new Date(now).toISOString(), counts: storage.counts });
   // The retained-run aggregate succeeded first time, so it is still served
   // from its own cache and keeps the snapshot time it was measured in.
   assert.deepEqual(recovered.records, { state: "available", measuredAt, processed: records.processed, accepted: records.accepted });
@@ -308,7 +308,7 @@ for (const replacementSettled of [false, true]) {
   });
 }
 
-test("estimated counts are carried to the reader instead of being withheld or presented as exact", async () => {
+test("an estimate is reported beside the count field, never inside it", async () => {
   const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
     async readStorageCounts() { return { ...storage, precision: "estimated" as const }; },
     async readRecordTotals() { return records; },
@@ -316,10 +316,48 @@ test("estimated counts are carried to the reader instead of being withheld or pr
     async readLeases() { return leases; },
   }));
   const result = await reader.read(database(), identity);
-  assert.equal(result.storage.state, "available");
-  assert.equal(result.storage.state === "available" && result.storage.precision, "estimated");
-  assert.equal(result.storage.state === "available" && result.storage.counts.total, storage.counts.total);
+  // A client that reads only `storage` is told nothing was counted, so it
+  // cannot render an estimate under a label that promises an exact count.
+  assert.deepEqual(result.storage, { state: "unavailable", reason: "count_exceeds_budget" });
+  assert.deepEqual(result.storageEstimate, { measuredAt, counts: storage.counts });
 });
+
+test("an exact count occupies the count field and reports no estimate", async () => {
+  const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
+    async readStorageCounts() { return storage; },
+    async readRecordTotals() { return records; },
+    async readHistory() { return history; },
+    async readLeases() { return leases; },
+  }));
+  const result = await reader.read(database(), identity);
+  assert.deepEqual(result.storage, { state: "available", measuredAt, counts: storage.counts });
+  assert.equal("storageEstimate" in result, false, "the key is absent, not null");
+});
+
+// A released client reads every measurement by enumerating this object. A null
+// entry would be enumerated with the rest and dereferenced, so the estimate key
+// must be absent whenever it is not reported.
+for (const precision of ["exact", "estimated"] as const) {
+  test(`serialized ${precision} measurements stay safe to enumerate by an older client`, async () => {
+    const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
+      async readStorageCounts() { return { ...storage, precision }; },
+      async readRecordTotals() { return records; },
+      async readHistory() { return history; },
+      async readLeases() { return leases; },
+    }));
+    const measurements: Record<string, { state?: string; reason?: string }> =
+      JSON.parse(JSON.stringify(await reader.read(database(), identity)));
+    for (const [field, measurement] of Object.entries(measurements)) {
+      assert.notEqual(measurement, null, `${field} must never serialize as null`);
+    }
+    // The released expression, run verbatim against the new payload.
+    assert.doesNotThrow(() => Object.values(measurements)
+      .some((measurement) => measurement.state === "unavailable" && measurement.reason === "unsupported"));
+    // An older client renders storage.counts only when the state is available,
+    // so an estimate is shown as unavailable rather than as an exact count.
+    assert.equal(measurements.storage!.state, precision === "exact" ? "available" : "unavailable");
+  });
+}
 
 test("a failed retained-run aggregate leaves stored counts measured, and each recovers alone", async () => {
   let now = Date.parse(measuredAt);

@@ -62,7 +62,7 @@ export function operationMeasurements(index = 0): ProviderSourceMeasurements {
     pulls: 200_000 + index, pullItems: 200_000 + index, marketEvents: 500_000 + index,
   };
   return {
-    storage: { state: "available", measuredAt: now, precision: "exact", counts: { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) } },
+    storage: { state: "available", measuredAt: now, counts: { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) } },
     records: { state: "available", measuredAt: now, processed: 700_000 + index, accepted: 699_000 + index },
     activity: {
       state: "available", measuredAt: now, historyMeasuredAt: now, lastCommittedPageAt: "2026-08-21T11:59:56.000Z",

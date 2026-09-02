@@ -13,6 +13,8 @@ import {
 
 const HISTORY_CACHE_MS = 60_000;
 type StorageMeasurement = ProviderSourceMeasurements["storage"];
+/** One storage read answers both fields, so they are cached as one reading. */
+type StorageReading = Pick<ProviderSourceMeasurements, "storage" | "storageEstimate">;
 type RecordsMeasurement = ProviderSourceMeasurements["records"];
 type ActivityMeasurement = Extract<ProviderSourceMeasurements["activity"], { state: "available" }>;
 type HistoryMeasurement = Pick<ActivityMeasurement, "historyMeasuredAt" | "lastCommittedPageAt" | "quarantine">;
@@ -54,13 +56,38 @@ function cachedMeasurement<T>(
 }
 
 const storageSchema = providerSourceMeasurementsSchema.shape.storage;
+const storageEstimateSchema = providerSourceMeasurementsSchema.shape.storageEstimate;
 const recordsSchema = providerSourceMeasurementsSchema.shape.records;
 
+/**
+ * An exact count is reported as the storage measurement. An estimate is
+ * reported only in storageEstimate, leaving the storage measurement
+ * unavailable, so a reader that knows nothing of estimates is never handed
+ * one in place of a count.
+ */
 function measuredStorage(storage: ProviderPulseStorageCounts): StorageMeasurement {
+  if (storage.precision === "estimated") {
+    return storageSchema.parse({ state: "unavailable", reason: "count_exceeds_budget" });
+  }
   return storageSchema.parse({
-    state: "available", measuredAt: storage.measuredAt,
-    precision: storage.precision, counts: storage.counts,
+    state: "available", measuredAt: storage.measuredAt, counts: storage.counts,
   });
+}
+
+/**
+ * The estimate key is omitted rather than set to null when no estimate was
+ * taken. Clients enumerate the measurements they know about, so a null would
+ * be enumerated as one of them.
+ */
+function storageReading(storage: ProviderPulseStorageCounts): StorageReading {
+  const measured = measuredStorage(storage);
+  if (storage.precision !== "estimated") return { storage: measured };
+  return {
+    storage: measured,
+    storageEstimate: storageEstimateSchema.parse({
+      measuredAt: storage.measuredAt, counts: storage.counts,
+    }),
+  };
 }
 
 function measuredRecords(records: ProviderPulseRecordTotals): RecordsMeasurement {
@@ -76,7 +103,7 @@ const queryFailed = unavailableProviderSourceMeasurements("query_failed");
 export class ProviderPulseMeasurementReader {
   // The gateway replaces its client on a route/credential change. A WeakMap
   // makes the client part of the cache identity without retaining credentials.
-  readonly #storage = new WeakMap<ProviderPrismaClient, CachedMeasurement<StorageMeasurement>>();
+  readonly #storage = new WeakMap<ProviderPrismaClient, CachedMeasurement<StorageReading>>();
   readonly #records = new WeakMap<ProviderPrismaClient, CachedMeasurement<RecordsMeasurement>>();
   readonly #history = new WeakMap<ProviderPrismaClient, CachedMeasurement<HistoryMeasurement>>();
 
@@ -100,15 +127,15 @@ export class ProviderPulseMeasurementReader {
     // separately. Counting stored rows costs time proportional to those rows,
     // so its failure must not withhold the small retained-run aggregate.
     const storageRead = cachedMeasurement(this.#storage, database, scope, checkedAt,
-      () => repository.readStorageCounts().then(measuredStorage));
+      () => repository.readStorageCounts().then(storageReading));
     const recordsRead = cachedMeasurement(this.#records, database, scope, checkedAt,
       () => repository.readRecordTotals().then(measuredRecords));
     const historyRead = cachedMeasurement(this.#history, database, scope, checkedAt,
       () => repository.readHistory().then(measuredHistory));
     // All full-history scans are cached. Only the two worker lease records are
     // checked every refresh, with their own database observation time.
-    const [storage, records, activity] = await Promise.all([
-      storageRead.catch(() => queryFailed.storage),
+    const [stored, records, activity] = await Promise.all([
+      storageRead.catch((): StorageReading => queryFailed),
       recordsRead.catch(() => queryFailed.records),
       Promise.all([historyRead, repository.readLeases()])
         .then(([history, leases]) => providerSourceMeasurementsSchema.shape.activity.parse({
@@ -117,6 +144,6 @@ export class ProviderPulseMeasurementReader {
         }))
         .catch(() => ({ state: "unavailable" as const, reason: "query_failed" as const })),
     ]);
-    return providerSourceMeasurementsSchema.parse({ storage, records, activity });
+    return providerSourceMeasurementsSchema.parse({ ...stored, records, activity });
   }
 }

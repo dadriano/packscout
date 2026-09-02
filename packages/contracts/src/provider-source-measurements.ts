@@ -7,6 +7,9 @@ export const providerMeasurementUnavailableSchema = z.object({
   state: z.literal("unavailable"),
   reason: z.enum([
     "not_configured", "unsupported", "database_unreachable", "query_failed",
+    // Counting every canonical row would cost more than its measurement
+    // budget, so no count was attempted. The estimate is reported separately.
+    "count_exceeds_budget",
   ]),
 }).strict();
 
@@ -27,22 +30,29 @@ const canonicalCountsSchema = z.object({
 { message: "Stored rows must equal the sum of the canonical table counts." });
 
 /**
- * Exact counts scan every canonical row and cost time proportional to stored
- * rows. Estimated counts come from the collector's live-tuple statistics and
- * are read in constant time, so a large provider stays measurable. Precision
- * travels with the measurement; it is never inferred from the counts alone.
+ * An available storage measurement is always an exact count of canonical rows.
+ * That meaning is fixed, so a client reading this field without knowing about
+ * estimates can never mistake one for a count.
  */
-export const providerStorageCountPrecisionSchema = z.enum(["exact", "estimated"]);
-
 const storageSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("available"),
     measuredAt: instant,
-    precision: providerStorageCountPrecisionSchema,
     counts: canonicalCountsSchema,
   }).strict(),
   providerMeasurementUnavailableSchema,
 ]);
+
+/**
+ * The collector's live-tuple estimate, carried beside the exact count rather
+ * than inside it so it can never be read as one. The key is absent unless an
+ * estimate was actually taken, never null: readers enumerate the measurements
+ * they know about, and a null would be enumerated as one of them.
+ */
+const storageEstimateSchema = z.object({
+  measuredAt: instant,
+  counts: canonicalCountsSchema,
+}).strict().optional();
 
 const recordsSchema = z.discriminatedUnion("state", [
   z.object({
@@ -88,14 +98,31 @@ const activitySchema = z.discriminatedUnion("state", [
 // measurement times, which callers must display rather than conflate.
 export const providerSourceMeasurementsSchema = z.object({
   storage: storageSchema,
+  storageEstimate: storageEstimateSchema,
   records: recordsSchema,
   activity: activitySchema,
-}).strict();
+}).strict().superRefine((measurements, context) => {
+  // Exactly one storage answer is reported, so no reader has to choose.
+  if (measurements.storage.state === "available" && measurements.storageEstimate !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["storageEstimate"],
+      message: "An exact storage count must not be accompanied by an estimate.",
+    });
+  }
+  if (measurements.storage.state === "unavailable"
+    && measurements.storage.reason === "count_exceeds_budget"
+    && measurements.storageEstimate === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["storageEstimate"],
+      message: "Rows left uncounted for budget must report an estimate.",
+    });
+  }
+});
 
 export type ProviderSourceMeasurements = z.infer<typeof providerSourceMeasurementsSchema>;
-export type ProviderStorageCountPrecision = z.infer<
-  typeof providerStorageCountPrecisionSchema
->;
+export type ProviderStorageEstimate = z.infer<typeof storageEstimateSchema>;
 export type ProviderMeasurementUnavailableReason = z.infer<
   typeof providerMeasurementUnavailableSchema
 >["reason"];

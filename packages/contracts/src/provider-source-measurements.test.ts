@@ -8,7 +8,7 @@ import {
 const measuredAt = "2026-08-30T12:00:00.000Z";
 const measured = {
   storage: {
-    state: "available", measuredAt, precision: "exact",
+    state: "available", measuredAt,
     counts: { total: 10, categories: 1, packs: 1, collectibles: 1, aliases: 1,
       instances: 1, packContents: 1, accounts: 1, pulls: 1, pullItems: 1, marketEvents: 1 },
   },
@@ -48,20 +48,34 @@ test("exact provider measurements reconcile totals and preserve safe numeric pre
   }).success, false);
 });
 
-test("storage counts declare their precision and keep their own snapshot time", () => {
-  for (const precision of ["exact", "estimated"]) {
-    const result = providerSourceMeasurementsSchema.parse({
-      ...measured, storage: { ...measured.storage, precision },
-    });
-    assert.equal(result.storage.state === "available" && result.storage.precision, precision);
-  }
-  // Precision is carried, never guessed from the counts.
-  for (const invalid of [undefined, null, "approximate"]) {
-    assert.equal(providerSourceMeasurementsSchema.safeParse({
-      ...measured, storage: { ...measured.storage, precision: invalid },
-    }).success, false);
-  }
-  // Separate statements observe separate snapshots, so the times may differ.
+test("an estimate never occupies the field that means an exact count", () => {
+  const estimate = { measuredAt, counts: measured.storage.counts };
+  const estimated = providerSourceMeasurementsSchema.parse({
+    ...measured,
+    storage: { state: "unavailable", reason: "count_exceeds_budget" },
+    storageEstimate: estimate,
+  });
+  // A reader that knows only `storage` is told nothing was counted.
+  assert.equal(estimated.storage.state, "unavailable");
+  assert.deepEqual(estimated.storageEstimate, estimate);
+
+  // The two answers are mutually exclusive in both directions.
+  assert.equal(providerSourceMeasurementsSchema.safeParse({
+    ...measured, storageEstimate: estimate,
+  }).success, false, "an exact count must not also carry an estimate");
+  assert.equal(providerSourceMeasurementsSchema.safeParse({
+    ...measured, storage: { state: "unavailable", reason: "count_exceeds_budget" },
+  }).success, false, "rows left uncounted for budget must report an estimate");
+
+  // An estimate is still a full, self-consistent set of counts.
+  assert.equal(providerSourceMeasurementsSchema.safeParse({
+    ...measured,
+    storage: { state: "unavailable", reason: "count_exceeds_budget" },
+    storageEstimate: { ...estimate, counts: { ...estimate.counts, total: 11 } },
+  }).success, false);
+});
+
+test("separate statements may report separate snapshot times", () => {
   const split = providerSourceMeasurementsSchema.parse({
     ...measured, records: { ...measured.records, measuredAt: "2026-08-30T11:00:00.000Z" },
   });
