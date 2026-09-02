@@ -20,7 +20,7 @@ import { withResidentOperation } from "./provider-resident-operation.mts";
 import { backfillHasOwnedExpiredHeadLease } from "./provider-backfill-supervisor.mts";
 
 export function parseContinuousArguments(args: readonly string[]) {
-  const flags = new Set(["--bootstrap-backfill", "--launchd"]);
+  const flags = new Set(["--bootstrap-backfill", "--await-initial-run", "--launchd"]);
   const selected = args.filter(value => flags.has(value));
   if (new Set(selected).size !== selected.length) refuseBackfill("CONTINUOUS_ARGUMENTS_INVALID");
   const remaining: string[] = [];
@@ -40,8 +40,13 @@ export function parseContinuousArguments(args: readonly string[]) {
     refuseBackfill("CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED");
   }
   const parsed = parseBackfillArguments(remaining);
-  if (selected.includes("--launchd") && parsed.mode !== "--run") refuseBackfill("CONTINUOUS_ARGUMENTS_INVALID");
-  return { ...parsed, bootstrapBackfill: selected.includes("--bootstrap-backfill"), launchd: selected.includes("--launchd"), cadence: policy.data };
+  if ((selected.includes("--launchd") && parsed.mode !== "--run") ||
+    (selected.includes("--await-initial-run") && !selected.includes("--bootstrap-backfill"))) {
+    refuseBackfill("CONTINUOUS_ARGUMENTS_INVALID");
+  }
+  return { ...parsed, bootstrapBackfill: selected.includes("--bootstrap-backfill"),
+    awaitInitialRun: selected.includes("--await-initial-run"), launchd: selected.includes("--launchd"),
+    cadence: policy.data };
 }
 export async function runContinuousPoller(args: ReturnType<typeof parseContinuousArguments>, signal: AbortSignal,
   lifecycle: { postHead?: ContinuousPostHeadRegistration; beforeSource?: (signal: AbortSignal) => Promise<void> } = {}) {
@@ -89,7 +94,7 @@ export async function runContinuousPoller(args: ReturnType<typeof parseContinuou
     read: (db, authority) => readContinuousView(db, pollingPins, authority, args.cadence, postHeadPolicy) });
   const readBootstrap = createContinuousProviderReader<BackfillAuthority, ResidentBootstrapView>({ authority: readAuthority,
     run: (authority, operation) => gateway.runWithCachedProviderDatabase(authority.route, operation),
-    read: (db, authority) => readResidentBootstrapView(db, args.pins, authority) });
+    read: (db, authority) => readResidentBootstrapView(db, args.pins, authority, args.awaitInitialRun) });
   let health: ContinuousHealth = { state: "starting" };
   const emit = (event: ContinuousHealth) => {
     health = event;
@@ -109,7 +114,8 @@ export async function runContinuousPoller(args: ReturnType<typeof parseContinuou
       if (args.bootstrapBackfill) {
         const view = await readBootstrap();
         if (view.handoff) { pollingPins = residentContinuousPins(view.handoff); continuousDecision(await read(), pollingPins); }
-        const disposition = view.backfill ? (backfillHasOwnedExpiredHeadLease(view.backfill) ? "owned_expired_head_cleanup"
+        const disposition = "awaitingInitialRun" in view && view.awaitingInitialRun ? "awaiting_initial_run" :
+          view.backfill ? (backfillHasOwnedExpiredHeadLease(view.backfill) ? "owned_expired_head_cleanup"
           : view.backfill.ownedLeaseExpiresAt && view.backfill.ownedLeaseExpiresAt > view.backfill.snapshot.now ? "waiting_owned_child"
             : classifyBackfillCheckpoint(view.backfill.snapshot)) : "handoff_saved";
         return { state: disposition, providerId: args.pins.providerId,

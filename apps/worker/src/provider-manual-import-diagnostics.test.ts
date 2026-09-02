@@ -12,6 +12,9 @@ test("typed source failures retain their stable codes and source classification"
   for (const error of [
     new ProviderCaptureSourceError("PROVIDER_CAPTURE_HASH_MISMATCH"),
     new ProviderDataforrestSourceError("PROVIDER_DATAFORREST_REQUEST_TIMEOUT"),
+    new ProviderDataforrestSourceError(
+      "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED",
+    ),
   ]) {
     const actual = classifyProviderManualImportFailure(error, "source_read");
     assert.equal(actual.failureCode, error.code);

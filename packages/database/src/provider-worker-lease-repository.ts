@@ -155,9 +155,12 @@ export class PrismaProviderWorkerLeaseRepository {
 
   async acquire(input: AcquireProviderWorkerLeaseInput): Promise<AcquireProviderWorkerLeaseResult> {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return runDrainedDatabaseTransaction(
+    return runDrainedDatabaseTransaction<
+      AcquireProviderWorkerLeaseResult,
+      ProviderTransactionClient
+    >(
       callback => this.database.$transaction(callback, TRANSACTION_OPTIONS),
-      async (transaction: ProviderTransactionClient) => acquireProviderWorkerLease(transaction, input),
+      transaction => acquireProviderWorkerLease(transaction, input),
     );
   }
 

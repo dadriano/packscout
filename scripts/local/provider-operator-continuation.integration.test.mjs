@@ -18,7 +18,10 @@ function fixture() {
     sourceCommit: "a".repeat(40), authorization: "operator_requested_one_time_continuation", expectedGeneration: "24",
     expectedImportFence: "9", expectedCheckpointHash: p.cursorHash, expectedFailureCode: p.failureCode,
     expectedFinishedAt: p.finishedAt, expectedPageCount: 387 });
-  const authority = { ...oldAuthority, integration: registry.resolveProvider(p.providerKey),
+  const authority = { ...oldAuthority, integration: registry.resolve(
+    p.providerKey,
+    oldAuthority.cachedConfiguration.adapterKey,
+  ),
     route: { ...oldAuthority.route, node: { host: "127.0.0.1", port: 55434, sslMode: "disable" } } };
   return { review, authority, control: createOperatorContinuation(review), ids: continuationIds(review) };
 }

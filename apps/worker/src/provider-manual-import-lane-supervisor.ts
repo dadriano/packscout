@@ -196,9 +196,9 @@ export async function runProviderManualImportLanesOnce(input: Readonly<{
       nextLaneIndex += 1;
       const lane = lanes[laneIndex]!;
       if (
-        providerDataforrestLiveIntegrationRegistry.resolveProvider(
+        !providerDataforrestLiveIntegrationRegistry.supportsProvider(
           lane.providerKey,
-        ) === null
+        )
       ) {
         outcomes[laneIndex] = rejectedOutcome(
           lane,

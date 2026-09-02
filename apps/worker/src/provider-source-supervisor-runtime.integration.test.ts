@@ -617,7 +617,7 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
         orderBy: { created_at: "asc" },
       });
       assert.ok(calls >= 4, JSON.stringify(runs));
-    }, 3_000);
+    });
     await firstWaveStarted.promise;
     assert.equal(maximumActive, 4);
     releaseFirstWave.resolve();
@@ -718,6 +718,7 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
     assert.equal(calls, 12, "frequent DB polling made an early upstream call");
   } finally {
+    releaseFirstWave.resolve();
     await supervisor?.stop().catch(() => undefined);
     await fixture.close();
   }

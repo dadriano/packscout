@@ -6,12 +6,18 @@ const policy = await tsImport("./provider-operator-continuation-policy.mts", imp
 const state = await tsImport("./provider-operator-continuation-state.mts", import.meta.url);
 const cli = await tsImport("./provider-operator-continuation.mts", import.meta.url);
 const db = await tsImport("@packscout/database", import.meta.url);
+const { DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION } =
+  await tsImport("@packscout/contracts", import.meta.url);
 const { providerDataforrestLiveIntegrationRegistry: registry } = await tsImport(
   "../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
 function fixture() {
   const pins = { organizationId: crypto.randomUUID(), providerId: crypto.randomUUID(), providerKey: "phygitals",
     configId: crypto.randomUUID(), initialRunId: crypto.randomUUID(), operationId: crypto.randomUUID(), operatorId: crypto.randomUUID() };
-  const integration = registry.resolveProvider(pins.providerKey), manifest = integration.manifest;
+  const integration = registry.resolve(
+    pins.providerKey,
+    DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+  );
+  const manifest = integration.manifest;
   const cursor = value => ({ sourceInstanceId: pins.providerId, sourceRevisionId: pins.configId,
     sourceTypeKey: manifest.sourceTypeKey, adapterVersion: manifest.adapterVersion,
     cursorCodecKey: manifest.cursorCodecKey, cursorGeneration: 1, value });

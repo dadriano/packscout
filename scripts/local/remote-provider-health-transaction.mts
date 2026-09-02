@@ -9,5 +9,7 @@ export async function runRemoteHealthTransaction<T, Transaction>(
       pending = Promise.resolve().then(() => read(transaction));
       return pending;
     });
-  } finally { if (pending) await pending.catch(() => undefined); }
+  } finally {
+    if (pending) await pending.catch(() => undefined);
+  }
 }

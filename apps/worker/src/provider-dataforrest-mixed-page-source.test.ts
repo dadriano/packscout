@@ -8,7 +8,10 @@ import {
   DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
@@ -18,6 +21,7 @@ import {
   type DataforrestEventRecordV1,
   type DataforrestEventsPageV1,
   type ProviderPageRecordCounts,
+  type ProviderCatalogIdentityCensus,
 } from "@packscout/contracts";
 import {
   PROVIDER_MIXED_PAGE_MAX_BYTES,
@@ -37,6 +41,7 @@ import type {
 } from
   "./dataforrest-source-authority-resolver.ts";
 import {
+  ProviderCatalogIdentityCensusSession,
   ProviderDataforrestMixedPageSource,
   ProviderDataforrestSourceError,
 } from "./provider-dataforrest-mixed-page-source.ts";
@@ -47,6 +52,7 @@ import {
   "./provider-dataforrest-live-integration.ts";
 import type { ProviderCapturePageSourceInput } from
   "./provider-capture-source-contract.ts";
+import { providerManualImportExecutionBudget } from "./provider-manual-import-execution-budget.ts";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const providerId = "11111111-1111-4111-8111-111111111111";
@@ -389,6 +395,7 @@ function sourcePage(input: Readonly<{
 }
 
 function sourceInput(input: Readonly<{
+  runId?: string;
   pageNumber?: number;
   checkpoint?: CanonicalJsonValue | null;
   checkpointFingerprint?: string | null;
@@ -396,7 +403,7 @@ function sourceInput(input: Readonly<{
 }> = {}): ProviderCapturePageSourceInput {
   return {
     authority: input.authority ?? authority,
-    runId,
+    runId: input.runId ?? runId,
     workerFence: 1n,
     pageNumber: input.pageNumber ?? 1,
     sourceCheckpoint: input.checkpoint ?? null,
@@ -415,9 +422,11 @@ function jsonResponse(value: unknown): Response {
 function sourceFixture(input: Readonly<{
   pages: readonly DataforrestEventsPageV1[];
   pageLimit?: number;
+  maximumPageRecords?: number;
   integration?: ProviderDataforrestLiveIntegration;
   resolvedAuthority?: ResolvedDataforrestSourceAuthority;
   workerId?: string;
+  catalogIdentityCensusSession?: ProviderCatalogIdentityCensusSession;
   resolver?: (
     request: DataforrestSourceAuthorityRequest,
   ) => Promise<ResolvedDataforrestSourceAuthority>;
@@ -437,6 +446,7 @@ function sourceFixture(input: Readonly<{
     normalizedRecordCount: number;
   }>> = [];
   const recordKindMeasurements: ProviderPageRecordCounts[] = [];
+  const catalogIdentityCensuses: ProviderCatalogIdentityCensus[] = [];
   const pages = [...input.pages];
   const baseIntegration = input.integration
     ?? createProviderDataforrestLiveIntegration(
@@ -494,6 +504,9 @@ function sourceFixture(input: Readonly<{
     translationRecorder: {
       recordPageTranslation(input) {
         recordKindMeasurements.push(input.recordCounts);
+        if (input.catalogIdentityCensus !== null) {
+          catalogIdentityCensuses.push(input.catalogIdentityCensus);
+        }
         translations.push({
           sourceRecordCount: input.sourceRecordCount,
           normalizedRecordCount: input.normalizedRecordCount,
@@ -504,6 +517,10 @@ function sourceFixture(input: Readonly<{
     workerId: input.workerId ?? "fixture:clutchpacks",
     integration,
     adapter,
+    maximumPageRecords: input.maximumPageRecords,
+    ...(input.catalogIdentityCensusSession === undefined ? {} : {
+      catalogIdentityCensusSession: input.catalogIdentityCensusSession,
+    }),
   });
   return {
     source,
@@ -512,6 +529,7 @@ function sourceFixture(input: Readonly<{
     terminalizations,
     translations,
     recordKindMeasurements,
+    catalogIdentityCensuses,
   };
 }
 
@@ -535,10 +553,12 @@ function phygitalsCardRecord(
 function collectorSourceFixture(
   pages: readonly DataforrestEventsPageV1[],
   manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  maximumPageRecords?: number,
 ) {
   return {
     ...sourceFixture({
       pages,
+      maximumPageRecords,
       integration: createProviderDataforrestLiveIntegration("collector_crypt", manifest),
       resolvedAuthority: {
         ...resolvedAuthority,
@@ -556,12 +576,122 @@ function collectorSourceFixture(
   };
 }
 
+function collectorCatalogFixture(pages: readonly DataforrestEventsPageV1[]) {
+  const manifest = dataforrestCollectorCryptCatalogV2SourceAdapterManifest;
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration(
+        "collector_crypt",
+        manifest,
+      ),
+      resolvedAuthority: {
+        ...resolvedAuthority,
+        providerKey: "collector_crypt",
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceConfiguration: {
+          platform: "collector_crypt",
+          stream: "catalog",
+        },
+      },
+    }),
+    captureAuthority: {
+      ...authority,
+      providerKey: "collector_crypt",
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
 function collectorPullRecords(count: number): DataforrestEventRecordV1[] {
   return Array.from({ length: count }, (_, index) => ({
     ...cardOnlyPullRecord(`collector-profile-pull-${index}`),
     platform: "collector_crypt",
   }));
 }
+
+test("remote page ceiling preserves the opaque Collector cursor, canonical ordering and original 1,000-record manifest", async () => {
+  const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;
+  const originalManifest = structuredClone(manifest);
+  const checkpoint = {
+    sourceInstanceId: providerId, sourceRevisionId: configVersionId,
+    sourceTypeKey: manifest.sourceTypeKey, adapterVersion: manifest.adapterVersion,
+    cursorCodecKey: manifest.cursorCodecKey, cursorGeneration: 1,
+    value: "collector/opaque+saved==?limit=1000&position=163000",
+  };
+  const checkpointFingerprint = providerMixedCursorFingerprint(checkpoint);
+  const pages = [sourcePage({ cursor: "collector-bounded-next", continuation: "continue", records: collectorPullRecords(100) }),
+    sourcePage({ cursor: "collector-bounded-head", continuation: "head", records: [] })];
+  const translated = [];
+  for (const mode of ["remote", "local"] as const) {
+    const fixture = collectorSourceFixture(pages, manifest, providerManualImportExecutionBudget(mode).maximumPageRecords);
+    const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority, pageNumber: 2, checkpoint, checkpointFingerprint,
+    })));
+    translated.push(first);
+    assert.equal(first.records.length, 100);
+    assert.deepEqual(first.inputCursor, checkpoint);
+    assert.equal(first.inputCursorFingerprint, checkpointFingerprint);
+    assert.deepEqual(first.nextCursor, { ...checkpoint, value: "collector-bounded-next" });
+    const second = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority, pageNumber: 3,
+      checkpoint: first.nextCursor, checkpointFingerprint: first.nextCursorFingerprint,
+    })));
+    assert.equal(second.continuation, "head");
+    assert.deepEqual(fixture.requestedUrls.map(url => url.searchParams.get("cursor")), [checkpoint.value, "collector-bounded-next"]);
+    const limit = mode === "remote" ? 100 : 1_000;
+    assert.equal(fixture.requestedUrls.every(url => url.searchParams.get("limit") === String(limit)), true);
+    assert.equal(fixture.terminalizations.every(({ operationScope }) =>
+      operationScope.operationKind === "page_read" && operationScope.pageLimit === limit
+      && operationScope.adapterVersion === manifest.adapterVersion), true);
+    const firstScope = fixture.terminalizations[0]!.operationScope;
+    assert.ok(firstScope.operationKind === "page_read");
+    assert.equal(firstScope.requestedCursorFingerprint, checkpointFingerprint);
+    assert.deepEqual(fixture.translations, [{ sourceRecordCount: 100, normalizedRecordCount: 100 },
+      { sourceRecordCount: 0, normalizedRecordCount: 0 }]);
+  }
+  assert.deepEqual(translated[0], translated[1]);
+  assert.deepEqual(manifest, originalManifest);
+  assert.equal(manifest.requestBounds.pageLimit, 1_000);
+});
+
+test("catalog V2 rejects a 101-record response before translation and audits its safe bound", async () => {
+  const records = Array.from({ length: 101 }, (_, index) => ({
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: `collector-catalog-pack-${index}`,
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    entity: "pack" as const,
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+    data: { name: `Collector pack ${index}` },
+  }));
+  const fixture = collectorCatalogFixture([sourcePage({
+    cursor: "collector-bounded-overflow",
+    continuation: "continue",
+    records,
+  })]);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === "PROVIDER_DATAFORREST_INVALID_RESPONSE");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  assert.equal(fixture.terminalizations.length, 1);
+  const scope = fixture.terminalizations[0]!.operationScope;
+  assert.equal(scope.operationKind === "page_read" && scope.pageLimit, 100);
+  assert.equal(fixture.terminalizations[0]!.outcome.ok, true);
+  assert.deepEqual(fixture.translations, []);
+});
+
+test("page ceilings reject invalid values before I/O and never increase an adapter's smaller maximum", async () => {
+  for (const maximumPageRecords of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => collectorSourceFixture([], undefined, maximumPageRecords), /page record ceiling is invalid/u);
+  }
+  const fixture = collectorSourceFixture([sourcePage({ cursor: "smaller-manifest-head", continuation: "head",
+    records: collectorPullRecords(100) })], dataforrestLaunchDistributedSourceAdapterManifest, 1_000);
+  const page = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })));
+  assert.equal(page.records.length, 100);
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+});
 
 test("Collector requests and accepts exactly 1,000 records with an exact version-pinned continuation", async () => {
   const manifest = dataforrestCollectorCryptDistributedSourceAdapterManifest;
@@ -672,6 +802,153 @@ test("Collector profile upgrade preserves identical canonical record identity an
   assert.notEqual(pages[0]!.records[0]!.disposition, "quarantine");
   assert.deepEqual(pages[0]!.records, pages[1]!.records);
   assert.notDeepEqual(pages[0]!.nextCursor, pages[1]!.nextCursor);
+});
+
+test("Collector V2 translates live-shaped cards and retained-shaped packs without quarantine", async () => {
+  const card = {
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: "collector-live-card",
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    entity: "card" as const,
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+    available: true,
+    data: {
+      asset: {
+        itemName: "Collector Live Card",
+        images: {
+          frontImage: "https://images.example.test/collector-front.png",
+          backImage: "https://images.example.test/collector-back.png",
+        },
+        category: "not-mapped-without-a-reviewed-type",
+        insuredValue: "not-mapped-without-a-reviewed-currency-contract",
+      },
+      detail: { plain: { itemName: "unreviewed-fallback" } },
+    },
+  };
+  const packWithoutAvailability = {
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: "collector-retained-pack",
+    occurred_at: "2026-09-01T00:01:00.000Z",
+    collected_at: "2026-09-01T00:01:01.000Z",
+    entity: "pack" as const,
+    first_seen_at: "2026-09-01T00:01:00.000Z",
+    data: {
+      name: "Collector Retained Pack",
+      archived: false,
+      public: true,
+    },
+  };
+  const fixture = collectorCatalogFixture([
+    sourcePage({
+      cursor: "collector-catalog-head",
+      continuation: "head",
+      records: [card, packWithoutAvailability],
+    }),
+  ]);
+
+  const page = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("stream"), "catalog");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  assert.equal(page.records.length, 2);
+  assert.equal(page.records.some((record) => record.disposition === "quarantine"), false);
+  assert.equal(page.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "collectible"
+    && record.candidate.collectibleKey === "card:collector-live-card"
+    && record.candidate.displayName === "Collector Live Card"
+    && record.candidate.primaryImageUrl ===
+      "https://images.example.test/collector-front.png"
+  ), true);
+  assert.equal(page.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "pack"
+    && record.candidate.packKey === "pack:collector-retained-pack"
+    && record.candidate.displayName === "Collector Retained Pack"
+    && record.candidate.availability === "unavailable"
+  ), true);
+  assert.deepEqual(fixture.recordKindMeasurements, [{
+    catalogRecordCount: 2,
+    collectibleRecordCount: 1,
+    packContentSnapshotCount: 0,
+    pullRecordCount: 0,
+    marketEventRecordCount: 0,
+    rejectedRecordCount: 0,
+  }]);
+  assert.deepEqual(fixture.catalogIdentityCensuses.map((census) => ({
+    rawCardObservationCount: census.rawCardObservationCount,
+    rawPackObservationCount: census.rawPackObservationCount,
+    distinctCardIdentityCount: census.distinctCardIdentityCount,
+    distinctPackIdentityCount: census.distinctPackIdentityCount,
+  })), [{
+    rawCardObservationCount: 1,
+    rawPackObservationCount: 1,
+    distinctCardIdentityCount: 1,
+    distinctPackIdentityCount: 1,
+  }]);
+});
+
+test("Collector distributed V2 uses the same catalog facts for future mixed-feed records", async () => {
+  const fixture = collectorSourceFixture([
+    sourcePage({
+      cursor: "collector-event-head",
+      continuation: "head",
+      records: [
+        {
+          stream: "catalog",
+          platform: "collector_crypt",
+          record_id: "collector-future-card",
+          occurred_at: "2026-09-01T00:02:00.000Z",
+          collected_at: "2026-09-01T00:02:01.000Z",
+          entity: "card",
+          first_seen_at: "2026-09-01T00:02:00.000Z",
+          available: true,
+          data: { asset: { itemName: "Collector Future Card" } },
+        },
+        {
+          stream: "catalog",
+          platform: "collector_crypt",
+          record_id: "collector-future-pack",
+          occurred_at: "2026-09-01T00:03:00.000Z",
+          collected_at: "2026-09-01T00:03:01.000Z",
+          entity: "pack",
+          first_seen_at: "2026-09-01T00:03:00.000Z",
+          data: { name: "Collector Future Pack" },
+        },
+      ],
+    }),
+  ], dataforrestCollectorCryptDistributedV2SourceAdapterManifest);
+  const page = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+
+  assert.equal(page.records.length, 2);
+  assert.equal(
+    page.records.some((record) => record.disposition === "quarantine"),
+    false,
+  );
+  assert.equal(
+    page.records.some((record) =>
+      record.kind === "catalog"
+      && record.entityType === "collectible"
+      && record.candidate.displayName === "Collector Future Card"
+    ),
+    true,
+  );
+  assert.equal(
+    page.records.some((record) =>
+      record.kind === "catalog"
+      && record.entityType === "pack"
+      && record.candidate.displayName === "Collector Future Pack"
+      && record.candidate.availability === "unavailable"
+    ),
+    true,
+  );
 });
 
 async function phygitalsMixedPage(
@@ -932,6 +1209,267 @@ function courtyardNativeFixture(
     },
   };
 }
+
+function courtyardCatalogFixture(
+  pages: readonly DataforrestEventsPageV1[],
+  catalogIdentityCensusSession?: ProviderCatalogIdentityCensusSession,
+) {
+  const manifest = dataforrestCourtyardCatalogSourceAdapterManifest;
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration("courtyard", manifest),
+      resolvedAuthority: {
+        ...courtyardResolvedAuthority,
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceConfiguration: { platform: "courtyard", stream: "catalog" },
+      },
+      ...(catalogIdentityCensusSession === undefined ? {} : {
+        catalogIdentityCensusSession,
+      }),
+    }),
+    captureAuthority: {
+      ...courtyardAuthority,
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
+test("catalog identity census exposes duplicates within and across pages without exposing source IDs", async () => {
+  const card = courtyardNativeCard("census-card", { asset: { title: "Census card" } });
+  const pack = courtyardRecords().find((record) =>
+    record.stream === "catalog" && record.entity === "pack");
+  assert.ok(pack);
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "census-more", continuation: "continue",
+      records: [card, card, pack] }),
+    sourcePage({ cursor: "census-head", continuation: "head",
+      records: [card, pack] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority,
+    pageNumber: 2, checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint }));
+  assert.equal(fixture.catalogIdentityCensuses.length, 2);
+  assert.deepEqual({ ...fixture.catalogIdentityCensuses[0]!, identityChainDigest: "digest",
+    pageIdentityMultisetDigest: "digest", pageResponseDigest: "digest" }, {
+    schemaVersion: "provider_catalog_identity_census_v1", pageResponseDigest: "digest",
+    rawCardObservationCount: 2, rawPackObservationCount: 1,
+    distinctCardIdentityCount: 1, distinctPackIdentityCount: 1,
+    identityChainDigest: "digest", pageIdentityMultisetDigest: "digest",
+    identityMultisetDigest: null,
+  });
+  const final = fixture.catalogIdentityCensuses[1]!;
+  assert.equal(final.rawCardObservationCount, 3);
+  assert.equal(final.rawPackObservationCount, 2);
+  assert.equal(final.distinctCardIdentityCount, 1);
+  assert.equal(final.distinctPackIdentityCount, 1);
+  assert.match(final.identityChainDigest, /^[a-f0-9]{64}$/u);
+  assert.match(final.pageIdentityMultisetDigest, /^[a-f0-9]{64}$/u);
+  assert.ok(final.identityMultisetDigest);
+  assert.match(final.identityMultisetDigest, /^[a-f0-9]{64}$/u);
+  assert.equal(JSON.stringify(fixture.catalogIdentityCensuses).includes("census-card"), false);
+  assert.equal(JSON.stringify(fixture.catalogIdentityCensuses).includes("courtyard-pack-001"), false);
+});
+
+test("catalog census counts no identity for an omitted source ID and preserves quarantine evidence", async () => {
+  const invalid = { ...adapterInvalidCatalogRecord(), platform: "courtyard" as const };
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "invalid-head", continuation: "head", records: [invalid] }),
+  ]);
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }));
+  assert.deepEqual(fixture.catalogIdentityCensuses.map((value) => ({
+    rawCardObservationCount: value.rawCardObservationCount,
+    rawPackObservationCount: value.rawPackObservationCount,
+    distinctCardIdentityCount: value.distinctCardIdentityCount,
+    distinctPackIdentityCount: value.distinctPackIdentityCount,
+  })), [{ rawCardObservationCount: 0, rawPackObservationCount: 0,
+    distinctCardIdentityCount: 0, distinctPackIdentityCount: 0 }]);
+  assert.equal(fixture.recordKindMeasurements[0]?.rejectedRecordCount, 1);
+});
+
+test("catalog census replays an exact page idempotently and refuses a conflicting replay", async () => {
+  const exact = sourcePage({ cursor: "replay-more", continuation: "continue",
+    records: [courtyardNativeCard("replay-card", { asset: { title: "Replay" } })] });
+  const fixture = courtyardCatalogFixture([exact, exact,
+    sourcePage({ cursor: "conflict-more", continuation: "continue",
+      records: [courtyardNativeCard("different-card", { asset: { title: "Different" } })] })]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  const replay = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+  })));
+  assert.equal(replay.responseDigest, first.responseDigest);
+  assert.deepEqual(fixture.catalogIdentityCensuses[1], fixture.catalogIdentityCensuses[0]);
+  await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
+    (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+      error.code === "PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+});
+
+test("catalog census refuses interleaved runs until the active run reaches head", async () => {
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "interleaved-more", continuation: "continue",
+      records: [courtyardNativeCard("first-run-card", { asset: { title: "First run" } })] }),
+    sourcePage({ cursor: "second-run-head", continuation: "head",
+      records: [courtyardNativeCard("second-run-card", { asset: { title: "Second run" } })] }),
+  ]);
+  await fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority }));
+  await assert.rejects(fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    runId: "55555555-5555-4555-8555-555555555555",
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_TRANSLATION_INVALID");
+  assert.equal(fixture.catalogIdentityCensuses.length, 1);
+});
+
+test("catalog census session advances across fresh routed page sources", async () => {
+  const session = new ProviderCatalogIdentityCensusSession();
+  const firstSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "shared-page-2", continuation: "continue",
+      records: [courtyardNativeCard("shared-card-1", {
+        asset: { title: "Shared one" },
+      })] }),
+  ], session);
+  const first = validateProviderMixedPage(await firstSource.source.nextPage(
+    sourceInput({ authority: firstSource.captureAuthority }),
+  ));
+  const secondSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "shared-head", continuation: "head",
+      records: [courtyardNativeCard("shared-card-2", {
+        asset: { title: "Shared two" },
+      })] }),
+  ], session);
+  await secondSource.source.nextPage(sourceInput({
+    authority: secondSource.captureAuthority,
+    pageNumber: 2,
+    checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  }));
+  assert.equal(secondSource.catalogIdentityCensuses[0]?.rawCardObservationCount, 2);
+  assert.equal(secondSource.catalogIdentityCensuses[0]?.distinctCardIdentityCount, 2);
+  assert.equal(session.workSnapshot().finalDigestComputationCount, 1);
+});
+
+test("catalog census refuses a process restart at page K before source I/O", async () => {
+  const firstSource = courtyardCatalogFixture([
+    sourcePage({ cursor: "restart-page-2", continuation: "continue",
+      records: [courtyardNativeCard("restart-card-1", {
+        asset: { title: "Restart one" },
+      })] }),
+  ]);
+  const first = validateProviderMixedPage(await firstSource.source.nextPage(
+    sourceInput({ authority: firstSource.captureAuthority }),
+  ));
+  const restarted = courtyardCatalogFixture([
+    sourcePage({ cursor: "restart-head", continuation: "head",
+      records: [courtyardNativeCard("restart-card-2", {
+        asset: { title: "Restart two" },
+      })] }),
+  ]);
+  await assert.rejects(restarted.source.nextPage(sourceInput({
+    authority: restarted.captureAuthority,
+    pageNumber: 2,
+    checkpoint: first.nextCursor,
+    checkpointFingerprint: first.nextCursorFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+  assert.equal(restarted.requestedUrls.length, 0);
+});
+
+test("catalog page 1 refuses a persisted page-K cursor before source I/O", async () => {
+  const prior = courtyardCatalogFixture([
+    sourcePage({ cursor: "persisted-page-k", continuation: "continue",
+      records: [courtyardNativeCard("persisted-card", {
+        asset: { title: "Persisted" },
+      })] }),
+  ]);
+  const page = validateProviderMixedPage(await prior.source.nextPage(
+    sourceInput({ authority: prior.captureAuthority }),
+  ));
+  const freshRun = courtyardCatalogFixture([
+    sourcePage({ cursor: "must-not-read", continuation: "head",
+      records: [courtyardNativeCard("partial-card", {
+        asset: { title: "Partial" },
+      })] }),
+  ]);
+  await assert.rejects(freshRun.source.nextPage(sourceInput({
+    authority: freshRun.captureAuthority,
+    runId: "55555555-5555-4555-8555-555555555555",
+    checkpoint: page.nextCursor,
+    checkpointFingerprint: page.nextCursorFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CATALOG_RESTART_UNSUPPORTED");
+  assert.equal(freshRun.requestedUrls.length, 0);
+});
+
+test("catalog later pages require the exact prior cursor chain", async () => {
+  const fixture = courtyardCatalogFixture([
+    sourcePage({ cursor: "chain-page-2", continuation: "continue",
+      records: [courtyardNativeCard("chain-card-1", {
+        asset: { title: "Chain one" },
+      })] }),
+    sourcePage({ cursor: "chain-head", continuation: "head",
+      records: [courtyardNativeCard("chain-card-2", {
+        asset: { title: "Chain two" },
+      })] }),
+  ]);
+  const first = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+  assert.ok(first.nextCursor !== null && typeof first.nextCursor === "object" &&
+    !Array.isArray(first.nextCursor));
+  const wrongCheckpoint = { ...first.nextCursor, value: "wrong-chain" };
+  const wrongFingerprint = providerMixedCursorFingerprint(wrongCheckpoint);
+  assert.ok(wrongFingerprint);
+  await assert.rejects(fixture.source.nextPage(sourceInput({
+    authority: fixture.captureAuthority,
+    pageNumber: 2,
+    checkpoint: wrongCheckpoint,
+    checkpointFingerprint: wrongFingerprint,
+  })), (error: unknown) => error instanceof ProviderDataforrestSourceError &&
+    error.code === "PROVIDER_DATAFORREST_CURSOR_INVALID");
+  assert.equal(fixture.requestedUrls.length, 1);
+});
+
+test("catalog census digest work stays page-bounded and finalizes once", async () => {
+  const pageCount = 25;
+  const recordsPerPage = 100;
+  const pages = Array.from({ length: pageCount }, (_, pageIndex) =>
+    sourcePage({
+      cursor: pageIndex === pageCount - 1 ? "scale-head" : `scale-${pageIndex + 2}`,
+      continuation: pageIndex === pageCount - 1 ? "head" : "continue",
+      records: Array.from({ length: recordsPerPage }, (_, recordIndex) =>
+        courtyardNativeCard(`scale-${pageIndex}-${recordIndex}`, {
+          asset: { title: `Scale ${pageIndex}-${recordIndex}` },
+        })),
+    }));
+  const fixture = courtyardCatalogFixture(pages);
+  let checkpoint: CanonicalJsonValue | null = null;
+  let checkpointFingerprint: string | null = null;
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const page = validateProviderMixedPage(await fixture.source.nextPage(sourceInput({
+      authority: fixture.captureAuthority,
+      pageNumber,
+      checkpoint,
+      checkpointFingerprint,
+    })));
+    checkpoint = page.nextCursor;
+    checkpointFingerprint = page.nextCursorFingerprint;
+  }
+  assert.deepEqual(fixture.source.catalogIdentityCensusWorkSnapshot(), {
+    pageDigestObservationCount: pageCount * recordsPerPage,
+    maximumPageDigestObservationCount: recordsPerPage,
+    finalDigestDistinctIdentityCount: pageCount * recordsPerPage,
+    finalDigestComputationCount: 1,
+  });
+  assert.equal(fixture.catalogIdentityCensuses.slice(0, -1)
+    .every((value) => value.identityMultisetDigest === null), true);
+  assert.ok(fixture.catalogIdentityCensuses.at(-1)?.identityMultisetDigest);
+});
 
 test("versioned Courtyard native cards map reviewed wrappers and quarantine malformed or absent names", async () => {
   const invalidAssets: DataforrestEventRecordV1["data"][string][] = [

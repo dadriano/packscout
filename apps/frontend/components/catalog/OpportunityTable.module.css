@@ -1,5 +1,4 @@
 .section {
-  container-type: inline-size;
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 0.55rem;
@@ -40,7 +39,7 @@
 
 .scrollRegion {
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: auto;
   border-top: 1px solid var(--color-border);
   scrollbar-color: var(--color-border-strong) transparent;
 }
@@ -51,7 +50,7 @@
 
 .table {
   width: 100%;
-  min-width: 0;
+  min-width: 70rem;
   table-layout: fixed;
   border-spacing: 0;
   font-size: 0.75rem;
@@ -71,12 +70,12 @@
 
 .table th:nth-child(3),
 .table td:nth-child(3) {
-  width: 16%;
+  width: 14%;
 }
 
 .table th:nth-child(4),
 .table td:nth-child(4) {
-  width: 11%;
+  width: 10%;
 }
 
 .table td:nth-child(4) {
@@ -91,16 +90,21 @@
 
 .table th:nth-child(6),
 .table td:nth-child(6) {
-  width: 7.4rem;
+  width: 6.9rem;
 }
 
 .table th:nth-child(7),
 .table td:nth-child(7) {
-  width: 6.1rem;
+  width: 5.7rem;
 }
 
 .table th:nth-child(8),
 .table td:nth-child(8) {
+  width: 6.8rem;
+}
+
+.table th:nth-child(9),
+.table td:nth-child(9) {
   width: 7.1rem;
 }
 
@@ -271,9 +275,16 @@
   font-weight: 720;
 }
 
+.confidenceCell {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+}
+
 .confidence {
   display: block;
   font-weight: 680;
+  white-space: nowrap;
 }
 
 .confidence[data-tone="positive"] {
@@ -297,22 +308,6 @@
   max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.estimateEvidence {
-  display: grid;
-  gap: 0.1rem;
-  margin-top: 0.2rem;
-  color: var(--color-warning-strong);
-  font-size: 0.58rem;
-  font-weight: 650;
-  line-height: 1.35;
-}
-
-.estimateEvidence time {
-  color: var(--color-text-muted);
-  font-weight: 500;
-  white-space: normal;
 }
 
 .emptyState {
@@ -341,16 +336,5 @@
 @media (prefers-reduced-motion: reduce) {
   .table tbody tr {
     transition: none;
-  }
-}
-
-@container (max-width: 36rem) {
-  .scrollRegion {
-    overflow-x: auto;
-  }
-
-  .table {
-    table-layout: auto;
-    min-width: 44rem;
   }
 }

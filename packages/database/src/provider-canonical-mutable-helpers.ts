@@ -100,4 +100,3 @@ export function hasSameMaterialFields(
     JSON.stringify(comparable(current[key])) === JSON.stringify(comparable(value))
   ));
 }
-

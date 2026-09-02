@@ -17,7 +17,7 @@ test("bootstrap runs pinned backfill, commits one head handoff, then restart ski
   Object.assign(backfill.snapshot.run, { state: "failed", reachedHead: false, failureCode: "PROVIDER_DATAFORREST_REQUEST_TIMEOUT",
     requestedHash: "b".repeat(64) }); backfill.snapshot.lastPage.continuation = "more";
   let handoff;
-  const ports = { read: async () => view,
+  const ports = { read: async () => handoff ? { handoff, backfill: null } : view,
     persist: async observed => { handoff = await persistResidentHandoff(f.database, pins, f.authority, observed); return handoff; },
     execute: async () => { executions++; backfill.snapshot = head; return "head"; },
     wait: async () => assert.fail(), emit() {} };
@@ -52,12 +52,47 @@ test("unknown handoff write failure latches through later successful reads and r
   assert.equal(JSON.stringify(events).includes("private DB"), false);
 });
 test("read-only outage retries before handoff without treating any write as retryable", async () => {
-  const { f, view } = await ready(); let reads = 0; let waits = 0;
-  const result = await superviseResidentBootstrap({ read: async () => { if (++reads === 1) throw new ContinuousReadUnavailableError(); return view; },
-    persist: backfill => persistResidentHandoff(f.database, pins, f.authority, backfill), execute: async () => assert.fail(),
+  const { f, view } = await ready(); let reads = 0; let waits = 0; let handoff;
+  const result = await superviseResidentBootstrap({ read: async () => {
+    if (++reads === 1) throw new ContinuousReadUnavailableError();
+    return handoff ? { handoff, backfill: null } : view;
+  },
+    persist: async backfill => handoff = await persistResidentHandoff(f.database, pins, f.authority, backfill),
+    execute: async () => assert.fail(),
     wait: async milliseconds => { assert.equal(milliseconds, 15000); waits++; assert.ok(waits < 3, "read outage must recover without latching"); }, emit() {},
   }, new AbortController().signal);
   assert.ok(result); assert.equal(waits, 1); assert.equal(f.audits.length, 1);
+});
+test("explicit initial-run wait performs no source or persistence work until admission appears", async () => {
+  const { f, view } = await ready();
+  const waiting = { handoff: null, backfill: null, awaitingInitialRun: true };
+  const states = []; let reads = 0; let waits = 0; let handoff;
+  const result = await superviseResidentBootstrap({
+    read: async () => ++reads === 1 ? waiting : handoff ? { handoff, backfill: null } : view,
+    persist: async backfill => handoff = await persistResidentHandoff(f.database, pins, f.authority, backfill),
+    execute: async () => assert.fail("source execution must wait for the deterministic run"),
+    wait: async milliseconds => { assert.equal(milliseconds, 15000); waits++; },
+    emit: event => states.push(event.state),
+  }, new AbortController().signal);
+  assert.ok(result); assert.equal(waits, 1); assert.equal(states[0], "waiting_initial_run");
+  assert.equal(f.audits.length, 1);
+});
+test("persisted handoff cannot enter continuous polling before the journal release appears", async () => {
+  const { backfill, view } = await ready();
+  const waiting = { handoff: null, backfill: null, awaitingInitialRun: true };
+  const stop = new AbortController(); const states = []; let persisted = false; let released = false;
+  const result = await superviseResidentBootstrap({
+    read: async () => !persisted ? view : released
+      ? { handoff: { pins, authorityDigest: "d".repeat(64), headRunId: pins.initialRunId,
+        checkpointHash: backfill.snapshot.checkpointHash, generation: backfill.snapshot.generation.toString(),
+        continuousOperationId: pins.operatorId, createdAt: backfill.snapshot.now.toISOString() }, backfill: null }
+      : waiting,
+    persist: async () => { persisted = true; return {}; },
+    execute: async () => assert.fail("source execution must remain gated after handoff"),
+    wait: async milliseconds => { assert.equal(milliseconds, 15000); released = true; },
+    emit: event => states.push(event.state),
+  }, stop.signal);
+  assert.ok(result); assert.deepEqual(states, ["handoff", "waiting_initial_run"]);
 });
 test("proven live child waits across terminal head until release; pause interrupts the wait", async () => {
   for (const paused of [false, true]) {

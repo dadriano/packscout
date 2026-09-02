@@ -275,5 +275,10 @@ test("all four isolated destinations are exact, legacy/cross-provider routes and
   const values = [pins.organizationId, pins.providerId, pins.providerKey, pins.configId, pins.initialRunId, pins.operationId, pins.operatorId];
   const args = ["--check-only", ...keys.flatMap((key, index) => [`--${key}`, values[index]])];
   assert.deepEqual(parseContinuousArguments(args).pins, pins);
+  const awaited = parseContinuousArguments(["--run", "--bootstrap-backfill", "--await-initial-run",
+    ...keys.flatMap((key, index) => [`--${key}`, values[index]])]);
+  assert.equal(awaited.bootstrapBackfill, true); assert.equal(awaited.awaitInitialRun, true);
+  assert.throws(() => parseContinuousArguments(["--run", "--await-initial-run",
+    ...keys.flatMap((key, index) => [`--${key}`, values[index]])]));
   assert.throws(() => parseContinuousArguments([...args, "--reset-cursor"]));
 });

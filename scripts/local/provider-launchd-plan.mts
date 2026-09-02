@@ -12,15 +12,20 @@ const escapeXml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("
 /** Pure plan: the integration operator verifies paths/ownership and installs it.
  * No launchctl, file writes, subprocesses, DB reads, or inherited secret env. */
 export function createProviderLaunchdPlan(input: { pins: BackfillPins; checkoutRoot: string; nodeExecutable: string;
-  logPath: string; bootstrapBackfill: boolean; platform?: string; cadence?: ContinuousCadence }) {
+  logPath: string; bootstrapBackfill: boolean; awaitInitialRun?: boolean; platform?: string;
+  cadence?: ContinuousCadence }) {
   if ((input.platform ?? process.platform) !== "darwin") refuseBackfill("CONTINUOUS_LAUNCHD_MACOS_REQUIRED");
+  if (input.awaitInitialRun === true && !input.bootstrapBackfill) {
+    refuseBackfill("CONTINUOUS_LAUNCHD_AWAIT_INITIAL_RUN_INVALID");
+  }
   const pins = backfillPinsSchema.parse(input.pins);
   const cadence = validatedContinuousCadence(input.cadence);
   if (input.bootstrapBackfill && cadence.kind !== "central") refuseBackfill("CONTINUOUS_BOOTSTRAP_POLICY_UNSUPPORTED");
   const root = absolutePath(input.checkoutRoot); const node = absolutePath(input.nodeExecutable);
   const log = absolutePath(input.logPath); const label = `com.packscout.provider-import.${pins.providerKey}`;
   const arguments_ = [node, "--import", "tsx", path.join(root, "scripts/local/run-provider-continuous-poller.mts"),
-    "--run", "--launchd", ...(input.bootstrapBackfill ? ["--bootstrap-backfill"] : []),
+    "--run", "--launchd", ...(input.bootstrapBackfill ? ["--bootstrap-backfill",
+      ...(input.awaitInitialRun === true ? ["--await-initial-run"] : [])] : []),
     "--organization-id", pins.organizationId, "--provider-id", pins.providerId, "--provider-key", pins.providerKey,
     "--config-id", pins.configId, "--initial-run-id", pins.initialRunId, "--operation-id", pins.operationId,
     "--operator-id", pins.operatorId,

@@ -3,9 +3,14 @@ import { describe, test } from "node:test";
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import type { CentralQueryClient } from "@packscout/database";
@@ -29,6 +34,18 @@ const credentialCipher = new AesGcmProviderCredentialCipher({
   primaryVersion: 1,
   keys: new Map([[1, key]]),
 });
+
+class CountingCredentialCipher extends AesGcmProviderCredentialCipher {
+  decryptCalls = 0;
+
+  override decrypt(
+    encrypted: Parameters<AesGcmProviderCredentialCipher["decrypt"]>[0],
+    scope: Parameters<AesGcmProviderCredentialCipher["decrypt"]>[1],
+  ): string {
+    this.decryptCalls += 1;
+    return super.decrypt(encrypted, scope);
+  }
+}
 const adapterKey =
   dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion;
 
@@ -126,7 +143,10 @@ function validConfiguration(): ValidConfigurationFixture {
   };
 }
 
-function resolverFor(row: ConfigurationFixture | null | Error) {
+function resolverFor(
+  row: ConfigurationFixture | null | Error,
+  sourceCredentialCipher: AesGcmProviderCredentialCipher = credentialCipher,
+) {
   let receivedQuery: unknown;
   const central = {
     provider_config_versions: {
@@ -140,7 +160,7 @@ function resolverFor(row: ConfigurationFixture | null | Error) {
   return {
     resolver: new CentralDataforrestSourceAuthorityResolver({
       central,
-      credentialCipher,
+      credentialCipher: sourceCredentialCipher,
     }),
     query: () => receivedQuery,
   };
@@ -208,48 +228,138 @@ describe("central DataForrest source authority", () => {
   for (const [providerKey, manifest] of [
     ["courtyard", dataforrestCourtyardDistributedV2SourceAdapterManifest],
     ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest],
+    ["collector_crypt", dataforrestCollectorCryptDistributedV2SourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
   ] as const) {
-  test(`resolves ${providerKey} only through its exact distributed tuple`, async () => {
-    const row = validConfiguration();
-    row.adapter_key =
-      manifest.adapterVersion;
-    row.configuration = { platform: providerKey };
-    row.provider.provider_key = providerKey;
-    const courtyardRequest: DataforrestSourceAuthorityRequest = {
-      ...request,
-      providerKey,
-      adapterKey:
-        manifest.adapterVersion,
-    };
+    test(`resolves ${providerKey} ${manifest.adapterVersion} through its exact distributed tuple`, async () => {
+      const row = validConfiguration();
+      row.adapter_key = manifest.adapterVersion;
+      row.configuration = { platform: providerKey };
+      row.provider.provider_key = providerKey;
+      const providerRequest: DataforrestSourceAuthorityRequest = {
+        ...request,
+        providerKey,
+        adapterKey: manifest.adapterVersion,
+      };
 
-    const authority = await resolverFor(row).resolver.resolve(
-      courtyardRequest,
-    );
-    assert.deepEqual(authority, {
-      organizationId,
-      providerId,
-      providerKey,
-      configVersionId,
-      configVersionNumber: 2n,
-      adapterKey:
-        manifest.adapterVersion,
-      sourceTypeKey:
-        manifest.sourceTypeKey,
-      sourceAdapterVersion:
-        manifest.adapterVersion,
-      sourceCredentialVersionId,
-      sourceCredentialVersionNumber: 3n,
-      expiresAt: null,
-      connectionConfiguration: {
-        endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
-        bearerToken,
-      },
-      sourceConfiguration: { platform: providerKey },
+      const authority = await resolverFor(row).resolver.resolve(
+        providerRequest,
+      );
+      assert.deepEqual(authority, {
+        organizationId,
+        providerId,
+        providerKey,
+        configVersionId,
+        configVersionNumber: 2n,
+        adapterKey: manifest.adapterVersion,
+        sourceTypeKey: manifest.sourceTypeKey,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceCredentialVersionId,
+        sourceCredentialVersionNumber: 3n,
+        expiresAt: null,
+        connectionConfiguration: {
+          endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+          bearerToken,
+        },
+        sourceConfiguration: { platform: providerKey },
+      });
+      assert.equal("ciphertext" in authority, false);
     });
-    assert.equal("ciphertext" in authority, false);
-  });
   }
+
+  for (const [providerKey, manifest] of [
+    ["courtyard", dataforrestCourtyardCatalogSourceAdapterManifest],
+    ["collector_crypt", dataforrestCollectorCryptCatalogV2SourceAdapterManifest],
+    ["phygitals", dataforrestPhygitalsCatalogSourceAdapterManifest],
+  ] as const) {
+    test(`resolves ${providerKey} catalog authority only with its strict stream pin`, async () => {
+      const row = validConfiguration();
+      row.adapter_key = manifest.adapterVersion;
+      row.configuration = { platform: providerKey, stream: "catalog" };
+      row.provider.provider_key = providerKey;
+      const providerRequest: DataforrestSourceAuthorityRequest = {
+        ...request,
+        providerKey,
+        adapterKey: manifest.adapterVersion,
+      };
+
+      const authority = await resolverFor(row).resolver.resolve(
+        providerRequest,
+      );
+      assert.deepEqual(authority, {
+        organizationId,
+        providerId,
+        providerKey,
+        configVersionId,
+        configVersionNumber: 2n,
+        adapterKey: manifest.adapterVersion,
+        sourceTypeKey: manifest.sourceTypeKey,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceCredentialVersionId,
+        sourceCredentialVersionNumber: 3n,
+        expiresAt: null,
+        connectionConfiguration: {
+          endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
+          bearerToken,
+        },
+        sourceConfiguration: { platform: providerKey, stream: "catalog" },
+      });
+      assert.equal("ciphertext" in authority, false);
+    });
+  }
+
+  test("rejects baseline and catalog configuration shape mismatches before credential use", async () => {
+    const countingCipher = new CountingCredentialCipher({
+      primaryVersion: 1,
+      keys: new Map([[1, key]]),
+    });
+    const mismatches = [
+      {
+        providerKey: "courtyard" as const,
+        manifest: dataforrestCourtyardDistributedV2SourceAdapterManifest,
+        configuration: { platform: "courtyard", stream: "catalog" },
+      },
+      {
+        providerKey: "courtyard" as const,
+        manifest: dataforrestCourtyardCatalogSourceAdapterManifest,
+        configuration: { platform: "courtyard" },
+      },
+      {
+        providerKey: "collector_crypt" as const,
+        manifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+        configuration: { platform: "collector_crypt", stream: "pulls" },
+      },
+      {
+        providerKey: "phygitals" as const,
+        manifest: dataforrestPhygitalsCatalogSourceAdapterManifest,
+        configuration: {
+          platform: "phygitals",
+          stream: "catalog",
+          cursor: "must-not-be-configurable",
+        },
+      },
+    ];
+
+    for (const mismatch of mismatches) {
+      const row = validConfiguration();
+      row.adapter_key = mismatch.manifest.adapterVersion;
+      row.configuration = mismatch.configuration;
+      row.provider.provider_key = mismatch.providerKey;
+      row.source_credential.ciphertext = new Uint8Array([0]);
+      row.source_credential.nonce = new Uint8Array([0]);
+      row.source_credential.auth_tag = new Uint8Array([0]);
+
+      await rejectsWith(
+        resolverFor(row, countingCipher).resolver.resolve({
+          ...request,
+          providerKey: mismatch.providerKey,
+          adapterKey: mismatch.manifest.adapterVersion,
+        }),
+        "PROVIDER_SOURCE_CONFIGURATION_CONFLICT",
+      );
+    }
+    assert.equal(countingCipher.decryptCalls, 0);
+  });
 
   test("rejects crossed installed provider-adapter tuples before querying central", async () => {
     const crossed = [
@@ -262,6 +372,17 @@ describe("central DataForrest source authority", () => {
         ...request,
         providerKey: "collector_crypt",
         adapterKey: dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+        adapterKey: dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+        adapterKey:
+          dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion,
       },
       {
         ...request,
@@ -288,6 +409,12 @@ describe("central DataForrest source authority", () => {
       },
       {
         ...request,
+        providerKey: "courtyard",
+        adapterKey:
+          dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
         providerKey: "phygitals",
       },
       {
@@ -299,6 +426,11 @@ describe("central DataForrest source authority", () => {
         ...request,
         providerKey: "courtyard",
         adapterKey: dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "phygitals",
+        adapterKey: dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion,
       },
       {
         ...request,
