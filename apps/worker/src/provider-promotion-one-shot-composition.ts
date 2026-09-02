@@ -96,6 +96,44 @@ export interface BoundProviderPromotionOneShotRunner {
   ): Promise<ProviderPromotionOneShotResult>;
 }
 
+export function createBoundProviderPromotionOneShot(input: Readonly<{
+  provider: ProviderPrismaClient;
+  providerId: string;
+  pin: PinnedProviderReleaseInputs;
+  workerId: string;
+  transport: DistributedProviderReleasePublicationTransport;
+  now?: () => Date;
+  randomUuid?: () => string;
+  maximumMilliseconds?: number;
+  maximumAttempts?: number;
+  setTimer?: typeof setTimeout;
+  clearTimer?: typeof clearTimeout;
+}>): ProviderPromotionOneShot {
+  return new ProviderPromotionOneShot({
+    providerId: input.providerId,
+    workerId: input.workerId,
+    ledger: new PrismaProviderPromotionJobRepository(input.provider),
+    work: new PrismaBoundProviderPromotionWork({
+      provider: input.provider,
+      providerId: input.providerId,
+      pin: input.pin,
+      workerId: input.workerId,
+      transport: input.transport,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    }),
+    ...(input.maximumMilliseconds === undefined
+      ? {}
+      : { maximumMilliseconds: input.maximumMilliseconds }),
+    ...(input.maximumAttempts === undefined
+      ? {}
+      : { maximumAttempts: input.maximumAttempts }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    ...(input.randomUuid === undefined ? {} : { randomUuid: input.randomUuid }),
+    ...(input.setTimer === undefined ? {} : { setTimer: input.setTimer }),
+    ...(input.clearTimer === undefined ? {} : { clearTimer: input.clearTimer }),
+  });
+}
+
 function boundedFailureCode(error: unknown, fallback: string): string {
   if (
     error !== null
@@ -397,39 +435,31 @@ export async function runPinnedProviderPromotionOnce(input: Readonly<{
         pin: bootstrap.pin,
         workerId: input.workerId,
         transport,
-      }) ?? new ProviderPromotionOneShot({
-          providerId: input.authority.providerId,
-          workerId: input.workerId,
-          ledger: new PrismaProviderPromotionJobRepository(provider),
-          work: new PrismaBoundProviderPromotionWork({
-            provider,
-            providerId: input.authority.providerId,
-            pin: bootstrap.pin,
-            workerId: input.workerId,
-            transport,
-            ...(input.dependencies.now === undefined
-              ? {}
-              : { now: input.dependencies.now }),
-          }),
-          ...(input.dependencies.maximumMilliseconds === undefined
-            ? {}
-            : { maximumMilliseconds: input.dependencies.maximumMilliseconds }),
-          ...(input.dependencies.maximumAttempts === undefined
-            ? {}
-            : { maximumAttempts: input.dependencies.maximumAttempts }),
-          ...(input.dependencies.now === undefined
-            ? {}
-            : { now: input.dependencies.now }),
-          ...(input.dependencies.randomUuid === undefined
-            ? {}
-            : { randomUuid: input.dependencies.randomUuid }),
-          ...(input.dependencies.setTimer === undefined
-            ? {}
-            : { setTimer: input.dependencies.setTimer }),
-          ...(input.dependencies.clearTimer === undefined
-            ? {}
-            : { clearTimer: input.dependencies.clearTimer }),
-        });
+      }) ?? createBoundProviderPromotionOneShot({
+        provider,
+        providerId: input.authority.providerId,
+        pin: bootstrap.pin,
+        workerId: input.workerId,
+        transport,
+        ...(input.dependencies.maximumMilliseconds === undefined
+          ? {}
+          : { maximumMilliseconds: input.dependencies.maximumMilliseconds }),
+        ...(input.dependencies.maximumAttempts === undefined
+          ? {}
+          : { maximumAttempts: input.dependencies.maximumAttempts }),
+        ...(input.dependencies.now === undefined
+          ? {}
+          : { now: input.dependencies.now }),
+        ...(input.dependencies.randomUuid === undefined
+          ? {}
+          : { randomUuid: input.dependencies.randomUuid }),
+        ...(input.dependencies.setTimer === undefined
+          ? {}
+          : { setTimer: input.dependencies.setTimer }),
+        ...(input.dependencies.clearTimer === undefined
+          ? {}
+          : { clearTimer: input.dependencies.clearTimer }),
+      });
       return runner.run(input.request);
     });
   if (routed.state === "unreachable") {

@@ -26,7 +26,6 @@ export class DistributedPromotionAuthorityConfigurationError extends Error {
     this.name = "DistributedPromotionAuthorityConfigurationError";
   }
 }
-
 export interface DistributedPromotionCredential {
   readonly keyId: string;
   readonly secret: Uint8Array;
@@ -427,4 +426,3 @@ export function assertDistributedPromotionAuthorityIsolation(
     refuse("DISTRIBUTED_PROMOTION_AUTHORITY_ROLE_CONFLICT");
   }
 }
-

@@ -1,6 +1,7 @@
 import {
   CentralProviderObservationRepository,
   PrismaProviderActivityOutboxRepository,
+  ProviderReleasePublicationRepository,
   type BoundedProviderDatabaseGateway,
   type CentralPrismaClient,
   type ProviderActivityBatch,
@@ -10,7 +11,10 @@ import {
   type ProviderActivityRelayTargetPage,
   type ProviderActivityObservationReceipt,
   type ProviderLocalHealthObservation,
+  type ProviderCompletedPublishPlanRelayProof,
 } from "@packscout/database";
+import { buildProviderCompletedPublishPlanRelayProof } from
+  "@packscout/services";
 
 export type ProviderActivityRelayAcceptance = Readonly<{
   readonly state: "accepted" | "deduplicated";
@@ -49,6 +53,7 @@ export interface ProviderActivityRelayDirectory {
     readonly event: ProviderActivityEvent;
     readonly health: ProviderLocalHealthObservation;
     readonly receivedAt: Date;
+    readonly completionProof?: ProviderCompletedPublishPlanRelayProof;
   }): Promise<ProviderActivityRelayAcceptance>;
   recordDirectProbe(input: {
     readonly organizationId: string;
@@ -70,6 +75,10 @@ export interface ProviderActivityLocalStore {
         readonly observedAt: Date;
       }
   >;
+  loadCompletionProof?(
+    target: ProviderActivityRelayTarget,
+    event: ProviderActivityEvent,
+  ): Promise<ProviderCompletedPublishPlanRelayProof>;
   markDelivered(
     target: ProviderActivityRelayTarget,
     event: ProviderActivityEvent,
@@ -126,7 +135,8 @@ function completionGateFromAcceptance(
     gate === null
     || gate.providerId !== target.providerId
     || gate.observedCompletionGeneration < 1n
-    || gate.requestedGeneration < gate.observedCompletionGeneration
+    || gate.requestedGeneration < 1n
+    || gate.manifestWakeGeneration < 1n
     || gate.acknowledgedGeneration < 0n
     || gate.acknowledgedGeneration > gate.requestedGeneration
     || gate.pending !==
@@ -211,6 +221,23 @@ implements ProviderActivityLocalStore {
     if (result.state === "unreachable" || result.value === "not_found") {
       throw new Error("Provider activity delivery acknowledgement failed.");
     }
+  }
+
+  async loadCompletionProof(
+    target: ProviderActivityRelayTarget,
+    event: ProviderActivityEvent,
+  ): Promise<ProviderCompletedPublishPlanRelayProof> {
+    const result = await this.gateway.runWithAdminProviderDatabase(
+      { organizationId: target.organizationId, providerId: target.providerId },
+      async (database) => buildProviderCompletedPublishPlanRelayProof(
+        await new ProviderReleasePublicationRepository(database)
+          .loadCompletedPublishPlanSource({ event }),
+      ),
+    );
+    if (result.state === "unreachable") {
+      throw new Error("Provider completion plan proof is unavailable.");
+    }
+    return result.value;
   }
 
   async markFailed(
@@ -398,12 +425,20 @@ export class ProviderActivityRelayCoordinator {
     for (const event of read.batch.events) {
       const attemptedAt = this.#clock();
       try {
+        const completionProof = event.eventType === "provider_release_completed"
+          ? await this.dependencies.local.loadCompletionProof?.(target, event)
+          : undefined;
+        if (
+          event.eventType === "provider_release_completed" &&
+          completionProof === undefined
+        ) throw new Error("Provider completion plan proof reader is unavailable.");
         const accepted = await this.dependencies.directory.acceptProviderActivity({
           organizationId: target.organizationId,
           providerId: target.providerId,
           event,
           health: read.batch.health,
           receivedAt: attemptedAt,
+          ...(completionProof === undefined ? {} : { completionProof }),
         });
         const completionGate = completionGateFromAcceptance(
           target,
@@ -418,7 +453,7 @@ export class ProviderActivityRelayCoordinator {
             authority: "manifest_reconciliation",
             cause: "provider_completion",
             scopeId: completionGate.providerId,
-            sourceGeneration: completionGate.requestedGeneration,
+            sourceGeneration: completionGate.manifestWakeGeneration,
             sourceEvidenceDigest: completionGate.evidenceDigest,
             requestedAt: attemptedAt,
           }).catch(() => {

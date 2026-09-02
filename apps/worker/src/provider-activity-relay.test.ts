@@ -4,6 +4,7 @@ import {
   type BoundedProviderDatabaseGateway,
   providerActivityEventDigest,
   type ProviderActivityEvent,
+  type ProviderCompletedPublishPlanRelayProof,
   type ProviderActivityRelayTarget,
   type ProviderLocalHealthObservation,
 } from "@packscout/database";
@@ -103,6 +104,10 @@ function completionActivity(
     deliveryAttemptCount: 0,
     lastFailureCode: null,
   };
+}
+
+function completionProofStub(): ProviderCompletedPublishPlanRelayProof {
+  return Object.freeze({}) as unknown as ProviderCompletedPublishPlanRelayProof;
 }
 
 test("an unreachable provider is isolated while another outbox delivers", async () => {
@@ -354,6 +359,7 @@ test("provider outboxes use the validated admin route so disabled lanes drain", 
 
 test("completion acceptance acknowledges locally even when immediate delivery drops", async () => {
   const event = completionActivity();
+  const relayProof = completionProofStub();
   const marks: string[] = [];
   const notifications: unknown[] = [];
   const logs: Parameters<ProviderActivityRelayObservability["log"]>[0][] = [];
@@ -365,19 +371,24 @@ test("completion acceptance acknowledges locally even when immediate delivery dr
       }),
       observeReachableHealth: () => Promise.resolve(),
       recordDirectProbe: () => Promise.resolve(),
-      acceptProviderActivity: () => Promise.resolve({
-        state: "accepted",
-        completionGate: {
-          providerId: providerA.providerId,
-          observedCompletionGeneration: 21n,
-          requestedGeneration: 21n,
-          acknowledgedGeneration: 20n,
-          evidenceDigest: event.eventDigest,
-          pending: true,
-        },
-      }),
+      acceptProviderActivity: (input) => {
+        assert.equal(input.completionProof, relayProof);
+        return Promise.resolve({
+          state: "accepted",
+          completionGate: {
+            providerId: providerA.providerId,
+            observedCompletionGeneration: 21n,
+            requestedGeneration: 21n,
+            manifestWakeGeneration: 31n,
+            acknowledgedGeneration: 20n,
+            evidenceDigest: event.eventDigest,
+            pending: true,
+          },
+        });
+      },
     },
     local: {
+      loadCompletionProof: () => Promise.resolve(relayProof),
       read: () => Promise.resolve({
         state: "reachable",
         batch: {
@@ -419,7 +430,7 @@ test("completion acceptance acknowledges locally even when immediate delivery dr
     authority: "manifest_reconciliation",
     cause: "provider_completion",
     scopeId: providerA.providerId,
-    sourceGeneration: 21n,
+    sourceGeneration: 31n,
     sourceEvidenceDigest: event.eventDigest,
     requestedAt: new Date("2026-08-29T12:01:00.000Z"),
   });
@@ -451,6 +462,7 @@ test("a lost local acknowledgement replays central completion and reissues one s
             providerId: providerA.providerId,
             observedCompletionGeneration: 21n,
             requestedGeneration: 21n,
+            manifestWakeGeneration: 31n,
             acknowledgedGeneration: 0n,
             evidenceDigest: event.eventDigest,
             pending: true,
@@ -459,6 +471,7 @@ test("a lost local acknowledgement replays central completion and reissues one s
       },
     },
     local: {
+      loadCompletionProof: () => Promise.resolve(completionProofStub()),
       read: () => Promise.resolve({
         state: "reachable",
         batch: {
@@ -517,6 +530,7 @@ test("central restart accepts a pending completion after an isolated outage", as
           providerId: providerB.providerId,
           observedCompletionGeneration: 21n,
           requestedGeneration: 21n,
+          manifestWakeGeneration: 31n,
           acknowledgedGeneration: 0n,
           evidenceDigest: event.eventDigest,
           pending: true,
@@ -524,6 +538,7 @@ test("central restart accepts a pending completion after an isolated outage", as
       }),
     },
     local: {
+      loadCompletionProof: () => Promise.resolve(completionProofStub()),
       read: () => Promise.resolve({
         state: "reachable",
         batch: {
@@ -569,6 +584,7 @@ test("a cross-provider completion receipt fails before local delivery acknowledg
           providerId: providerB.providerId,
           observedCompletionGeneration: 21n,
           requestedGeneration: 21n,
+          manifestWakeGeneration: 31n,
           acknowledgedGeneration: 0n,
           evidenceDigest: event.eventDigest,
           pending: true,
@@ -576,6 +592,7 @@ test("a cross-provider completion receipt fails before local delivery acknowledg
       }),
     },
     local: {
+      loadCompletionProof: () => Promise.resolve(completionProofStub()),
       read: () => Promise.resolve({
         state: "reachable",
         batch: {
