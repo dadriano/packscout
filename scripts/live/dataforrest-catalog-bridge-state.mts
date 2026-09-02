@@ -462,11 +462,12 @@ export function recordEventCursorRestored(input: Readonly<{
   assertUnchangedEventEvidence(input.state.preflight.baseline, value.canonical);
   if (value.centralActiveConfigId !== plan.eventSuccessor.id ||
     value.centralActiveConfigNumber !== plan.eventSuccessor.versionNumber ||
-    value.centralActiveAdapterVersion !== definition.eventManifest.adapterVersion ||
+    value.centralActiveAdapterVersion !== definition.eventSuccessorManifest.adapterVersion ||
     value.providerCachedConfigId !== plan.eventSuccessor.id || value.providerCachedConfigNumber !== plan.eventSuccessor.versionNumber ||
     value.centralActiveConfigurationDigest !== catalogBridgeDigest(plan.eventSuccessor.configuration) ||
     value.providerCachedConfigurationDigest !== catalogBridgeDigest({
-      adapterKey: definition.eventManifest.adapterVersion, settings: plan.eventSuccessor.configuration,
+      adapterKey: definition.eventSuccessorManifest.adapterVersion,
+      settings: plan.eventSuccessor.configuration,
     }) ||
     !value.sourceCursorPresent || value.sourceCursorHash !== restored.cursorHash || value.restoredCursorHash !== restored.cursorHash ||
     value.restoredOpaqueValueHash !== restored.opaqueValueHash || value.cursorEnvelopeDigest !== catalogBridgeDigest(restored.cursor)) {

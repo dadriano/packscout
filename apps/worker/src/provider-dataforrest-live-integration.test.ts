@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
-  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_PAGE_TARGET_RECORDS,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
@@ -19,10 +21,11 @@ const dualProfiles = Object.freeze([
   {
     providerKey: "collector_crypt" as const,
     baselineAdapterKey:
-      DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
-    catalogAdapterKey: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+      DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+    catalogAdapterKey: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
     mapperKey: "collector-crypt-provider-observation",
-    pageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+    baselinePageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+    catalogPageLimit: DATAFORREST_COLLECTOR_CRYPT_CATALOG_PAGE_TARGET_RECORDS,
     maximumResponseBytes: 8_388_608,
   },
   {
@@ -30,7 +33,8 @@ const dualProfiles = Object.freeze([
     baselineAdapterKey: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
     catalogAdapterKey: DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
     mapperKey: "courtyard-provider-observation",
-    pageLimit: 100,
+    baselinePageLimit: 100,
+    catalogPageLimit: 100,
     maximumResponseBytes:
       DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   },
@@ -39,7 +43,8 @@ const dualProfiles = Object.freeze([
     baselineAdapterKey: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
     catalogAdapterKey: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     mapperKey: "phygitals-provider-observation",
-    pageLimit: 100,
+    baselinePageLimit: 100,
+    catalogPageLimit: 100,
     maximumResponseBytes: 8_388_608,
   },
 ]);
@@ -67,10 +72,6 @@ test("the worker resolves every baseline and catalog profile by exact tuple", ()
         `dataforrest-${profile.providerKey}-records-v1`,
       );
       assert.equal(
-        integration.manifest.requestBounds.pageLimit,
-        profile.pageLimit,
-      );
-      assert.equal(
         integration.manifest.requestBounds.maximumResponseBytes,
         profile.maximumResponseBytes,
       );
@@ -80,6 +81,14 @@ test("the worker resolves every baseline and catalog profile by exact tuple", ()
       profile.baselineAdapterKey,
     );
     assert.equal(catalog.manifest.adapterVersion, profile.catalogAdapterKey);
+    assert.equal(
+      baseline.manifest.requestBounds.pageLimit,
+      profile.baselinePageLimit,
+    );
+    assert.equal(
+      catalog.manifest.requestBounds.pageLimit,
+      profile.catalogPageLimit,
+    );
   }
 });
 
@@ -142,6 +151,10 @@ test("adapter profiles never resolve across provider boundaries", () => {
       { providerKey: profile.providerKey, adapterKey: profile.baselineAdapterKey },
       { providerKey: profile.providerKey, adapterKey: profile.catalogAdapterKey },
     ]),
+    {
+      providerKey: "collector_crypt" as const,
+      adapterKey: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+    },
   ];
 
   for (const profile of profiles) {
@@ -184,7 +197,11 @@ test("installed live integrations expose the exact closed profile set", () => {
         "collector_crypt",
         DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
       ],
-      ["collector_crypt", DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION],
+      [
+        "collector_crypt",
+        DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+      ],
+      ["collector_crypt", DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION],
       ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION],
       ["phygitals", DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION],
     ],

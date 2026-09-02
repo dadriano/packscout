@@ -1,9 +1,9 @@
 import {
   PROVIDER_CATALOG_IDENTITY_CENSUS_VERSION,
   providerCatalogIdentityCensusSchema,
-  providerCatalogIdentityChainDigest,
   type ProviderCatalogIdentityCensus,
 } from "@packscout/contracts";
+import { providerCatalogIdentityChainDigest } from "@packscout/services";
 import {
   PrismaAdminProviderRuntimeRepository,
   PrismaProviderWorkerLeaseRepository,
@@ -292,7 +292,7 @@ function assertCentralShape(input: Readonly<{ boundary: CentralBoundary;
       .includes(provider.active_config_version_id ?? "") ||
     current.provider_id !== definition.providerId ||
     current.version_number !== BigInt(definition.currentConfigNumber) ||
-    current.adapter_key !== definition.eventManifest.adapterVersion ||
+    current.adapter_key !== definition.currentEventManifest.adapterVersion ||
     catalogBridgeDigest(current.configuration) !== catalogBridgeDigest({ platform: definition.providerKey }) ||
     boundary.membership.operator.state !== "active" ||
     !["admin", "data_operator"].includes(boundary.membership.role) ||
@@ -811,7 +811,8 @@ async function synchronizePausedCatalogConfiguration(input: Readonly<{
     const leaseLive = lease.lease_owner !== null && lease.lease_expires_at !== null &&
       lease.lease_expires_at > lease.database_now;
     const oldConfiguration = catalogBridgeDigest(runtime.cached_configuration) === catalogBridgeDigest({
-      adapterKey: definition.eventManifest.adapterVersion, settings: { platform: definition.providerKey },
+      adapterKey: definition.currentEventManifest.adapterVersion,
+      settings: { platform: definition.providerKey },
     });
     const catalogConfiguration = catalogBridgeDigest(runtime.cached_configuration) === catalogBridgeDigest({
       adapterKey: definition.catalogAdapterVersion, settings: plan.catalog.configuration,
@@ -2595,7 +2596,7 @@ async function eventStageObservation(input: Readonly<{
     centralActiveConfigId: plan.catalog.id,
     centralProviderRowVersion: staged.providerRowVersion,
     stagedConfigId: plan.eventSuccessor.id, stagedConfigNumber: plan.eventSuccessor.versionNumber,
-    stagedAdapterVersion: definition.eventManifest.adapterVersion,
+    stagedAdapterVersion: definition.eventSuccessorManifest.adapterVersion,
     stagedConfigurationDigest: catalogBridgeDigest(plan.eventSuccessor.configuration),
     activationProofDigest: staged.activationProofDigest,
     providerStillAtCatalogConfigId: plan.catalog.id, activeRunCount: 0,
@@ -2666,7 +2667,7 @@ async function synchronizePausedEventConfiguration(input: Readonly<{
         "source_cursor_hash=$8, row_version=row_version+1, updated_at=$5::timestamptz " +
         "where singleton_key=true and row_version=$9::bigint",
         plan.eventSuccessor.id, BigInt(plan.eventSuccessor.versionNumber),
-        JSON.stringify({ adapterKey: definition.eventManifest.adapterVersion,
+        JSON.stringify({ adapterKey: definition.eventSuccessorManifest.adapterVersion,
           settings: plan.eventSuccessor.configuration }), input.expiresAt, input.now(),
         input.scheduleSeconds, JSON.stringify(restored.cursor), restored.cursorHash, expectedRow);
       if (changed !== 1) refuseCatalogBridge("CATALOG_BRIDGE_EVENT_CURSOR_SYNC_CAS_FAILED");
@@ -2748,7 +2749,7 @@ async function restoreEventCursorObservation(input: Readonly<{
   return Object.freeze({ observedAt: input.now().toISOString(),
     centralActiveConfigId: plan.eventSuccessor.id,
     centralActiveConfigNumber: plan.eventSuccessor.versionNumber,
-    centralActiveAdapterVersion: definition.eventManifest.adapterVersion,
+    centralActiveAdapterVersion: definition.eventSuccessorManifest.adapterVersion,
     centralActiveConfigurationDigest: catalogBridgeDigest(central.eventSuccessor.configuration),
     providerRowVersion: central.provider.row_version.toString(),
     providerCachedConfigId: plan.eventSuccessor.id,

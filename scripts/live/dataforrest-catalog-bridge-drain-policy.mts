@@ -220,7 +220,7 @@ function assertAuthorityAndCheckpoint(boundary: CatalogBridgeDrainBoundary, pins
     central.providerKey !== definition.providerKey || !positiveInteger.test(central.providerRowVersion) ||
     central.activeConfigId !== definition.currentConfigId || central.activeConfigNumber !== definition.currentConfigNumber ||
     central.maximumConfigNumber !== definition.currentConfigNumber ||
-    central.activeAdapterVersion !== definition.eventManifest.adapterVersion ||
+    central.activeAdapterVersion !== definition.currentEventManifest.adapterVersion ||
     catalogBridgeDigest(central.configuration) !== catalogBridgeDigest({ platform: definition.providerKey }) ||
     central.configurationDigest !== catalogBridgeDigest(central.configuration) || !sha256.test(central.authorityDigest) ||
     runtime.providerId !== definition.providerId || runtime.providerKey !== definition.providerKey ||
@@ -229,7 +229,8 @@ function assertAuthorityAndCheckpoint(boundary: CatalogBridgeDrainBoundary, pins
     !positiveInteger.test(runtime.generation) || !positiveInteger.test(runtime.rowVersion) ||
     runtime.cachedConfigId !== definition.currentConfigId || runtime.cachedConfigNumber !== definition.currentConfigNumber ||
     catalogBridgeDigest(runtime.cachedConfiguration) !== catalogBridgeDigest({
-      adapterKey: definition.eventManifest.adapterVersion, settings: { platform: definition.providerKey },
+      adapterKey: definition.currentEventManifest.adapterVersion,
+      settings: { platform: definition.providerKey },
     }) || !sha256.test(runtime.sourceCursorHash) || runtime.otherOwnedLeaseCount !== 0 ||
     !Number.isSafeInteger(runtime.otherActiveTransactionCount) || runtime.otherActiveTransactionCount < 0 ||
     !uuid.test(run.id) || run.configId !== definition.currentConfigId || run.configNumber !== definition.currentConfigNumber ||
@@ -246,9 +247,10 @@ function assertAuthorityAndCheckpoint(boundary: CatalogBridgeDrainBoundary, pins
     const parsed = opaqueCursorEnvelopeSchema.safeParse(cursor);
     if (!parsed.success || parsed.data.value === null || parsed.data.sourceInstanceId !== definition.providerId ||
       parsed.data.sourceRevisionId !== definition.currentConfigId ||
-      parsed.data.adapterVersion !== definition.eventManifest.adapterVersion ||
-      parsed.data.sourceTypeKey !== definition.eventManifest.sourceTypeKey ||
-      parsed.data.cursorCodecKey !== definition.eventManifest.cursorCodecKey || parsed.data.cursorGeneration !== 1 ||
+      parsed.data.adapterVersion !== definition.currentEventManifest.adapterVersion ||
+      parsed.data.sourceTypeKey !== definition.currentEventManifest.sourceTypeKey ||
+      parsed.data.cursorCodecKey !== definition.currentEventManifest.cursorCodecKey ||
+      parsed.data.cursorGeneration !== 1 ||
       providerMixedCursorFingerprint(parsed.data) !== runtime.sourceCursorHash) {
       refuseCatalogBridge("CATALOG_BRIDGE_DRAIN_CURSOR_INVALID");
     }

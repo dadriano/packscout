@@ -173,7 +173,8 @@ function fakeDatabase(options = {}) {
     operating_state: "running", state_generation: 26n, row_version: 50n,
     cached_config_version_id: definition.currentConfigId,
     cached_config_version_number: BigInt(definition.currentConfigNumber),
-    cached_configuration: { adapterKey: definition.eventManifest.adapterVersion, settings: { platform: providerKey } },
+    cached_configuration: { adapterKey: definition.currentEventManifest.adapterVersion,
+      settings: { platform: providerKey } },
     source_cursor: { cursor: "opaque" }, source_cursor_hash: hash("d") };
   const transaction = {
     async $executeRawUnsafe(sql) {
@@ -224,7 +225,8 @@ function adapterHarness(options = {}) {
   const authority = { boundary: { organizationId: definition.organizationId, providerId: definition.providerId,
     providerKey, providerRowVersion: "4", activeConfigId: definition.currentConfigId,
     activeConfigNumber: definition.currentConfigNumber, maximumConfigNumber: definition.currentConfigNumber,
-    activeAdapterVersion: definition.eventManifest.adapterVersion, configuration: { platform: providerKey },
+    activeAdapterVersion: definition.currentEventManifest.adapterVersion,
+    configuration: { platform: providerKey },
     configurationDigest: plan.catalogBridgeDigest({ platform: providerKey }), authorityDigest: hash("b") },
   route, routeDigest: hash("c") };
   const adapter = liveDatabase.createCatalogBridgeLiveDatabaseAdapter({ policy: live, dependencies: {

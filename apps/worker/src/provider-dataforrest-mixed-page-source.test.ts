@@ -8,7 +8,9 @@ import {
   DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
@@ -574,6 +576,34 @@ function collectorSourceFixture(
   };
 }
 
+function collectorCatalogFixture(pages: readonly DataforrestEventsPageV1[]) {
+  const manifest = dataforrestCollectorCryptCatalogV2SourceAdapterManifest;
+  return {
+    ...sourceFixture({
+      pages,
+      integration: createProviderDataforrestLiveIntegration(
+        "collector_crypt",
+        manifest,
+      ),
+      resolvedAuthority: {
+        ...resolvedAuthority,
+        providerKey: "collector_crypt",
+        adapterKey: manifest.adapterVersion,
+        sourceAdapterVersion: manifest.adapterVersion,
+        sourceConfiguration: {
+          platform: "collector_crypt",
+          stream: "catalog",
+        },
+      },
+    }),
+    captureAuthority: {
+      ...authority,
+      providerKey: "collector_crypt",
+      configuration: { adapterKey: manifest.adapterVersion, settings: {} },
+    },
+  };
+}
+
 function collectorPullRecords(count: number): DataforrestEventRecordV1[] {
   return Array.from({ length: count }, (_, index) => ({
     ...cardOnlyPullRecord(`collector-profile-pull-${index}`),
@@ -626,10 +656,22 @@ test("remote page ceiling preserves the opaque Collector cursor, canonical order
   assert.equal(manifest.requestBounds.pageLimit, 1_000);
 });
 
-test("remote 100-record request rejects a 101-record response before translation and audits the effective bound", async () => {
-  const fixture = collectorSourceFixture([sourcePage({ cursor: "collector-bounded-overflow", continuation: "continue",
-    records: collectorPullRecords(101) })], dataforrestCollectorCryptDistributedSourceAdapterManifest,
-  providerManualImportExecutionBudget("remote").maximumPageRecords);
+test("catalog V2 rejects a 101-record response before translation and audits its safe bound", async () => {
+  const records = Array.from({ length: 101 }, (_, index) => ({
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: `collector-catalog-pack-${index}`,
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    entity: "pack" as const,
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+    data: { name: `Collector pack ${index}` },
+  }));
+  const fixture = collectorCatalogFixture([sourcePage({
+    cursor: "collector-bounded-overflow",
+    continuation: "continue",
+    records,
+  })]);
   await assert.rejects(fixture.source.nextPage(sourceInput({ authority: fixture.captureAuthority })),
     (error: unknown) => error instanceof ProviderDataforrestSourceError && error.code === "PROVIDER_DATAFORREST_INVALID_RESPONSE");
   assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
@@ -760,6 +802,153 @@ test("Collector profile upgrade preserves identical canonical record identity an
   assert.notEqual(pages[0]!.records[0]!.disposition, "quarantine");
   assert.deepEqual(pages[0]!.records, pages[1]!.records);
   assert.notDeepEqual(pages[0]!.nextCursor, pages[1]!.nextCursor);
+});
+
+test("Collector V2 translates live-shaped cards and retained-shaped packs without quarantine", async () => {
+  const card = {
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: "collector-live-card",
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    entity: "card" as const,
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+    available: true,
+    data: {
+      asset: {
+        itemName: "Collector Live Card",
+        images: {
+          frontImage: "https://images.example.test/collector-front.png",
+          backImage: "https://images.example.test/collector-back.png",
+        },
+        category: "not-mapped-without-a-reviewed-type",
+        insuredValue: "not-mapped-without-a-reviewed-currency-contract",
+      },
+      detail: { plain: { itemName: "unreviewed-fallback" } },
+    },
+  };
+  const packWithoutAvailability = {
+    stream: "catalog" as const,
+    platform: "collector_crypt" as const,
+    record_id: "collector-retained-pack",
+    occurred_at: "2026-09-01T00:01:00.000Z",
+    collected_at: "2026-09-01T00:01:01.000Z",
+    entity: "pack" as const,
+    first_seen_at: "2026-09-01T00:01:00.000Z",
+    data: {
+      name: "Collector Retained Pack",
+      archived: false,
+      public: true,
+    },
+  };
+  const fixture = collectorCatalogFixture([
+    sourcePage({
+      cursor: "collector-catalog-head",
+      continuation: "head",
+      records: [card, packWithoutAvailability],
+    }),
+  ]);
+
+  const page = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("stream"), "catalog");
+  assert.equal(fixture.requestedUrls[0]?.searchParams.get("limit"), "100");
+  assert.equal(page.records.length, 2);
+  assert.equal(page.records.some((record) => record.disposition === "quarantine"), false);
+  assert.equal(page.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "collectible"
+    && record.candidate.collectibleKey === "card:collector-live-card"
+    && record.candidate.displayName === "Collector Live Card"
+    && record.candidate.primaryImageUrl ===
+      "https://images.example.test/collector-front.png"
+  ), true);
+  assert.equal(page.records.some((record) =>
+    record.kind === "catalog"
+    && record.entityType === "pack"
+    && record.candidate.packKey === "pack:collector-retained-pack"
+    && record.candidate.displayName === "Collector Retained Pack"
+    && record.candidate.availability === "unavailable"
+  ), true);
+  assert.deepEqual(fixture.recordKindMeasurements, [{
+    catalogRecordCount: 2,
+    collectibleRecordCount: 1,
+    packContentSnapshotCount: 0,
+    pullRecordCount: 0,
+    marketEventRecordCount: 0,
+    rejectedRecordCount: 0,
+  }]);
+  assert.deepEqual(fixture.catalogIdentityCensuses.map((census) => ({
+    rawCardObservationCount: census.rawCardObservationCount,
+    rawPackObservationCount: census.rawPackObservationCount,
+    distinctCardIdentityCount: census.distinctCardIdentityCount,
+    distinctPackIdentityCount: census.distinctPackIdentityCount,
+  })), [{
+    rawCardObservationCount: 1,
+    rawPackObservationCount: 1,
+    distinctCardIdentityCount: 1,
+    distinctPackIdentityCount: 1,
+  }]);
+});
+
+test("Collector distributed V2 uses the same catalog facts for future mixed-feed records", async () => {
+  const fixture = collectorSourceFixture([
+    sourcePage({
+      cursor: "collector-event-head",
+      continuation: "head",
+      records: [
+        {
+          stream: "catalog",
+          platform: "collector_crypt",
+          record_id: "collector-future-card",
+          occurred_at: "2026-09-01T00:02:00.000Z",
+          collected_at: "2026-09-01T00:02:01.000Z",
+          entity: "card",
+          first_seen_at: "2026-09-01T00:02:00.000Z",
+          available: true,
+          data: { asset: { itemName: "Collector Future Card" } },
+        },
+        {
+          stream: "catalog",
+          platform: "collector_crypt",
+          record_id: "collector-future-pack",
+          occurred_at: "2026-09-01T00:03:00.000Z",
+          collected_at: "2026-09-01T00:03:01.000Z",
+          entity: "pack",
+          first_seen_at: "2026-09-01T00:03:00.000Z",
+          data: { name: "Collector Future Pack" },
+        },
+      ],
+    }),
+  ], dataforrestCollectorCryptDistributedV2SourceAdapterManifest);
+  const page = validateProviderMixedPage(await fixture.source.nextPage(
+    sourceInput({ authority: fixture.captureAuthority }),
+  ));
+
+  assert.equal(page.records.length, 2);
+  assert.equal(
+    page.records.some((record) => record.disposition === "quarantine"),
+    false,
+  );
+  assert.equal(
+    page.records.some((record) =>
+      record.kind === "catalog"
+      && record.entityType === "collectible"
+      && record.candidate.displayName === "Collector Future Card"
+    ),
+    true,
+  );
+  assert.equal(
+    page.records.some((record) =>
+      record.kind === "catalog"
+      && record.entityType === "pack"
+      && record.candidate.displayName === "Collector Future Pack"
+      && record.candidate.availability === "unavailable"
+    ),
+    true,
+  );
 });
 
 async function phygitalsMixedPage(

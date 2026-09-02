@@ -129,9 +129,9 @@ function runningBoundary() {
   const definition = plan.catalogBridgeProvider("collector_crypt");
   const cursor = { sourceInstanceId: definition.providerId,
     sourceRevisionId: definition.currentConfigId,
-    sourceTypeKey: definition.eventManifest.sourceTypeKey,
-    adapterVersion: definition.eventManifest.adapterVersion,
-    cursorCodecKey: definition.eventManifest.cursorCodecKey,
+    sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+    adapterVersion: definition.currentEventManifest.adapterVersion,
+    cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
     cursorGeneration: 1, value: "private-saved-event-cursor" };
   const cursorHash = database.providerMixedCursorFingerprint(cursor);
   return { definition, cursor, cursorHash, boundary: {
@@ -140,7 +140,7 @@ function runningBoundary() {
       providerKey: definition.providerKey, providerRowVersion: "20",
       activeConfigId: definition.currentConfigId, activeConfigNumber: definition.currentConfigNumber,
       maximumConfigNumber: definition.currentConfigNumber,
-      activeAdapterVersion: definition.eventManifest.adapterVersion,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
       configuration: { platform: definition.providerKey },
       configurationDigest: plan.catalogBridgeDigest({ platform: definition.providerKey }),
       authorityDigest: hash("b") },
@@ -149,7 +149,7 @@ function runningBoundary() {
       databaseRole: "provider", schemaVersion: "distributed-provider-v1", state: "running",
       generation: "30", rowVersion: "40", cachedConfigId: definition.currentConfigId,
       cachedConfigNumber: definition.currentConfigNumber,
-      cachedConfiguration: { adapterKey: definition.eventManifest.adapterVersion,
+      cachedConfiguration: { adapterKey: definition.currentEventManifest.adapterVersion,
         settings: { platform: definition.providerKey } },
       sourceCursor: cursor, sourceCursorHash: cursorHash, activeRunCount: 1,
       actionableCommandCount: 0, otherOwnedLeaseCount: 0, otherActiveTransactionCount: 0 },
@@ -215,7 +215,14 @@ test("source canaries hash outputs, inspect exact streams and zero every protect
     first_seen_at: "2026-09-01T02:00:00Z", available: true,
     data: { asset: { title: "Reviewed card" } } }], next_cursor: returnedCursor,
   poll_after_seconds: 0 }));
-  const eventBody = new TextEncoder().encode(JSON.stringify({ records: [],
+  const eventBody = new TextEncoder().encode(JSON.stringify({ records: [{
+    stream: "catalog", entity: "pack", platform: definition.providerKey,
+    record_id: "pack-without-outer-availability",
+    occurred_at: "2026-09-01T02:01:00Z",
+    collected_at: "2026-09-01T02:01:01Z",
+    first_seen_at: "2026-09-01T02:01:00Z",
+    data: { name: "Retained Collector pack" },
+  }],
     next_cursor: `${returnedCursor}-event`, poll_after_seconds: 60 }));
   const protectedBodies = [];
   const requests = [];
@@ -231,9 +238,9 @@ test("source canaries hash outputs, inspect exact streams and zero every protect
     authority: { organizationId: definition.organizationId, providerId: definition.providerId,
       providerKey: definition.providerKey, configVersionId: definition.currentConfigId,
       configVersionNumber: BigInt(definition.currentConfigNumber),
-      adapterKey: definition.eventManifest.adapterVersion,
-      sourceTypeKey: definition.eventManifest.sourceTypeKey,
-      sourceAdapterVersion: definition.eventManifest.adapterVersion,
+      adapterKey: definition.currentEventManifest.adapterVersion,
+      sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+      sourceAdapterVersion: definition.currentEventManifest.adapterVersion,
       sourceCredentialVersionId: "40000000-0000-4000-8000-000000000009",
       sourceCredentialVersionNumber: 3n, expiresAt: null,
       connectionConfiguration: { endpoint: contracts.DATAFORREST_EVENTS_V1_ENDPOINT, bearerToken },
@@ -243,7 +250,11 @@ test("source canaries hash outputs, inspect exact streams and zero every protect
   });
   assert.equal(canaries.catalogOrigin.cardCount, 1);
   assert.equal(canaries.catalogOrigin.packCount, 0);
-  assert.equal(canaries.savedEventCursor.recordCount, 0);
+  assert.equal(canaries.savedEventCursor.recordCount, 1);
+  assert.equal(
+    canaries.savedEventCursor.adapterVersion,
+    definition.eventSuccessorManifest.adapterVersion,
+  );
   assert.equal(requests[0].url.searchParams.get("stream"), "catalog");
   assert.equal(requests[0].url.searchParams.has("cursor"), false);
   assert.equal(requests[1].url.searchParams.get("cursor"), cursor.value);
@@ -319,7 +330,8 @@ test("materializer emits awaited successor arguments and binds policy to raw pli
     stagedPlistFileSha256: plistSha256, oneShotModuleSha256: hash("f"),
     residentModuleSha256: hash("0") });
   assert.equal(policy.successorLaunchAgent.fileSha256, plistSha256);
-  assert.equal(policy.utility.executionTimeoutMilliseconds, 90 * 60_000);
+  assert.equal(policy.utility.executionTimeoutMilliseconds,
+    8 * 60 * 60_000 + 30 * 60_000);
   assert.notEqual(policy.successorLaunchAgent.fileSha256,
     sha256(Buffer.concat([successor.plist, Buffer.from("tampered")])));
 });

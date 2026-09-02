@@ -15,7 +15,7 @@ const { pins: residentPins, residentFixture } =
   await import("../local/provider-resident-test-fixture.mjs");
 const { providerMixedCursorFingerprint, providerResumeEvidenceDigest } =
   await tsImport("@packscout/database", import.meta.url);
-const { providerCatalogIdentityChainDigest } = await tsImport("@packscout/contracts", import.meta.url);
+const { providerCatalogIdentityChainDigest } = await tsImport("@packscout/services", import.meta.url);
 
 const operationId = "30000000-0000-4000-8000-000000000001";
 const operatorId = "30000000-0000-4000-8000-000000000002";
@@ -25,9 +25,9 @@ function fixture() {
   const definition = plan.catalogBridgeProvider("collector_crypt");
   const cursor = { sourceInstanceId: definition.providerId,
     sourceRevisionId: definition.currentConfigId,
-    sourceTypeKey: definition.eventManifest.sourceTypeKey,
-    adapterVersion: definition.eventManifest.adapterVersion,
-    cursorCodecKey: definition.eventManifest.cursorCodecKey,
+    sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+    adapterVersion: definition.currentEventManifest.adapterVersion,
+    cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
     cursorGeneration: 1, value: "private-catalog-live-test-cursor" };
   const cursorHash = providerMixedCursorFingerprint(cursor);
   const pins = { operationId, providerKey: definition.providerKey, operatorId,
@@ -61,7 +61,7 @@ function fixture() {
       providerKey: definition.providerKey, providerRowVersion: "20",
       activeConfigId: definition.currentConfigId, activeConfigNumber: definition.currentConfigNumber,
       maximumConfigNumber: definition.currentConfigNumber,
-      activeAdapterVersion: definition.eventManifest.adapterVersion,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
       configuration: { platform: definition.providerKey },
       configurationDigest: plan.catalogBridgeDigest({ platform: definition.providerKey }),
       authorityDigest: hash("1"), sourceCredentialDigest: hash("2"), databaseRouteDigest: hash("3") },
@@ -70,7 +70,7 @@ function fixture() {
       databaseRole: "provider", schemaVersion: "distributed-provider-v1", runtimeState: "paused",
       generation: "30", rowVersion: "40", cachedConfigId: definition.currentConfigId,
       cachedConfigNumber: definition.currentConfigNumber,
-      cachedConfiguration: { adapterKey: definition.eventManifest.adapterVersion,
+      cachedConfiguration: { adapterKey: definition.currentEventManifest.adapterVersion,
         settings: { platform: definition.providerKey } },
       sourceCursor: cursor, sourceCursorHash: cursorHash, activeRunCount: 0,
       actionableCommandCount: 0, importLeaseOwner: null, otherOwnedLeaseCount: 0,
@@ -80,7 +80,7 @@ function fixture() {
         status: 200, recordCount: 2, cardCount: 1, packCount: 1, pullCount: 0, tradeCount: 0,
         responseSha256: hash("4"), nextCursorHash: hash("5"), checkedAt: "2026-09-01T03:59:30.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },
-      savedEventCursor: { adapterVersion: definition.eventManifest.adapterVersion,
+      savedEventCursor: { adapterVersion: definition.eventSuccessorManifest.adapterVersion,
         requestedCursorHash: cursorHash, opaqueValueHash: plan.catalogBridgeDigest(cursor.value),
         status: 200, recordCount: 1, responseSha256: hash("6"),
         checkedAt: "2026-09-01T03:59:45.000Z", responseBytes: 1000, durationMilliseconds: 10 },
@@ -227,7 +227,8 @@ function dependencies(value, overrides = {}) {
 
 test("catalog live policy binds its timeout to exact source-head and adapter evidence", () => {
   const value = fixture();
-  assert.equal(value.policy.utility.executionTimeoutMilliseconds, 90 * 60_000);
+  assert.equal(value.policy.utility.executionTimeoutMilliseconds,
+    8 * 60 * 60_000 + 30 * 60_000);
   assert.throws(() => policyModule.catalogBridgeCatalogLivePolicySchema.parse({ ...value.policy,
     utility: { ...value.policy.utility,
       executionTimeoutMilliseconds: value.policy.utility.executionTimeoutMilliseconds + 60_000 } }));

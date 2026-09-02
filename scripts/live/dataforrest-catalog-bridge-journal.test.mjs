@@ -17,8 +17,10 @@ const hash = (letter) => letter.repeat(64);
 function preparationDocument() {
   const definition = plan.catalogBridgeProvider("collector_crypt");
   const cursor = { sourceInstanceId: definition.providerId, sourceRevisionId: definition.currentConfigId,
-    sourceTypeKey: definition.eventManifest.sourceTypeKey, adapterVersion: definition.eventManifest.adapterVersion,
-    cursorCodecKey: definition.eventManifest.cursorCodecKey, cursorGeneration: 1, value: secret };
+    sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+    adapterVersion: definition.currentEventManifest.adapterVersion,
+    cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
+    cursorGeneration: 1, value: secret };
   const sourceCursorHash = providerMixedCursorFingerprint(cursor);
   const pins = { operationId: "20000000-0000-4000-8000-000000000001", providerKey: definition.providerKey,
     operatorId: "20000000-0000-4000-8000-000000000002", residentCheckout: "/approved/resident",
@@ -33,7 +35,7 @@ function preparationDocument() {
     central: { organizationId: definition.organizationId, providerId: definition.providerId,
       providerKey: definition.providerKey, providerRowVersion: "4", activeConfigId: definition.currentConfigId,
       activeConfigNumber: definition.currentConfigNumber, maximumConfigNumber: definition.currentConfigNumber,
-      activeAdapterVersion: definition.eventManifest.adapterVersion,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
       configuration: { platform: definition.providerKey },
       configurationDigest: plan.catalogBridgeDigest({ platform: definition.providerKey }),
       authorityDigest: hash("e"), sourceCredentialDigest: hash("f"),
@@ -42,7 +44,7 @@ function preparationDocument() {
       databaseName: definition.databaseName, databasePort: definition.databasePort, databaseRole: "provider",
       schemaVersion: "distributed-provider-v1", runtimeState: "paused", generation: "7", rowVersion: "8",
       cachedConfigId: definition.currentConfigId, cachedConfigNumber: definition.currentConfigNumber,
-      cachedConfiguration: { adapterKey: definition.eventManifest.adapterVersion,
+      cachedConfiguration: { adapterKey: definition.currentEventManifest.adapterVersion,
         settings: { platform: definition.providerKey } },
       sourceCursor: cursor, sourceCursorHash, activeRunCount: 0, actionableCommandCount: 0,
       importLeaseOwner: null, otherOwnedLeaseCount: 0, otherActiveTransactionCount: 0,
@@ -65,7 +67,8 @@ function preparationDocument() {
         recordCount: 2, cardCount: 1, packCount: 1, pullCount: 0, tradeCount: 0,
         responseSha256: hash("2"), nextCursorHash: hash("3"), checkedAt: "2026-09-01T02:59:30.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },
-      savedEventCursor: { adapterVersion: definition.eventManifest.adapterVersion, requestedCursorHash: sourceCursorHash,
+      savedEventCursor: { adapterVersion: definition.eventSuccessorManifest.adapterVersion,
+        requestedCursorHash: sourceCursorHash,
         opaqueValueHash: plan.catalogBridgeDigest(secret), status: 200, recordCount: 1,
         responseSha256: hash("4"), checkedAt: "2026-09-01T02:59:45.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },

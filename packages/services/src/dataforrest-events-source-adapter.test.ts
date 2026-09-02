@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
-  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -17,7 +17,8 @@ import {
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogSourceAdapterManifest,
-  dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
@@ -77,9 +78,9 @@ const connectionConfiguration = Object.freeze({
 const catalogRequestProfiles = [
   {
     provider: "collector_crypt",
-    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
-    manifest: dataforrestCollectorCryptCatalogSourceAdapterManifest,
-    predecessor: dataforrestCollectorCryptDistributedSourceAdapterManifest,
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+    manifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    predecessor: dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   },
   {
     provider: "courtyard",
@@ -783,6 +784,105 @@ test("catalog filter behavior does not change predecessor request shapes", async
       ["platform", "limit"],
     );
   }
+});
+
+test("Collector Crypt V2 admits only missing pack availability as unknown", async () => {
+  const base = {
+    platform: "collector_crypt" as const,
+    stream: "catalog" as const,
+    record_id: "collector-pack-without-availability",
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+  };
+  const packWithoutAvailability = {
+    ...base,
+    entity: "pack" as const,
+    data: { name: "Collector pack" },
+  };
+  const records = [
+    packWithoutAvailability,
+    {
+      ...base,
+      entity: "card" as const,
+      record_id: "collector-card-without-availability",
+      data: { asset: { itemName: "Collector card" } },
+    },
+    {
+      ...base,
+      entity: "pack" as const,
+      record_id: "collector-pack-with-malformed-availability",
+      available: "yes",
+      data: { name: "Malformed availability pack" },
+    },
+  ];
+  const page = {
+    records,
+    next_cursor: "collector-catalog-next",
+    poll_after_seconds: 0,
+  };
+  const configuration = {
+    platform: "collector_crypt" as const,
+    stream: "catalog" as const,
+  };
+
+  const current = dataforrestCollectorCryptCatalogV2SourceAdapterManifest;
+  const currentAdapter = adapterWithClient(async () => jsonResponse(page), current);
+  const currentOperation = await pageOperation(
+    runtime(),
+    "collector_crypt",
+    null,
+    current.requestBounds,
+    current,
+    configuration,
+  );
+  const interpreted = await completedPage(currentAdapter, currentOperation);
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) {
+    const [pack, card, malformed] = interpreted.value.normalizedPage.outcomes;
+    assert.equal(pack?.status, "valid");
+    if (pack?.status === "valid" && pack.observation.kind === "catalog") {
+      assert.equal(pack.observation.entity, "pack");
+      assert.equal(pack.observation.availability, "unknown");
+      assert.deepEqual(pack.observation.providerFacts.displayName, {
+        state: "present",
+        value: "Collector pack",
+      });
+    }
+    for (const outcome of [card, malformed]) {
+      assert.equal(outcome?.status, "invalid");
+      if (outcome?.status === "invalid") {
+        assert.equal(outcome.reasonCode, "missing_required_fields");
+        assert.deepEqual(outcome.fieldPaths, ["available"]);
+      }
+    }
+  }
+  currentOperation.requestLease.close();
+
+  const old = dataforrestCollectorCryptCatalogSourceAdapterManifest;
+  const oldAdapter = adapterWithClient(async () => jsonResponse({
+    ...page,
+    records: [packWithoutAvailability],
+  }), old);
+  const oldOperation = await pageOperation(
+    runtime(),
+    "collector_crypt",
+    null,
+    old.requestBounds,
+    old,
+    configuration,
+  );
+  const oldInterpretation = await completedPage(oldAdapter, oldOperation);
+  assert.equal(oldInterpretation.ok, true);
+  if (oldInterpretation.ok) {
+    const [pack] = oldInterpretation.value.normalizedPage.outcomes;
+    assert.equal(pack?.status, "invalid");
+    if (pack?.status === "invalid") {
+      assert.equal(pack.reasonCode, "missing_required_fields");
+      assert.deepEqual(pack.fieldPaths, ["available"]);
+    }
+  }
+  oldOperation.requestLease.close();
 });
 
 test("catalog profiles interpret catalog-only pages and source tests", async () => {

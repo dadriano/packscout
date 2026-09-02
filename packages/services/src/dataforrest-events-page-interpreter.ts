@@ -3,6 +3,7 @@ import { isUtf8 } from "node:buffer";
 import { JSONParser, TokenType } from "@streamparser/json";
 import {
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+  adaptDataforrestEventRecordForAdapter,
   dataforrestEventsCatalogSourceConfigurationV1Schema,
   dataforrestEventsJsonNodeBudget,
   dataforrestContinuation,
@@ -633,8 +634,12 @@ function interpretRecord(
       evidenceReference,
     );
   }
+  const adaptedRecord = adaptDataforrestEventRecordForAdapter(
+    record,
+    adapterVersion,
+  );
   const missingFields = requiredFieldsForStream(record.stream).filter(
-    (field) => !(field in record),
+    (field) => !(field in adaptedRecord),
   );
   if (missingFields.length > 0) {
     return invalidOutcome(
@@ -644,7 +649,7 @@ function interpretRecord(
       evidenceReference,
     );
   }
-  const parsed = dataforrestEventRecordV1Schema.safeParse(record);
+  const parsed = dataforrestEventRecordV1Schema.safeParse(adaptedRecord);
   if (!parsed.success) {
     const invalidTimestamp = parsed.error.issues.some(({ path }) =>
       timestampFields.has(String(path[0] ?? ""))

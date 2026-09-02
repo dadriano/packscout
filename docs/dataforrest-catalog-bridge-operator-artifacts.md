@@ -1,10 +1,15 @@
 # DataForrest catalog bridge operator artifacts
 
-Status: live-operation companion for Collector Crypt, Courtyard, and Phygitals
+Status: implemented artifact workflow for Collector Crypt, Courtyard, and
+Phygitals; not a live-readiness certificate
 
 The catalog bridge is a sequential, fail-closed operation. Each provider uses a
 fresh operation UUID and its own private artifact directory. Finish and verify
 one provider before capturing a drain policy for the next provider.
+
+Do not treat successful materialization or `--check-only` output as authorization
+to run `--apply`. The exact commit and artifact chain require the non-live
+rehearsal and independent review described below before any live operation.
 
 ## Private artifact root
 
@@ -155,10 +160,58 @@ page count, every request's 10-second ceiling, 50 percent processing headroom,
 
 | Provider | Reviewed records | Page limit | Minimum pages | Bounded timeout |
 |---|---:|---:|---:|---:|
-| Collector Crypt | 191,452 | 1,000 | 192 | 90 minutes |
+| Collector Crypt | 191,452 | 100 | 1,915 | 8 hours 30 minutes |
 | Phygitals | 276,862 | 100 | 2,769 | 12 hours 15 minutes |
 | Courtyard | 1,056,650 | 100 | 10,567 | 44 hours 45 minutes |
 
 These are refusal ceilings, not expected durations. Any request, translation,
 or atomic commit failure remains terminal for the one-shot operation. Preserve
 the failed artifact set and stop rather than reusing an incomplete operation.
+
+For the bridge-selected Collector Crypt catalog-v2 profile, 100 is the effective
+catalog request ceiling. The one-shot uses the lower of the catalog adapter bound
+and its runtime resource ceiling; no policy field or operator flag may increase
+it. The ordinary 1,000-record event profile and retained catalog-v1 profile are
+different immutable request profiles and are not evidence that a 1,000-record
+catalog response is admissible.
+
+Collector Crypt config 3, its authority, and its saved event cursor envelope are
+immutable distributed-v1 state. Drain and preparation resolve that exact v1
+tuple, while the fresh compatibility probe at the saved cursor is interpreted by
+the distributed-v2 successor that will consume it. The event successor and
+re-enveloped cursor then use distributed v2. Both tuples remain installed only
+for this transition. Remove distributed-v1 execution support after the completed
+bridge proves central/provider v2 authority, the restored successor run at head,
+and no active configuration, run, or saved cursor still references v1.
+
+The census is deliberately non-resumable. An interruption after page 1 cannot
+restart at page K, and an incomplete journal, catalog config, run ID, or cursor
+must not be reused. Keep the resident offline and paused. Recovery requires fresh
+authoritative evidence and counts, a new operation and deterministic descendant
+identities, a strictly higher catalog config, a cleared catalog cursor, and a new
+null-origin admission from page 1.
+
+## Mandatory non-live rehearsal
+
+Repository tests validate the artifact schemas, fail-closed transitions, database
+adapters, and process boundaries with fixtures. They do not certify the exact
+live operation. Before requesting live authorization, run the exact clean commit
+through the complete operator sequence using disposable, migrated central and
+provider databases plus an isolated process harness. The reviewed rehearsal
+evidence must include:
+
+1. Capability, drain-policy, preparation, journal, live-policy, and successor
+   plist artifacts bound to one clean commit and their canonical digests.
+2. Successful `--check-only` execution at every boundary without database or
+   process mutation.
+3. A complete Collector Crypt catalog census at no more than 100 records per
+   request, with recorded page count, peak response size, elapsed time, exact
+   card/pack identity counts, and zero quarantine.
+4. An injected mid-census interruption proving the resident remains offline and
+   paused and that the failed operation cannot resume or reuse its artifacts.
+5. Fresh-operation recovery from page 1, followed by event-cursor restoration,
+   deterministic successor-run acceptance, launchd bootstrap, and final handoff.
+
+Archive the sanitized rehearsal evidence for independent review. Until every
+item is reviewed and an operation-specific approval is recorded, do not run a
+live `--apply` command.

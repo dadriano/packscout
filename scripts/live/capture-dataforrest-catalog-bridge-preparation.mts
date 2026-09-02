@@ -189,7 +189,7 @@ export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
   const cursor = opaqueCursorEnvelopeSchema.safeParse(input.savedEventCursor);
   if (!cursor.success || cursor.data.value === null ||
     cursor.data.sourceRevisionId !== definition.currentConfigId ||
-    cursor.data.adapterVersion !== definition.eventManifest.adapterVersion) {
+    cursor.data.adapterVersion !== definition.currentEventManifest.adapterVersion) {
     refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_CURSOR_INVALID");
   }
   const captureResponse = input.captureResponse ?? captureHardenedProviderResponse;
@@ -229,7 +229,11 @@ export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
     outcome.status === "valid" && outcome.observation.kind === "pull").length;
   const tradeCount = catalog.inspection.outcomes.filter((outcome) =>
     outcome.status === "valid" && outcome.observation.kind === "trade").length;
-  const event = await capture(definition.eventManifest, "event", cursor.data.value);
+  const event = await capture(
+    definition.eventSuccessorManifest,
+    "event",
+    cursor.data.value,
+  );
   return Object.freeze({
     catalogOrigin: Object.freeze({ adapterVersion: definition.catalogAdapterVersion,
       requestedCursorHash: null, status: catalog.response.status,
@@ -237,7 +241,8 @@ export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
       responseSha256: catalog.responseSha256, nextCursorHash: catalog.nextCursorHash,
       checkedAt: catalog.checkedAt, responseBytes: catalog.response.responseBytes,
       durationMilliseconds: catalog.response.durationMilliseconds }),
-    savedEventCursor: Object.freeze({ adapterVersion: definition.eventManifest.adapterVersion,
+    savedEventCursor: Object.freeze({
+      adapterVersion: definition.eventSuccessorManifest.adapterVersion,
       requestedCursorHash: input.savedEventCursorHash,
       opaqueValueHash: catalogBridgeDigest(cursor.data.value), status: event.response.status,
       recordCount: event.inspection.recordCount, responseSha256: event.responseSha256,
@@ -390,7 +395,7 @@ export async function captureCatalogBridgePreparation(input: Readonly<{
     const sourceAuthority = await resolver.resolve({ providerId: definition.providerId,
       providerKey: definition.providerKey, configVersionId: definition.currentConfigId,
       configVersionNumber: BigInt(definition.currentConfigNumber),
-      adapterKey: definition.eventManifest.adapterVersion });
+      adapterKey: definition.currentEventManifest.adapterVersion });
     const sourceCredentialDigest = catalogBridgeSourceCredentialDigest(sourceAuthority);
     const canaries = await captureCatalogBridgeSourceCanaries({ authority: sourceAuthority,
       savedEventCursor: before.runtime.sourceCursor,
@@ -404,7 +409,7 @@ export async function captureCatalogBridgePreparation(input: Readonly<{
     const confirmedSourceAuthority = await resolver.resolve({ providerId: definition.providerId,
       providerKey: definition.providerKey, configVersionId: definition.currentConfigId,
       configVersionNumber: BigInt(definition.currentConfigNumber),
-      adapterKey: definition.eventManifest.adapterVersion });
+      adapterKey: definition.currentEventManifest.adapterVersion });
     if (catalogBridgeSourceCredentialDigest(confirmedSourceAuthority) !== sourceCredentialDigest) {
       refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_CREDENTIAL_CHANGED");
     }
