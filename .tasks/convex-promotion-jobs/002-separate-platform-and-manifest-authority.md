@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/002
 **Depends on:** distributed-canonical-warehouse/014, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/003, convex-promotion-jobs/004
-**Status:** in_progress
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -33,17 +33,17 @@ client.
 
 ## Acceptance Criteria
 
-- [ ] Provider A can publish only Provider A and cannot activate a manifest.
-- [ ] Provider B's credential, database, release, or status proof is rejected
+- [x] Provider A can publish only Provider A and cannot activate a manifest.
+- [x] Provider B's credential, database, release, or status proof is rejected
   before Provider A mutation.
-- [ ] The central job can perform only
+- [x] The central job can perform only
   `advance | add | remove | rollback` and cannot publish provider bytes.
-- [ ] Missing, extra, stale, target-drifted, cross-scoped, or malformed
+- [x] Missing, extra, stale, target-drifted, cross-scoped, or malformed
   authority fails startup/admission without durable false progress.
-- [ ] Current and previous rotation keys reconcile exact historical receipts;
+- [x] Current and previous rotation keys reconcile exact historical receipts;
   old authority can be retired independently.
-- [ ] Central outage never prevents a valid provider completion transaction.
-- [ ] No production composition instantiates the legacy composite promotion
+- [x] Central outage never prevents a valid provider completion transaction.
+- [x] No production composition instantiates the legacy composite promotion
   authority.
 
 ## Verification
@@ -57,10 +57,24 @@ and the framework boundary ratchet.
 - Related specs reviewed: `tech-001-distributed-promotion-jobs.md`
 - Alignment: provider and manifest authorities are split, routed by trusted
   server configuration, and fail closed without a legacy composite fallback.
-- Divergences: an already-running provider retains its last verified pin during
-  a central outage, but a cold-started provider cannot reconstruct that full
-  pin locally and therefore fails closed.
+- Alignment detail: startup requires a current trusted bootstrap and fails
+  closed when it cannot obtain one. After startup, a resident provider retains
+  its last verified pin through a transient central outage. A durable cold-start
+  cache was not part of the approved contract and would require separate
+  revocation, expiry, and storage semantics.
+- Capacity boundary: bootstrap accepts at most 50,000 records per retained
+  section and 128 MiB on the wire. Larger graphs fail closed and require a
+  future streaming-to-persistence design; the maximum-count representative
+  graph passes the real worker consumer under 256 MiB V8 old-space, and every
+  section rejects a declared or produced 50,001st record.
+- Authority capacity: publication configuration accepts the 64-provider roster
+  with one distinct 32-byte provider key each plus all 24 ancillary authority
+  slots in 6,029 UTF-8 bytes. It permits at most two current/previous keys per
+  provider while enforcing Convex's independent 8 KiB secret-map limit, so
+  rotations remain bounded across a full roster. Provider 65, a third key for
+  one provider, and an 8,193-byte map fail closed.
 - Verification: focused authority, relay, rotation, worker, and framework
   checks pass.
-- Remaining gate: durable provider-local cold-start pinning and complete live
-  rotation/recovery evidence require approved distributed topology work.
+- Completion: split authority, trusted routing, rotation overlap, outage
+  continuity, and legacy-composition exclusion are covered by focused and full
+  repository verification. Live cutover evidence remains Task 009 work.

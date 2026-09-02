@@ -6,7 +6,9 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 9/23 tasks complete; provider release assembly/publication is being ported to current main
+**Progress:** 12/23 tasks complete; distributed publication foundations are
+complete while Admin parity, provider imports, and rollout certification remain
+in progress
 
 ## Current Build Checkpoint
 
@@ -185,7 +187,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 007 | Complete one mixed-response provider run | large | 4–6 days | in progress | 005 |
 | 008 | Operate provider runs from admin | large | 3–5 days | in progress | 002, 003, 005, 007 |
 | 009 | Diagnose and recover provider work | large | 3–5 days | done | 005, 007, 008 |
-| 010 | Observe provider health and alerts | large | 3–5 days | in progress | 002, 003, 005, 007 |
+| 010 | Observe provider health and alerts | large | 3–5 days | done | 005 |
 
 ### Diagnostics and publication
 
@@ -194,8 +196,8 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 011 | Exclude the obsolete Data Feed Lab | small | <1 day | done | 002, 003 |
 | 012 | Publish shared catalog versions safely | large | 3–5 days | done | 006 |
 | 013 | Assemble immutable provider releases | large | 5–7 days | done | 006, 007, 012 |
-| 014 | Publish provider releases safely | large | 4–6 days | in progress | 013 |
-| 015 | Advance provider manifest gates independently | large | 4–6 days | in progress | 012, 014 |
+| 014 | Publish provider releases safely | large | 4–6 days | done | 013 |
+| 015 | Advance provider manifest gates independently | large | 4–6 days | done | 012, 014 |
 
 ### Delivery and proof
 

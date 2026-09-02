@@ -111,3 +111,15 @@ acceptance, public contracts, package checks, then
 Existing ClutchPacks scripts and legacy readiness certifiers are pattern sources
 only. They are not distributed cutover evidence and their combined-runtime,
 fixed-eight, global-barrier, Heat/reset, or clear assumptions must not ship.
+
+## Blocker
+
+Repository implementation is complete through Task 008. Certification requires
+completion of distributed Tasks 017 and 018 for recovery, retention, security,
+and failure-isolation evidence. It then requires an authorized preproduction
+environment with one central and at least two provider databases, the target
+Convex deployment and split signing roles, deployed provider/manifest/relay/
+liveness processes, and approval to drain the old authority and execute canary,
+fault-injection, rollback, and timing samples. Those prerequisite proofs,
+credentials, databases, services, and rollout authority are not available in
+this checkout and cannot be replaced with fabricated local evidence.

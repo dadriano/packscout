@@ -450,19 +450,23 @@ unactivatable frame expires.
 `PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS` is a JSON object keyed by active key ID.
 Each value is canonical padded base64 for 32–256 opaque secret bytes, matching
 the worker's `PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64`; values are decoded
-before HMAC-SHA256 import and are never stored in Convex documents. Rotate by
-adding the new key ID and base64 secret to the map, deploying workers with the
-new key ID, then removing the retired entry only after the authentication and
-nonce windows have elapsed.
+before HMAC-SHA256 import and are never stored in Convex documents. The encoded
+map must remain within Convex's 8 KiB per-value environment limit; Convex rejects
+an oversized map before parsing or authentication. Rotate by adding the new key
+ID and base64 secret to the map, deploying workers with the new key ID, then
+removing the retired entry only after the authentication and nonce windows have
+elapsed.
 
 Provider-release publishing additionally requires
 `PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS`, a strict JSON object mapping each
 provider publisher key ID to exactly one canonical `platformKey`. Convex passes
 the authenticated key ID—not a caller-supplied authority field—to every
 provider-release mutation and rejects a request whose platform does not match
-that server-side binding. Multiple key IDs may temporarily map to the same
-platform during a key rotation. The binding map contains no secrets and is
-never returned in receipts or errors.
+that server-side binding. The roster is bounded to 64 platforms and at most two
+key IDs may temporarily map to one platform during a key rotation. The secret
+map's independent 8 KiB limit controls how many rotations may overlap across a
+full roster. The binding map contains no secrets and is never returned in
+receipts or errors.
 
 ### Local simulation lifecycle
 

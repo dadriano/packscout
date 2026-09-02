@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/004
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/002, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/005
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -33,19 +33,19 @@ provider-gate changes while serializing Convex compare-and-swap activation.
 
 ## Acceptance Criteria
 
-- [ ] With providers A and B active, advancing A changes only A and immutable
+- [x] With providers A and B active, advancing A changes only A and immutable
   manifest metadata; B's entry is byte-for-byte identical.
-- [ ] Add, remove, and rollback affect only the selected provider and require
+- [x] Add, remove, and rollback affect only the selected provider and require
   explicit authorized central intent.
-- [ ] Provider disablement alone does not remove its active entry.
-- [ ] Missing/incomplete/cross-provider/mismatched proof performs no Convex
+- [x] Provider disablement alone does not remove its active entry.
+- [x] Missing/incomplete/cross-provider/mismatched proof performs no Convex
   mutation and preserves the prior active manifest.
-- [ ] CAS loss returns/persists the current active state and safely retries or
+- [x] CAS loss returns/persists the current active state and safely retries or
   defers without overwriting it.
-- [ ] A failed or unreachable provider does not block another provider's
+- [x] A failed or unreachable provider does not block another provider's
   activation.
-- [ ] Duplicate/status/restart recovery yields one accepted manifest transition.
-- [ ] No common-epoch barrier, fixed roster, provider credential, cross-database
+- [x] Duplicate/status/restart recovery yields one accepted manifest transition.
+- [x] No common-epoch barrier, fixed roster, provider credential, cross-database
   transaction, or clear operation exists.
 
 ## Verification
@@ -59,3 +59,7 @@ typecheck/lint.
 
 The prior manifest-finalizer implementation is a bounded-run and recovery port
 source only; its global barrier and clear path are forbidden.
+
+Independent gate/coordinator, add/advance/remove/rollback, unrelated-entry
+preservation, compare-and-swap recovery, and failed-provider isolation checks
+pass against the current manifest contracts.

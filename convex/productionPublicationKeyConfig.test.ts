@@ -1,4 +1,8 @@
-import { canonicalJson } from "@packscout/contracts";
+import {
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+  MIN_PRODUCTION_AUTH_SECRET_BYTES,
+  canonicalJson,
+} from "@packscout/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   catalogManifestKeyHasRole,
@@ -12,6 +16,11 @@ const KEY_ID = "catalog-publisher-v1";
 const HEAT_KEY_ID = "heat-publisher-v1";
 const ROTATED_HEAT_KEY_ID = "heat-publisher-v2";
 const SECRET = "packscout-catalog-manifest-secret-000000000001";
+const MAX_CONVEX_ENVIRONMENT_VALUE_BYTES = 8 * 1_024;
+const PROVIDER_KEYS_PER_PLATFORM = 2;
+const MAX_MANIFEST_KEYS = 16;
+const MAX_HEAT_KEYS = 4;
+const MAX_DATA_RELEASE_V3_KEYS = 4;
 
 function configureSecrets(...keyIds: readonly string[]): void {
   const configuredKeyIds = keyIds.length === 0 ? [KEY_ID] : keyIds;
@@ -24,6 +33,84 @@ function configureSecrets(...keyIds: readonly string[]): void {
       ]),
     )),
   );
+}
+
+function configureMinimumSecrets(...keyIds: readonly string[]): string {
+  const serialized = canonicalJson(Object.fromEntries(
+    keyIds.map((keyId, index) => [
+      keyId,
+      btoa(String(index + 1).padStart(
+        MIN_PRODUCTION_AUTH_SECRET_BYTES,
+        "0",
+      )),
+    ]),
+  ));
+  vi.stubEnv("PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS", serialized);
+  return serialized;
+}
+
+function indexedKeyIds(prefix: string, count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_, index) => `${prefix}-${String(index).padStart(2, "0")}-v1`,
+  );
+}
+
+function providerKeyPlatforms(
+  providerCount: number,
+  keysPerPlatform: number,
+): Record<string, string> {
+  return Object.fromEntries(Array.from(
+    { length: providerCount },
+    (_, providerIndex) => {
+      const index = String(providerIndex).padStart(2, "0");
+      return Array.from(
+        { length: keysPerPlatform },
+        (__, keyIndex) => [
+          `provider-${index}-key-${String(keyIndex)}-v1`,
+          `provider-${index}`,
+        ],
+      );
+    },
+  ).flat());
+}
+
+function configureFullRosterAuthorityGraph(): string {
+  const providerPlatforms = providerKeyPlatforms(
+    MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+    1,
+  );
+  const manifestKeyIds = indexedKeyIds("manifest", MAX_MANIFEST_KEYS);
+  const heatKeyIds = indexedKeyIds("heat", MAX_HEAT_KEYS);
+  const dataReleaseV3KeyIds = indexedKeyIds(
+    "data-release-v3",
+    MAX_DATA_RELEASE_V3_KEYS,
+  );
+  const serializedSecrets = configureMinimumSecrets(
+    ...Object.keys(providerPlatforms),
+    ...manifestKeyIds,
+    ...heatKeyIds,
+    ...dataReleaseV3KeyIds,
+  );
+  vi.stubEnv(
+    "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+    canonicalJson(providerPlatforms),
+  );
+  vi.stubEnv(
+    "PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES",
+    canonicalJson(Object.fromEntries(
+      manifestKeyIds.map((keyId) => [keyId, ["publish"]]),
+    )),
+  );
+  vi.stubEnv(
+    "PACKSCOUT_HEAT_PUBLICATION_KEY_IDS",
+    canonicalJson(heatKeyIds),
+  );
+  vi.stubEnv(
+    "PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_IDS",
+    canonicalJson(dataReleaseV3KeyIds),
+  );
+  return serializedSecrets;
 }
 
 afterEach(() => {
@@ -80,6 +167,85 @@ describe("catalog manifest key roles", () => {
       canonicalJson({ [KEY_ID]: ["retain"] }),
     );
     expect(catalogRetentionKeyIsAuthorized(KEY_ID)).toBe(true);
+  });
+});
+
+describe("publication authority capacity", () => {
+  test("accepts 64 providers with one key each plus all 24 ancillary slots within 8 KiB", () => {
+    const serializedSecrets = configureFullRosterAuthorityGraph();
+
+    expect(new TextEncoder().encode(serializedSecrets).byteLength)
+      .toBeLessThanOrEqual(MAX_CONVEX_ENVIRONMENT_VALUE_BYTES);
+    expect(publicationAuthorityConfigurationIsIsolated()).toBe(true);
+  });
+
+  test("rejects a sixty-fifth provider even below the provider-key entry limit", () => {
+    const providerPlatforms = providerKeyPlatforms(
+      MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 1,
+      1,
+    );
+    configureSecrets(...Object.keys(providerPlatforms));
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(providerPlatforms),
+    );
+
+    expect(publicationAuthorityConfigurationIsIsolated()).toBe(false);
+  });
+
+  test("accepts current and previous provider keys but rejects a third", () => {
+    const rotatingProviderPlatforms = providerKeyPlatforms(
+      1,
+      PROVIDER_KEYS_PER_PLATFORM,
+    );
+    configureSecrets(...Object.keys(rotatingProviderPlatforms));
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(rotatingProviderPlatforms),
+    );
+    expect(publicationAuthorityConfigurationIsIsolated()).toBe(true);
+
+    const overCapacityProviderPlatforms = providerKeyPlatforms(
+      1,
+      PROVIDER_KEYS_PER_PLATFORM + 1,
+    );
+    configureSecrets(...Object.keys(overCapacityProviderPlatforms));
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(overCapacityProviderPlatforms),
+    );
+
+    expect(publicationAuthorityConfigurationIsIsolated()).toBe(false);
+  });
+
+  test("accepts a publication-secret value exactly at the 8 KiB boundary", () => {
+    const serialized = canonicalJson({
+      [KEY_ID]: btoa("x".repeat(MIN_PRODUCTION_AUTH_SECRET_BYTES)),
+    });
+    const exactBoundary = serialized.padEnd(
+      MAX_CONVEX_ENVIRONMENT_VALUE_BYTES,
+      " ",
+    );
+    vi.stubEnv("PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS", exactBoundary);
+
+    expect(new TextEncoder().encode(exactBoundary).byteLength)
+      .toBe(MAX_CONVEX_ENVIRONMENT_VALUE_BYTES);
+    expect(configuredPublicationKeySecret(KEY_ID)).not.toBeNull();
+  });
+
+  test("rejects a publication-secret value one byte beyond 8 KiB", () => {
+    const serialized = canonicalJson({
+      [KEY_ID]: btoa("x".repeat(MIN_PRODUCTION_AUTH_SECRET_BYTES)),
+    });
+    const overBoundary = serialized.padEnd(
+      MAX_CONVEX_ENVIRONMENT_VALUE_BYTES + 1,
+      " ",
+    );
+    vi.stubEnv("PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS", overBoundary);
+
+    expect(new TextEncoder().encode(overBoundary).byteLength)
+      .toBe(MAX_CONVEX_ENVIRONMENT_VALUE_BYTES + 1);
+    expect(configuredPublicationKeySecret(KEY_ID)).toBeNull();
   });
 });
 

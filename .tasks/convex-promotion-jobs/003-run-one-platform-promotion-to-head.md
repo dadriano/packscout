@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/003
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/002, distributed-canonical-warehouse/014
 **Blocks:** convex-promotion-jobs/005
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -33,18 +33,18 @@ central availability or another provider credential.
 
 ## Acceptance Criteria
 
-- [ ] Provider A reaches its latest settled head while Provider B is failed,
+- [x] Provider A reaches its latest settled head while Provider B is failed,
   unreachable, paused, or absent.
-- [ ] Duplicate/reordered trigger deliveries and process restart create no
+- [x] Duplicate/reordered trigger deliveries and process restart create no
   duplicate release or checkpoint advancement.
-- [ ] Exact found/not-found status recovery works across key overlap; unsigned,
+- [x] Exact found/not-found status recovery works across key overlap; unsigned,
   cross-provider, or mismatched proof fails closed.
-- [ ] A wake arriving during generation N remains pending after N completes.
-- [ ] Fifty-second exit creates durable continuation and resumes committed
+- [x] A wake arriving during generation N remains pending after N completes.
+- [x] Fifty-second exit creates durable continuation and resumes committed
   progress.
-- [ ] Completion succeeds while central is unavailable and later relay replay
+- [x] Completion succeeds while central is unavailable and later relay replay
   yields one central completion fact.
-- [ ] No provider job publishes another provider, activates a manifest, writes
+- [x] No provider job publishes another provider, activates a manifest, writes
   central state, or upserts canonical rows directly into Convex.
 
 ## Verification
@@ -58,3 +58,7 @@ typecheck/lint, and a two-provider outage-isolation integration test.
 
 The prior `platform-promotion-job` tests are behavioral port sources. Shipping
 code uses provider-local clients and provider identity.
+
+Provider one-shot, status recovery, continuation, cached-pin outage isolation,
+completion relay, and provider-local persistence checks pass. Live outage and
+cutover certification remain isolated in Task 009.

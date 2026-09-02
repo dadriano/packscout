@@ -1,11 +1,11 @@
 # Task: Observe Provider Health and Alerts
 
 **ID:** distributed-canonical-warehouse/010
-**Depends on:** distributed-canonical-warehouse/002, distributed-canonical-warehouse/003, distributed-canonical-warehouse/005, distributed-canonical-warehouse/007
+**Depends on:** distributed-canonical-warehouse/005
 **Blocks:** distributed-canonical-warehouse/020
 **Estimated scope:** large
 **Estimated effort:** 3–5 days for one builder, including activity relay, grouped alert lifecycle, partial outages, and admin parity
-**Status:** in progress
+**Status:** done
 
 ## Start Here
 
@@ -71,9 +71,9 @@ An alert projection contains organization and provider IDs, state, type, severit
 
 ### Observation acceptance
 
-- [ ] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
-- [ ] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
-- [ ] One unreachable provider leaves healthy provider history and alert operations usable.
+- [x] Provider activity delivery is idempotent, resumes after central outage, and never blocks a provider commit.
+- [x] Every health result includes observation time and staleness, and stale or missing data never appears healthy by default.
+- [x] One unreachable provider leaves healthy provider history and alert operations usable.
 - [x] Provider-local detail remains authoritative and returns an explicit unavailable result when unreachable.
 - [x] Metrics cover reachability, heartbeats, activity lag, quarantine, publication lag, and alert age.
 
@@ -91,7 +91,15 @@ An alert projection contains organization and provider IDs, state, type, severit
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Provider activity is relayed from the local outbox as best-effort observation; central alerts remain durable but non-authoritative.
-- No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+- Dependency refinement: this task consumes the implemented provider-local
+  execution/outbox boundary from Task 005. The unfinished organization UI,
+  provider-management UI, and source-head work in Tasks 002, 003, and 007 do
+  not gate the independently tested health/alert runtime or Admin routes; they
+  remain rollout prerequisites through the later security and certification
+  tasks.
+- No deviations remain; the runtime relay, monotonic observation, rotating
+  provider scan, partial-outage, and lost-acknowledgement paths are covered by
+  focused worker, database, service, and Admin tests.
 
 ## Completion Evidence
 
@@ -100,7 +108,8 @@ An alert projection contains organization and provider IDs, state, type, severit
   disabled targets could be misreported as unreachable, the fixed first target
   page could starve later providers, and concurrent delivery acknowledgement
   could produce a false failure. These gaps must be fixed and reverified before
-  the prior completion evidence is accepted again.
+  the prior completion evidence is accepted again. Those gaps are now closed
+  by the production relay process/composition and their focused regressions.
 
 - Provider-local transactions append safe, bounded activity through an outbox that preserves normal capacity with a singleton overflow coalescer; central outages leave delivery pending and never roll back the authoritative provider commit.
 - The relay replays events idempotently with bounded per-provider backoff, while independent provider cycles remain isolated and a successful direct probe is recorded before the next health projection.

@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import type { PinnedProviderReleaseInputs } from "@packscout/database";
 import {
+  PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES,
+  PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
+  PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS,
 } from "@packscout/contracts";
 import {
   ProviderPromotionBootstrapService,
@@ -157,6 +161,40 @@ test("bootstrap rejects a repository response for another provider", async () =>
   }), {
     code: "PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE",
   });
+});
+
+test("bootstrap rejects every retained section at the shared count limit plus one", async (context) => {
+  for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
+    await context.test(section, async () => {
+      assert.equal(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[section], 50_000);
+      let reads = 0;
+      const service = new ProviderPromotionBootstrapService({
+        credentials: credentials(),
+        repository: {
+          async pin() {
+            reads += 1;
+            return {
+              ...pin(),
+              [section]: new Array<never>(
+                PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[section] + 1,
+              ),
+            };
+          },
+        },
+      });
+
+      await assert.rejects(service.stream({
+        providerId: providerA,
+        bearerTokenBase64: tokenBase64,
+        ...ownership(),
+      }), {
+        name: "ProviderPromotionBootstrapError",
+        code: "PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE",
+        message: "Provider promotion bootstrap failed.",
+      });
+      assert.equal(reads, 1);
+    });
+  }
 });
 
 test("bootstrap reads one pin and emits a graph larger than 16 MiB in bounded frames", async () => {
@@ -329,4 +367,107 @@ test("bootstrap serializes large correlation graphs lazily and cooperatively", a
     code: "PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE",
   });
   assert.equal(serializedVersions, serializedBeforeAbort);
+});
+
+test("bootstrap frames the full accepted collectible-correlation count lazily", {
+  timeout: 30_000,
+}, async (context) => {
+  const correlation = Object.freeze({
+    localCollectibleId: "57000000-0000-4000-8000-000000000001",
+    localEntityVersion: 9_999_999_999_999_999_999n,
+    publicCollectibleId: "56000000-0000-5000-8000-000000000001",
+  });
+  // Shared immutable records isolate producer framing. The worker constrained-
+  // heap test uses distinct records for its consumer-memory proof.
+  const collectibleCorrelations = Array(
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.collectibleCorrelations,
+  ).fill(correlation) as PinnedProviderReleaseInputs["collectibleCorrelations"];
+  const service = new ProviderPromotionBootstrapService({
+    credentials: credentials(),
+    repository: {
+      async pin() {
+        return { ...pin(), categoryCorrelations: [], collectibleCorrelations };
+      },
+    },
+  });
+  const stream = await service.stream({
+    providerId: providerA,
+    bearerTokenBase64: tokenBase64,
+    signal: new AbortController().signal,
+    deadlineAt: Date.now() + 30_000,
+  });
+
+  let emittedBytes = 0;
+  let emittedFrames = 0;
+  let emittedCorrelations = 0;
+  for await (const frame of stream) {
+    const frameBytes = Buffer.byteLength(`${JSON.stringify(frame)}\n`, "utf8");
+    assert.ok(frameBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES);
+    emittedBytes += frameBytes;
+    emittedFrames += 1;
+    if (frame.kind === "page" && frame.section === "collectibleCorrelations") {
+      emittedCorrelations += frame.records.length;
+    }
+  }
+
+  assert.equal(
+    emittedCorrelations,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.collectibleCorrelations,
+  );
+  assert.ok(emittedBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES);
+  assert.ok(emittedFrames <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES);
+  context.diagnostic(
+    `correlations=${(emittedBytes / 1_024 / 1_024).toFixed(1)} MiB in ${emittedFrames} frames`,
+  );
+});
+
+test("bootstrap frames the full accepted catalog-alias count lazily", {
+  timeout: 30_000,
+}, async (context) => {
+  const alias = Object.freeze({
+    aliasPublicCollectibleId: "56000000-0000-5000-8000-000000000001",
+    canonicalPublicCollectibleId: "56000000-0000-5000-8000-000000000002",
+  });
+  // Shared immutable records isolate producer framing. The worker constrained-
+  // heap test uses distinct records for its consumer-memory proof.
+  const catalogAliases = Array(
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases,
+  ).fill(alias) as PinnedProviderReleaseInputs["catalogAliases"];
+  const service = new ProviderPromotionBootstrapService({
+    credentials: credentials(),
+    repository: {
+      async pin() {
+        return { ...pin(), catalogAliases };
+      },
+    },
+  });
+  const stream = await service.stream({
+    providerId: providerA,
+    bearerTokenBase64: tokenBase64,
+    signal: new AbortController().signal,
+    deadlineAt: Date.now() + 30_000,
+  });
+
+  let emittedAliases = 0;
+  let emittedBytes = 0;
+  let emittedFrames = 0;
+  for await (const frame of stream) {
+    const frameBytes = Buffer.byteLength(`${JSON.stringify(frame)}\n`, "utf8");
+    assert.ok(frameBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES);
+    emittedBytes += frameBytes;
+    emittedFrames += 1;
+    if (frame.kind === "page" && frame.section === "catalogAliases") {
+      emittedAliases += frame.records.length;
+    }
+  }
+
+  assert.equal(
+    emittedAliases,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases,
+  );
+  assert.ok(emittedBytes <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES);
+  assert.ok(emittedFrames <= PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAMES);
+  context.diagnostic(
+    `aliases=${(emittedBytes / 1_024 / 1_024).toFixed(1)} MiB in ${emittedFrames} frames`,
+  );
 });

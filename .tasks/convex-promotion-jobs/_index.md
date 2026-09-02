@@ -2,14 +2,11 @@
 
 ## Start Here
 
-Read `tech-001-distributed-promotion-jobs.md`, then finish the missing
-provider-local release assembly/publication and central one-provider manifest
-activation foundations in `distributed-canonical-warehouse/013`–`015`.
+Read `tech-001-distributed-promotion-jobs.md`, then use Task 009 for the live
+cutover and certification of the completed distributed worker implementation.
 
-**Progress:** 0/9 distributed tasks done. Tasks 001–008 are implemented or
-under integration, but are not complete until their remaining dependencies and
-verification anchors pass. Task 009 remains blocked on those dependencies and
-live rollout evidence.
+**Progress:** 8/9 distributed tasks done. Tasks 001–008 are implemented and
+verified. Task 009 remains the explicit live rollout/canary certification gate.
 
 ## Context
 
@@ -50,24 +47,24 @@ partial-outage handling, and safe bounded history/detail.
 
 | ID | Task | Status | Depends on |
 |---|---|---|---|
-| 001 | Establish split durable promotion job records | in_progress | distributed 013–015 schema contracts |
-| 002 | Separate provider and central manifest authority | in_progress | distributed 014, 015 |
-| 003 | Run one provider publication job to head | blocked | 001, 002, distributed 014 |
-| 004 | Reconcile one provider manifest gate centrally | blocked | 001, 002, distributed 015 |
+| 001 | Establish split durable promotion job records | done | distributed 013–015 schema contracts |
+| 002 | Separate provider and central manifest authority | done | distributed 014, 015 |
+| 003 | Run one provider publication job to head | done | 001, 002, distributed 014 |
+| 004 | Reconcile one provider manifest gate centrally | done | 001, 002, distributed 015 |
 
 ### Triggering and liveness
 
 | ID | Task | Status | Depends on |
 |---|---|---|---|
-| 005 | Trigger jobs immediately and reconcile on schedule | blocked | 003, 004, distributed 010 |
-| 006 | Detect missed promotion jobs dynamically | blocked | 001, 005 |
+| 005 | Trigger jobs immediately and reconcile on schedule | done | 003, 004, distributed 010 |
+| 006 | Detect missed promotion jobs dynamically | done | 001, 005 |
 
 ### Admin and launch
 
 | ID | Task | Status | Depends on |
 |---|---|---|---|
-| 007 | Expose distributed promotion job monitoring | blocked | 001, 006 |
-| 008 | Monitor promotion jobs in Admin | blocked | 006, 007, distributed 022 |
+| 007 | Expose distributed promotion job monitoring | done | 001, 006 |
+| 008 | Monitor promotion jobs in Admin | done | 006, 007 |
 | 009 | Cut over and certify distributed hybrid promotion | blocked | 005–008, distributed 017, 018 |
 
 ## Build Order
@@ -106,6 +103,8 @@ The final exact commit must pass `npm run verify:framework`.
 
 ## Next Action
 
-Complete distributed Tasks 014–015, including an approved provider-local
-cold-start pin design, then run the live two-provider canary and rollout
-evidence required by Task 009.
+Complete distributed Tasks 017 and 018, then provision the preproduction
+central/provider topology and publication credentials and run the live
+two-provider canary and rollout evidence required by Task 009. Cold startup
+intentionally fails closed without a current trusted bootstrap; a resident
+worker continues from its last verified pin through a transient central outage.

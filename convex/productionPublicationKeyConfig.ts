@@ -1,4 +1,5 @@
 import {
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   MAX_PRODUCTION_AUTH_SECRET_BYTES,
   MIN_PRODUCTION_AUTH_SECRET_BYTES,
   PRODUCTION_AUTH_KEY_ID_PATTERN,
@@ -19,10 +20,18 @@ export type CatalogManifestKeyRole =
   (typeof CATALOG_MANIFEST_KEY_ROLES)[number];
 
 const MAX_CATALOG_MANIFEST_KEYS = 16;
+const MAX_CONVEX_ENVIRONMENT_VALUE_BYTES = 8 * 1_024;
 const MAX_DATA_RELEASE_V3_PUBLICATION_KEYS = 4;
 const MAX_HEAT_PUBLICATION_KEYS = 4;
-const MAX_PROVIDER_PUBLICATION_KEYS = 16;
-const MAX_PRODUCTION_PUBLICATION_KEYS = 64;
+const MAX_PROVIDER_PUBLICATION_KEYS_PER_PLATFORM = 2;
+const MAX_PROVIDER_PUBLICATION_KEYS =
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES *
+  MAX_PROVIDER_PUBLICATION_KEYS_PER_PLATFORM;
+const MAX_PRODUCTION_PUBLICATION_KEYS =
+  MAX_PROVIDER_PUBLICATION_KEYS +
+  MAX_CATALOG_MANIFEST_KEYS +
+  MAX_HEAT_PUBLICATION_KEYS +
+  MAX_DATA_RELEASE_V3_PUBLICATION_KEYS;
 const catalogManifestKeyRoleSet = new Set<string>(
   CATALOG_MANIFEST_KEY_ROLES,
 );
@@ -44,6 +53,12 @@ export function configuredPublicationKeySecret(
 function configuredPublicationKeys(): ReadonlyMap<string, Uint8Array> | null {
   const raw = env.PACKSCOUT_DATA_RELEASE_PUBLISHING_KEYS;
   if (raw === undefined) return null;
+  if (
+    new TextEncoder().encode(raw).byteLength >
+      MAX_CONVEX_ENVIRONMENT_VALUE_BYTES
+  ) {
+    return null;
+  }
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!isPlainRecord(parsed)) return null;
@@ -125,11 +140,29 @@ function configuredProviderPublicationKeyIds(): ReadonlySet<string> | null {
     if (!isPlainRecord(parsed)) return null;
     const entries = Object.entries(parsed);
     if (entries.length > MAX_PROVIDER_PUBLICATION_KEYS) return null;
-    if (entries.some(([keyId, platformKey]) =>
-      !PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId) ||
-      !providerCatalogPlatformKeyV1Schema.safeParse(platformKey).success ||
-      configuredPublicationKeySecret(keyId) === null
-    )) {
+    const publicationKeys = configuredPublicationKeys();
+    const keyCountByPlatform = new Map<string, number>();
+    for (const [keyId, platformKey] of entries) {
+      const parsedPlatformKey = providerCatalogPlatformKeyV1Schema.safeParse(
+        platformKey,
+      );
+      if (
+        !PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId) ||
+        !parsedPlatformKey.success ||
+        publicationKeys?.has(keyId) !== true
+      ) {
+        return null;
+      }
+      const nextKeyCount =
+        (keyCountByPlatform.get(parsedPlatformKey.data) ?? 0) + 1;
+      if (nextKeyCount > MAX_PROVIDER_PUBLICATION_KEYS_PER_PLATFORM) {
+        return null;
+      }
+      keyCountByPlatform.set(parsedPlatformKey.data, nextKeyCount);
+    }
+    if (
+      keyCountByPlatform.size > MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES
+    ) {
       return null;
     }
     return new Set(entries.map(([keyId]) => keyId));

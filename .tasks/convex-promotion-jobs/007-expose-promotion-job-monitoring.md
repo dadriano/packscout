@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/007
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/006, distributed-canonical-warehouse/010
 **Blocks:** convex-promotion-jobs/008
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -62,21 +62,21 @@ schedule, publication, and activation facts.
 
 ## Acceptance Criteria
 
-- [ ] Dynamic add/disable/archive updates the roster exactly once without a
+- [x] Dynamic add/disable/archive updates the roster exactly once without a
   hardcoded provider count.
-- [ ] One unavailable provider leaves healthy provider and manifest results
+- [x] One unavailable provider leaves healthy provider and manifest results
   readable and explicitly labels live versus last-known evidence.
-- [ ] Completed local release newer than central active selection reads
+- [x] Completed local release newer than central active selection reads
   `awaiting_activation`; unrelated providers remain current.
-- [ ] Disabled/archived providers preserve truthful retained active selection
+- [x] Disabled/archived providers preserve truthful retained active selection
   without being presented as live work.
-- [ ] One-provider gate advance updates only its provider judgment.
-- [ ] Provider projection replay deduplicates and exposes projection lag.
-- [ ] History pagination/filter/cursor tamper and cross-scope opaque IDs fail
+- [x] One-provider gate advance updates only its provider judgment.
+- [x] Provider projection replay deduplicates and exposes projection lag.
+- [x] History pagination/filter/cursor tamper and cross-scope opaque IDs fail
   safely.
-- [ ] Detail bounds and digests remain deterministic after local source pruning.
-- [ ] Responses, errors, logs, and fixtures pass protected-content redaction.
-- [ ] Anonymous/forbidden/invalid/missing/rate-limited/unavailable outcomes use
+- [x] Detail bounds and digests remain deterministic after local source pruning.
+- [x] Responses, errors, logs, and fixtures pass protected-content redaction.
+- [x] Anonymous/forbidden/invalid/missing/rate-limited/unavailable outcomes use
   stable structured 401/403/422/404/429/503 behavior and `no-store`.
 
 ## Verification
@@ -91,8 +91,8 @@ typecheck/lint, and the standards ratchet.
 The monitoring service joins observations in memory from bounded independent
 reads; it performs no cross-database query or transaction.
 
-## Blocker
+## Completion
 
 The contracts, provider projections, central monitoring runtime, and Admin API
-routes are implemented and pass their focused checks. Completion still depends
-on Tasks 001 and 006 plus the unresolved distributed health dependency.
+routes are implemented. Their dynamic roster, outage isolation, bounded
+history/detail, authorization, structured error, and redaction checks pass.

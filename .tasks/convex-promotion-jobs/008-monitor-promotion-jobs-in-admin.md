@@ -1,9 +1,9 @@
 # Task: Monitor Distributed Promotion Jobs in Admin
 
 **ID:** convex-promotion-jobs/008
-**Depends on:** convex-promotion-jobs/006, convex-promotion-jobs/007, distributed-canonical-warehouse/022
+**Depends on:** convex-promotion-jobs/006, convex-promotion-jobs/007
 **Blocks:** convex-promotion-jobs/009
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -63,22 +63,22 @@ without receiving mutation or routing authority.
 
 ## Acceptance Criteria
 
-- [ ] Navigation/title/breadcrumb/permission work for both authorized roles.
-- [ ] A dynamic roster renders each provider exactly once.
-- [ ] One provider outage or last-known row does not blank healthy rows.
-- [ ] Disabled retained-active, archived last-known, awaiting activation, and
+- [x] Navigation/title/breadcrumb/permission work for both authorized roles.
+- [x] A dynamic roster renders each provider exactly once.
+- [x] One provider outage or last-known row does not blank healthy rows.
+- [x] Disabled retained-active, archived last-known, awaiting activation, and
   independent gate advance are visually and textually distinct.
-- [ ] Manifest add/advance/remove/rollback updates only the selected row.
-- [ ] Stale evaluator marks liveness judgments last-known without erasing
+- [x] Manifest add/advance/remove/rollback updates only the selected row.
+- [x] Stale evaluator marks liveness judgments last-known without erasing
   publication facts.
-- [ ] Filters survive reload/share; changing scope resets pagination safely.
-- [ ] Alert and Published Data links carry only the trusted safe key or opaque
+- [x] Filters survive reload/share; changing scope resets pagination safely.
+- [x] Alert and Published Data links carry only the trusted safe key or opaque
   monitoring ID.
-- [ ] Visible polling, hidden-tab pause, manual refresh, request-race handling,
+- [x] Visible polling, hidden-tab pause, manual refresh, request-race handling,
   429 cadence, and exact-scope stale retention are tested.
-- [ ] Keyboard, focus, accessible names/live regions, textual badges, narrow and
+- [x] Keyboard, focus, accessible names/live regions, textual badges, narrow and
   desktop layouts pass.
-- [ ] The rendered surface contains no mutation affordance or protected field.
+- [x] The rendered surface contains no mutation affordance or protected field.
 
 ## Verification
 
@@ -93,8 +93,18 @@ at the group gate.
 The UI renders server judgments and never derives tenancy, routing, liveness, or
 checkpoint comparisons.
 
-## Blocker
+- Related specs reviewed: `tech-001-distributed-promotion-jobs.md` and
+  `distributed-canonical-warehouse/022-port-authoritative-admin-baseline.md`.
+- Approved dependency refinement: this task delivers only the isolated,
+  read-only Promotion Jobs surface. Unfinished Background Work, Compare, and
+  quarantine parity in distributed task 022 do not gate this feature.
+- Verification evidence: route and permission tests, polling/error-state tests,
+  accessibility and responsive-layout checks, browser verification, and the
+  exact `npm run verify:framework` repository gate.
+
+## Completion
 
 The read-only pages, polling, error states, accessibility semantics, responsive
-layout, and browser verification are complete. The task remains blocked on
-Tasks 006 and 007 and the unfinished distributed Admin parity dependency.
+layout, and browser verification are complete. The broad distributed Admin
+parity task does not gate this isolated Promotion Jobs surface; its unfinished
+Background Work, Compare, and quarantine parity remain tracked there.

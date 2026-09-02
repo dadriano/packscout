@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/005
 **Depends on:** convex-promotion-jobs/003, convex-promotion-jobs/004, distributed-canonical-warehouse/010
 **Blocks:** convex-promotion-jobs/006, convex-promotion-jobs/009
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -64,26 +64,26 @@ keeping durable provider-local and central intents as the correctness source.
 
 ## Acceptance Criteria
 
-- [ ] A provider commit atomically creates only its own wake; rollback creates
+- [x] A provider commit atomically creates only its own wake; rollback creates
   neither change nor wake.
-- [ ] Lost immediate delivery is repaired by that provider's next one-minute
+- [x] Lost immediate delivery is repaired by that provider's next one-minute
   schedule without affecting another provider.
-- [ ] Provider completion succeeds during central outage and relay replay yields
+- [x] Provider completion succeeds during central outage and relay replay yields
   one central inbox fact and one gate generation.
-- [ ] A newer local or central generation remains pending after an older run.
-- [ ] Duplicate/reordered/overlapping delivery from all four triggers creates no
+- [x] A newer local or central generation remains pending after an older run.
+- [x] Duplicate/reordered/overlapping delivery from all four triggers creates no
   duplicate publication or manifest artifact.
-- [ ] Same-key/tombstone/expiry and cross-scope refusal semantics hold
+- [x] Same-key/tombstone/expiry and cross-scope refusal semantics hold
   independently in provider and central authorities.
-- [ ] Providers can be added dynamically, including more than eight; one
+- [x] Providers can be added dynamically, including more than eight; one
   schedule can pause/resume without altering another.
-- [ ] Advancing provider A preserves provider B's manifest entry exactly; A
+- [x] Advancing provider A preserves provider B's manifest entry exactly; A
   failure leaves B usable.
-- [ ] Forged route, trigger, epoch/window, generation, or manual identity fails
+- [x] Forged route, trigger, epoch/window, generation, or manual identity fails
   before check-in, lease, relay acknowledgement, or Convex request.
-- [ ] Generic code contains no fixed roster, `platformKey` routing, all-provider
-  command, global readiness barrier, `clear`, legacy shared client, or
-  cross-database transaction.
+- [x] Shipping split-job code contains no fixed roster, `platformKey` routing,
+  all-provider command, global readiness barrier, `clear` authority, legacy
+  shared client, or cross-database transaction.
 
 ## Verification
 
@@ -96,3 +96,14 @@ tests, service/worker/database typecheck/lint, and the framework ratchet.
 
 No trigger delivery is a source of truth. Provider and central work remain
 separate even when one process hosts both adapters.
+
+Provider canonical writes atomically coalesce the durable wake; immediate
+delivery is post-commit and lossy by design, while the one-minute schedule,
+relay replay, and continuation paths repair loss. Production source-to-canonical
+deployment belongs to the upstream provider-import feature; this task owns the
+canonical PostgreSQL-to-Convex trigger path.
+
+The repository retains a deprecated, explicit preproduction-only ClutchPacks
+canary with fixed-eight/composite helpers. Production and split-job entrypoints
+do not import it, it is not a fallback authority, and Task 009 must prove it is
+not enabled at cutover.

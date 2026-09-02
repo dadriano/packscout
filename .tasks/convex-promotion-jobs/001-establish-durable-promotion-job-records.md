@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/001
 **Depends on:** distributed-canonical-warehouse/013, distributed-canonical-warehouse/014, distributed-canonical-warehouse/015
 **Blocks:** convex-promotion-jobs/003, convex-promotion-jobs/004, convex-promotion-jobs/006, convex-promotion-jobs/007
-**Status:** in_progress
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -75,5 +75,5 @@ typecheck/lint, and `npm run test:prisma-schema`.
 - Divergences: none.
 - Verification: Prisma schema checks, database integration tests, workspace
   lint/typecheck/tests, and `npm run verify:framework` pass.
-- Remaining gate: prerequisite distributed Tasks 014 and 015 are still in
-  progress, so this task remains `in_progress` despite its checked criteria.
+- Completion: prerequisite distributed Tasks 014 and 015 are complete and the
+  split-schema, replay, generation, retention, and isolation checks are green.

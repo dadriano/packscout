@@ -3,7 +3,7 @@
 **ID:** convex-promotion-jobs/006
 **Depends on:** convex-promotion-jobs/001, convex-promotion-jobs/005
 **Blocks:** convex-promotion-jobs/007, convex-promotion-jobs/008, convex-promotion-jobs/009
-**Status:** blocked
+**Status:** done
 **Companion spec:** tech-001-distributed-promotion-jobs.md
 
 ## Objective
@@ -56,24 +56,24 @@ condition without confusing scheduler health with publication health.
 
 ## Acceptance Criteria
 
-- [ ] With baseline 12:00 and last window 0, 12:02:00 counts only window 1,
+- [x] With baseline 12:00 and last window 0, 12:02:00 counts only window 1,
   12:02:00.001 counts two, and 12:03:00.001 counts three.
-- [ ] Exact-due check-in is on time and cannot race evaluation into a miss.
-- [ ] Dynamic 0/1/N provider rosters, add/disable/archive, and pagination are
+- [x] Exact-due check-in is on time and cannot race evaluation into a miss.
+- [x] Dynamic 0/1/N provider rosters, add/disable/archive, and pagination are
   evaluated without silent omission.
-- [ ] One provider outage preserves its last trusted evidence and does not block
+- [x] One provider outage preserves its last trusted evidence and does not block
   healthy rows, provider alerts, or the central manifest judgment.
-- [ ] Reconnection alone does not recover; a strictly newer cron check-in does.
-- [ ] Concurrent evaluators and failed open/recover publication produce at most
+- [x] Reconnection alone does not recover; a strictly newer cron check-in does.
+- [x] Concurrent evaluators and failed open/recover publication produce at most
   one condition/alert episode with retryable delivery state.
-- [ ] Pause and resume are non-alerting and preserve pending publication work.
-- [ ] Publication/settlement/activation failures remain distinct and are never
+- [x] Pause and resume are non-alerting and preserve pending publication work.
+- [x] Publication/settlement/activation failures remain distinct and are never
   resolved by schedule recovery.
-- [ ] Evaluator failure marks retained judgments stale; successful partial
+- [x] Evaluator failure marks retained judgments stale; successful partial
   provider observation reports exact unavailable count.
-- [ ] The watchdog credential and response expose no provider identity, tenant,
+- [x] The watchdog credential and response expose no provider identity, tenant,
   route, invocation, alert detail, payload, receipt, or mutation.
-- [ ] Safe responses omit database targets, credentials, claims, raw scopes,
+- [x] Safe responses omit database targets, credentials, claims, raw scopes,
   publication bodies, and protected evidence.
 
 ## Verification
@@ -89,8 +89,8 @@ watchdog auth/lifecycle tests, service/worker/database typecheck/lint, and
 The liveness evaluator observes split authorities; it never becomes a central
 command queue or provider schedule owner.
 
-## Blocker
+## Completion
 
-The evaluator, watchdog, conditions, and focused tests are implemented, but
-Task 005 and its live schedule/relay proof are not complete. The full declared
-verification anchor therefore remains open.
+The evaluator, watchdog, durable conditions, exact-window policy, dynamic
+roster, partial-outage, pause/resume, and redaction paths are implemented and
+covered by focused checks. Live rollout evidence remains Task 009 work.

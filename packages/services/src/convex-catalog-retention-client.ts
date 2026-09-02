@@ -1,5 +1,6 @@
 import {
   MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  MAX_CATALOG_RETENTION_HTTP_RESPONSE_BYTES,
   PRODUCTION_CATALOG_RETENTION_PATHS,
   canonicalJson,
   catalogRetentionErrorEnvelopeSchema,
@@ -157,7 +158,7 @@ export class SignedConvexCatalogRetentionClient {
       maximumRequestBytes: options.maximumRequestBytes ??
         MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
       maximumResponseBytes: options.maximumResponseBytes ??
-        MAX_CATALOG_RETENTION_HTTP_BODY_BYTES + 4_096,
+        MAX_CATALOG_RETENTION_HTTP_RESPONSE_BYTES,
       errorResponseBoundary: retentionErrorResponseBoundary,
     });
   }

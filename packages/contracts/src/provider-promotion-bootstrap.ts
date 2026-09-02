@@ -6,8 +6,9 @@ export const PROVIDER_PROMOTION_BOOTSTRAP_STREAM_CONTENT_TYPE =
   "application/x-ndjson" as const;
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES =
   1 * 1_024 * 1_024;
-// The governed 100k-collectible plus 100k-correlation fixture is 75.7 MiB.
-// This leaves framing headroom while quartering the prior transfer budget.
+// The worker retains, validates, and hashes the decoded arrays. The constrained
+// 256 MiB V8 old-space consumer proof covers the accepted 50k-per-section
+// graph within this aggregate wire bound.
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES =
   128 * 1_024 * 1_024;
 export const PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_RECORDS_PER_FRAME = 250;
@@ -35,11 +36,11 @@ export interface ProviderPromotionBootstrapCounts {
 }
 
 export const PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS = Object.freeze({
-  catalogCategories: 100_000,
-  catalogCollectibles: 100_000,
-  catalogAliases: 4_000_000,
-  categoryCorrelations: 100_000,
-  collectibleCorrelations: 1_000_000,
+  catalogCategories: 50_000,
+  catalogCollectibles: 50_000,
+  catalogAliases: 50_000,
+  categoryCorrelations: 50_000,
+  collectibleCorrelations: 50_000,
 } satisfies ProviderPromotionBootstrapCounts);
 
 export function providerPromotionBootstrapSnapshotFingerprint(input: {

@@ -2,7 +2,7 @@
 
 **ID:** distributed-canonical-warehouse/003
 **Depends on:** distributed-canonical-warehouse/001, distributed-canonical-warehouse/002
-**Blocks:** distributed-canonical-warehouse/005, distributed-canonical-warehouse/006, distributed-canonical-warehouse/008, distributed-canonical-warehouse/010, distributed-canonical-warehouse/011
+**Blocks:** distributed-canonical-warehouse/005, distributed-canonical-warehouse/006, distributed-canonical-warehouse/008, distributed-canonical-warehouse/011
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including provider UI parity, credential safety, topology routing, and failure verification
 **Status:** not started

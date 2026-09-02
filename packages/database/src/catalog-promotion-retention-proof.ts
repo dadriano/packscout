@@ -1,6 +1,7 @@
 import {
   activeCatalogManifestStateV1Schema,
   CATALOG_RETENTION_COMPLETE_MILLISECONDS,
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   canonicalJson,
   catalogManifestActivateRequestSchema,
   catalogManifestBlockRequestSchema,
@@ -63,7 +64,10 @@ function parseCanonical<T>(body: string, schema: { parse(value: unknown): T }): 
   }
 }
 
-function canonicalPlatformKeys(body: string, sha256: string): readonly string[] {
+export function parseCatalogPromotionRetentionPlatformKeys(
+  body: string,
+  sha256: string,
+): readonly string[] {
   if (promotionV2Sha256(body) !== sha256) return proofIncomplete();
   let value: unknown;
   try {
@@ -71,10 +75,13 @@ function canonicalPlatformKeys(body: string, sha256: string): readonly string[] 
   } catch {
     return proofIncomplete();
   }
-  if (!Array.isArray(value) || value.length > 8 ||
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES ||
     value.some((key) => !providerCatalogPlatformKeyV1Schema.safeParse(key).success) ||
     value.some((key, index) => index > 0 && String(value[index - 1]) >= String(key)) ||
-    canonicalJson(value) !== body) return proofIncomplete();
+    canonicalJson(value) !== body
+  ) return proofIncomplete();
   return value as string[];
 }
 
@@ -1184,7 +1191,7 @@ export async function loadCatalogPromotionRetentionProof(
   if (!lane || lane.bootstrapState === "unverified" ||
     lane.bootstrapProviderSetBody === null ||
     lane.bootstrapProviderSetSha256 === null) return proofIncomplete();
-  const platformKeys = canonicalPlatformKeys(
+  const platformKeys = parseCatalogPromotionRetentionPlatformKeys(
     lane.bootstrapProviderSetBody, lane.bootstrapProviderSetSha256,
   );
   const [activeState, completedHeads, protections] = await Promise.all([

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import {
+  PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_FRAME_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES,
   PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS,
@@ -56,6 +57,17 @@ function catalogCategory(
   };
 }
 
+function catalogCategoryAt(index: number): Record<string, unknown> {
+  const publicCategoryId = `27000000-0000-5000-8000-${String(index)
+    .padStart(12, "0")}`;
+  return {
+    ...catalogCategory(`Category ${index}`),
+    publicCategoryId,
+    categoryKey: `category-${index}`,
+    pathPublicCategoryIds: [publicCategoryId],
+  };
+}
+
 function catalogCollectible(
   index: number,
   aliasCount = 0,
@@ -93,10 +105,12 @@ function catalogCollectible(
   };
 }
 
-function catalogAlias(): Record<string, unknown> {
+function catalogAlias(index = 1): Record<string, unknown> {
   return {
-    aliasPublicCollectibleId: "47000000-0000-5000-8000-000000000001",
-    canonicalPublicCollectibleId: "37000000-0000-5000-8000-000000000001",
+    aliasPublicCollectibleId: `47000000-0000-5000-8000-${String(index)
+      .padStart(12, "0")}`,
+    canonicalPublicCollectibleId: `37000000-0000-5000-8000-${String(index)
+      .padStart(12, "0")}`,
   };
 }
 
@@ -330,7 +344,7 @@ function runConstrainedMemoryChild(): Promise<string> {
       "--import",
       "tsx",
       "--test",
-      "--test-name-pattern=^bootstrap accepts a realistic 100k-collectible bounded graph$",
+      "--test-name-pattern=^bootstrap accepts the maximum-count representative consumer graph$",
       fileURLToPath(import.meta.url),
     ], {
       cwd: process.cwd(),
@@ -425,6 +439,43 @@ test("gateway refuses redirects and non-framed response shapes", async () => {
   assert.equal(redirect, "error");
 });
 
+test("gateway rejects every declared section count at the shared limit plus one", async (context) => {
+  const serialized = await serializedPin();
+  const metadata = { ...serialized };
+  for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
+    delete metadata[section];
+  }
+
+  for (const section of PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS) {
+    await context.test(section, async () => {
+      assert.equal(PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[section], 50_000);
+      const counts = Object.fromEntries(
+        PROVIDER_PROMOTION_BOOTSTRAP_SECTIONS.map((candidate) => [
+          candidate,
+          candidate === section
+            ? PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS[candidate] + 1
+            : 0,
+        ]),
+      );
+      const client = new ProviderPromotionBootstrapGatewayClient(options(
+        (async () => streamResponse([{
+          kind: "header",
+          version: PROVIDER_PROMOTION_BOOTSTRAP_STREAM_VERSION,
+          snapshotFingerprint: "f".repeat(64),
+          counts,
+          pin: metadata,
+        }])) as typeof globalThis.fetch,
+      ));
+
+      await assert.rejects(client.load(providerId), {
+        name: "DistributedPromotionGatewayResponseError",
+        code: "DISTRIBUTED_PROMOTION_GATEWAY_RESPONSE_INVALID",
+        message: "Distributed promotion gateway response is invalid.",
+      });
+    });
+  }
+});
+
 test("caller abort reaches the in-flight fetch without exposing its reason", async () => {
   let fetchSignal: AbortSignal | null = null;
   let fetchAborted = false;
@@ -473,21 +524,40 @@ test("bootstrap accepts a framed graph larger than the former 16 MiB cap", async
   assert.equal(pin.catalogCollectibles.length, 1_500);
 });
 
-test("bootstrap accepts a realistic 100k-collectible bounded graph", {
+test("bootstrap accepts the maximum-count representative consumer graph", {
   timeout: 120_000,
 }, async (context) => {
   if (process.env[MEMORY_CHILD_ENV] !== "1") {
     const output = await runConstrainedMemoryChild();
     const measurement = output.match(
-      /100k bootstrap wire=[^\n]+/u,
+      /maximum-count bootstrap wire=[^\n]+/u,
     )?.[0];
     assert.ok(measurement, output);
-    context.diagnostic(`${MEMORY_CHILD_HEAP_MIB} MiB heap child: ${measurement}`);
+    context.diagnostic(
+      `${MEMORY_CHILD_HEAP_MIB} MiB V8 old-space child: ${measurement}`,
+    );
     return;
   }
+  const catalogCategories = Array.from(
+    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCategories },
+    (_, index) => catalogCategoryAt(index + 1),
+  );
   const catalogCollectibles = Array.from(
-    { length: 100_000 },
+    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles },
     (_, index) => catalogCollectible(index + 1),
+  );
+  const catalogAliases = Array.from(
+    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases },
+    (_, index) => catalogAlias(index + 1),
+  );
+  const categoryCorrelations = Array.from(
+    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.categoryCorrelations },
+    (_, index) => ({
+      localCategoryId: `57000000-0000-4000-8000-${String(index + 1)
+        .padStart(12, "0")}`,
+      localEntityVersion: "1",
+      publicCategoryId: catalogCategoryId,
+    }),
   );
   const collectibleCorrelations = catalogCollectibles.map((collectible, index) => ({
     localCollectibleId: `57000000-0000-4000-8000-${String(index + 1)
@@ -496,8 +566,10 @@ test("bootstrap accepts a realistic 100k-collectible bounded graph", {
     publicCollectibleId: collectible.publicCollectibleId as string,
   }));
   const frames = await streamFrames(await serializedPin({
-    catalogCategories: [catalogCategory()],
+    catalogCategories,
     catalogCollectibles,
+    catalogAliases,
+    categoryCorrelations,
     collectibleCorrelations,
   }));
   const totalBytes = frames.reduce((total, frame) =>
@@ -510,10 +582,28 @@ test("bootstrap accepts a realistic 100k-collectible bounded graph", {
     30_000,
   ));
   const pin = await client.load(providerId);
-  assert.equal(pin.catalogCollectibles.length, 100_000);
-  assert.equal(pin.collectibleCorrelations.length, 100_000);
+  assert.equal(
+    pin.catalogCategories.length,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCategories,
+  );
+  assert.equal(
+    pin.catalogCollectibles.length,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles,
+  );
+  assert.equal(
+    pin.catalogAliases.length,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases,
+  );
+  assert.equal(
+    pin.categoryCorrelations.length,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.categoryCorrelations,
+  );
+  assert.equal(
+    pin.collectibleCorrelations.length,
+    PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.collectibleCorrelations,
+  );
   context.diagnostic(
-    `100k bootstrap wire=${(totalBytes / 1_024 / 1_024).toFixed(1)} MiB; ` +
+    `maximum-count bootstrap wire=${(totalBytes / 1_024 / 1_024).toFixed(1)} MiB; ` +
       `process maxRSS=${(process.resourceUsage().maxRSS / 1_024).toFixed(1)} MiB`,
   );
 });
