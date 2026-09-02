@@ -41,6 +41,11 @@
   object-fit: cover;
 }
 
+.frame[data-variant="thumbnail"] .image,
+.frame[data-variant="pack"] .image {
+  object-fit: contain;
+}
+
 .frame[data-variant="vendor"] .image {
   object-fit: contain;
 }
