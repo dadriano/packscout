@@ -5,6 +5,7 @@ import {
   CATALOG_RETENTION_SCHEMA_VERSION,
   MAX_CATALOG_RETENTION_DOCUMENTS_PER_MUTATION,
   MAX_CATALOG_RETENTION_OPERATION_RECEIPTS,
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
   REPACK_HEAT_AGGREGATION_VERSION,
   REPACK_HEAT_POLICY_VERSION,
@@ -35,6 +36,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { ensureImmutableCatalogManifest } from "./catalogManifestActivate";
+import { CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE } from
+  "./catalogManifestRetentionReferences";
 import { loadActiveCatalogManifestState } from "./catalogManifestState";
 import {
   buildCatalogManifestFromProviderPlans,
@@ -486,8 +489,10 @@ describe("catalog retention lifecycle", () => {
     const completed = await t.run((ctx) =>
       seedProviderCatalogPublishPlanGraph(ctx, plan, OLD_TIME)
     );
+    const manifestCount = CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE +
+      MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 2;
     const manifests = await Promise.all(
-      Array.from({ length: 42 }, (_, index) =>
+      Array.from({ length: manifestCount }, (_, index) =>
         buildCatalogManifestFromProviderPlans(
           [plan],
           `retention-backlog-${index.toString().padStart(2, "0")}`,
@@ -507,9 +512,9 @@ describe("catalog retention lifecycle", () => {
     const duplicate = await t.run(async (ctx) => {
       const ordered = await ctx.db.query("globalCatalogManifests")
         .withIndex("by_public_release_id")
-        .take(33);
-      const previous = ordered[31];
-      const boundary = ordered[32];
+        .take(CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE + 1);
+      const previous = ordered[CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE - 1];
+      const boundary = ordered[CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE];
       if (previous === undefined || boundary === undefined) {
         throw new Error("Expected a full manifest audit page.");
       }
@@ -549,7 +554,7 @@ describe("catalog retention lifecycle", () => {
     });
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
+    )).toHaveLength(manifestCount);
 
     const corrupted = await t.run(async (ctx) => {
       const state = await ctx.db.query("catalogRetentionState").unique();
@@ -587,52 +592,63 @@ describe("catalog retention lifecycle", () => {
     )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
+    )).toHaveLength(manifestCount);
 
     await t.run((ctx) =>
       ctx.db.patch("catalogManifestProviderReferences", corrupted.id, {
         platformKey: corrupted.platformKey,
       })
     );
-    const secondAudit = await execute(
-      t,
-      internal.catalogRetention.retainManifests,
-      await manifestRequest(t, {
-        operationId: "retention:backlog:audit-page-2",
-        generation: 1,
-        sequence: 1,
-      }),
-    );
-    expect(secondAudit.details).toMatchObject({
-      deletedManifestCount: 0,
-      deletedManifestReferenceCount: 0,
-      hasMore: true,
-    });
-    expect(await t.run((ctx) =>
-      ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
-
-    const deletion = await execute(
-      t,
-      internal.catalogRetention.retainManifests,
-      await manifestRequest(t, {
-        operationId: "retention:backlog:edge-page-2",
-        generation: 2,
-        sequence: 1,
-      }),
-    );
-    expect(deletion.details).toMatchObject({
+    let generation = first.retentionGeneration;
+    let sawIncompleteEdgeAudit = false;
+    let completionReceipt: any = null;
+    const maximumAuditCalls = Math.ceil(
+      manifestCount / CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE,
+    ) + 2;
+    for (let index = 0; index < maximumAuditCalls; index += 1) {
+      const receipt = await execute(
+        t,
+        internal.catalogRetention.retainManifests,
+        await manifestRequest(t, {
+          operationId: `retention:backlog:audit-page-${index + 2}`,
+          generation,
+          sequence: 1,
+        }),
+      );
+      generation = receipt.retentionGeneration;
+      const state = await t.run((ctx) =>
+        ctx.db.query("catalogRetentionState").unique()
+      );
+      if (state === null) throw new Error("Expected retention state.");
+      if (state.referenceAuditComplete) {
+        completionReceipt = receipt;
+        break;
+      }
+      if (state.referenceAuditPhase === "edges") {
+        sawIncompleteEdgeAudit = true;
+      }
+      expect(receipt.details).toMatchObject({
+        deletedManifestCount: 0,
+        deletedManifestReferenceCount: 0,
+        hasMore: true,
+      });
+      expect(await t.run((ctx) =>
+        ctx.db.query("globalCatalogManifests").collect()
+      )).toHaveLength(manifestCount);
+    }
+    expect(sawIncompleteEdgeAudit).toBe(true);
+    expect(completionReceipt?.details).toMatchObject({
       deletedManifestCount: 1,
       deletedManifestReferenceCount: 1,
       hasMore: true,
     });
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(41);
+    )).toHaveLength(manifestCount - 1);
     expect(await t.run((ctx) =>
       ctx.db.query("catalogRetentionState").unique()
     )).toMatchObject({
-      generation: 3,
+      generation,
       referenceAuditComplete: true,
       manifestPhaseComplete: false,
     });
