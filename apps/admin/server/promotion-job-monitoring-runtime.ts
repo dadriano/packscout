@@ -386,33 +386,69 @@ type DeadlineSettlement<T> =
   | { readonly state: "rejected" }
   | { readonly state: "timed_out" };
 
+interface DeadlineLatch {
+  readonly deadlineAt: number;
+  readonly expired: Promise<void>;
+  isExpired(): boolean;
+  close(): void;
+}
+
+function createDeadlineLatch(deadlineAt: number): DeadlineLatch {
+  let expired = false;
+  let resolveExpired!: () => void;
+  const expiration = new Promise<void>((resolve) => {
+    resolveExpired = resolve;
+  });
+  const expire = () => {
+    if (expired) return;
+    expired = true;
+    resolveExpired();
+  };
+  const remainingMs = deadlineAt - Date.now();
+  const timer = remainingMs > 0 ? setTimeout(expire, remainingMs) : null;
+  if (timer === null) expire();
+  return {
+    deadlineAt,
+    expired: expiration,
+    isExpired() {
+      if (!expired && Date.now() >= deadlineAt) expire();
+      return expired;
+    },
+    close() {
+      if (timer !== null) clearTimeout(timer);
+    },
+  };
+}
+
 async function settleByDeadline<T>(
   operation: () => Promise<T>,
-  deadlineAt: number,
+  deadline: DeadlineLatch,
 ): Promise<DeadlineSettlement<T>> {
-  const remainingMs = deadlineAt - Date.now();
   // Do not launch more provider work after the roster-wide budget expires.
   // Those rows still retain their central last-known evidence below.
-  if (remainingMs <= 0) return { state: "timed_out" };
-  const pending = Promise.resolve().then(operation);
+  if (deadline.isExpired()) return { state: "timed_out" };
+  let pending: Promise<T>;
+  try {
+    pending = Promise.resolve(operation());
+  } catch {
+    return { state: "rejected" };
+  }
   return new Promise((resolve) => {
     let finished = false;
-    const timer = setTimeout(() => {
+    void deadline.expired.then(() => {
       if (finished) return;
       finished = true;
       resolve({ state: "timed_out" });
-    }, remainingMs);
+    });
     void pending.then(
       (value) => {
         if (finished) return;
         finished = true;
-        clearTimeout(timer);
         resolve({ state: "fulfilled", value });
       },
       () => {
         if (finished) return;
         finished = true;
-        clearTimeout(timer);
         resolve({ state: "rejected" });
       },
     );
@@ -1152,52 +1188,58 @@ export class PromotionJobMonitoringReadService {
       idCodec: this.#ids,
       evaluatorCurrent,
     });
-    const providerViews = await mapBounded(providers, async (provider) => {
-      const central = await this.options.repository.readProviderEvidence({
-        organizationId: input.organizationId,
-        provider,
-        active: manifest.activeReleases.get(provider.providerKey) ?? null,
-      });
-      let routed: ProviderDatabaseOperationResult<LiveProviderPromotionMonitoringSnapshot>
-        | null = null;
-      let probeFailureCode: string | null = null;
-      if (provider.lifecycle === "active") {
-        const settlement = await settleByDeadline(
-          () => this.options.gateway.runWithAdminProviderDatabase(
-            {
-              organizationId: input.organizationId,
-              providerId: provider.id,
-              deadlineAt: providerReadDeadline,
-            },
-            (database) => this.#readLiveProvider(database, this.#now()),
-          ),
-          providerReadDeadline,
-        );
-        if (settlement.state === "fulfilled") {
-          routed = settlement.value;
-        } else {
-          probeFailureCode = settlement.state === "timed_out"
-            ? "MONITORING_PROBE_BUDGET_EXHAUSTED"
-            : "MONITORING_PROBE_FAILED";
+    const providerReadDeadlineLatch = createDeadlineLatch(providerReadDeadline);
+    let providerViews: PromotionJobMonitoringOverview["providers"];
+    try {
+      providerViews = await mapBounded(providers, async (provider) => {
+        const central = await this.options.repository.readProviderEvidence({
+          organizationId: input.organizationId,
+          provider,
+          active: manifest.activeReleases.get(provider.providerKey) ?? null,
+        });
+        let routed: ProviderDatabaseOperationResult<LiveProviderPromotionMonitoringSnapshot>
+          | null = null;
+        let probeFailureCode: string | null = null;
+        if (provider.lifecycle === "active") {
+          const settlement = await settleByDeadline(
+            () => this.options.gateway.runWithAdminProviderDatabase(
+              {
+                organizationId: input.organizationId,
+                providerId: provider.id,
+                deadlineAt: providerReadDeadlineLatch.deadlineAt,
+              },
+              (database) => this.#readLiveProvider(database, this.#now()),
+            ),
+            providerReadDeadlineLatch,
+          );
+          if (settlement.state === "fulfilled") {
+            routed = settlement.value;
+          } else {
+            probeFailureCode = settlement.state === "timed_out"
+              ? "MONITORING_PROBE_BUDGET_EXHAUSTED"
+              : "MONITORING_PROBE_FAILED";
+          }
         }
-      }
-      const centralFacts: ProviderPromotionMonitoringCentralFacts = {
-        activeRelease: central.activeRelease,
-        pendingGate: central.pendingGate,
-      };
-      return judgeProviderPromotionMonitoring({
-        roster: provider,
-        live: routed?.state === "reachable"
-          ? liveFacts(routed.value, central, this.#ids, scope)
-          : null,
-        lastKnown: lastKnownFacts(central, this.#ids, scope),
-        central: centralFacts,
-        routeFailureCode: routed?.state === "unreachable"
-          ? asFailureCode(routed.failureCode)
-          : probeFailureCode,
-        evaluatorCurrent,
+        const centralFacts: ProviderPromotionMonitoringCentralFacts = {
+          activeRelease: central.activeRelease,
+          pendingGate: central.pendingGate,
+        };
+        return judgeProviderPromotionMonitoring({
+          roster: provider,
+          live: routed?.state === "reachable"
+            ? liveFacts(routed.value, central, this.#ids, scope)
+            : null,
+          lastKnown: lastKnownFacts(central, this.#ids, scope),
+          central: centralFacts,
+          routeFailureCode: routed?.state === "unreachable"
+            ? asFailureCode(routed.failureCode)
+            : probeFailureCode,
+          evaluatorCurrent,
+        });
       });
-    });
+    } finally {
+      providerReadDeadlineLatch.close();
+    }
     return {
       observedAt: now.toISOString(),
       roster: {
