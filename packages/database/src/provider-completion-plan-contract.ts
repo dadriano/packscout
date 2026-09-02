@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   canonicalJson,
   globalCatalogProviderActiveObservationV1Schema,
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   providerReleaseCompletedHeadV1Schema,
   verifyProviderCatalogReleasePlanV1,
   type GlobalCatalogProviderActiveObservationV1,
@@ -197,7 +198,7 @@ export async function verifyProviderCompletedPublishPlanRelayProof(
   const canonicalActiveObservationBody = canonicalJson(activeObservation);
   if (
     Buffer.byteLength(canonicalPlanBody, "utf8") >
-      MAX_PROVIDER_COMPLETION_PLAN_CACHE_BYTES ||
+      MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES ||
     Buffer.byteLength(canonicalCompletedHeadBody, "utf8") > 256 * 1_024 ||
     Buffer.byteLength(canonicalActiveObservationBody, "utf8") > 256 * 1_024
   ) fail("PROVIDER_COMPLETION_PLAN_PROOF_TOO_LARGE");

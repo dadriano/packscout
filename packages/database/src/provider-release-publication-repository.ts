@@ -30,7 +30,8 @@ import {
   type ProviderActivityEvent,
 } from "./provider-activity-contract.ts";
 import {
-  loadProviderReleasePublicationSource,
+  hydrateProviderReleasePublicationSource,
+  loadProviderReleasePublicationMetadata,
   type ProviderReleasePublicationSource,
 } from "./provider-release-repository.ts";
 import {
@@ -683,11 +684,7 @@ export class ProviderReleasePublicationRepository {
     );
   }
 
-  /**
-   * Reads one immutable completion event, its accepted terminal attempt, and
-   * its full immutable release source in one provider snapshot. This never
-   * opens or participates in a central transaction.
-   */
+  /** Verifies compact completion evidence before hydrating immutable batches. */
   async loadCompletedPublishPlanSource(input: Readonly<{
     event: ProviderActivityEvent;
   }>): Promise<ProviderCompletedPublishPlanSource> {
@@ -696,7 +693,7 @@ export class ProviderReleasePublicationRepository {
     const expectedKind = completion.state === "complete"
       ? "finalize"
       : "confirmReuse";
-    return this.provider.$transaction(async (transaction) => {
+    const verified = await this.provider.$transaction(async (transaction) => {
       const storedEvent = await transaction.provider_activity_outbox.findUnique({
         where: { id: event.id },
       });
@@ -728,7 +725,7 @@ export class ProviderReleasePublicationRepository {
         repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
       }
 
-      const source = await loadProviderReleasePublicationSource(
+      const metadata = await loadProviderReleasePublicationMetadata(
         transaction,
         completion.providerReleaseId,
       );
@@ -766,34 +763,44 @@ export class ProviderReleasePublicationRepository {
         parsed.operationKind !== expectedKind
       ) repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
       const receipt = parsed as ProviderTerminalReceipt;
-      const recordCount = source.batches.reduce(
-        (total, batch) => total + batch.recordCount,
-        0,
-      );
+      if (expectedKind === "finalize") {
+        try {
+          await verifyProviderPublicationFinalizeTranscript({
+            transaction,
+            providerReleaseId: completion.providerReleaseId,
+            terminalRequest: parseRequest(operation) as
+              ProviderReleaseFinalizeRequest,
+            parseStartRequest: (start) => parseRequest({
+              ...start,
+              operationKind: "start",
+            }) as ProviderReleaseStartRequest,
+          });
+        } catch (error) {
+          if (error instanceof ProviderPublicationCompactProofError) {
+            repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+          }
+          throw error;
+        }
+      }
       if (
-        source.release.lifecycle !== "complete" ||
-        source.descriptor.providerReleaseId !== completion.providerReleaseId ||
-        source.descriptor.catalogVersionId !== completion.catalogVersionId ||
-        source.descriptor.catalogContentHash !== completion.catalogContentHash ||
-        source.descriptor.contentHash !== completion.providerReleaseContentHash ||
+        metadata.release.lifecycle !== "complete" ||
+        metadata.descriptor.providerReleaseId !== completion.providerReleaseId ||
+        metadata.descriptor.catalogVersionId !== completion.catalogVersionId ||
+        metadata.descriptor.catalogContentHash !== completion.catalogContentHash ||
+        metadata.descriptor.contentHash !== completion.providerReleaseContentHash ||
         receipt.publicProviderReleaseId !== completion.publicProviderReleaseId ||
         receipt.details.release.providerReleaseFingerprint !==
           completion.providerReleaseFingerprint ||
         receipt.providerCheckpoint.settledSequence !==
           completion.completedThroughChangeSequence ||
-        stored.accepted_content_hash !== source.descriptor.contentHash ||
-        stored.accepted_record_count !== recordCount
+        stored.accepted_content_hash !== metadata.descriptor.contentHash ||
+        stored.accepted_record_count !== metadata.batchRecordCount
       ) repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
       return {
-        providerId: source.descriptor.providerId,
-        providerKey: source.descriptor.providerKey,
-        providerReleaseId: source.descriptor.providerReleaseId,
+        metadata,
         publicProviderReleaseId: receipt.publicProviderReleaseId,
         providerReleaseFingerprint:
           receipt.details.release.providerReleaseFingerprint,
-        catalogVersionId: source.descriptor.catalogVersionId,
-        catalogContentHash: source.descriptor.catalogContentHash,
-        providerReleaseContentHash: source.descriptor.contentHash,
         completedThroughChangeSequence:
           BigInt(completion.completedThroughChangeSequence),
         artifactAttemptId: stored.operation.id,
@@ -801,12 +808,32 @@ export class ProviderReleasePublicationRepository {
         terminalOperationId: receipt.operationId,
         terminalReceiptSha256: stored.response_digest,
         receipt,
-        publicationSource: source,
       };
     }, {
       ...TRANSACTION_OPTIONS,
       isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
     });
+    const source = await hydrateProviderReleasePublicationSource(
+      this.provider,
+      verified.metadata,
+    );
+    return {
+      providerId: source.descriptor.providerId,
+      providerKey: source.descriptor.providerKey,
+      providerReleaseId: source.descriptor.providerReleaseId,
+      publicProviderReleaseId: verified.publicProviderReleaseId,
+      providerReleaseFingerprint: verified.providerReleaseFingerprint,
+      catalogVersionId: source.descriptor.catalogVersionId,
+      catalogContentHash: source.descriptor.catalogContentHash,
+      providerReleaseContentHash: source.descriptor.contentHash,
+      completedThroughChangeSequence: verified.completedThroughChangeSequence,
+      artifactAttemptId: verified.artifactAttemptId,
+      terminalOperationKind: verified.terminalOperationKind,
+      terminalOperationId: verified.terminalOperationId,
+      terminalReceiptSha256: verified.terminalReceiptSha256,
+      receipt: verified.receipt,
+      publicationSource: source,
+    };
   }
 
   async recordIntent(input: {

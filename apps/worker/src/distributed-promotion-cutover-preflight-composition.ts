@@ -15,7 +15,7 @@ import type {
 type ActivationStore = Pick<PrismaManifestActivationRepository, "loadMirror">;
 type PlanStore = Pick<
   PrismaProviderCompletionPublishPlanRepository,
-  "loadForManifestReferences"
+  "loadMetadataForManifestReferences"
 >;
 
 function references(manifest: GlobalCatalogManifestV1) {
@@ -60,10 +60,10 @@ export async function readDistributedPromotionManifestPlanCacheCoverage(
   const [activePlans, previousPlans] = await Promise.all([
     activeReferences.length === 0
       ? Promise.resolve(null)
-      : dependencies.plans.loadForManifestReferences(activeReferences),
+      : dependencies.plans.loadMetadataForManifestReferences(activeReferences),
     previousReferences.length === 0
       ? Promise.resolve([])
-      : dependencies.plans.loadForManifestReferences(previousReferences),
+      : dependencies.plans.loadMetadataForManifestReferences(previousReferences),
   ]);
   const after = await dependencies.activations.loadMirror();
   return Object.freeze({

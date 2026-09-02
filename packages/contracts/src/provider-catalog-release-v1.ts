@@ -60,6 +60,13 @@ export const MAX_PROVIDER_CATALOG_RELEASE_BATCH_BYTES = 48 * 1_024;
 export const MAX_PROVIDER_CATALOG_RELEASE_HTTP_BODY_BYTES = 128 * 1_024;
 export const MAX_PROVIDER_CATALOG_RELEASE_BATCH_COUNT = 4_096;
 export const MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES = 100_000;
+/**
+ * Maximum serialized provider-plan bytes admitted into one in-memory
+ * publication or manifest-composition boundary. Storage may retain larger
+ * artifacts, but callers must not hydrate them without a streaming design.
+ */
+export const MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES =
+  32 * 1_024 * 1_024;
 
 const MAX_SIGNED_INT64 = BigInt("9223372036854775807");
 const nonNegativeSafeIntegerSchema = z.number().int().safe().min(0);

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PRODUCTION_PROVIDER_RELEASE_PATHS,
   PROVIDER_RELEASE_PUBLICATION_SCHEMA_VERSION,
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   canonicalJson,
   providerReleaseBlockReceiptSchema,
   providerReleaseBlockRequestSchema,
@@ -150,6 +151,7 @@ export interface DistributedProviderPublicationResult {
 
 export type DistributedProviderPublicationFailureCode =
   | "PROVIDER_PUBLICATION_SOURCE_INVALID"
+  | "PROVIDER_PUBLICATION_SOURCE_TOO_LARGE"
   | "PROVIDER_PUBLICATION_DEADLINE"
   | "PROVIDER_PUBLICATION_INTENT_FAILED"
   | "PROVIDER_PUBLICATION_RECEIPT_INVALID"
@@ -470,6 +472,15 @@ export class DistributedProviderReleasePublicationService {
       if (plan.classification === "blocked") {
         throw new DistributedProviderPublicationError(
           "PROVIDER_PUBLICATION_SOURCE_INVALID",
+          false,
+        );
+      }
+      if (
+        Buffer.byteLength(canonicalJson(plan), "utf8") >
+          MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES
+      ) {
+        throw new DistributedProviderPublicationError(
+          "PROVIDER_PUBLICATION_SOURCE_TOO_LARGE",
           false,
         );
       }

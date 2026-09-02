@@ -2,6 +2,7 @@ import {
   activeCatalogManifestStateV1Schema,
   approvedPublicCatalogConfigurationV1Schema,
   canonicalJson,
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   recomputeProviderCatalogReleaseGoverningHashV1,
   sha256CanonicalJson,
   verifyGlobalCatalogManifestV1,
@@ -14,7 +15,9 @@ import {
   PrismaManifestActivationRepository,
   PrismaManifestGateIntentRepository,
   PrismaProviderCompletionPublishPlanRepository,
+  ProviderCompletionPublishPlanCapacityError,
   PromotionJobPersistenceError,
+  providerCompletionPlanHydrationByteCount,
   type CachedProviderCompletionPublishPlan,
   type CentralPrismaClient,
   type ManifestActivationMirror,
@@ -350,7 +353,13 @@ implements VerifiedManifestGateProofSource {
               providerReleaseId: claim.targetProviderReleaseId!,
               catalogVersionId: claim.targetCatalogVersionId!,
             }, deadline);
-      } catch {
+      } catch (error) {
+        if (error instanceof ProviderCompletionPublishPlanCapacityError) {
+          return resolution(
+            "blocked",
+            "PROVIDER_MANIFEST_GATE_PLAN_CAPACITY_EXCEEDED",
+          );
+        }
         return resolution(
           "deferred",
           "PROVIDER_MANIFEST_GATE_PLAN_CACHE_UNAVAILABLE",
@@ -407,13 +416,23 @@ implements VerifiedManifestGateProofSource {
             providerReleaseFingerprint: reference.providerReleaseFingerprint,
           })),
           deadline,
+          MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES -
+            (target === null
+              ? 0
+              : providerCompletionPlanHydrationByteCount(target)),
         );
         if (loaded === null) return resolution(
           "deferred",
           "PROVIDER_MANIFEST_GATE_RETAINED_PLAN_MISSING",
         );
         retainedPlans = loaded;
-      } catch {
+      } catch (error) {
+        if (error instanceof ProviderCompletionPublishPlanCapacityError) {
+          return resolution(
+            "blocked",
+            "PROVIDER_MANIFEST_GATE_PLAN_CAPACITY_EXCEEDED",
+          );
+        }
         return resolution(
           "deferred",
           "PROVIDER_MANIFEST_GATE_RETAINED_PLAN_UNAVAILABLE",

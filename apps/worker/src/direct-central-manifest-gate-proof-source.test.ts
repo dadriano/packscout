@@ -4,6 +4,7 @@ import {
   activeCatalogManifestStateV1Schema,
   approvedPublicCatalogConfigurationV1Schema,
   buildGlobalCatalogAggregateObservationV1,
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   recomputeProviderCatalogReleaseGoverningHashV1,
   sha256CanonicalJson,
   type ActiveCatalogManifestStateV1,
@@ -11,7 +12,9 @@ import {
 } from "@packscout/contracts";
 import {
   PUBLIC_CATALOG_CONFIGURATION_HASH_DOMAIN,
+  ProviderCompletionPublishPlanCapacityError,
   PromotionJobPersistenceError,
+  providerCompletionPlanHydrationByteCount,
   verifyProviderCompletedPublishPlanRelayProof,
   type CachedProviderCompletionPublishPlan,
   type ManifestActivationMirror,
@@ -199,6 +202,7 @@ function claim(input: Readonly<{
 class MemoryPlanStore {
   readonly retainedRequests: string[][] = [];
   readonly readDeadlines: number[] = [];
+  readonly aggregateBudgets: number[] = [];
 
   constructor(
     private readonly values: readonly CachedProviderCompletionPublishPlan[],
@@ -234,17 +238,25 @@ class MemoryPlanStore {
     providerKey: string;
     publicProviderReleaseId: string;
     providerReleaseFingerprint: string;
-  }>[], deadline?: Readonly<{ deadlineAt: number }>) {
+  }>[], deadline?: Readonly<{ deadlineAt: number }>, maximumAggregateBytes =
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES) {
     if (deadline !== undefined) this.readDeadlines.push(deadline.deadlineAt);
+    this.aggregateBudgets.push(maximumAggregateBytes);
     this.retainedRequests.push(references.map(({ providerKey }) => providerKey));
     const matches = references.map((reference) => this.values.find((value) =>
       value.providerKey === reference.providerKey &&
       value.publicProviderReleaseId === reference.publicProviderReleaseId &&
       value.providerReleaseFingerprint ===
         reference.providerReleaseFingerprint));
-    return matches.some((value) => value === undefined)
-      ? null
-      : matches as readonly CachedProviderCompletionPublishPlan[];
+    if (matches.some((value) => value === undefined)) return null;
+    const plans = matches as readonly CachedProviderCompletionPublishPlan[];
+    if (plans.reduce(
+      (total, value) => total + providerCompletionPlanHydrationByteCount(value),
+      0,
+    ) > maximumAggregateBytes) {
+      throw new ProviderCompletionPublishPlanCapacityError();
+    }
+    return plans;
   }
 }
 
@@ -340,6 +352,30 @@ test("advances A from central cache while unavailable B needs no provider read",
   assert.deepEqual(afterB, beforeB);
   assert.deepEqual(result.target.proof.completedHead, a2.completedHead);
   assert.deepEqual(result.target.proof.activeObservation, a2.activeObservation);
+});
+
+test("blocks before composition when target and retained plans exceed capacity", async () => {
+  const [a1, a2Base, b1] = await Promise.all([
+    cachedPlan(A1), cachedPlan(A2), cachedPlan(B1),
+  ]);
+  const active = await activeFixture([a1, b1]);
+  const a2 = {
+    ...a2Base,
+    planByteCount: MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES -
+      a2Base.completedHeadByteCount - a2Base.activeObservationByteCount - 1,
+  };
+  const plans = new MemoryPlanStore([a1, a2, b1]);
+  const result = await source({ plans, mirror: active.mirror }).resolveTarget({
+    claim: claim({ evidenceDigest: a2.evidenceDigest }),
+    currentManifest: active.manifest,
+    currentActiveState: active.state,
+  });
+
+  assert.deepEqual(result, {
+    state: "blocked",
+    failureCode: "PROVIDER_MANIFEST_GATE_PLAN_CAPACITY_EXCEEDED",
+  });
+  assert.deepEqual(plans.aggregateBudgets, [1]);
 });
 
 test("blocks an implicit completion from adding an absent provider", async () => {

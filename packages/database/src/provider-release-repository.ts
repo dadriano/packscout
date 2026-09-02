@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   packscoutPublicIdentityUuid,
   type BuiltProviderRelease,
   type ProviderReleaseBatch,
@@ -241,6 +242,7 @@ export type ProviderReleaseAssemblyFailureCode =
   | "PROVIDER_RELEASE_SNAPSHOT_LIMIT"
   | "PROVIDER_RELEASE_SNAPSHOT_INVALID"
   | "PROVIDER_RELEASE_STORED_CONFLICT"
+  | "PROVIDER_RELEASE_PUBLICATION_TOO_LARGE"
   | "PROVIDER_RELEASE_NOT_FOUND"
   | "PROVIDER_RELEASE_NOT_PUBLISHABLE";
 
@@ -456,6 +458,13 @@ export interface ProviderReleasePublicationSource {
   readonly descriptor: ProviderReleaseDescriptor;
   readonly batches: readonly ProviderReleaseBatch[];
   readonly publicEquivalenceHash: string;
+}
+
+export interface ProviderReleasePublicationMetadata {
+  readonly release: StoredProviderRelease;
+  readonly descriptor: ProviderReleaseDescriptor;
+  readonly batchRecordCount: number;
+  readonly payloadByteCount: number;
 }
 
 async function requireProviderPinPreflight(input: {
@@ -839,7 +848,7 @@ const RELEASE_BATCH_KIND_ORDER = new Map<ProviderReleaseBatchKind, number>([
 ]);
 
 async function loadStoredBatches(
-  transaction: ProviderTransactionClient,
+  transaction: Pick<ProviderPrismaClient, "provider_release_batches">,
   providerReleaseId: string,
   phases?: ProviderReleaseTransactionPhases,
 ): Promise<readonly ProviderReleaseBatch[]> {
@@ -1176,6 +1185,19 @@ export async function loadProviderReleasePublicationSource(
   transaction: ProviderTransactionClient,
   providerReleaseId: string,
 ): Promise<ProviderReleasePublicationSource> {
+  const metadata = await loadProviderReleasePublicationMetadata(
+    transaction,
+    providerReleaseId,
+  );
+  return hydrateProviderReleasePublicationSource(transaction, metadata);
+}
+
+export async function loadProviderReleasePublicationMetadata(
+  transaction: Pick<ProviderPrismaClient,
+    "database_identity" | "provider_releases" | "$queryRaw"
+  >,
+  providerReleaseId: string,
+): Promise<ProviderReleasePublicationMetadata> {
   const [identity, row] = await Promise.all([
     transaction.database_identity.findUniqueOrThrow({
       where: { singleton_key: true },
@@ -1210,13 +1232,67 @@ export async function loadProviderReleasePublicationSource(
   ) {
     throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_NOT_PUBLISHABLE");
   }
+  const [sizes] = await transaction.$queryRaw<Array<{
+    batchCount: bigint;
+    batchRecordCount: bigint;
+    payloadByteCount: bigint;
+  }>>(ProviderPrisma.sql`
+    select count(*)::bigint as "batchCount",
+           coalesce(sum(record_count), 0)::bigint as "batchRecordCount",
+           coalesce(sum(octet_length(payload::text)), 0)::bigint
+             as "payloadByteCount"
+    from provider_release_batches
+    where provider_release_id = ${providerReleaseId}::uuid
+  `);
+  if (
+    sizes === undefined ||
+    sizes.batchCount !== BigInt(row.batch_count) ||
+    sizes.batchRecordCount > BigInt(Number.MAX_SAFE_INTEGER) ||
+    sizes.payloadByteCount > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_STORED_CONFLICT");
+  }
+  if (
+    sizes.payloadByteCount >
+      BigInt(MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES)
+  ) {
+    throw new ProviderReleaseAssemblyError(
+      "PROVIDER_RELEASE_PUBLICATION_TOO_LARGE",
+    );
+  }
+  const release = storedRelease(row);
+  return {
+    release,
+    descriptor: release.descriptor,
+    batchRecordCount: Number(sizes.batchRecordCount),
+    payloadByteCount: Number(sizes.payloadByteCount),
+  };
+}
+
+export async function hydrateProviderReleasePublicationSource(
+  provider: Pick<ProviderPrismaClient, "provider_release_batches">,
+  metadata: ProviderReleasePublicationMetadata,
+): Promise<ProviderReleasePublicationSource> {
   try {
-    const source = await requireStoredIntegrity(transaction, row);
+    const batches = await loadStoredBatches(provider, metadata.release.id);
+    const publicEquivalenceHash = await assertProviderReleaseIntegrity({
+      descriptor: metadata.descriptor,
+      batches,
+    });
+    if (
+      batches.length !== metadata.release.batchCount ||
+      batches.reduce((total, batch) => total + batch.recordCount, 0) !==
+        metadata.batchRecordCount
+    ) {
+      throw new ProviderReleaseIntegrityError(
+        "Stored provider release metadata changed during hydration.",
+      );
+    }
     return {
-      release: source.release,
-      descriptor: source.release.descriptor,
-      batches: source.batches,
-      publicEquivalenceHash: source.publicEquivalenceHash,
+      release: metadata.release,
+      descriptor: metadata.descriptor,
+      batches,
+      publicEquivalenceHash,
     };
   } catch (error) {
     if (error instanceof ProviderReleaseIntegrityError) {
@@ -1319,12 +1395,22 @@ export class ProviderReleaseRepository {
     deadline?: ProviderReleaseSourceTransactionDeadline,
   ): Promise<ProviderReleasePublicationSource> {
     const id = requireProviderReleaseId(providerReleaseId);
-    return withPublicationSourceDeadline(
-      deadline,
-      () => this.provider.$transaction(
-        (transaction) => loadProviderReleasePublicationSource(transaction, id),
+    return withPublicationSourceDeadline(deadline, async () => {
+      const metadata = await this.provider.$transaction(
+        (transaction) => loadProviderReleasePublicationMetadata(transaction, id),
         publicationSourceTransactionOptions(deadline),
-      ),
-    );
+      );
+      if (deadline !== undefined && Date.now() >= deadline.deadlineAt) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+      }
+      const source = await hydrateProviderReleasePublicationSource(
+        this.provider,
+        metadata,
+      );
+      if (deadline !== undefined && Date.now() >= deadline.deadlineAt) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+      }
+      return source;
+    });
   }
 }

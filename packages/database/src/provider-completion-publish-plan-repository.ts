@@ -1,4 +1,5 @@
 import {
+  MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
   type GlobalCatalogProviderActiveObservationV1,
   type ProviderCatalogReleasePublishPlanV1,
   type ProviderReleaseCompletedHeadV1,
@@ -97,11 +98,14 @@ interface RetentionRow extends Omit<PlanRow,
   | "planBytes"
   | "completedHeadBytes"
   | "activeObservationBytes"
-  | "activityEventType"
 > {
   planByteCount: number;
   completedHeadByteCount: number;
   activeObservationByteCount: number;
+}
+
+interface ExplicitTargetRow extends RetentionRow {
+  identityConflict: boolean;
 }
 
 const planProjection = CentralPrisma.sql`
@@ -151,6 +155,7 @@ const retentionProjection = CentralPrisma.sql`
   cache.terminal_receipt_sha256 as "terminalReceiptSha256",
   cache.evidence_digest as "evidenceDigest",
   event.event_digest as "activityEvidenceDigest",
+  event.event_type as "activityEventType",
   event.event_at as "activityEventAt",
   event.received_at as "activityReceivedAt",
   cache.plan_sha256 as "planSha256",
@@ -213,6 +218,26 @@ export interface CachedProviderCompletionPublishPlan
   readonly activeObservation: GlobalCatalogProviderActiveObservationV1;
 }
 
+export class ProviderCompletionPublishPlanCapacityError extends Error {
+  readonly code = "PROVIDER_COMPLETION_PLAN_CAPACITY_EXCEEDED";
+
+  constructor() {
+    super("Provider completion plan capacity was exceeded.");
+    this.name = "ProviderCompletionPublishPlanCapacityError";
+  }
+}
+
+export function providerCompletionPlanHydrationByteCount(
+  metadata: Pick<ProviderCompletionPublishPlanRetentionMetadata,
+    | "planByteCount"
+    | "completedHeadByteCount"
+    | "activeObservationByteCount"
+  >,
+): number {
+  return metadata.planByteCount + metadata.completedHeadByteCount +
+    metadata.activeObservationByteCount;
+}
+
 function repositoryFailure(): never {
   throw new Error("Provider completion publish-plan cache is inconsistent.");
 }
@@ -236,7 +261,8 @@ function parseBody(value: string): unknown {
 function validMetadata(row: Omit<RetentionRow,
   "planByteCount" | "completedHeadByteCount" | "activeObservationByteCount"
 >): boolean {
-  return row.providerKey.length <= 53 && PROVIDER_KEY_PATTERN.test(row.providerKey) &&
+  return row.activityEventType === "provider_release_completed" &&
+    row.providerKey.length <= 53 && PROVIDER_KEY_PATTERN.test(row.providerKey) &&
     row.completedThroughChangeSequence > 0n &&
     (row.terminalOperationKind === "finalize" ||
       row.terminalOperationKind === "confirmReuse") &&
@@ -299,6 +325,31 @@ function retentionMetadata(row: RetentionRow):
   };
 }
 
+function requireHydrationCapacity(
+  metadata: readonly ProviderCompletionPublishPlanRetentionMetadata[],
+  maximumBytes = MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
+): void {
+  if (
+    !Number.isSafeInteger(maximumBytes) || maximumBytes < 0 ||
+    maximumBytes > MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES
+  ) repositoryFailure();
+  let total = 0;
+  for (const item of metadata) {
+    total += providerCompletionPlanHydrationByteCount(item);
+    if (!Number.isSafeInteger(total) || total > maximumBytes) {
+      throw new ProviderCompletionPublishPlanCapacityError();
+    }
+  }
+}
+
+function requireReadTime(deadline?: ProviderCompletionPlanReadDeadline): void {
+  if (deadline !== undefined && Date.now() >= deadline.deadlineAt) {
+    throw Object.assign(new Error("Provider plan read deadline reached."), {
+      code: "PROMOTION_JOB_DEADLINE_EXCEEDED",
+    });
+  }
+}
+
 async function cachedPlan(row: PlanRow): Promise<CachedProviderCompletionPublishPlan> {
   if (row.activityEventType !== "provider_release_completed" || !validMetadata(row)) {
     repositoryFailure();
@@ -349,39 +400,24 @@ async function cachedPlan(row: PlanRow): Promise<CachedProviderCompletionPublish
   };
 }
 
-function rowMatches(
-  row: PlanRow,
-  input: Readonly<{
-    eventId: string;
-    evidenceDigest: string;
-    verifiedAt: Date;
-    proof: VerifiedProviderCompletedPublishPlanRelayProof;
-  }>,
-): boolean {
-  const proof = input.proof;
-  return row.eventId === input.eventId &&
-    row.providerId === proof.providerId &&
-    row.providerKey === proof.providerKey &&
-    row.providerReleaseId === proof.providerReleaseId &&
-    row.publicProviderReleaseId === proof.publicProviderReleaseId &&
-    row.providerReleaseFingerprint === proof.providerReleaseFingerprint &&
-    row.catalogVersionId === proof.catalogVersionId &&
-    row.catalogContentHash === proof.catalogContentHash &&
-    row.providerReleaseContentHash === proof.providerReleaseContentHash &&
-    row.completedThroughChangeSequence ===
-      proof.completedThroughChangeSequence &&
-    row.artifactAttemptId === proof.artifactAttemptId &&
-    row.terminalOperationKind === proof.terminalOperationKind &&
-    row.terminalOperationId === proof.terminalOperationId &&
-    row.terminalReceiptSha256 === proof.terminalReceiptSha256 &&
-    row.evidenceDigest === input.evidenceDigest &&
-    row.activityEvidenceDigest === input.evidenceDigest &&
-    row.planSha256 === proof.planSha256 &&
-    body(row.planBytes) === proof.canonicalPlanBody &&
-    row.completedHeadSha256 === proof.completedHeadSha256 &&
-    body(row.completedHeadBytes) === proof.canonicalCompletedHeadBody &&
-    row.activeObservationSha256 === proof.activeObservationSha256 &&
-    body(row.activeObservationBytes) === proof.canonicalActiveObservationBody;
+async function hydrateExactEvent(
+  central: CentralPrismaClient,
+  eventId: string,
+  deadline?: ProviderCompletionPlanReadDeadline,
+): Promise<CachedProviderCompletionPublishPlan | null> {
+  requireReadTime(deadline);
+  const [row] = await boundedRead(
+    central,
+    (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
+      select ${planProjection} from ${joinedTables}
+      where cache.event_id = ${eventId}::uuid
+    `),
+    deadline,
+  );
+  if (row === undefined) return null;
+  const cached = await cachedPlan(row);
+  requireReadTime(deadline);
+  return cached;
 }
 
 /** Central immutable plan cache; it never opens a provider connection. */
@@ -398,6 +434,15 @@ export class PrismaProviderCompletionPublishPlanRepository {
     assertPromotionJobSha256(input.evidenceDigest);
     if (!validDate(input.verifiedAt)) repositoryFailure();
     const proof = input.proof;
+    const planBytes = Buffer.from(proof.canonicalPlanBody, "utf8");
+    const completedHeadBytes = Buffer.from(
+      proof.canonicalCompletedHeadBody,
+      "utf8",
+    );
+    const activeObservationBytes = Buffer.from(
+      proof.canonicalActiveObservationBody,
+      "utf8",
+    );
     const [scope] = await transaction.$queryRaw<Array<{
       providerKey: string;
       catalogLifecycle: string;
@@ -424,45 +469,39 @@ export class PrismaProviderCompletionPublishPlanRepository {
         ))
       ) acquired
     `);
-    const priorIdentity = await transaction.$queryRaw<Array<{
-      providerReleaseId: string;
-      publicProviderReleaseId: string;
-      providerReleaseFingerprint: string;
-      catalogVersionId: string;
-      catalogContentHash: string;
-      providerReleaseContentHash: string;
-      planSha256: string;
-      planBytes: Uint8Array;
+    const [priorIdentity] = await transaction.$queryRaw<Array<{
+      conflict: boolean;
     }>>(CentralPrisma.sql`
-      select provider_release_id::text as "providerReleaseId",
-             public_provider_release_id::text as "publicProviderReleaseId",
-             provider_release_fingerprint as "providerReleaseFingerprint",
-             catalog_version_id::text as "catalogVersionId",
-             catalog_content_hash as "catalogContentHash",
-             provider_release_content_hash as "providerReleaseContentHash",
-             plan_sha256 as "planSha256", plan_bytes as "planBytes"
-      from provider_completion_publish_plans
-      where provider_id = ${proof.providerId}::uuid and (
-        provider_release_id = ${proof.providerReleaseId}::uuid
-        or (
-          public_provider_release_id = ${proof.publicProviderReleaseId}::uuid
-          and provider_release_fingerprint =
-            ${proof.providerReleaseFingerprint}
+      select exists (
+        select 1 from provider_completion_publish_plans existing
+        where existing.provider_id = ${proof.providerId}::uuid and (
+          existing.provider_release_id = ${proof.providerReleaseId}::uuid
+          or (
+            existing.public_provider_release_id =
+              ${proof.publicProviderReleaseId}::uuid
+            and existing.provider_release_fingerprint =
+              ${proof.providerReleaseFingerprint}
+          )
+        ) and (
+          existing.plan_sha256 <> ${proof.planSha256}
+          or existing.plan_bytes <> ${planBytes}
+          or (
+            existing.provider_release_id = ${proof.providerReleaseId}::uuid
+            and (
+              existing.public_provider_release_id <>
+                ${proof.publicProviderReleaseId}::uuid
+              or existing.provider_release_fingerprint <>
+                ${proof.providerReleaseFingerprint}
+              or existing.catalog_version_id <> ${proof.catalogVersionId}::uuid
+              or existing.catalog_content_hash <> ${proof.catalogContentHash}
+              or existing.provider_release_content_hash <>
+                ${proof.providerReleaseContentHash}
+            )
+          )
         )
-      )
-      for share
+      ) as conflict
     `);
-    if (priorIdentity.some((row) =>
-      row.planSha256 !== proof.planSha256 ||
-      body(row.planBytes) !== proof.canonicalPlanBody ||
-      (row.providerReleaseId === proof.providerReleaseId && (
-        row.publicProviderReleaseId !== proof.publicProviderReleaseId ||
-        row.providerReleaseFingerprint !== proof.providerReleaseFingerprint ||
-        row.catalogVersionId !== proof.catalogVersionId ||
-        row.catalogContentHash !== proof.catalogContentHash ||
-        row.providerReleaseContentHash !== proof.providerReleaseContentHash
-      ))
-    )) repositoryFailure();
+    if (priorIdentity?.conflict !== false) repositoryFailure();
 
     const inserted = await transaction.$executeRaw(CentralPrisma.sql`
       insert into provider_completion_publish_plans (
@@ -484,16 +523,47 @@ export class PrismaProviderCompletionPublishPlanRepository {
         ${proof.completedThroughChangeSequence}, ${proof.artifactAttemptId}::uuid,
         ${proof.terminalOperationKind}, ${proof.terminalOperationId},
         ${proof.terminalReceiptSha256}, ${input.evidenceDigest},
-        ${proof.planSha256}, ${Buffer.from(proof.canonicalPlanBody, "utf8")},
+        ${proof.planSha256}, ${planBytes},
         ${proof.completedHeadSha256},
-        ${Buffer.from(proof.canonicalCompletedHeadBody, "utf8")},
+        ${completedHeadBytes},
         ${proof.activeObservationSha256},
-        ${Buffer.from(proof.canonicalActiveObservationBody, "utf8")},
+        ${activeObservationBytes},
         ${input.verifiedAt}, ${input.verifiedAt}
       ) on conflict do nothing
     `);
-    const rows = await transaction.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-      select ${planProjection} from ${joinedTables}
+    const rows = await transaction.$queryRaw<Array<{
+      matches: boolean;
+    }>>(CentralPrisma.sql`
+      select (
+        cache.event_id = ${input.eventId}::uuid
+        and cache.provider_id = ${proof.providerId}::uuid
+        and provider.provider_key = ${proof.providerKey}
+        and cache.provider_release_id = ${proof.providerReleaseId}::uuid
+        and cache.public_provider_release_id =
+          ${proof.publicProviderReleaseId}::uuid
+        and cache.provider_release_fingerprint =
+          ${proof.providerReleaseFingerprint}
+        and cache.catalog_version_id = ${proof.catalogVersionId}::uuid
+        and cache.catalog_content_hash = ${proof.catalogContentHash}
+        and cache.provider_release_content_hash =
+          ${proof.providerReleaseContentHash}
+        and cache.completed_through_change_sequence =
+          ${proof.completedThroughChangeSequence}
+        and cache.artifact_attempt_id = ${proof.artifactAttemptId}::uuid
+        and cache.terminal_operation_kind = ${proof.terminalOperationKind}
+        and cache.terminal_operation_id = ${proof.terminalOperationId}
+        and cache.terminal_receipt_sha256 = ${proof.terminalReceiptSha256}
+        and cache.evidence_digest = ${input.evidenceDigest}
+        and event.event_digest = ${input.evidenceDigest}
+        and event.event_type = 'provider_release_completed'
+        and cache.plan_sha256 = ${proof.planSha256}
+        and cache.plan_bytes = ${planBytes}
+        and cache.completed_head_sha256 = ${proof.completedHeadSha256}
+        and cache.completed_head_bytes = ${completedHeadBytes}
+        and cache.active_observation_sha256 = ${proof.activeObservationSha256}
+        and cache.active_observation_bytes = ${activeObservationBytes}
+      ) as matches
+      from ${joinedTables}
       where cache.event_id = ${input.eventId}::uuid
          or (cache.provider_id = ${proof.providerId}::uuid
            and cache.evidence_digest = ${input.evidenceDigest})
@@ -504,7 +574,7 @@ export class PrismaProviderCompletionPublishPlanRepository {
            and cache.completed_through_change_sequence =
              ${proof.completedThroughChangeSequence})
     `);
-    if (rows.length < 1 || rows.some((row) => !rowMatches(row, input))) {
+    if (rows.length < 1 || rows.some((row) => !row.matches)) {
       repositoryFailure();
     }
     return inserted === 1 ? "inserted" : "deduplicated";
@@ -520,14 +590,17 @@ export class PrismaProviderCompletionPublishPlanRepository {
     assertPromotionJobSha256(input.evidenceDigest);
     const [row] = await boundedRead(
       this.central,
-      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-        select ${planProjection} from ${joinedTables}
+      (client) => client.$queryRaw<RetentionRow[]>(CentralPrisma.sql`
+        select ${retentionProjection} from ${joinedTables}
         where cache.provider_id = ${input.providerId}::uuid
           and cache.evidence_digest = ${input.evidenceDigest}
       `),
       deadline,
     );
-    return row ? cachedPlan(row) : null;
+    if (row === undefined) return null;
+    const metadata = retentionMetadata(row);
+    requireHydrationCapacity([metadata]);
+    return hydrateExactEvent(this.central, metadata.eventId, deadline);
   }
 
   async loadExact(input: Readonly<{
@@ -544,8 +617,8 @@ export class PrismaProviderCompletionPublishPlanRepository {
     assertPromotionJobUuid(input.artifactAttemptId);
     assertPromotionJobSha256(input.providerReleaseFingerprint);
     assertPromotionJobSha256(input.evidenceDigest);
-    const [row] = await this.central.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-      select ${planProjection} from ${joinedTables}
+    const [row] = await this.central.$queryRaw<RetentionRow[]>(CentralPrisma.sql`
+      select ${retentionProjection} from ${joinedTables}
       where cache.provider_id = ${input.providerId}::uuid
         and cache.provider_release_id = ${input.providerReleaseId}::uuid
         and cache.public_provider_release_id =
@@ -555,7 +628,10 @@ export class PrismaProviderCompletionPublishPlanRepository {
         and cache.artifact_attempt_id = ${input.artifactAttemptId}::uuid
         and cache.evidence_digest = ${input.evidenceDigest}
     `);
-    return row ? cachedPlan(row) : null;
+    if (row === undefined) return null;
+    const metadata = retentionMetadata(row);
+    requireHydrationCapacity([metadata]);
+    return hydrateExactEvent(this.central, metadata.eventId);
   }
 
   /**
@@ -574,37 +650,56 @@ export class PrismaProviderCompletionPublishPlanRepository {
     assertPromotionJobUuid(input.providerId);
     assertPromotionJobUuid(input.providerReleaseId);
     assertPromotionJobUuid(input.catalogVersionId);
-    const rows = await boundedRead(
+    const [row] = await boundedRead(
       this.central,
-      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-        select ${planProjection} from ${joinedTables}
+      (client) => client.$queryRaw<ExplicitTargetRow[]>(CentralPrisma.sql`
+        select ${retentionProjection}, exists (
+          select 1 from provider_completion_publish_plans other
+          where other.provider_id = cache.provider_id
+            and other.provider_release_id = cache.provider_release_id
+            and other.catalog_version_id = cache.catalog_version_id
+            and (
+              other.public_provider_release_id <>
+                cache.public_provider_release_id
+              or other.provider_release_fingerprint <>
+                cache.provider_release_fingerprint
+              or other.catalog_content_hash <> cache.catalog_content_hash
+              or other.provider_release_content_hash <>
+                cache.provider_release_content_hash
+              or other.plan_sha256 <> cache.plan_sha256
+            )
+        ) as "identityConflict"
+        from ${joinedTables}
         where cache.provider_id = ${input.providerId}::uuid
           and cache.provider_release_id = ${input.providerReleaseId}::uuid
           and cache.catalog_version_id = ${input.catalogVersionId}::uuid
         order by cache.completed_through_change_sequence desc,
                  event.received_at desc,
                  cache.event_id desc
+        limit 1
       `),
       deadline,
     );
-    const [newest] = rows;
-    if (!newest) repositoryFailure();
-    if (rows.some((row) =>
-      row.publicProviderReleaseId !== newest.publicProviderReleaseId ||
-      row.providerReleaseFingerprint !== newest.providerReleaseFingerprint ||
-      row.catalogContentHash !== newest.catalogContentHash ||
-      row.providerReleaseContentHash !== newest.providerReleaseContentHash ||
-      row.planSha256 !== newest.planSha256 ||
-      body(row.planBytes) !== body(newest.planBytes)
-    )) repositoryFailure();
-    return cachedPlan(newest);
+    if (row === undefined) repositoryFailure();
+    if (row.identityConflict) repositoryFailure();
+    const metadata = retentionMetadata(row);
+    requireHydrationCapacity([metadata]);
+    const hydrated = await hydrateExactEvent(
+      this.central,
+      metadata.eventId,
+      deadline,
+    );
+    if (hydrated === null) repositoryFailure();
+    return hydrated;
   }
 
-  /** Loads one newest exact cached plan for every current manifest reference. */
-  async loadForManifestReferences(
+  /** Selects bounded immutable event metadata without hydrating plan bytes. */
+  async loadMetadataForManifestReferences(
     references: readonly ProviderManifestPlanReference[],
     deadline?: ProviderCompletionPlanReadDeadline,
-  ): Promise<readonly CachedProviderCompletionPublishPlan[] | null> {
+  ): Promise<
+    readonly ProviderCompletionPublishPlanRetentionMetadata[] | null
+  > {
     if (
       references.length < 1 || references.length > MAX_MANIFEST_REFERENCES ||
       new Set(references.map(({ providerKey }) => providerKey)).size !==
@@ -627,11 +722,11 @@ export class PrismaProviderCompletionPublishPlanRepository {
     )`);
     const rows = await boundedRead(
       this.central,
-      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
+      (client) => client.$queryRaw<RetentionRow[]>(CentralPrisma.sql`
         select distinct on (
           provider.provider_key, cache.public_provider_release_id,
           cache.provider_release_fingerprint
-        ) ${planProjection}
+        ) ${retentionProjection}
         from ${joinedTables}
         where ${CentralPrisma.join(predicates, " OR ")}
         order by provider.provider_key, cache.public_provider_release_id,
@@ -645,17 +740,40 @@ export class PrismaProviderCompletionPublishPlanRepository {
     if (references.some((reference) => !byKey.has(reference.providerKey))) {
       return null;
     }
-    const result: CachedProviderCompletionPublishPlan[] = [];
-    for (const reference of [...references].sort((left, right) =>
-      left.providerKey < right.providerKey ? -1 : 1)) {
-      const cached = await cachedPlan(byKey.get(reference.providerKey)!);
+    return [...references].sort((left, right) =>
+      left.providerKey < right.providerKey ? -1 : 1).map((reference) => {
+      const metadata = retentionMetadata(byKey.get(reference.providerKey)!);
       if (
-        cached.publicProviderReleaseId !==
+        metadata.publicProviderReleaseId !==
           reference.publicProviderReleaseId.toLowerCase() ||
-        cached.providerReleaseFingerprint !==
+        metadata.providerReleaseFingerprint !==
           reference.providerReleaseFingerprint
       ) repositoryFailure();
-      result.push(cached);
+      return metadata;
+    });
+  }
+
+  /** Loads exact selected rows only after aggregate byte admission succeeds. */
+  async loadForManifestReferences(
+    references: readonly ProviderManifestPlanReference[],
+    deadline?: ProviderCompletionPlanReadDeadline,
+    maximumAggregateBytes = MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES,
+  ): Promise<readonly CachedProviderCompletionPublishPlan[] | null> {
+    const metadata = await this.loadMetadataForManifestReferences(
+      references,
+      deadline,
+    );
+    if (metadata === null) return null;
+    requireHydrationCapacity(metadata, maximumAggregateBytes);
+    const result: CachedProviderCompletionPublishPlan[] = [];
+    for (const selected of metadata) {
+      const hydrated = await hydrateExactEvent(
+        this.central,
+        selected.eventId,
+        deadline,
+      );
+      if (hydrated === null) return null;
+      result.push(hydrated);
     }
     return result;
   }

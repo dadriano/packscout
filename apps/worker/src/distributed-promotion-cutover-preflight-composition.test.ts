@@ -50,7 +50,7 @@ test("cutover cache coverage counts exact active and previous references", async
   const result = await readDistributedPromotionManifestPlanCacheCoverage({
     activations: { async loadMirror() { return snapshot; } },
     plans: {
-      async loadForManifestReferences(references) {
+      async loadMetadataForManifestReferences(references) {
         mutableCalls.push([...references]);
         return references.map(() => ({} as never));
       },
@@ -75,7 +75,7 @@ test("cutover cache coverage reports a missing reference as incomplete", async (
   });
   const result = await readDistributedPromotionManifestPlanCacheCoverage({
     activations: { async loadMirror() { return snapshot; } },
-    plans: { async loadForManifestReferences() { return null; } },
+    plans: { async loadMetadataForManifestReferences() { return null; } },
   });
   assert.equal(result.activeReferenceCount, 2);
   assert.equal(result.cachedActiveReferenceCount, 0);
@@ -90,7 +90,7 @@ test("cutover cache coverage refuses a mirror that changes during the read", asy
   const result = await readDistributedPromotionManifestPlanCacheCoverage({
     activations: { async loadMirror() { return snapshots.shift()!; } },
     plans: {
-      async loadForManifestReferences(references) {
+      async loadMetadataForManifestReferences(references) {
         return references.map(() => ({} as never));
       },
     },
