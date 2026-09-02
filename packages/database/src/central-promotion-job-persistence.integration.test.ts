@@ -340,6 +340,48 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
       await harness.client.provider_promotion_invocation_projections.count(),
       1,
     );
+    assert.equal(
+      (await harness.client.provider_promotion_invocation_projections
+        .findUniqueOrThrow({
+          where: { id: projected.id },
+          select: { organization_id: true },
+        })).organization_id,
+      organizationId,
+      "central derives the projection tenant from its provider authority",
+    );
+    const [historyIndex] = await harness.client.$queryRaw<Array<{
+      indexDefinition: string;
+    }>>(CentralPrisma.sql`
+      select indexdef as "indexDefinition"
+      from pg_indexes
+      where schemaname = current_schema()
+        and tablename = 'provider_promotion_invocation_projections'
+        and indexname =
+          'provider_promotion_invocation_projections_org_history_idx'
+    `);
+    assert.match(
+      historyIndex?.indexDefinition ?? "",
+      /USING btree \(organization_id, started_at DESC, monitoring_order_key DESC\)/u,
+      "the applied schema supports bounded organization-wide history ordering",
+    );
+    const queryPlan = await harness.client.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe("set local enable_seqscan = off");
+      return transaction.$queryRaw<Array<{ "QUERY PLAN": string }>>(
+        CentralPrisma.sql`
+          explain (costs off)
+          select id
+          from provider_promotion_invocation_projections
+          where organization_id = ${organizationId}::uuid
+          order by started_at desc, monitoring_order_key desc
+          limit 101
+        `,
+      );
+    });
+    assert.match(
+      queryPlan.map((row) => row["QUERY PLAN"]).join("\n"),
+      /provider_promotion_invocation_projections_org_history_idx/u,
+      "the organization-wide keyset query can use the new history index",
+    );
     assert.doesNotMatch(
       projected.canonicalDetailBody,
       new RegExp([
@@ -520,7 +562,8 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
     const overflowDetail = '{"attempts":[]}';
     await harness.client.$executeRaw(CentralPrisma.sql`
       insert into provider_promotion_invocation_projections (
-        provider_id, provider_invocation_id_digest, projection_digest,
+        provider_id, organization_id, provider_invocation_id_digest,
+        projection_digest,
         trigger_kind, outcome, scheduled_checkin_at, started_at, finished_at,
         before_lane_position, after_lane_position,
         before_settled_position, after_settled_position,
@@ -530,6 +573,7 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
       )
       select
         ${providerOne}::uuid,
+        ${organizationId}::uuid,
         encode(sha256(convert_to('overflow-invocation:' || ordinal, 'UTF8')),
           'hex'),
         encode(sha256(convert_to('overflow-projection:' || ordinal, 'UTF8')),

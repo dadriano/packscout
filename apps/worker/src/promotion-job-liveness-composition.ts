@@ -41,11 +41,15 @@ implements ProviderPromotionScheduleSource {
     "runWithAdminProviderDatabase"
   >) {}
 
-  readSchedule(provider: PromotionJobLivenessRosterEntry) {
+  readSchedule(
+    provider: PromotionJobLivenessRosterEntry,
+    input: Readonly<{ deadlineAt: number }>,
+  ) {
     return this.gateway.runWithAdminProviderDatabase(
       {
         organizationId: provider.organizationId,
         providerId: provider.providerId,
+        deadlineAt: input.deadlineAt,
       },
       (database) =>
         new PrismaProviderPromotionJobRepository(database).loadSchedule(),
@@ -151,6 +155,7 @@ export function createPromotionJobLivenessOneShot(input: Readonly<{
   >;
   systemConditionSink: PromotionJobSystemConditionSink;
   providerConcurrency?: number;
+  providerCycleTimeoutMs?: number;
   rosterPageSize?: number;
   maximumProviders?: number;
   deliveryLimit?: number;
@@ -177,6 +182,9 @@ export function createPromotionJobLivenessOneShot(input: Readonly<{
     ...(input.providerConcurrency === undefined
       ? {}
       : { providerConcurrency: input.providerConcurrency }),
+    ...(input.providerCycleTimeoutMs === undefined
+      ? {}
+      : { providerCycleTimeoutMs: input.providerCycleTimeoutMs }),
     now,
   });
   return new PromotionJobLivenessOneShot({

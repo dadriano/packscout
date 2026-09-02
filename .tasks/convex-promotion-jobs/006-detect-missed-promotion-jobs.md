@@ -29,6 +29,10 @@ condition without confusing scheduler health with publication health.
 
 - Each minute, capture the eligible central roster and its version/digest, then
   read provider schedules with bounded pagination and gateway concurrency.
+- All provider reads share one cycle-wide deadline that reserves time inside
+  the one-minute cadence for persistence and condition delivery. After expiry,
+  no queued provider read starts and every unfinished provider is recorded as
+  unavailable in stable roster order.
 - Evaluate each reachable provider independently and the central manifest row.
   Expected count is eligible provider count plus one, never a fixed nine.
 - One provider timeout records `unavailable`, preserves last trusted evidence,
@@ -63,6 +67,8 @@ condition without confusing scheduler health with publication health.
   evaluated without silent omission.
 - [x] One provider outage preserves its last trusted evidence and does not block
   healthy rows, provider alerts, or the central manifest judgment.
+- [x] A 64-provider outage consumes one cycle budget, launches at most the
+  configured concurrency before expiry, and persists all 64 unavailable rows.
 - [x] Reconnection alone does not recover; a strictly newer cron check-in does.
 - [x] Concurrent evaluators and failed open/recover publication produce at most
   one condition/alert episode with retryable delivery state.
@@ -81,7 +87,8 @@ condition without confusing scheduler health with publication health.
 Run exact-boundary unit tests, provider schedule snapshot tests, central
 observation/condition transaction tests, dynamic roster pagination/capacity
 tests, one-provider timeout integration, alert open/recover/pause retry tests,
-watchdog auth/lifecycle tests, service/worker/database typecheck/lint, and
+shared-deadline whole-roster tests, watchdog auth/lifecycle tests,
+service/worker/database typecheck/lint, and
 `npm run verify:framework` at the final group gate.
 
 ## Spec Compliance

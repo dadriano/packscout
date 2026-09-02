@@ -15,6 +15,9 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PROVIDER_KEY_PATTERN = /^[a-z][a-z0-9_]{0,52}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+// Reserve 15 seconds of the fixed one-minute cadence for persistence and
+// condition delivery after provider observation completes.
+const DEFAULT_PROVIDER_CYCLE_TIMEOUT_MS = 45_000;
 
 export interface PromotionJobLivenessRosterEntry {
   readonly organizationId: string;
@@ -41,6 +44,7 @@ export interface PromotionJobLivenessRosterSource {
 export interface ProviderPromotionScheduleSource {
   readSchedule(
     provider: PromotionJobLivenessRosterEntry,
+    input: Readonly<{ deadlineAt: number }>,
   ): Promise<ProviderDatabaseOperationResult<PromotionJobSchedule>>;
 }
 
@@ -144,12 +148,56 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+type ProviderReadSettlement<T> =
+  | { readonly state: "fulfilled"; readonly value: T }
+  | { readonly state: "rejected" }
+  | { readonly state: "timed_out" };
+
+function settleProviderRead<T>(
+  operation: () => Promise<T>,
+  deadlineSignal: AbortSignal,
+): Promise<ProviderReadSettlement<T>> {
+  if (deadlineSignal.aborted) {
+    return Promise.resolve({ state: "timed_out" });
+  }
+  const pending = Promise.resolve().then(operation);
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = (result: ProviderReadSettlement<T>) => {
+      if (finished) return;
+      finished = true;
+      deadlineSignal.removeEventListener("abort", expired);
+      resolve(result);
+    };
+    const expired = () => finish({ state: "timed_out" });
+    deadlineSignal.addEventListener("abort", expired, { once: true });
+    if (deadlineSignal.aborted) expired();
+    void pending.then(
+      (value) => finish({ state: "fulfilled", value }),
+      () => finish({ state: "rejected" }),
+    );
+  });
+}
+
+function scheduleProviderCycleDeadline(
+  expire: () => void,
+  timeoutMs: number,
+): () => void {
+  const timer = setTimeout(expire, timeoutMs);
+  return () => clearTimeout(timer);
+}
+
 export interface PromotionJobLivenessEvaluatorOptions {
   readonly roster: PromotionJobLivenessRosterSource;
   readonly providers: ProviderPromotionScheduleSource;
   readonly manifest: ManifestPromotionScheduleSource;
   readonly store: PromotionJobLivenessCycleStore;
   readonly providerConcurrency?: number;
+  readonly providerCycleTimeoutMs?: number;
+  readonly scheduleProviderCycleDeadline?: (
+    expire: () => void,
+    timeoutMs: number,
+  ) => () => void;
   readonly now?: () => Date;
 }
 
@@ -160,6 +208,11 @@ export interface PromotionJobLivenessEvaluatorOptions {
  */
 export class PromotionJobLivenessEvaluator {
   readonly #providerConcurrency: number;
+  readonly #providerCycleTimeoutMs: number;
+  readonly #scheduleProviderCycleDeadline: (
+    expire: () => void,
+    timeoutMs: number,
+  ) => () => void;
   readonly #now: () => Date;
 
   constructor(private readonly options: PromotionJobLivenessEvaluatorOptions) {
@@ -168,6 +221,17 @@ export class PromotionJobLivenessEvaluator {
       throw new TypeError("Promotion job provider concurrency is invalid.");
     }
     this.#providerConcurrency = concurrency;
+    this.#providerCycleTimeoutMs = options.providerCycleTimeoutMs
+      ?? DEFAULT_PROVIDER_CYCLE_TIMEOUT_MS;
+    if (
+      !Number.isInteger(this.#providerCycleTimeoutMs)
+      || this.#providerCycleTimeoutMs < 100
+      || this.#providerCycleTimeoutMs > 50_000
+    ) {
+      throw new TypeError("Promotion job provider cycle timeout is invalid.");
+    }
+    this.#scheduleProviderCycleDeadline = options.scheduleProviderCycleDeadline
+      ?? scheduleProviderCycleDeadline;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -176,6 +240,28 @@ export class PromotionJobLivenessEvaluator {
     if (!validDate(evaluatedAt)) {
       throw new TypeError("Promotion job evaluator time is invalid.");
     }
+    const providerDeadlineAt = Date.now() + this.#providerCycleTimeoutMs;
+    const providerDeadline = new AbortController();
+    const cancelProviderDeadline = this.#scheduleProviderCycleDeadline(
+      () => providerDeadline.abort(),
+      this.#providerCycleTimeoutMs,
+    );
+    try {
+      return await this.runCycleBeforeDeadline(
+        evaluatedAt,
+        providerDeadlineAt,
+        providerDeadline.signal,
+      );
+    } finally {
+      cancelProviderDeadline();
+    }
+  }
+
+  private async runCycleBeforeDeadline(
+    evaluatedAt: Date,
+    providerDeadlineAt: number,
+    providerDeadlineSignal: AbortSignal,
+  ): Promise<SuccessfulPromotionJobLivenessCycle> {
     let roster: PromotionJobLivenessRosterSnapshot;
     try {
       roster = assertRoster(await this.options.roster.captureEligibleRoster());
@@ -216,7 +302,12 @@ export class PromotionJobLivenessEvaluator {
     const providerObservations = await mapWithConcurrency(
       roster.providers,
       this.#providerConcurrency,
-      (provider) => this.observeProvider(provider, evaluatedAt),
+      (provider) => this.observeProvider(
+        provider,
+        evaluatedAt,
+        providerDeadlineAt,
+        providerDeadlineSignal,
+      ),
     );
     const summary = summarizePromotionJobLivenessCycle({
       providerObservations: providerObservations.map(({ observation }) =>
@@ -252,17 +343,23 @@ export class PromotionJobLivenessEvaluator {
   private async observeProvider(
     provider: PromotionJobLivenessRosterEntry,
     evaluatedAt: Date,
+    providerDeadlineAt: number,
+    providerDeadlineSignal: AbortSignal,
   ): Promise<ProviderPromotionLivenessObservation> {
-    let result: ProviderDatabaseOperationResult<PromotionJobSchedule>;
-    try {
-      result = await this.options.providers.readSchedule(provider);
-    } catch {
+    const settlement = await settleProviderRead(
+      () => this.options.providers.readSchedule(provider, {
+        deadlineAt: providerDeadlineAt,
+      }),
+      providerDeadlineSignal,
+    );
+    if (settlement.state !== "fulfilled") {
       return this.unavailableProvider(
         provider,
         evaluatedAt,
         "database_unreachable",
       );
     }
+    const result = settlement.value;
     if (result.state === "unreachable") {
       const observedAt = new Date(result.observedAt);
       return this.unavailableProvider(

@@ -200,6 +200,7 @@ test("real central repository scopes roster, merged history, and provider detail
       data: Array.from({ length: 125 }, (_, index) => ({
         id: `94000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
         provider_id: providerId,
+        organization_id: organizationId,
         provider_invocation_id_digest: promotionJobSha256(
           `monitoring-bulk-invocation-${index}`,
         ),

@@ -47,6 +47,7 @@ function local(
     observedAt: "2026-09-01T12:00:01.000Z",
     schedule,
     wake,
+    lanePosition: "2",
     settledPosition: "2",
     completedRelease: release("2", "a"),
     latestInvocation: null,
@@ -92,11 +93,11 @@ test("completed release newer than the active selection awaits only activation",
   assert.equal(beta.state, "current");
 });
 
-test("settled work newer than the completed release awaits publication", () => {
+test("a lane head newer than the publication settlement awaits publication", () => {
   const result = judge({
     live: local({
-      settledPosition: "3",
-      completedRelease: release("2", "a"),
+      lanePosition: "3",
+      completedRelease: null,
     }),
   });
   assert.equal(result.state, "awaiting_publication");
@@ -172,5 +173,8 @@ test("a stale evaluator does not erase current publication facts", () => {
 test("invalid position evidence fails before the browser receives a judgment", () => {
   assert.throws(() => judge({
     live: local({ settledPosition: "02" }),
+  }), { code: "PROMOTION_JOB_MONITORING_EVIDENCE_INVALID" });
+  assert.throws(() => judge({
+    live: local({ lanePosition: "1", settledPosition: "2" }),
   }), { code: "PROMOTION_JOB_MONITORING_EVIDENCE_INVALID" });
 });

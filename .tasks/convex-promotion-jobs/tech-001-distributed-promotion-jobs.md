@@ -114,6 +114,9 @@ admission evidence only, never publication behavior or credential authority.
 - A central evaluator snapshots the trusted roster and reads provider schedule
   state through bounded-concurrency gateway calls. One unavailable provider is
   a row-level unavailable observation, not an evaluator failure.
+- Provider gateway calls share one cycle-wide deadline inside the one-minute
+  cadence. Expiry starts no queued call and records every unfinished provider
+  as unavailable before the cycle persists its exact roster result.
 - At `evaluatedAt`, a due window counts only when
   `dueAt(window) < evaluatedAt`.
 - Zero or one missed window is healthy, two is overdue, and three or more is
@@ -138,7 +141,8 @@ The server returns:
 - one central manifest coordinator view;
 - one provider view per trusted roster entry;
 - merged keyset history backed by central manifest invocations and sanitized
-  provider invocation projections;
+  provider invocation projections, with provider projections carrying a direct
+  tenant key and an organization-leading global history index;
 - opaque, scope-bound detail IDs with at most 25 attempt snapshots and 25
   recent operations per attempt.
 
@@ -146,7 +150,8 @@ Each provider view separates:
 
 - evidence source `live | last_known | unavailable`;
 - schedule health;
-- local settled/completed publication state;
+- canonical lane head, fully published settlement checkpoint, and completed
+  release state, without presenting pending canonical work as settled;
 - central active manifest selection and pending gate state;
 - lifecycle `draft | active | disabled | archived`.
 

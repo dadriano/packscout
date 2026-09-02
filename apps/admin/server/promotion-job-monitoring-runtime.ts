@@ -108,6 +108,7 @@ export interface LiveProviderPromotionMonitoringSnapshot {
   readonly observedAt: Date;
   readonly schedule: PromotionJobSchedule;
   readonly wake: PromotionWakeIntent;
+  readonly lanePosition: bigint;
   readonly settledPosition: bigint;
   readonly completedRelease: PromotionJobPublicReleaseMonitoring | null;
   readonly executionState: ProviderPromotionMonitoringLocalFacts["executionState"];
@@ -799,12 +800,10 @@ export class PrismaPromotionJobMonitoringReadRepository {
         : this.central.provider_promotion_invocation_projections.findMany({
             where: {
               ...before,
-              provider: {
-                organization_id: input.organizationId,
-                ...(providerFilter === null
-                  ? {}
-                  : { provider_key: providerFilter }),
-              },
+              organization_id: input.organizationId,
+              ...(providerFilter === null
+                ? {}
+                : { provider: { provider_key: providerFilter } }),
               ...(input.query.trigger === undefined
                 ? {}
                 : { trigger_kind: input.query.trigger }),
@@ -884,23 +883,41 @@ async function readLiveProvider(
   observedAt: Date,
 ): Promise<LiveProviderPromotionMonitoringSnapshot> {
   const jobs = new PrismaProviderPromotionJobRepository(database);
-  const [schedule, wake, ledger, completion, latest] = await Promise.all([
+  const [schedule, wake, latest] = await Promise.all([
     jobs.loadSchedule(),
     jobs.loadWakeIntent(),
-    database.promotion_ledger.findUnique({
-      where: { singleton_key: true },
-      select: { last_sequence: true },
-    }),
-    database.provider_activity_outbox.findFirst({
-      where: { event_type: "provider_release_completed" },
-      orderBy: [{ event_at: "desc" }, { id: "desc" }],
-      select: { evidence: true },
-    }),
     database.provider_promotion_job_invocations.findFirst({
       orderBy: [{ started_at: "desc" }, { run_id: "desc" }],
       select: { lifecycle_state: true, outcome: true },
     }),
   ]);
+  // Publication state and its completion event commit together, while the
+  // canonical lane advances before publication. Reading in dependency order
+  // keeps the independently committed checkpoints monotonic without locks.
+  const publication = await database.provider_publication_state.findUnique({
+    where: { singleton_key: true },
+    select: {
+      completed_release_id: true,
+      completed_through_change_sequence: true,
+    },
+  });
+  const settledPosition = publication?.completed_through_change_sequence ?? 0n;
+  const completedReleaseId = publication?.completed_release_id ?? null;
+  const completion = completedReleaseId === null
+    ? null
+    : await database.provider_activity_outbox.findFirst({
+        where: {
+          event_type: "provider_release_completed",
+          dedupe_key:
+            `provider-release-completed:${completedReleaseId}:${settledPosition}`,
+        },
+        orderBy: [{ event_at: "desc" }, { id: "desc" }],
+        select: { evidence: true },
+      });
+  const ledger = await database.promotion_ledger.findUnique({
+    where: { singleton_key: true },
+    select: { last_sequence: true },
+  });
   const latestSummary = latest === null ? null : {
     lifecycleState: latest.lifecycle_state as PromotionJobInvocation["lifecycleState"],
     outcome: latest.outcome as PromotionJobInvocation["outcome"],
@@ -909,7 +926,8 @@ async function readLiveProvider(
     observedAt,
     schedule,
     wake,
-    settledPosition: ledger?.last_sequence ?? 0n,
+    lanePosition: ledger?.last_sequence ?? 0n,
+    settledPosition,
     completedRelease: safeCompletion(completion?.evidence ?? null),
     executionState: executionState(latestSummary, wake),
   };
@@ -937,6 +955,7 @@ function lastKnownFacts(
     observedAt: observedAt.toISOString(),
     schedule: mapObservedSchedule(observation),
     wake: null,
+    lanePosition: null,
     settledPosition: furthestPosition(
       projection?.settledPosition?.toString() ?? null,
       central.completedRelease?.position ?? null,
@@ -974,6 +993,7 @@ function liveFacts(
     observedAt: live.observedAt.toISOString(),
     schedule: mapSchedule(live.schedule, live.observedAt),
     wake: mapWake(live.wake),
+    lanePosition: live.lanePosition.toString(),
     settledPosition: live.settledPosition.toString(),
     completedRelease: live.completedRelease,
     latestInvocation: projection === null

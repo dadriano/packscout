@@ -236,10 +236,95 @@ function live(providerKey: string): LiveProviderPromotionMonitoringSnapshot {
       lastDeliveryAttemptAt: observedAt,
       latestDeliveryFailureCode: null,
     },
+    lanePosition: 2n,
     settledPosition: 2n,
     completedRelease: release(providerKey === "alpha" ? "a" : "b"),
     executionState: "ready",
   };
+}
+
+function providerDatabaseWithPositions(input: Readonly<{
+  lanePosition: bigint;
+  settledPosition: bigint;
+  readOrder: string[];
+}>): ProviderPrismaClient {
+  const completedReleaseId = "20000000-0000-4000-8000-000000000010";
+  return {
+    async $queryRaw(statement: unknown) {
+      const text = (statement as { strings?: readonly string[] }).strings
+        ?.join(" ") ?? "";
+      if (text.includes("provider_promotion_job_schedule")) {
+        return [{
+          lifecycle: "active",
+          scheduleEpoch: 1n,
+          cadenceSeconds: 60,
+          baselineAt: new Date("2026-09-01T11:00:00.000Z"),
+          activatedAt: new Date("2026-09-01T11:00:00.000Z"),
+          pausedAt: null,
+          lastAdmittedWindowIndex: 59n,
+          lastScheduledCheckinAt: observedAt,
+          nextExpectedCheckinAt: new Date("2026-09-01T12:01:00.000Z"),
+        }];
+      }
+      if (text.includes("provider_promotion_job_wake")) {
+        return [{
+          requestedGeneration: 1n,
+          acknowledgedGeneration: 1n,
+          latestCause: "canonical_settlement",
+          latestRequestedAt: observedAt,
+          latestDeliveryGeneration: 1n,
+          latestDeliveryState: "delivered",
+          lastDeliveryAttemptAt: observedAt,
+          latestDeliveryFailureCode: null,
+        }];
+      }
+      throw new Error("Unexpected live monitoring query.");
+    },
+    promotion_ledger: {
+      async findUnique(query: unknown) {
+        input.readOrder.push("lane");
+        assert.deepEqual(query, {
+          where: { singleton_key: true },
+          select: { last_sequence: true },
+        });
+        return { last_sequence: input.lanePosition };
+      },
+    },
+    provider_publication_state: {
+      async findUnique(query: unknown) {
+        input.readOrder.push("settlement");
+        assert.deepEqual(query, {
+          where: { singleton_key: true },
+          select: {
+            completed_release_id: true,
+            completed_through_change_sequence: true,
+          },
+        });
+        return {
+          completed_release_id: completedReleaseId,
+          completed_through_change_sequence: input.settledPosition,
+        };
+      },
+    },
+    provider_activity_outbox: {
+      async findFirst(query: unknown) {
+        input.readOrder.push("completion");
+        assert.deepEqual(query, {
+          where: {
+            event_type: "provider_release_completed",
+            dedupe_key:
+              `provider-release-completed:${completedReleaseId}:${input.settledPosition}`,
+          },
+          orderBy: [{ event_at: "desc" }, { id: "desc" }],
+          select: { evidence: true },
+        });
+        return null;
+      },
+    },
+    provider_promotion_job_invocations: {
+      async findFirst() { return null; },
+    },
+  } as unknown as ProviderPrismaClient;
 }
 
 function providerAt(index: number): PromotionJobMonitoringRosterProvider {
@@ -315,8 +400,14 @@ function capacityRepository(
   };
 }
 
-test("overview isolates a provider outage and retains archived truth without live routing", async () => {
+test("overview separates live lane and settlement while isolating a provider outage", async () => {
   const routed: string[] = [];
+  const readOrder: string[] = [];
+  const providerClient = providerDatabaseWithPositions({
+    lanePosition: 3n,
+    settledPosition: 2n,
+    readOrder,
+  });
   const gateway = {
     async runWithAdminProviderDatabase(input, operation) {
       routed.push(input.providerId);
@@ -329,12 +420,11 @@ test("overview isolates a provider outage and retains archived truth without liv
           retryHint: "Retry later.",
         };
       }
-      const database = { monitoringProviderKey: "alpha" } as unknown as ProviderPrismaClient;
       return {
         state: "reachable" as const,
         providerId: input.providerId,
         observedAt: observedAt.toISOString(),
-        value: await operation(database),
+        value: await operation(providerClient),
       };
     },
   } satisfies Pick<BoundedProviderDatabaseGateway, "runWithAdminProviderDatabase">;
@@ -344,7 +434,6 @@ test("overview isolates a provider outage and retains archived truth without liv
     deployment: "test",
     secret: new Uint8Array(32).fill(8),
     now: () => observedAt,
-    readLiveProvider: async () => live("alpha"),
   });
 
   const overview = promotionJobMonitoringOverviewSchema.parse(
@@ -354,13 +443,15 @@ test("overview isolates a provider outage and retains archived truth without liv
   assert.equal(overview.roster.eligibleProviderCount, 2);
   assert.equal(overview.evaluator.expectedCount, 3);
   assert.equal(overview.manifest.evidenceSource, "live");
-  assert.equal(overview.providers[0]?.state, "current");
+  assert.equal(overview.providers[0]?.state, "awaiting_publication");
+  assert.equal(overview.providers[0]?.settledPosition, "2");
   assert.equal(overview.providers[0]?.evidenceSource, "live");
   assert.equal(overview.providers[1]?.state, "last_known");
   assert.equal(overview.providers[1]?.evidenceSource, "last_known");
   assert.equal(overview.providers[1]?.routeFailureCode, "DATABASE_UNREACHABLE");
   assert.equal(overview.providers[2]?.lifecycle, "archived");
   assert.equal(overview.providers[2]?.state, "last_known");
+  assert.deepEqual(readOrder, ["settlement", "completion", "lane"]);
   assert.deepEqual(routed, [alphaId, betaId]);
 });
 

@@ -589,6 +589,58 @@ test("cross-authority identifiers stay soft while every local UUID reference is 
   );
 });
 
+test("central provider promotion history is tenant-keyed and globally ordered", () => {
+  const centralSource = readFileSync(centralSchemaPath, "utf8");
+  const projections = modelMap(centralSource).get(
+    "provider_promotion_invocation_projections",
+  );
+  assert.ok(projections);
+  assert.match(
+    fieldsIn(projections).get("organization_id") ?? "",
+    /^organization_id\s+String\s+@db\.Uuid$/u,
+  );
+  assert.match(
+    projections.body,
+    /provider\s+providers\s+@relation\(fields:\s*\[provider_id,\s*organization_id\],\s*references:\s*\[id,\s*organization_id\][^)]*map:\s*"provider_promotion_invocation_projections_provider_org_fk"\)/u,
+  );
+  assert.match(
+    projections.body,
+    /@@index\(\[organization_id,\s*started_at\(sort:\s*Desc\),\s*monitoring_order_key\(sort:\s*Desc\)\],\s*map:\s*"provider_promotion_invocation_projections_org_history_idx"\)/u,
+  );
+
+  const migration = migrationContents(
+    "central",
+    "20260902120000_provider_promotion_org_history",
+  );
+  assert.match(
+    migration,
+    /ADD COLUMN "organization_id" UUID/u,
+  );
+  assert.match(
+    migration,
+    /DISABLE TRIGGER "guard_provider_promotion_invocation_projection"[\s\S]*UPDATE "provider_promotion_invocation_projections" AS projection[\s\S]*SET "organization_id" = provider\."organization_id"[\s\S]*FROM "providers" AS provider[\s\S]*ENABLE TRIGGER "guard_provider_promotion_invocation_projection"/u,
+  );
+  assert.match(
+    migration,
+    /ALTER COLUMN "organization_id" SET NOT NULL/u,
+  );
+  assert.match(
+    migration,
+    /FOREIGN KEY \("provider_id", "organization_id"\)\s+REFERENCES "providers" \("id", "organization_id"\)/u,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "provider_promotion_invocation_projections_org_history_idx"\s+ON "provider_promotion_invocation_projections"\s+\("organization_id", "started_at" DESC, "monitoring_order_key" DESC\)/u,
+  );
+  assert.ok(
+    migration.indexOf("SET \"organization_id\" = provider.\"organization_id\"") <
+      migration.indexOf('ALTER COLUMN "organization_id" SET NOT NULL'),
+    "the authoritative provider backfill must precede the not-null constraint",
+  );
+  assert.match(migration, /^BEGIN;/u);
+  assert.match(migration, /COMMIT;\s*$/u);
+});
+
 test("provider facts preserve source identities while local relationships resolve monotonically", () => {
   const providerSource = readFileSync(providerSchemaPath, "utf8");
   const providerModels = modelMap(providerSource);

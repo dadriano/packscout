@@ -15,11 +15,11 @@ import {
 
 const evaluatedAt = new Date("2026-09-01T12:03:00.001Z");
 const organizationId = "10000000-0000-4000-8000-000000000001";
-const providerIds = [
-  "20000000-0000-4000-8000-000000000001",
-  "20000000-0000-4000-8000-000000000002",
-  "20000000-0000-4000-8000-000000000003",
-];
+const providerIds = Array.from(
+  { length: 64 },
+  (_, index) =>
+    `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+);
 
 function schedule(
   authority: PromotionJobSchedule["authority"],
@@ -75,7 +75,14 @@ function harness(input: Readonly<{
   roster?: () => Promise<PromotionJobLivenessRosterSnapshot>;
   provider?: (
     entry: PromotionJobLivenessRosterEntry,
+    input: Readonly<{ deadlineAt: number }>,
   ) => Promise<ProviderDatabaseOperationResult<PromotionJobSchedule>>;
+  providerConcurrency?: number;
+  providerCycleTimeoutMs?: number;
+  scheduleProviderCycleDeadline?: (
+    expire: () => void,
+    timeoutMs: number,
+  ) => () => void;
   failCommit?: boolean;
 }> = {}) {
   const successful: SuccessfulPromotionJobLivenessCycle[] = [];
@@ -104,7 +111,16 @@ function harness(input: Readonly<{
         return Promise.resolve();
       },
     },
-    providerConcurrency: 2,
+    providerConcurrency: input.providerConcurrency ?? 2,
+    ...(input.providerCycleTimeoutMs === undefined
+      ? {}
+      : { providerCycleTimeoutMs: input.providerCycleTimeoutMs }),
+    ...(input.scheduleProviderCycleDeadline === undefined
+      ? {}
+      : {
+          scheduleProviderCycleDeadline:
+            input.scheduleProviderCycleDeadline,
+        }),
     now: () => evaluatedAt,
   });
   return { evaluator, successful, failed };
@@ -170,6 +186,64 @@ test("provider reads are bounded without changing roster order", async () => {
     cycle.providerObservations.map(({ provider: row }) => row.providerKey),
     ["provider_1", "provider_2", "provider_3"],
   );
+});
+
+test("one cycle deadline records a 64-provider outage without launching queued reads", async () => {
+  const started: string[] = [];
+  const deadlines = new Set<number>();
+  const rejectStarted: ((reason?: unknown) => void)[] = [];
+  const scheduledDeadline: { expire?: () => void } = {};
+  let cancelCount = 0;
+  let markFirstWaveStarted!: () => void;
+  const firstWaveStarted = new Promise<void>((resolve) => {
+    markFirstWaveStarted = resolve;
+  });
+  const context = harness({
+    roster: () => Promise.resolve(roster(64)),
+    providerConcurrency: 8,
+    providerCycleTimeoutMs: 1_000,
+    scheduleProviderCycleDeadline(expire, timeoutMs) {
+      assert.equal(timeoutMs, 1_000);
+      scheduledDeadline.expire = expire;
+      return () => { cancelCount += 1; };
+    },
+    provider(entry, input) {
+      started.push(entry.providerId);
+      deadlines.add(input.deadlineAt);
+      if (started.length === 8) markFirstWaveStarted();
+      return new Promise((_, reject) => { rejectStarted.push(reject); });
+    },
+  });
+
+  const cyclePromise = context.evaluator.runCycle();
+  await firstWaveStarted;
+  assert.ok(scheduledDeadline.expire);
+  scheduledDeadline.expire();
+  const cycle = await cyclePromise;
+
+  assert.equal(started.length, 8);
+  assert.equal(deadlines.size, 1);
+  assert.equal(cancelCount, 1);
+  assert.deepEqual(
+    cycle.providerObservations.map(({ provider: row }) => row.providerKey),
+    Array.from({ length: 64 }, (_, index) => `provider_${index + 1}`),
+  );
+  for (const observation of cycle.providerObservations) {
+    assert.equal(observation.observation.evidenceSource, "unavailable");
+    assert.equal(observation.failureCode, "database_unreachable");
+  }
+  assert.deepEqual(cycle.summary, {
+    expectedCount: 65,
+    reachableCount: 1,
+    unavailableCount: 64,
+    healthyCount: 1,
+    overdueCount: 0,
+    alertingCount: 0,
+  });
+  assert.equal(context.successful.length, 1);
+  assert.deepEqual(context.failed, []);
+  for (const reject of rejectStarted) reject(new Error("late provider failure"));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 });
 
 test("registry failure marks the cycle unsuccessful instead of reporting zero", async () => {

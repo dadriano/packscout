@@ -28,8 +28,10 @@ schedule, publication, and activation facts.
 - All live provider probes share one 15-second overview deadline. Once that
   budget expires, no queued probe starts and every remaining row falls back to
   its sanitized central evidence.
-- Provider view separates local schedule, settled/completed/retry state, central
-  active manifest selection, pending activation, and lifecycle.
+- Provider view separates the canonical lane head, fully published settlement
+  checkpoint, completed release/retry state, central active manifest selection,
+  pending activation, and lifecycle. Only the published checkpoint is exposed
+  as `settledPosition`; a newer lane head means `awaiting_publication`.
 - Manifest view is central-only: active/previous manifest, serialized operation,
   per-provider gate queue depth/oldest age, last activation/reconciliation,
   schedule/wake/invocation, and no global epoch/readiness judgment.
@@ -40,6 +42,9 @@ schedule, publication, and activation facts.
   projections centrally. Manifest invocations originate centrally.
 - Return one central keyset page ordered newest by
   `(startedAt, monitoringId)`, default 25 and maximum 100.
+- Organization-wide provider history is tenant-keyed directly on the projection
+  and backed by an index ordered `(organizationId, startedAt, monitoringId)`;
+  provider filtering preserves the same keyset order.
 - Filters are exactly `manifest | provider:<providerKey>`, trigger, and terminal
   outcome. Omission means all. Reject `all`, UUIDs, database names, aliases,
   unprefixed keys, and cursor/filter mismatch.
@@ -73,12 +78,16 @@ schedule, publication, and activation facts.
   overview probe budget rather than multiplying the timeout by roster size.
 - [x] Completed local release newer than central active selection reads
   `awaiting_activation`; unrelated providers remain current.
+- [x] A canonical lane head newer than the fully published checkpoint reads
+  `awaiting_publication` without overstating `settledPosition`.
 - [x] Disabled/archived providers preserve truthful retained active selection
   without being presented as live work.
 - [x] One-provider gate advance updates only its provider judgment.
 - [x] Provider projection replay deduplicates and exposes projection lag.
 - [x] History pagination/filter/cursor tamper and cross-scope opaque IDs fail
   safely.
+- [x] Unfiltered tenant history uses the organization-leading global keyset
+  index rather than scanning every provider partition.
 - [x] Detail bounds and digests remain deterministic after local source pruning.
 - [x] Responses, errors, logs, and fixtures pass protected-content redaction.
 - [x] Anonymous/forbidden/invalid/missing/rate-limited/unavailable outcomes use

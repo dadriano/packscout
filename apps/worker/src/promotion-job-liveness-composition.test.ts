@@ -48,7 +48,11 @@ test("provider schedule reads use the exact roster identity through the bounded 
   } as unknown as ProviderPrismaClient;
   const source = new GatewayProviderPromotionScheduleSource({
     async runWithAdminProviderDatabase(input, operation) {
-      assert.deepEqual(input, { organizationId, providerId });
+      assert.deepEqual(input, {
+        organizationId,
+        providerId,
+        deadlineAt: 1_800_000_000_000,
+      });
       return {
         state: "reachable",
         providerId,
@@ -61,7 +65,7 @@ test("provider schedule reads use the exact roster identity through the bounded 
     organizationId,
     providerId,
     providerKey: "provider_one",
-  });
+  }, { deadlineAt: 1_800_000_000_000 });
   assert.equal(result.state, "reachable");
   if (result.state !== "reachable") return;
   assert.equal(result.value.authority, "provider_publication");

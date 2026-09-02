@@ -22,6 +22,7 @@ export interface ProviderPromotionMonitoringLocalFacts {
   readonly observedAt: string;
   readonly schedule: PromotionJobScheduleMonitoring | null;
   readonly wake: PromotionJobWakeMonitoring | null;
+  readonly lanePosition: string | null;
   readonly settledPosition: string | null;
   readonly completedRelease: PromotionJobPublicReleaseMonitoring | null;
   readonly latestInvocation: PromotionJobInvocationMonitoring | null;
@@ -84,7 +85,9 @@ function assertRelease(
 
 function assertLocal(facts: ProviderPromotionMonitoringLocalFacts): void {
   if (!instant(facts.observedAt)) invalid();
-  position(facts.settledPosition);
+  const lane = position(facts.lanePosition);
+  const settled = position(facts.settledPosition);
+  if (lane !== null && settled !== null && settled > lane) invalid();
   assertRelease(facts.completedRelease, true);
   if (
     facts.completedRelease !== null
@@ -112,11 +115,9 @@ function liveState(
   central: ProviderPromotionMonitoringCentralFacts,
 ): ProviderPromotionJobMonitoring["state"] {
   if (facts.executionState !== "ready") return facts.executionState;
+  const lane = position(facts.lanePosition) ?? 0n;
   const settled = position(facts.settledPosition) ?? 0n;
-  const completed = facts.completedRelease === null
-    ? 0n
-    : position(facts.completedRelease.position)!;
-  if (settled > completed) return "awaiting_publication";
+  if (lane > settled) return "awaiting_publication";
   if (
     facts.completedRelease !== null
     && !releasesMatch(facts.completedRelease, central.activeRelease)

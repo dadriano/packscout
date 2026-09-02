@@ -89,15 +89,17 @@ export class PrismaProviderPromotionInvocationProjectionRepository {
     return this.central.$transaction(async (transaction) => {
       await transaction.$executeRaw(CentralPrisma.sql`
         insert into provider_promotion_invocation_projections (
-          provider_id, provider_invocation_id_digest, projection_digest,
+          provider_id, organization_id, provider_invocation_id_digest,
+          projection_digest,
           trigger_kind, outcome, scheduled_checkin_at, started_at, finished_at,
           before_lane_position, after_lane_position,
           before_settled_position, after_settled_position,
           cycle_count, promotion_attempt_count, publication_count,
           operation_count, safe_failure_code, canonical_detail_body,
           canonical_detail_digest, projected_at, created_at
-        ) values (
-          ${input.providerId}::uuid, ${record.providerInvocationIdDigest},
+        ) select
+          ${input.providerId}::uuid, provider.organization_id,
+          ${record.providerInvocationIdDigest},
           ${record.projectionDigest}, ${input.triggerKind}, ${input.outcome},
           ${input.scheduledCheckinAt}, ${input.startedAt}, ${input.finishedAt},
           ${input.progress.beforeLanePosition}, ${input.progress.afterLanePosition},
@@ -108,7 +110,9 @@ export class PrismaProviderPromotionInvocationProjectionRepository {
           ${input.safeFailureCode}, ${record.canonicalDetailBody},
           ${record.canonicalDetailDigest}, ${input.projectedAt},
           ${input.projectedAt}
-        ) on conflict (provider_id, provider_invocation_id_digest) do nothing
+        from providers as provider
+        where provider.id = ${input.providerId}::uuid
+        on conflict (provider_id, provider_invocation_id_digest) do nothing
       `);
       const [row] = await transaction.$queryRaw<ProjectionRow[]>(CentralPrisma.sql`
         select ${projection} from provider_promotion_invocation_projections
