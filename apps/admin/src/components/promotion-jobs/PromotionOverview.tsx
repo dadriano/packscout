@@ -205,7 +205,7 @@ function releaseSummary(
   return (
     <span>
       {release.publicReleaseId}
-      <small>Position {release.position}</small>
+      <small>Position {release.position ?? "not recorded"}</small>
     </span>
   );
 }

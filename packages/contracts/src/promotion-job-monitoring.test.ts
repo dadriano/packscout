@@ -5,6 +5,8 @@ import {
   promotionJobMonitoringOverviewSchema,
   promotionJobMonitoringFilterSchema,
   promotionJobMonitoringIdSchema,
+  promotionJobPublicReleaseMonitoringSchema,
+  providerPromotionJobMonitoringSchema,
 } from "./promotion-job-monitoring.ts";
 
 test("promotion monitoring filters accept only manifest or prefixed provider keys", () => {
@@ -67,6 +69,36 @@ test("detail identity is opaque and cannot be a UUID or local run ID", () => {
   }
 });
 
+test("historical active positions may be unknown but completed positions may not", () => {
+  const release = {
+    publicReleaseId: "release-alpha",
+    fingerprint: "a".repeat(64),
+    position: null,
+  };
+  assert.equal(
+    promotionJobPublicReleaseMonitoringSchema.safeParse(release).success,
+    true,
+  );
+  assert.equal(providerPromotionJobMonitoringSchema.safeParse({
+    providerKey: "alpha",
+    displayName: "Alpha",
+    lifecycle: "active",
+    evidenceSource: "last_known",
+    observedAt: "2026-09-01T12:00:00.000Z",
+    stale: true,
+    routeFailureCode: null,
+    state: "last_known",
+    schedule: null,
+    wake: null,
+    settledPosition: "2",
+    completedRelease: release,
+    activeRelease: release,
+    pendingGate: null,
+    latestInvocation: null,
+    projectionLagMs: null,
+  }).success, false);
+});
+
 test("overview schema strips undeclared protected authority at every boundary", () => {
   const result = promotionJobMonitoringOverviewSchema.parse({
     observedAt: "2026-09-01T12:00:00.000Z",
@@ -76,6 +108,7 @@ test("overview schema strips undeclared protected authority at every boundary", 
       version: "1",
       highWater: "2",
       digest: "a".repeat(64),
+      providerCount: 0,
       eligibleProviderCount: 0,
       databaseUrl: "never-return",
     },

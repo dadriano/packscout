@@ -148,7 +148,8 @@ export interface PromotionJobInvocationMonitoring {
 export interface PromotionJobPublicReleaseMonitoring {
   readonly publicReleaseId: string;
   readonly fingerprint: string;
-  readonly position: string;
+  /** Provider-local position can be absent for a retained historical selection. */
+  readonly position: string | null;
 }
 
 export interface ManifestGateMonitoring {
@@ -229,6 +230,9 @@ export interface PromotionJobRosterMonitoring {
   readonly version: string;
   readonly highWater: string;
   readonly digest: string;
+  /** Every centrally retained row visible to this organization. */
+  readonly providerCount: number;
+  /** Active rows admitted to the deployment-wide schedule evaluator. */
   readonly eligibleProviderCount: number;
 }
 
@@ -331,7 +335,7 @@ export const promotionJobInvocationMonitoringSchema = z.object({
 export const promotionJobPublicReleaseMonitoringSchema = z.object({
   publicReleaseId: safePublicIdSchema,
   fingerprint: digestSchema,
-  position: decimalSchema,
+  position: decimalSchema.nullable(),
 });
 
 export const manifestGateMonitoringSchema = z.object({
@@ -362,6 +366,17 @@ export const providerPromotionJobMonitoringSchema = z.object({
   pendingGate: manifestGateMonitoringSchema.nullable(),
   latestInvocation: promotionJobInvocationMonitoringSchema.nullable(),
   projectionLagMs: z.number().int().nonnegative().nullable(),
+}).superRefine((provider, context) => {
+  if (
+    provider.completedRelease !== null
+    && provider.completedRelease.position === null
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Completed provider release position is required.",
+      path: ["completedRelease", "position"],
+    });
+  }
 });
 
 export const manifestPromotionJobMonitoringSchema = z.object({
@@ -417,6 +432,7 @@ export const promotionJobMonitoringOverviewSchema = z.object({
     version: decimalSchema,
     highWater: decimalSchema,
     digest: digestSchema,
+    providerCount: z.number().int().nonnegative(),
     eligibleProviderCount: z.number().int().nonnegative(),
   }),
   evaluator: promotionJobEvaluatorMonitoringSchema,
@@ -424,7 +440,7 @@ export const promotionJobMonitoringOverviewSchema = z.object({
   providers: z.array(providerPromotionJobMonitoringSchema),
 }).superRefine((overview, context) => {
   if (
-    overview.providers.length !== overview.roster.eligibleProviderCount
+    overview.providers.length !== overview.roster.providerCount
     || new Set(overview.providers.map(({ providerKey }) => providerKey)).size
       !== overview.providers.length
   ) {

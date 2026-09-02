@@ -29,7 +29,10 @@ const wake: PromotionJobWakeMonitoring = {
   failureCode: null,
 };
 
-function release(position: string, token: string): PromotionJobPublicReleaseMonitoring {
+function release(
+  position: string | null,
+  token: string,
+): PromotionJobPublicReleaseMonitoring {
   return {
     publicReleaseId: `release-${token}`,
     fingerprint: token.repeat(64),
@@ -97,6 +100,17 @@ test("settled work newer than the completed release awaits publication", () => {
     }),
   });
   assert.equal(result.state, "awaiting_publication");
+});
+
+test("a historical active selection can omit its local position without fabricating drift", () => {
+  const result = judge({
+    central: { activeRelease: release(null, "a"), pendingGate: null },
+  });
+  assert.equal(result.state, "current");
+  assert.equal(result.activeRelease?.position, null);
+  assert.throws(() => judge({
+    live: local({ completedRelease: release(null, "a") }),
+  }), { code: "PROMOTION_JOB_MONITORING_EVIDENCE_INVALID" });
 });
 
 test("provider outage retains only matching last-known evidence and marks it stale", () => {

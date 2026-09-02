@@ -167,6 +167,7 @@ test("concrete factory composes current-admin provider dependencies without lega
   });
   assert.ok(runtime.app.canonical);
   assert.ok(runtime.app.importOperations);
+  assert.ok(runtime.app.promotionJobs);
   assert.ok(runtime.app.providerSourceOperations);
   assert.equal(runtime.app.providerSources, undefined);
   await runtime.close();

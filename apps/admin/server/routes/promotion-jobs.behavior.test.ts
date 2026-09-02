@@ -75,6 +75,7 @@ const overview: PromotionJobMonitoringOverview = {
     version: "1",
     highWater: "1",
     digest: "a".repeat(64),
+    providerCount: 0,
     eligibleProviderCount: 0,
   },
   evaluator: {

@@ -20,9 +20,9 @@ export interface ProviderPromotionMonitoringRosterRow {
 
 export interface ProviderPromotionMonitoringLocalFacts {
   readonly observedAt: string;
-  readonly schedule: PromotionJobScheduleMonitoring;
-  readonly wake: PromotionJobWakeMonitoring;
-  readonly settledPosition: string;
+  readonly schedule: PromotionJobScheduleMonitoring | null;
+  readonly wake: PromotionJobWakeMonitoring | null;
+  readonly settledPosition: string | null;
   readonly completedRelease: PromotionJobPublicReleaseMonitoring | null;
   readonly latestInvocation: PromotionJobInvocationMonitoring | null;
   readonly executionState: "ready" | "retry_wait" | "blocked" | "failed";
@@ -69,6 +69,7 @@ function position(value: string | null): bigint | null {
 
 function assertRelease(
   release: PromotionJobPublicReleaseMonitoring | null,
+  requirePosition = false,
 ): void {
   if (release === null) return;
   if (
@@ -76,6 +77,7 @@ function assertRelease(
     || release.publicReleaseId.length < 1
     || release.publicReleaseId.length > 256
     || !/^[0-9a-f]{64}$/u.test(release.fingerprint)
+    || (requirePosition && release.position === null)
   ) invalid();
   position(release.position);
 }
@@ -83,10 +85,11 @@ function assertRelease(
 function assertLocal(facts: ProviderPromotionMonitoringLocalFacts): void {
   if (!instant(facts.observedAt)) invalid();
   position(facts.settledPosition);
-  assertRelease(facts.completedRelease);
+  assertRelease(facts.completedRelease, true);
   if (
     facts.completedRelease !== null
-    && position(facts.completedRelease.position)! > position(facts.settledPosition)!
+    && (facts.settledPosition === null
+      || position(facts.completedRelease.position)! > position(facts.settledPosition)!)
   ) invalid();
   if (
     facts.projectionLagMs !== null
@@ -101,7 +104,7 @@ function releasesMatch(
   return active !== null
     && completed.publicReleaseId === active.publicReleaseId
     && completed.fingerprint === active.fingerprint
-    && completed.position === active.position;
+    && (active.position === null || completed.position === active.position);
 }
 
 function liveState(
@@ -109,7 +112,7 @@ function liveState(
   central: ProviderPromotionMonitoringCentralFacts,
 ): ProviderPromotionJobMonitoring["state"] {
   if (facts.executionState !== "ready") return facts.executionState;
-  const settled = position(facts.settledPosition)!;
+  const settled = position(facts.settledPosition) ?? 0n;
   const completed = facts.completedRelease === null
     ? 0n
     : position(facts.completedRelease.position)!;

@@ -62,6 +62,7 @@ function overviewFixture(): PromotionJobMonitoringOverview {
       version: "4",
       highWater: "18",
       digest,
+      providerCount: 3,
       eligibleProviderCount: 3,
     },
     evaluator: {

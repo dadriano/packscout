@@ -74,6 +74,7 @@ type ProviderAppDependencies = Pick<
   | "backgroundWork"
   | "canonical"
   | "parity"
+  | "promotionJobs"
   | "providerSources"
   | "providerSourceOperations"
 >;
