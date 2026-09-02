@@ -610,8 +610,44 @@ function projectProviderContent(
       });
       publicContents.push({ content, collectible });
     }
-    const packChases = publicContents
-      .map(({ content, collectible }) => chaseFor({ content, publicRepackId, collectible }))
+    const chaseCandidates = publicContents
+      .filter(({ content }) => content.contentRole !== "other")
+      .sort((left, right) => {
+        const leftComparison = left.collectible.valuation?.usdComparison;
+        const rightComparison = right.collectible.valuation?.usdComparison;
+        const leftValue = leftComparison?.status === "available"
+          ? leftComparison.value.minorUnits
+          : null;
+        const rightValue = rightComparison?.status === "available"
+          ? rightComparison.value.minorUnits
+          : null;
+        if (leftValue !== null && rightValue === null) return -1;
+        if (leftValue === null && rightValue !== null) return 1;
+        if (leftValue !== null && rightValue !== null && leftValue !== rightValue) {
+          return leftValue > rightValue ? -1 : 1;
+        }
+        return left.collectible.publicCollectibleId <
+            right.collectible.publicCollectibleId
+          ? -1
+          : left.collectible.publicCollectibleId >
+              right.collectible.publicCollectibleId
+            ? 1
+            : 0;
+      });
+    const packChases = chaseCandidates
+      .map(({ content, collectible }, displayOrder) => chaseFor({
+        content: {
+          ...content,
+          contentRole: displayOrder === 0
+            ? "top_chase"
+            : content.contentRole === "featured_chase"
+              ? "featured_chase"
+              : "possible_outcome",
+          displayOrder,
+        },
+        publicRepackId,
+        collectible,
+      }))
       .filter((value): value is PublicRepackChase => value !== null);
     const publicCategoryIds = [...selectedForPack].sort();
     const categories = publicCategoryIds.map((id) => {

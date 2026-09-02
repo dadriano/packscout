@@ -381,6 +381,47 @@ test("mixed cards, watches, art, provisional identities, unavailable values, ali
   ]) assert.equal(serialized.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden);
 });
 
+test("top chase and display order follow governed value priority instead of source labels", async () => {
+  const central = await pin();
+  const repriced = await withCatalogCollectibles(
+    central,
+    central.catalogCollectibles.map((row) => row.publicCollectibleId === watchId
+      ? {
+          ...row,
+          valuationAmount: "2500",
+          valuationUsdAmount: "2500",
+        }
+      : row),
+  );
+  const built = await buildProviderRelease({
+    snapshot: snapshot(),
+    pin: repriced,
+    predecessorCompleteReleaseId: null,
+  });
+  const repack = built.repacks.find(({ name }) =>
+    name === "Cards Watches and Art"
+  );
+  const chases = built.chases.filter(({ publicRepackId }) =>
+    publicRepackId === repack?.publicRepackId
+  );
+  assert.equal(repack?.topChase?.publicCollectibleId, watchId);
+  assert.deepEqual(
+    chases.map(({ publicCollectibleId, role, displayOrder }) => ({
+      publicCollectibleId,
+      role,
+      displayOrder,
+    })),
+    [
+      { publicCollectibleId: watchId, role: "top_chase", displayOrder: 0 },
+      {
+        publicCollectibleId: cardId,
+        role: "possible_outcome",
+        displayOrder: 1,
+      },
+    ],
+  );
+});
+
 test("the cooperative build checkpoint stops large CPU loops at the caller deadline", async () => {
   const central = await pin();
   const current = snapshot();

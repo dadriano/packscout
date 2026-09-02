@@ -53,6 +53,8 @@ import { withVerifiedLocalConvexPublicationAuthorityCleanup } from
   "./local-convex-publication-authorities.mts";
 import { readLocalClutchpacksV3List } from
   "./distributed-clutchpacks-public-transport.mts";
+import { clutchpacksPublicValuationFields } from
+  "./distributed-clutchpacks-content-snapshot.mts";
 import { parseClutchpacksApprovedAssetOrigins } from
   "./distributed-clutchpacks-publication-snapshot.mts";
 import {
@@ -412,7 +414,9 @@ async function localReleasePin(input: Readonly<{
         transaction.promotion_ledger.findUniqueOrThrow({
           where: { singleton_key: true },
         }),
-        transaction.categories.findMany({ orderBy: [{ category_key: "asc" }, { id: "asc" }] }),
+        transaction.categories.findMany({
+          orderBy: [{ category_key: "asc" }, { id: "asc" }],
+        }),
         transaction.packs.findMany({
           where: publicPackScope,
           orderBy: { id: "asc" },
@@ -439,17 +443,24 @@ async function localReleasePin(input: Readonly<{
           },
         }),
       ]);
+    if (identity.database_role !== "provider") {
+      return refuse("CLUTCHPACKS_CANONICAL_ROLE_INVALID");
+    }
     if (
-      identity.database_role !== "provider"
-      || identity.provider_key !== "clutchpacks"
+      identity.provider_key !== "clutchpacks"
       || runtime.central_provider_id !== identity.provider_id
       || runtime.provider_key !== identity.provider_key
-      || runtime.operating_state !== "idle"
-      || runtime.cached_config_version_id === null
-      || runtime.last_head_reached_at === null
-      || ledger.last_sequence < 1n
-      || packs.length < 1
-    ) return refuse("CLUTCHPACKS_CANONICAL_SOURCE_INELIGIBLE");
+    ) return refuse("CLUTCHPACKS_CANONICAL_IDENTITY_INVALID");
+    if (runtime.cached_config_version_id === null) {
+      return refuse("CLUTCHPACKS_CANONICAL_CONFIG_MISSING");
+    }
+    if (runtime.last_head_reached_at === null) {
+      return refuse("CLUTCHPACKS_CANONICAL_HEAD_MISSING");
+    }
+    if (ledger.last_sequence < 1n) {
+      return refuse("CLUTCHPACKS_CANONICAL_LANE_EMPTY");
+    }
+    if (packs.length < 1) return refuse("CLUTCHPACKS_CANONICAL_PACKS_EMPTY");
 
     const categoryById = new Map(allCategories.map((row) => [row.id, row]));
     const selectedCategoryIds = new Set<string>();
@@ -480,7 +491,9 @@ async function localReleasePin(input: Readonly<{
       let cursor: string | null = categoryId;
       while (cursor !== null) {
         const row = categoryById.get(cursor);
-        if (row === undefined) return refuse("CLUTCHPACKS_LOCAL_CATEGORY_PATH_INVALID");
+        if (row === undefined) {
+          return refuse("CLUTCHPACKS_LOCAL_CATEGORY_PATH_INVALID");
+        }
         reversed.push(globalCategoryPublicId(row.id));
         cursor = row.parent_category_id;
       }
@@ -493,7 +506,9 @@ async function localReleasePin(input: Readonly<{
         parentPublicCategoryId: row.parent_category_id === null
           ? null
           : globalCategoryPublicId(row.parent_category_id),
-        categoryKey: row.category_key,
+        // Canonical provider category keys are not centrally governed public
+        // keys yet, so this local-only pin uses a stable non-semantic key.
+        categoryKey: `local-${row.id}`,
         displayName: row.display_name,
         categoryKind: "other",
         displayOrder,
@@ -548,8 +563,10 @@ async function localReleasePin(input: Readonly<{
         valuationUsdAmount: row.valuation_usd_amount === null
           ? null
           : normalizeExactDecimal(row.valuation_usd_amount.toFixed()),
-        valuationUnavailableReason: row.valuation_unavailable_reason,
-        valuationType: row.valuation_type,
+        ...clutchpacksPublicValuationFields({
+          valuationType: row.valuation_type,
+          valuationUnavailableReason: row.valuation_unavailable_reason,
+        }),
         valuationObservedAt: row.valuation_observed_at?.toISOString() ?? null,
         dataAsOf: row.data_as_of.toISOString(),
       }) as PublicCatalogCollectible;
@@ -589,12 +606,12 @@ async function localReleasePin(input: Readonly<{
       `local-clutchpacks-worker-catalog:${catalogContentHash}`,
     );
     const categoryCorrelations = selectedCategories.map((row) => ({
-        localCategoryId: row.id,
-        localEntityVersion: row.row_version,
-        publicCategoryId: globalCategoryPublicId(row.id),
-      })).sort((left, right) =>
-        left.localCategoryId.localeCompare(right.localCategoryId)
-      );
+      localCategoryId: row.id,
+      localEntityVersion: row.row_version,
+      publicCategoryId: globalCategoryPublicId(row.id),
+    })).sort((left, right) =>
+      left.localCategoryId.localeCompare(right.localCategoryId)
+    );
     const collectibleCorrelations = collectibles.map((row) => ({
       localCollectibleId: row.id,
       localEntityVersion: row.row_version,
@@ -762,6 +779,19 @@ export async function runClutchpacksProviderPromotionFrontendE2e(
       connectionLimit: 2,
     });
     await lifecycle.start();
+    const restoredRuntime = await lifecycle.client.provider_runtime
+      .findUniqueOrThrow({ where: { singleton_key: true } });
+    const normalizedLegacyFreshness = restoredRuntime.freshness_state !== "fresh"
+      && restoredRuntime.freshness_state !== "stale";
+    if (normalizedLegacyFreshness) {
+      // This protected snapshot predates the publication contract's two
+      // accepted labels. Preserve uncertainty by mapping only the disposable
+      // copy to stale; never manufacture a fresh source observation.
+      await lifecycle.client.provider_runtime.update({
+        where: { singleton_key: true },
+        data: { freshness_state: "stale", row_version: { increment: 1 } },
+      });
+    }
     const localPin = await localReleasePin({
       provider: lifecycle.client,
       approvedImageOrigins,
@@ -776,6 +806,9 @@ export async function runClutchpacksProviderPromotionFrontendE2e(
       await recomputeProviderCatalogReleaseOriginSetHashV1(
         approvedImageOrigins,
       );
+    const frontendOriginSetHash = createHash("sha256")
+      .update(JSON.stringify([...approvedImageOrigins].sort()))
+      .digest("hex");
     await withLocalConvexEvReady(
       await createLocalConvexEvMigrationClient(local),
       async () => await withVerifiedLocalConvexPublicationAuthorityCleanup({
@@ -863,17 +896,35 @@ export async function runClutchpacksProviderPromotionFrontendE2e(
           let invocationCount = 0;
           for (let cycleIndex = 0; cycleIndex < 4; cycleIndex += 1) {
             const cycle = await runtime.runCycle();
-            if (
-              cycle.reconciliationFailures !== 0
-              || cycle.stateReadFailures !== 0
-              || cycle.invocations.length !== 1
-              || cycle.invocations[0]?.state !== "completed"
-            ) return refuse("CLUTCHPACKS_PROVIDER_WORKER_DID_NOT_CATCH_UP");
+            if (cycle.reconciliationFailures !== 0) {
+              return refuse("CLUTCHPACKS_PROVIDER_WORKER_RECONCILIATION_FAILED");
+            }
+            if (cycle.stateReadFailures !== 0) {
+              return refuse("CLUTCHPACKS_PROVIDER_WORKER_STATE_READ_FAILED");
+            }
+            if (cycle.invocations.length !== 1) {
+              return refuse("CLUTCHPACKS_PROVIDER_WORKER_INVOCATION_MISSING");
+            }
+            if (cycle.invocations[0]?.state !== "completed") {
+              return refuse(
+                cycle.invocations[0]?.failureCode
+                  ?? "CLUTCHPACKS_PROVIDER_WORKER_INVOCATION_FAILED",
+              );
+            }
             invocation = cycle.invocations[0];
             invocationCount += 1;
             if (invocation.outcome === "caught_up") break;
             if (invocation.outcome !== "continuation_required") {
-              return refuse("CLUTCHPACKS_PROVIDER_WORKER_DID_NOT_CATCH_UP");
+              const durable = await lifecycle!.client
+                .provider_promotion_job_invocations.findFirst({
+                  orderBy: [{ started_at: "desc" }, { run_id: "desc" }],
+                  select: { safe_failure_code: true },
+                });
+              return refuse(
+                durable?.safe_failure_code
+                  ?? `CLUTCHPACKS_PROVIDER_WORKER_OUTCOME_${invocation.outcome
+                    .toUpperCase().replaceAll(/[^A-Z0-9_]/gu, "_")}`,
+              );
             }
           }
           if (invocation?.outcome !== "caught_up") {
@@ -952,6 +1003,7 @@ export async function runClutchpacksProviderPromotionFrontendE2e(
               kind: "protected_local_dump",
               sha256: dumpSha256,
               providerKey: "clutchpacks",
+              normalizedLegacyFreshness,
               canonicalPackCount: localPin.canonicalCounts.packs,
               canonicalCollectibleCount: localPin.canonicalCounts.collectibles,
               laneSequence: lane.last_sequence.toString(),
@@ -989,7 +1041,7 @@ export async function runClutchpacksProviderPromotionFrontendE2e(
                 NEXT_PUBLIC_CONVEX_URL: local.publicUrl,
                 PACKSCOUT_PUBLIC_IMAGE_ORIGINS:
                   approvedImageOrigins.join(","),
-                PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: originSetHash,
+                PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: frontendOriginSetHash,
               },
               reviewPath:
                 "/packs?vendor=clutchpacks&availability=all&pageSize=50",
