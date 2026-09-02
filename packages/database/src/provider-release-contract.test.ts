@@ -17,6 +17,7 @@ import {
   type ProviderReleaseSnapshot,
 } from "./provider-release-contract.ts";
 import type { PinnedProviderReleaseInputs } from "./provider-release-central-repository.ts";
+import { currencyMinorUnits, publicPrice } from "./provider-release-money.ts";
 
 const providerId = "13000000-0000-4000-8000-000000000001";
 const local = {
@@ -444,14 +445,48 @@ test("configured stale threshold controls public freshness independently from sc
   );
 });
 
-test("supported token prices and valuations preserve exact public display money", async () => {
+test("ISO source money keeps its public display exponent", () => {
+  assert.deepEqual(
+    publicPrice({
+      amount: "100.005",
+      currency: "USD",
+      usdAmount: "100.005",
+      unavailableReason: null,
+    }),
+    {
+      displayMoney: { minorUnits: 10_001, currency: "USD" },
+      usdComparison: {
+        status: "available",
+        value: { minorUnits: 10_001, currency: "USD" },
+      },
+    },
+  );
+  assert.equal(currencyMinorUnits("100.5", "JPY"), 101);
+  assert.deepEqual(
+    publicPrice({
+      amount: "100.5",
+      currency: "JPY",
+      usdAmount: "0.67",
+      unavailableReason: null,
+    }),
+    {
+      displayMoney: { minorUnits: 101, currency: "JPY" },
+      usdComparison: {
+        status: "available",
+        value: { minorUnits: 67, currency: "USD" },
+      },
+    },
+  );
+});
+
+test("token source money stays out of public display while USD evidence remains", async () => {
   const central = await pin();
   const tokenCollectibles = central.catalogCollectibles.map((row) => (
     row.publicCollectibleId === watchId
       ? {
           ...row,
           valuationAmount: "1.25",
-          valuationCurrency: "USDC",
+          valuationCurrency: "USDT",
           valuationUsdAmount: "1.25",
         }
       : row
@@ -479,6 +514,8 @@ test("supported token prices and valuations preserve exact public display money"
             priceAmount: "100.005",
             priceCurrency: "USDC",
             priceUsdAmount: "100.005",
+            vendorEvAmount: "90.125",
+            vendorEvCurrency: "USDT",
           }
         : row
     )),
@@ -490,13 +527,24 @@ test("supported token prices and valuations preserve exact public display money"
   });
   const repack = built.repacks.find(({ name }) => name === "Cards Watches and Art");
   const watch = built.chases.find(({ collectible }) => collectible.publicCollectibleId === watchId);
-  assert.deepEqual(repack?.price.displayMoney, {
-    minorUnits: 100_005_000,
-    currency: "USDC",
+  assert.deepEqual(repack?.price, {
+    displayMoney: null,
+    usdComparison: {
+      status: "available",
+      value: { minorUnits: 10_001, currency: "USD" },
+    },
   });
-  assert.deepEqual(watch?.collectible.valuation?.displayMoney, {
-    minorUnits: 1_250_000,
-    currency: "USDC",
+  assert.deepEqual(repack?.evEstimates.vendorReported, {
+    status: "unavailable",
+    displayMoney: null,
+    metrics: null,
+    observedAt: observedAt.toISOString(),
+    reason: "CURRENCY_UNSUPPORTED",
+  });
+  assert.equal(watch?.collectible.valuation?.displayMoney, null);
+  assert.deepEqual(watch?.collectible.valuation?.usdComparison, {
+    status: "available",
+    value: { minorUnits: 125, currency: "USD" },
   });
 });
 

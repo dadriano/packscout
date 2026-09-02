@@ -98,6 +98,7 @@ const PROVIDER_TABLES = [
   "provider_releases",
   "provider_release_batches",
   "provider_publication_operations",
+  "provider_publication_batch_evidence",
   "provider_publication_receipts",
   "provider_publication_state",
   "provider_promotion_job_wake",
@@ -541,7 +542,7 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
   assert.equal(centralModels.size, 56);
-  assert.equal(providerModels.size, 38);
+  assert.equal(providerModels.size, 39);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 

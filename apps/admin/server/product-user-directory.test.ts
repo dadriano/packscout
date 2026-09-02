@@ -321,7 +321,7 @@ function savedItemsResponse(overrides: Record<string, unknown> = {}) {
         publicCollectibleId: "30000000-0000-5000-8000-000000000001",
         savedAt: "2026-08-19T12:00:03.000Z",
         resolution: "resolved",
-        collectible: { name: "Charizard Holo PSA 10", collectibleType: "card" },
+        collectible: { name: "Gallery Study", collectibleType: "art" },
       },
     ],
     ...overrides,
@@ -337,7 +337,7 @@ function detailFetch(
   );
 }
 
-test("the detail read joins the record lookup to the resolved saved items", async () => {
+test("the detail read joins the record lookup and accepts art saved items", async () => {
   const { calls, implementation } = detailFetch(row());
   const reader = createProductUserDirectoryReader({
     config,
@@ -381,8 +381,8 @@ test("the detail read joins the record lookup to the resolved saved items", asyn
       resolution: "resolved",
       publicCollectibleId: "30000000-0000-5000-8000-000000000001",
       savedAt: "2026-08-19T12:00:03.000Z",
-      name: "Charizard Holo PSA 10",
-      collectibleType: "card",
+      name: "Gallery Study",
+      collectibleType: "art",
     },
   ]);
 

@@ -7,6 +7,7 @@ export * from "./provider-catalog-release-v1.ts";
 export * from "./provider-release-publication-v1.ts";
 export * from "./provider-release-publication-v1-receipts.ts";
 export * from "./provider-release.ts";
+export * from "./provider-promotion-bootstrap.ts";
 export * from "./global-catalog-manifest-v1.ts";
 export * from "./catalog-manifest-publication-v1.ts";
 export * from "./catalog-manifest-publication-auth-v1.ts";

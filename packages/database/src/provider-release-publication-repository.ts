@@ -10,11 +10,11 @@ import {
   providerReleaseReceiptSchema,
   providerReleaseReuseReceiptSchema,
   providerReleaseStartRequestSchema,
-  verifyProviderCatalogReleasePlanV1,
   type ProviderReleaseExpectedCompletedHeadV1,
-  type ProviderCatalogReleaseBatchV1,
+  type ProviderReleaseFinalizeRequest,
   type ProviderReleaseMutationRequest,
   type ProviderReleaseReceipt,
+  type ProviderReleaseStartRequest,
 } from "@packscout/contracts";
 import { Prisma as ProviderPrisma } from
   "../prisma/generated/provider/index.js";
@@ -39,6 +39,16 @@ import {
   providerWorkerLeaseDatabaseNow,
   providerWorkerLeaseIsLive,
 } from "./provider-worker-lease-repository.ts";
+import {
+  ProviderPublicationCompactProofError,
+  buildProviderPublicationBatchEvidence,
+  storedProviderPublicationBatchEvidenceMatches,
+  type ProviderPublicationBatchEvidence,
+} from "./provider-release-publication-proof.ts";
+import {
+  PUBLICATION_BATCH_EVIDENCE_SELECT,
+  verifyProviderPublicationFinalizeTranscript,
+} from "./provider-release-publication-transcript.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -290,19 +300,6 @@ function requestBatchIndex(request: ProviderReleaseMutationRequest): number | nu
   return "batch" in request ? request.batch.batchIndex : null;
 }
 
-function releaseContext(request: ProviderReleaseMutationRequest): string {
-  if (!("release" in request)) {
-    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
-  }
-  return canonicalJson({
-    release: request.release,
-    providerCheckpoint: request.providerCheckpoint,
-    sourceWatermark: request.sourceWatermark,
-    observation: request.observation,
-    expectedCompletedHead: request.expectedCompletedHead,
-  });
-}
-
 function receiptFrom(
   operation: DistributedProviderPublicationOperation,
   evidence: DistributedProviderPublicationReceiptEvidence,
@@ -391,77 +388,6 @@ function intentFrom(row: {
     receiptSha256: row.receipt?.response_digest ?? null,
     failureCode: row.failure_code,
   };
-}
-
-async function requireFinalizeTranscript(
-  transaction: ProviderTransactionClient,
-  providerReleaseId: string,
-  terminalRequest: ProviderReleaseMutationRequest,
-): Promise<void> {
-  if (!("release" in terminalRequest)) {
-    repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
-  }
-  const rows = await transaction.provider_publication_operations.findMany({
-    where: {
-      provider_release_id: providerReleaseId,
-      operation_kind: { in: ["start", "applyBatch"] },
-      state: "accepted",
-    },
-    include: { receipt: true },
-  });
-  const expectedContext = releaseContext(terminalRequest);
-  let startCount = 0;
-  const batches: ProviderCatalogReleaseBatchV1[] = [];
-  for (const row of rows) {
-    if (
-      row.receipt === null
-      || (row.operation_kind !== "start" && row.operation_kind !== "applyBatch")
-    ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-    const operation: DistributedProviderPublicationOperation = {
-      operationId: row.idempotency_key,
-      operationKind: row.operation_kind,
-      canonicalRequestBody: new TextDecoder().decode(row.request_bytes),
-      requestSha256: row.request_digest,
-    };
-    const request = parseRequest(operation);
-    receiptFrom(operation, {
-      canonicalReceiptBody: new TextDecoder().decode(row.receipt.response_bytes),
-      receiptSha256: row.receipt.response_digest,
-    });
-    if (releaseContext(request) !== expectedContext) {
-      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-    }
-    if (row.operation_kind === "start") {
-      startCount += 1;
-    } else if ("batch" in request) {
-      batches.push(request.batch);
-    } else {
-      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-    }
-  }
-  batches.sort((left, right) => left.batchIndex - right.batchIndex);
-  if (
-    startCount !== 1
-    || batches.length !== terminalRequest.release.batchCount
-    || batches.some((batch, index) => batch.batchIndex !== index)
-  ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-  try {
-    const verified = await verifyProviderCatalogReleasePlanV1({
-      schemaVersion: "provider_catalog_release_v1",
-      classification: "publish",
-      ...terminalRequest.release,
-      providerCheckpoint: terminalRequest.providerCheckpoint,
-      sourceWatermark: terminalRequest.sourceWatermark,
-      observation: terminalRequest.observation,
-      batches,
-    });
-    if (verified.classification !== "publish") {
-      repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-    }
-  } catch (error) {
-    if (error instanceof ProviderReleasePublicationRepositoryError) throw error;
-    repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
-  }
 }
 
 function emptyExpectedHead(platformKey: string): ProviderReleaseExpectedCompletedHeadV1 {
@@ -1075,6 +1001,18 @@ export class ProviderReleasePublicationRepository {
     if (!("release" in request)) {
       repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
     }
+    let compactBatchEvidence: ProviderPublicationBatchEvidence | null = null;
+    if ("batch" in request) {
+      try {
+        compactBatchEvidence =
+          await buildProviderPublicationBatchEvidence(request);
+      } catch (error) {
+        if (error instanceof ProviderPublicationCompactProofError) {
+          repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
+        }
+        throw error;
+      }
+    }
     return withPublicationDeadline(deadline, () =>
       this.provider.$transaction(async (transaction) => {
       const { checkpoint, databaseNow } = await requireLease(
@@ -1101,6 +1039,20 @@ export class ProviderReleasePublicationRepository {
             row.receipt.response_bytes,
           )
         ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+        if (compactBatchEvidence !== null) {
+          const storedEvidence = await transaction
+            .provider_publication_batch_evidence.findUnique({
+              where: { operation_id: row.id },
+              select: PUBLICATION_BATCH_EVIDENCE_SELECT,
+            });
+          if (
+            storedEvidence === null
+            || !storedProviderPublicationBatchEvidenceMatches(
+              storedEvidence,
+              compactBatchEvidence,
+            )
+          ) repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+        }
         return {
           receipt,
           completed: input.operation.operationKind === "finalize"
@@ -1111,11 +1063,25 @@ export class ProviderReleasePublicationRepository {
         repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
       }
       if (input.operation.operationKind === "finalize") {
-        await requireFinalizeTranscript(
-          transaction,
-          row.provider_release_id,
-          request,
-        );
+        try {
+          await verifyProviderPublicationFinalizeTranscript({
+            transaction,
+            providerReleaseId: row.provider_release_id,
+            terminalRequest: request as ProviderReleaseFinalizeRequest,
+            parseStartRequest: (operation) => parseRequest({
+              ...operation,
+              operationKind: "start",
+            }) as ProviderReleaseStartRequest,
+          });
+        } catch (error) {
+          if (error instanceof ProviderReleasePublicationRepositoryError) {
+            throw error;
+          }
+          if (error instanceof ProviderPublicationCompactProofError) {
+            repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
+          }
+          throw error;
+        }
       }
       await setReconciliationContext(
         transaction,
@@ -1159,6 +1125,25 @@ export class ProviderReleasePublicationRepository {
           received_at: databaseNow,
         },
       });
+      if (compactBatchEvidence !== null) {
+        await transaction.provider_publication_batch_evidence.create({
+          data: {
+            operation_id: row.id,
+            provider_release_id: row.provider_release_id,
+            batch_index: compactBatchEvidence.batchIndex,
+            batch_kind: compactBatchEvidence.batchKind,
+            batch_hash: compactBatchEvidence.batchHash,
+            record_count: compactBatchEvidence.recordCount,
+            byte_count: compactBatchEvidence.byteCount,
+            release_context_hash: compactBatchEvidence.releaseContextHash,
+            search_shard_descriptors:
+              compactBatchEvidence.searchShardDescriptors.map(
+                (descriptor) => ({ ...descriptor }),
+              ),
+            created_at: databaseNow,
+          },
+        });
+      }
       if (input.operation.operationKind === "block") {
         if (row.provider_release.lifecycle !== "blocked") {
           await transaction.provider_releases.update({

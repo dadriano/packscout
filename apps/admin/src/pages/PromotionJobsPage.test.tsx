@@ -7,7 +7,7 @@ import type {
 } from "@packscout/contracts";
 import * as React from "react";
 import { act } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import {
   changeControl,
   cleanupPage,
@@ -221,6 +221,25 @@ function route(initial = "/promotion-jobs") {
   return <MemoryRouter initialEntries={[initial]}><PromotionJobsPage /></MemoryRouter>;
 }
 
+function HistoryNavigation() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(-1)}>Browser Back</button>
+      <button type="button" onClick={() => navigate(1)}>Browser Forward</button>
+    </>
+  );
+}
+
+function routeWithHistory(initial = "/promotion-jobs") {
+  return (
+    <MemoryRouter initialEntries={[initial]}>
+      <PromotionJobsPage />
+      <HistoryNavigation />
+    </MemoryRouter>
+  );
+}
+
 function requestPath(input: RequestInfo | URL): string {
   return String(input);
 }
@@ -357,6 +376,100 @@ test("invalid shared URL filters stay visible and never broaden into a history r
     requests.filter(({ input }) => requestPath(input).includes("/history")).length,
     0,
   );
+});
+
+test("a shared cursor URL can return to page one without dropping active filters", async (context) => {
+  const requests = stubFetch(context, ({ input }) => {
+    const target = new URL(requestPath(input), "https://admin.packscout.test");
+    if (target.pathname.endsWith("/overview")) return jsonResponse(overviewFixture());
+    return jsonResponse(historyFixture(
+      alphaInvocation,
+      target.searchParams.has("cursor") ? null : "shared-cursor",
+    ));
+  });
+  const rendered = await renderPage(route(
+    "/promotion-jobs?filter=manifest&trigger=change_wake&cursor=shared-cursor",
+  ));
+  cleanupPage(context, rendered);
+  await settlePage();
+
+  const historyRequests = () => requests
+    .filter(({ input }) => requestPath(input).includes("/history"))
+    .map(({ input }) => new URL(requestPath(input), "https://admin.packscout.test"));
+  const initial = historyRequests().at(-1);
+  assert.equal(initial?.searchParams.get("filter"), "manifest");
+  assert.equal(initial?.searchParams.get("trigger"), "change_wake");
+  assert.equal(initial?.searchParams.get("cursor"), "shared-cursor");
+  assert.match(pageText(rendered), /Page 2/);
+  assert.equal(findButton(rendered, "Previous").disabled, false);
+
+  await act(async () => findButton(rendered, "Previous").click());
+  await settlePage();
+
+  const firstPage = historyRequests().at(-1);
+  assert.equal(firstPage?.searchParams.get("filter"), "manifest");
+  assert.equal(firstPage?.searchParams.get("trigger"), "change_wake");
+  assert.equal(firstPage?.searchParams.has("cursor"), false);
+  assert.match(pageText(rendered), /Page 1/);
+  assert.equal(findButton(rendered, "Previous").disabled, true);
+});
+
+test("browser Back and Forward restore the exact cursor page and controls", async (context) => {
+  const requests = stubFetch(context, ({ input }) => {
+    const target = new URL(requestPath(input), "https://admin.packscout.test");
+    if (target.pathname.endsWith("/overview")) return jsonResponse(overviewFixture());
+    const cursor = target.searchParams.get("cursor");
+    const nextCursor = cursor === null
+      ? "cursor-one"
+      : cursor === "cursor-one" ? "cursor-two" : null;
+    return jsonResponse(historyFixture(alphaInvocation, nextCursor));
+  });
+  const rendered = await renderPage(routeWithHistory(
+    "/promotion-jobs?filter=manifest&trigger=change_wake",
+  ));
+  cleanupPage(context, rendered);
+  await settlePage();
+
+  assert.match(pageText(rendered), /Page 1/);
+  assert.equal(findButton(rendered, "Previous").disabled, true);
+
+  await act(async () => findButton(rendered, "Next").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 2/);
+  assert.equal(findButton(rendered, "Previous").disabled, false);
+
+  await act(async () => findButton(rendered, "Next").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 3/);
+
+  await act(async () => findButton(rendered, "Browser Back").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 2/);
+  assert.equal(findButton(rendered, "Previous").disabled, false);
+
+  await act(async () => findButton(rendered, "Browser Back").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 1/);
+  assert.equal(findButton(rendered, "Previous").disabled, true);
+
+  await act(async () => findButton(rendered, "Browser Forward").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 2/);
+  assert.equal(findButton(rendered, "Previous").disabled, false);
+
+  await act(async () => findButton(rendered, "Browser Forward").click());
+  await settlePage();
+  assert.match(pageText(rendered), /Page 3/);
+  assert.equal(findButton(rendered, "Previous").disabled, false);
+
+  const historyRequests = requests
+    .filter(({ input }) => requestPath(input).includes("/history"))
+    .map(({ input }) => new URL(requestPath(input), "https://admin.packscout.test"));
+  assert.ok(historyRequests.length >= 7);
+  assert.ok(historyRequests.every((target) =>
+    target.searchParams.get("filter") === "manifest" &&
+    target.searchParams.get("trigger") === "change_wake"
+  ));
 });
 
 test("a slower superseded filter response cannot replace the current scope", async (context) => {

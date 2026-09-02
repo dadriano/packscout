@@ -148,6 +148,7 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "provider_change_consumers",
   "provider_releases",
   "provider_release_batches",
+  "provider_publication_batch_evidence",
   "provider_publication_operations",
   "provider_publication_receipts",
   "provider_publication_state",

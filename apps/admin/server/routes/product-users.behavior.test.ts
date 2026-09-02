@@ -170,8 +170,8 @@ const savedCollectibles = [
     resolution: "resolved",
     publicCollectibleId: "30000000-0000-5000-8000-000000000001",
     savedAt: "2026-08-19T12:00:03.000Z",
-    name: "1999 Pokemon Base Set Charizard Holo PSA 10",
-    collectibleType: "card",
+    name: "PackScout Gallery Study",
+    collectibleType: "art",
     searchText: "never-serialize",
   },
 ] as const;
@@ -765,7 +765,7 @@ test("the user detail read enforces the product-user authorization matrix", asyn
   assert.deepEqual(detailRequests, [{ subject: emailUser.subject }]);
 });
 
-test("the detail read relays resolved and unresolved saved items verbatim", async () => {
+test("the detail read relays saved items, including art, verbatim", async () => {
   const { app, cookiePolicy } = createHarness();
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/product-users/detail`, {
@@ -820,8 +820,8 @@ test("the detail read relays resolved and unresolved saved items verbatim", asyn
         resolution: "resolved",
         publicCollectibleId: "30000000-0000-5000-8000-000000000001",
         savedAt: "2026-08-19T12:00:03.000Z",
-        name: "1999 Pokemon Base Set Charizard Holo PSA 10",
-        collectibleType: "card",
+        name: "PackScout Gallery Study",
+        collectibleType: "art",
       },
     ]);
   });

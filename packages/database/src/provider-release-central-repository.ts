@@ -28,6 +28,7 @@ const PIN_TRANSACTION = Object.freeze({
   timeout: 60_000,
   isolationLevel: CentralPrisma.TransactionIsolationLevel.RepeatableRead,
 });
+const PIN_TRANSACTION_SETTLEMENT_RESERVE_MILLISECONDS = 50;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 
 export type ProviderReleasePinFailureCode =
@@ -40,7 +41,9 @@ export type ProviderReleasePinFailureCode =
   | "CATALOG_VERSION_MISSING"
   | "CATALOG_VERSION_INCOMPLETE"
   | "CATALOG_ARTIFACT_INVALID"
-  | "CORRELATION_SNAPSHOT_INVALID";
+  | "CORRELATION_SNAPSHOT_INVALID"
+  | "PROVIDER_RELEASE_PIN_CANCELLED"
+  | "PROVIDER_RELEASE_PIN_DEADLINE";
 
 export class ProviderReleasePinError extends Error {
   constructor(readonly code: ProviderReleasePinFailureCode) {
@@ -86,6 +89,11 @@ export interface PinnedProviderReleaseInputs {
   readonly publicProvider: PublicVendor;
 }
 
+export interface ProviderReleasePinControl {
+  readonly signal?: AbortSignal;
+  readonly deadlineAt?: number;
+}
+
 interface StoredBatch {
   readonly batch_kind: string;
   readonly batch_index: number;
@@ -100,6 +108,104 @@ function exactArray(value: unknown): readonly unknown[] {
     throw new ProviderReleasePinError("CATALOG_ARTIFACT_INVALID");
   }
   return value;
+}
+
+function pinFailure(code: ProviderReleasePinFailureCode): never {
+  throw new ProviderReleasePinError(code);
+}
+
+function requirePinActive(
+  control: ProviderReleasePinControl,
+  nowMilliseconds: () => number,
+): void {
+  if (control.signal?.aborted === true) {
+    pinFailure("PROVIDER_RELEASE_PIN_CANCELLED");
+  }
+  if (
+    control.deadlineAt !== undefined &&
+    nowMilliseconds() >= control.deadlineAt
+  ) pinFailure("PROVIDER_RELEASE_PIN_DEADLINE");
+}
+
+function pinTransactionOptions(
+  control: ProviderReleasePinControl,
+  nowMilliseconds: () => number,
+) {
+  if (control.deadlineAt === undefined) return PIN_TRANSACTION;
+  if (!Number.isSafeInteger(control.deadlineAt) || control.deadlineAt < 1) {
+    throw new TypeError("Provider release pin deadline is invalid.");
+  }
+  requirePinActive(control, nowMilliseconds);
+  const available = Math.floor(
+    control.deadlineAt - nowMilliseconds() -
+      PIN_TRANSACTION_SETTLEMENT_RESERVE_MILLISECONDS,
+  );
+  const maxWait = Math.min(
+    PIN_TRANSACTION.maxWait,
+    Math.max(1, Math.floor(available / 5)),
+  );
+  const timeout = Math.min(PIN_TRANSACTION.timeout, available - maxWait);
+  if (timeout < 1) pinFailure("PROVIDER_RELEASE_PIN_DEADLINE");
+  return {
+    maxWait,
+    timeout,
+    isolationLevel: PIN_TRANSACTION.isolationLevel,
+  };
+}
+
+function transactionExpired(error: unknown): boolean {
+  return error !== null && typeof error === "object" && "code" in error &&
+    (error.code === "P2024" || error.code === "P2028");
+}
+
+async function withPinControl<T>(input: Readonly<{
+  control: ProviderReleasePinControl;
+  nowMilliseconds: () => number;
+  operation: () => Promise<T>;
+}>): Promise<T> {
+  requirePinActive(input.control, input.nowMilliseconds);
+  let cancel: (() => void) | null = null;
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  const boundaries: Promise<never>[] = [];
+  const signal = input.control.signal;
+  if (signal !== undefined) {
+    boundaries.push(new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(new ProviderReleasePinError(
+        "PROVIDER_RELEASE_PIN_CANCELLED",
+      ));
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    }));
+  }
+  const deadlineAt = input.control.deadlineAt;
+  if (deadlineAt !== undefined) {
+    boundaries.push(new Promise<never>((_resolve, reject) => {
+      deadlineTimer = setTimeout(
+        () => reject(new ProviderReleasePinError(
+          "PROVIDER_RELEASE_PIN_DEADLINE",
+        )),
+        Math.max(
+          0,
+          deadlineAt - input.nowMilliseconds(),
+        ),
+      );
+    }));
+  }
+  try {
+    const result = await Promise.race([input.operation(), ...boundaries]);
+    requirePinActive(input.control, input.nowMilliseconds);
+    return result;
+  } catch (error) {
+    if (input.control.deadlineAt !== undefined && transactionExpired(error)) {
+      pinFailure("PROVIDER_RELEASE_PIN_DEADLINE");
+    }
+    throw error;
+  } finally {
+    if (cancel !== null && signal !== undefined) {
+      signal.removeEventListener("abort", cancel);
+    }
+    if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+  }
 }
 
 async function verifyCatalogArtifact(input: {
@@ -425,15 +531,29 @@ async function loadPin(
 }
 
 export class ProviderReleaseCentralRepository {
-  constructor(private readonly central: CentralPrismaClient) {}
+  constructor(
+    private readonly central: CentralPrismaClient,
+    private readonly nowMilliseconds: () => number = Date.now,
+  ) {}
 
   pin(input: {
     readonly providerId: string;
     readonly catalogVersionId?: string;
+    readonly signal?: AbortSignal;
+    readonly deadlineAt?: number;
   }): Promise<PinnedProviderReleaseInputs> {
-    return this.central.$transaction(
-      (transaction) => loadPin(transaction, input),
-      PIN_TRANSACTION,
-    );
+    const control = {
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.deadlineAt === undefined ? {} : { deadlineAt: input.deadlineAt }),
+    } satisfies ProviderReleasePinControl;
+    const transaction = pinTransactionOptions(control, this.nowMilliseconds);
+    return withPinControl({
+      control,
+      nowMilliseconds: this.nowMilliseconds,
+      operation: () => this.central.$transaction(
+        (client) => loadPin(client, input),
+        transaction,
+      ),
+    });
   }
 }

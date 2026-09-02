@@ -1,9 +1,11 @@
 /// <reference types="vite/client" />
 
 import {
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   buildPublicCollectibleSearchText,
   normalizePublicSearchText,
   publicCollectibleSchema,
+  recomputeProviderCatalogSearchIndexHashV1,
   type ProviderCatalogReleaseBatchKindV1,
   type ProviderCatalogReleaseBatchRecordMapV1,
   type ProviderCatalogReleasePublishPlanV1,
@@ -164,6 +166,76 @@ async function seedProviders(t: CatalogTest) {
   });
 }
 
+async function seedEmptyProviders(
+  t: CatalogTest,
+  count: number,
+): Promise<SelectedProviderRelease[]> {
+  const template = (await buildMockProviderCatalogReleasePlans())[0];
+  const templateVendor = template === undefined
+    ? undefined
+    : recordsFor(template, "vendors")[0];
+  if (template === undefined || templateVendor === undefined) {
+    throw new Error("Expected a provider fixture.");
+  }
+  const providerSearchIndexHash =
+    await recomputeProviderCatalogSearchIndexHashV1([]);
+  return await t.run(async (ctx) => {
+    const providers: SelectedProviderRelease[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const identifierSuffix = String(index).padStart(12, "0");
+      const platformKey = `provider_${String(index).padStart(3, "0")}`;
+      const releaseId = await ctx.db.insert("providerCatalogReleases", {
+        platformKey,
+        publicProviderReleaseId:
+          `50000000-0000-5000-8000-${identifierSuffix}`,
+        lifecycle: "complete",
+        sharedConfigurationEpoch: template.sharedConfigurationEpoch,
+        dataAsOf: template.dataAsOf,
+        providerReleaseFingerprint: template.providerReleaseFingerprint,
+        contentHash: template.contentHash,
+        publicAssetOrigins: template.publicAssetOrigins,
+        governingHashes: template.governingHashes,
+        entityHashes: template.entityHashes,
+        counts: {
+          vendors: 1,
+          categories: 0,
+          collectibles: 0,
+          repacks: 0,
+          repackChases: 0,
+          searchShards: 0,
+        },
+        searchAlgorithmVersion: template.searchAlgorithmVersion,
+        providerSearchIndexHash,
+        batchCount: template.batchCount,
+        batchChainHash: template.batchChainHash,
+        createdAt: template.providerCheckpoint.settledAt!,
+        completedAt: template.providerCheckpoint.settledAt,
+        completionOperationId: `mock:provider:${platformKey}:finalize`,
+        completionReceiptSha256: "a".repeat(64),
+        retentionEligibleAt: "2026-08-23T12:01:00.000Z",
+      });
+      const publicVendorId =
+        `60000000-0000-5000-8000-${identifierSuffix}`;
+      const detail = {
+        ...templateVendor,
+        publicVendorId,
+        vendorKey: platformKey,
+        displayName: `Provider ${index}`,
+      };
+      await ctx.db.insert("providerCatalogVendors", {
+        releaseId,
+        publicVendorId,
+        vendorKey: platformKey,
+        detail,
+      });
+      const release = await ctx.db.get("providerCatalogReleases", releaseId);
+      if (release === null) throw new Error("Mock provider release is missing.");
+      providers.push({ platformKey, release });
+    }
+    return providers;
+  });
+}
+
 const expectedCounts = {
   vendorCount: 2,
   categoryCount: 6,
@@ -289,22 +361,51 @@ describe("public provider catalog composition", () => {
     ).resolves.toBeNull();
   });
 
-  test("rejects a ninth selected provider and conflicting shared collectible bytes", async () => {
+  test("accepts active catalogs from nine through the manifest provider maximum", async () => {
+    const t = createTest();
+    const providers = await seedEmptyProviders(
+      t,
+      MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 1,
+    );
+
+    for (const providerCount of [
+      9,
+      MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+    ]) {
+      const result = await t.run(async (ctx) => {
+        const catalog = await loadPublicProviderCatalog(
+          ctx,
+          providers.slice(0, providerCount),
+          { vendorCount: providerCount, categoryCount: 0, repackCount: 0 },
+        );
+        return catalog === null
+          ? null
+          : {
+              providerCount: catalog.providers.length,
+              vendorCount: catalog.vendorByReleaseId.size,
+              rowCount: catalog.rows.length,
+            };
+      });
+      expect(result).toEqual({
+        providerCount,
+        vendorCount: providerCount,
+        rowCount: 0,
+      });
+    }
+
+    const overLimitRejected = await t.run(async (ctx) =>
+      (await loadPublicProviderCatalog(ctx, providers, {
+        vendorCount: providers.length,
+        categoryCount: 0,
+        repackCount: 0,
+      })) === null
+    );
+    expect(overLimitRejected).toBe(true);
+  });
+
+  test("fails closed on conflicting shared collectible bytes", async () => {
     const t = createTest();
     const providers = await seedProviders(t);
-    await expect(
-      t.run((ctx) =>
-        loadPublicProviderCatalog(
-          ctx,
-          Array.from({ length: 9 }, (_, index) => ({
-            platformKey: `provider_${index}`,
-            release: providers[0]!.release,
-          })),
-          expectedCounts,
-        ),
-      ),
-    ).resolves.toBeNull();
-
     const charizardId = buildMockDataReleaseV2().collectibles[0]!
       .publicCollectibleId;
     await t.run(async (ctx) => {

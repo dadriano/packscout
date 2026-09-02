@@ -885,6 +885,7 @@ model provider_releases {
   batches            provider_release_batches[]
   operations         provider_publication_operations[]
   receipts           provider_publication_receipts[]
+  batch_evidence     provider_publication_batch_evidence[]
   publication_states provider_publication_state[]
 
   @@index([predecessor_id], map: "provider_releases_predecessor_id_idx")
@@ -926,9 +927,29 @@ model provider_publication_operations {
 
   provider_release provider_releases              @relation(fields: [provider_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_operations_release_id_fkey")
   receipt          provider_publication_receipts?
+  batch_evidence   provider_publication_batch_evidence?
 
   @@unique([id, provider_release_id], map: "provider_publication_operations_id_release_id_key")
   @@index([state, requested_at], map: "provider_publication_operations_state_requested_idx")
+}
+
+model provider_publication_batch_evidence {
+  operation_id             String   @id @db.Uuid
+  provider_release_id      String   @db.Uuid
+  batch_index              Int
+  batch_kind               String
+  batch_hash               String   @db.Char(64)
+  record_count             Int
+  byte_count               Int
+  release_context_hash     String   @db.Char(64)
+  search_shard_descriptors Json     @db.JsonB
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+
+  operation        provider_publication_operations @relation(fields: [operation_id, provider_release_id], references: [id, provider_release_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_batch_evidence_operation_release_fkey")
+  provider_release provider_releases               @relation(fields: [provider_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_batch_evidence_release_id_fkey")
+
+  @@unique([operation_id, provider_release_id], map: "provider_publication_batch_evidence_operation_release_key")
+  @@unique([provider_release_id, batch_index], map: "provider_publication_batch_evidence_release_index_key")
 }
 
 model provider_publication_receipts {

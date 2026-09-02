@@ -1,11 +1,11 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   promotionJobHistoryQuerySchema,
   promotionJobTerminalOutcomes,
   promotionJobTriggerKinds,
   type PromotionJobHistoryQuery,
 } from "@packscout/contracts";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { KeysetPagination } from "../components/operations/KeysetPagination";
 import { PromotionHistory } from "../components/promotion-jobs/PromotionHistory";
 import { PromotionOverview } from "../components/promotion-jobs/PromotionOverview";
@@ -19,6 +19,34 @@ import {
 } from "../hooks/promotion-jobs/usePromotionJobs";
 
 const ALLOWED_QUERY_KEYS = new Set(["filter", "trigger", "outcome", "cursor"]);
+const CURSOR_STACK_STATE_KEY = "promotionJobHistoryCursorStack";
+
+function cursorStackFromLocation(state: unknown, cursor: string): string[] {
+  if (!cursor) return [];
+  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+    return [""];
+  }
+  const stack = (state as Record<string, unknown>)[CURSOR_STACK_STATE_KEY];
+  if (
+    !Array.isArray(stack) ||
+    stack.length === 0 ||
+    stack[0] !== "" ||
+    stack.slice(1).some((value) => typeof value !== "string" || !value)
+  ) {
+    return [""];
+  }
+  return [...stack] as string[];
+}
+
+function locationStateWithCursorStack(
+  state: unknown,
+  cursorStack: readonly string[],
+): Record<string, unknown> {
+  const current = typeof state === "object" && state !== null && !Array.isArray(state)
+    ? state as Record<string, unknown>
+    : {};
+  return { ...current, [CURSOR_STACK_STATE_KEY]: [...cursorStack] };
+}
 
 interface ParsedHistoryLocation {
   readonly query: PromotionJobHistoryQuery | null;
@@ -109,7 +137,9 @@ function invalidOption(value: string, valid: readonly string[]) {
 export function PromotionJobsPage() {
   useDocumentTitle("Convex Promotion Jobs");
   const [searchParams, setSearchParams] = useSearchParams();
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const location = useLocation();
+  const cursor = searchParams.get("cursor") ?? "";
+  const cursorStack = cursorStackFromLocation(location.state, cursor);
   const locationKey = searchParams.toString();
   const parsed = useMemo(
     () => parsePromotionHistoryLocation(new URLSearchParams(locationKey)),
@@ -120,22 +150,28 @@ export function PromotionJobsPage() {
   const filter = searchParams.get("filter") ?? "";
   const trigger = searchParams.get("trigger") ?? "";
   const outcome = searchParams.get("outcome") ?? "";
-  const cursor = searchParams.get("cursor") ?? "";
   const providerFilters = overview.data?.providers.map(({ providerKey }) => `provider:${providerKey}`) ?? [];
   const validFilters = ["", "manifest", ...providerFilters];
+
+  function setHistoryLocation(
+    next: URLSearchParams | Record<string, never>,
+    nextCursorStack: readonly string[],
+  ) {
+    setSearchParams(next, {
+      state: locationStateWithCursorStack(location.state, nextCursorStack),
+    });
+  }
 
   function changeFilter(key: "filter" | "trigger" | "outcome", value: string) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("cursor");
-    setCursorStack([]);
-    setSearchParams(next);
+    setHistoryLocation(next, []);
   }
 
   function resetFilters() {
-    setCursorStack([]);
-    setSearchParams({});
+    setHistoryLocation({}, []);
   }
 
   function refreshAll() {
@@ -243,15 +279,13 @@ export function PromotionJobsPage() {
               const next = new URLSearchParams(searchParams);
               if (previous) next.set("cursor", previous);
               else next.delete("cursor");
-              setCursorStack((values) => values.slice(0, -1));
-              setSearchParams(next);
+              setHistoryLocation(next, cursorStack.slice(0, -1));
             }}
             onNext={() => {
               if (!history.data?.nextCursor) return;
-              setCursorStack((values) => [...values, cursor]);
               const next = new URLSearchParams(searchParams);
               next.set("cursor", history.data.nextCursor);
-              setSearchParams(next);
+              setHistoryLocation(next, [...cursorStack, cursor]);
             }}
           />
         ) : null}

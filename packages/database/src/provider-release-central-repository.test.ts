@@ -129,6 +129,7 @@ async function fakeCentral(input: {
   readonly configExpiresAt?: Date | null;
   readonly identityRole?: "central" | "provider";
   readonly identitySchemaVersion?: string;
+  readonly observeTransactionOptions?: (options: unknown) => void;
 } = {}): Promise<CentralPrismaClient> {
   const built = await artifact();
   const publicProvider = {
@@ -240,7 +241,11 @@ async function fakeCentral(input: {
     },
   };
   return {
-    async $transaction(callback: (client: typeof transaction) => Promise<unknown>) {
+    async $transaction(
+      callback: (client: typeof transaction) => Promise<unknown>,
+      options: unknown,
+    ) {
+      input.observeTransactionOptions?.(options);
       return callback(transaction);
     },
   } as unknown as CentralPrismaClient;
@@ -310,4 +315,60 @@ test("central pin rejects a database with the wrong authoritative role or schema
         && error.code === "CENTRAL_IDENTITY_INVALID",
     );
   }
+});
+
+test("central pin preserves defaults and bounds an owned transaction to remaining time", async () => {
+  const built = await artifact();
+  const observed: Record<string, unknown>[] = [];
+  const central = await fakeCentral({
+    observeTransactionOptions(options) {
+      observed.push(options as Record<string, unknown>);
+    },
+  });
+  const now = 1_000;
+  const repository = new ProviderReleaseCentralRepository(central, () => now);
+  await repository.pin({
+    providerId: ids.provider,
+    catalogVersionId: built.descriptor.catalogVersionId,
+  });
+  await repository.pin({
+    providerId: ids.provider,
+    catalogVersionId: built.descriptor.catalogVersionId,
+    deadlineAt: now + 10_000,
+  });
+
+  assert.deepEqual(observed[0], {
+    maxWait: 5_000,
+    timeout: 60_000,
+    isolationLevel: "RepeatableRead",
+  });
+  assert.equal(observed[1]?.maxWait, 1_990);
+  assert.equal(observed[1]?.timeout, 7_960);
+  assert.equal(
+    Number(observed[1]?.maxWait) + Number(observed[1]?.timeout),
+    9_950,
+  );
+});
+
+test("central pin stops awaiting an in-flight transaction when ownership aborts", async () => {
+  let transactionStarted!: () => void;
+  const started = new Promise<void>((resolve) => { transactionStarted = resolve; });
+  const central = {
+    $transaction() {
+      transactionStarted();
+      return new Promise<never>(() => {});
+    },
+  } as unknown as CentralPrismaClient;
+  const controller = new AbortController();
+  const repository = new ProviderReleaseCentralRepository(central);
+  const pending = repository.pin({
+    providerId: ids.provider,
+    signal: controller.signal,
+    deadlineAt: Date.now() + 30_000,
+  });
+  await started;
+  controller.abort();
+  await assert.rejects(pending, (error: unknown) =>
+    error instanceof ProviderReleasePinError &&
+    error.code === "PROVIDER_RELEASE_PIN_CANCELLED");
 });

@@ -35,7 +35,7 @@ jobs:
   verify-framework:
     name: Verify framework standards
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       PACKSCOUT_TEST_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
 

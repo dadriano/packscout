@@ -27,6 +27,7 @@ export const PROVIDER_RELEASE_CURRENCY_EXPONENTS = Object.freeze({
 } satisfies Readonly<Record<string, number>>);
 
 const TOKEN_ADDRESS_CURRENCY_PATTERN = /^0x[0-9A-Fa-f]{40}$/u;
+const ISO_DISPLAY_CURRENCY_PATTERN = /^[A-Z]{3}$/u;
 
 function normalizedReason(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]+/gu, "_");
@@ -150,7 +151,8 @@ export function publicPrice(input: {
     };
   }
   const sourceMinor = currencyMinorUnits(input.amount, input.currency);
-  const displayMoney = publicCurrencyKeySchema.safeParse(input.currency).success && sourceMinor !== null
+  const displayMoney = ISO_DISPLAY_CURRENCY_PATTERN.test(input.currency) &&
+      sourceMinor !== null
     ? { minorUnits: sourceMinor, currency: input.currency }
     : null;
   const usdMinor = input.usdAmount === null
@@ -229,7 +231,8 @@ export function publicVendorEv(input: {
     };
   }
   const reportedMinor = currencyMinorUnits(input.amount, input.currency);
-  const displayMoney = reportedMinor === null || !publicCurrencyKeySchema.safeParse(input.currency).success
+  const displayMoney = reportedMinor === null ||
+      !ISO_DISPLAY_CURRENCY_PATTERN.test(input.currency)
     ? null
     : { minorUnits: reportedMinor, currency: input.currency };
   if (input.currency === "USD" && reportedMinor !== null && input.priceUsdMinor !== null) {
@@ -372,7 +375,7 @@ export function publicValuation(
         collectible.valuationCurrency!,
       );
   const displayMoney = collectible.valuationCurrency !== null
-      && publicCurrencyKeySchema.safeParse(collectible.valuationCurrency).success
+      && ISO_DISPLAY_CURRENCY_PATTERN.test(collectible.valuationCurrency)
       && sourceMinor !== null
     ? { minorUnits: sourceMinor, currency: collectible.valuationCurrency }
     : null;
