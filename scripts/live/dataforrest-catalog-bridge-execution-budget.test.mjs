@@ -5,8 +5,8 @@ import { tsImport } from "tsx/esm/api";
 const budget = await tsImport("./dataforrest-catalog-bridge-execution-budget.mts", import.meta.url);
 
 const providers = [
-  { providerKey: "collector_crypt", card: 191_383, pack: 69, pageLimit: 1_000,
-    minimumPages: 192, timeout: 5_400_000 },
+  { providerKey: "collector_crypt", card: 191_383, pack: 69, pageLimit: 100,
+    minimumPages: 1_915, timeout: 30_600_000 },
   { providerKey: "courtyard", card: 1_056_550, pack: 100, pageLimit: 100,
     minimumPages: 10_567, timeout: 161_100_000 },
   { providerKey: "phygitals", card: 276_719, pack: 143, pageLimit: 100,

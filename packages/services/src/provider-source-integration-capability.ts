@@ -1,7 +1,8 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
-  dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
@@ -152,7 +153,11 @@ ProviderSourceIntegrationCapabilityRegistry {
     ),
     providerSourceIntegrationCapability(
       "collector_crypt",
-      dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion,
+      dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion,
     ),
     providerSourceIntegrationCapability(
       "phygitals",

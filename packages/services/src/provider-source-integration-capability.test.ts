@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
@@ -96,15 +98,16 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion;
   const catalogProfiles = [
     ["courtyard", dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion],
-    ["collector_crypt", dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion],
   ] as const;
 
   assert.deepEqual(installed.keys(), [
     `clutchpacks:${CLUTCHPACKS_CAPTURE_ADAPTER_KEY}`,
     `clutchpacks:${dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion}`,
-    `collector_crypt:${dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion}`,
     `collector_crypt:${dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion}`,
     `courtyard:${dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion}`,
     `courtyard:${dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion}`,
@@ -121,11 +124,15 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
   }
   assert.equal(installed.has("collector_crypt", adapterKey), false);
   assert.equal(installed.has("collector_crypt",
+    dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion), true);
+  assert.equal(installed.has("collector_crypt",
     dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), true);
   for (const providerKey of ["courtyard", "clutchpacks", "phygitals"]) {
     assert.equal(installed.has(providerKey,
-      dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), false);
+      dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion), false);
   }
+  assert.equal(installed.has("collector_crypt",
+    dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion), false);
   assert.equal(installed.has("phygitals", adapterKey), false);
   assert.equal(installed.has("phygitals",
     dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion), true);

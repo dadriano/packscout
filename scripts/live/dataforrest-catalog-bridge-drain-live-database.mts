@@ -93,7 +93,7 @@ export async function readCatalogBridgeLiveCentralAuthorityObservation(input: Re
   if (!provider || provider.lifecycle !== "active" || provider.provider_key !== definition.providerKey ||
     provider.active_config_version_id !== definition.currentConfigId || !activeConfig ||
     activeConfig.provider_id !== definition.providerId || activeConfig.version_number !== BigInt(definition.currentConfigNumber) ||
-    activeConfig.adapter_key !== definition.eventManifest.adapterVersion ||
+    activeConfig.adapter_key !== definition.currentEventManifest.adapterVersion ||
     maximum._max.version_number !== BigInt(definition.currentConfigNumber) || !membership ||
     membership.operator.state !== "active" || !["admin", "data_operator"].includes(membership.role) ||
     located.state !== "ready") {

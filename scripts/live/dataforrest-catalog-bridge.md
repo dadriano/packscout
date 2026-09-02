@@ -1,9 +1,12 @@
 # DataForrest catalog bridge
 
-Status: production drain, catalog cutover, event successor, and operator artifact producers implemented
+Status: drain, catalog cutover, event successor, and operator artifact producers
+implemented; live readiness is not certified by this document
 
 The exact operator commands and private-artifact contract are documented in
 [`docs/dataforrest-catalog-bridge-operator-artifacts.md`](../../docs/dataforrest-catalog-bridge-operator-artifacts.md).
+The presence of those commands is not authorization to run `--apply`. A reviewed
+non-live rehearsal and operation-specific approval are still required.
 
 Collector Crypt, Courtyard, and Phygitals each have one provider-local runtime
 cursor. A catalog request cursor and the ordinary event request cursor are scoped
@@ -49,6 +52,25 @@ to different immutable request profiles. The catalog bridge therefore cannot add
     restored cursor, then release the lease and launch the successor resident.
     Accept the run only when it starts from that cursor and reaches head.
 
+Collector Crypt's immutable active config 3, authority, and saved cursor envelope
+remain pinned to distributed adapter v1 during drain and preparation. The fresh
+saved-cursor compatibility probe deliberately interprets the response with the
+distributed-v2 successor that will consume the cursor. Its staged event successor
+therefore re-envelopes both the configuration revision and adapter identity while
+preserving the opaque cursor value. The live registry intentionally installs
+Collector distributed v1, distributed v2, and catalog v2 during this transition.
+Remove the v1 execution tuple only after the bridge has completed, central and
+provider authority both reference the v2 successor, the restored v2 run has
+reached head, and no active configuration, run, or saved cursor references v1.
+
+The bridge-selected Collector Crypt catalog-v2 profile has an effective
+100-record request ceiling. The one-shot applies the lower of the immutable
+adapter limit and its runtime resource ceiling, so an operator artifact cannot
+raise that bound. At the reviewed 191,452-record floor, a complete Collector
+Crypt census therefore requires at least 1,915 sequential pages. Do not
+substitute an ordinary 1,000-record event profile, the retained catalog-v1
+reproducibility profile, or a raised catalog limit to reduce the page count.
+
 The source head counts are manually reviewed exact operation pins, recorded with
 the provenance value `manually_reviewed_exact_source_head_counts_v1` in the policy,
 prepared receipt, and completed receipt. They are not an independently captured
@@ -93,9 +115,9 @@ directly.
 
 The preparation CLI validates a mode-`0600` private input, independently checks
 the resident checkout commit, cleanliness, and bridge-module hash, then either
-performs a read-only validation or writes a mode-`0700` private journal. It does
-not write to either database, call the provider, unload a process, or start an
-import.
+performs a read-only validation or writes mode-`0600` files into a mode-`0700`
+private journal directory. It does not write to either database, call the
+provider, unload a process, or start an import.
 
 ```bash
 node --import tsx scripts/live/prepare-dataforrest-catalog-bridge.mts \
@@ -186,11 +208,36 @@ The driver keeps the resident offline after any refusal. It must never log a
 source credential, response body, authorization header, raw request cursor, or raw
 saved cursor.
 
+## Required rehearsal before live authorization
+
+The automated acceptance map proves contracts and failure handling against
+fixtures. It is not a production-readiness certificate and does not replace an
+end-to-end operator rehearsal. Before any live `--apply` authorization, rehearse
+the exact clean commit with disposable, migrated central and provider databases
+and an isolated process harness. Retain a reviewed evidence package that proves:
+
+- every producer, `--check-only` command, journal transition, and successor-plist
+  check uses the same exact commit and module digests;
+- Collector Crypt requests never exceed 100 records and the full census completes
+  within the derived refusal timeout without response-size or atomic-page failure;
+- the catalog head contains the reviewed distinct card and pack counts with zero
+  quarantine and unchanged event evidence;
+- injected interruption leaves the resident offline and paused, and no page-K
+  cursor, journal, config, or run identity can be reused; and
+- event-cursor restoration, successor admission, launchd bootstrap, and final
+  handoff complete from the reviewed paused boundary.
+
+If the rehearsal cannot produce all of that evidence, the live operation remains
+unauthorized. A terminal one-shot failure still requires a new reviewed operation
+and the fresh recovery sequence described above; the implemented artifact tools
+do not turn it into a resumable run.
+
 ## Acceptance map
 
 | Scenario | Coverage |
 |---|---|
 | Exact current config and clean resident are required | Automated: `dataforrest-catalog-bridge-plan.test.mjs` |
+| Collector config 3/cursor stay v1 and re-envelope to the v2 successor | Automated: `dataforrest-catalog-bridge-plan.test.mjs` |
 | Active work, lease, process, cursor, or canary drift refuses preparation | Automated: `dataforrest-catalog-bridge-plan.test.mjs` |
 | Initial pause binds exact command and terminal-run/last-page provenance | Automated: `dataforrest-catalog-bridge-drain.test.mjs` |
 | Bootout occurs only after paused/no-work/no-lease proof | Automated: `dataforrest-catalog-bridge-drain.test.mjs` |
@@ -214,3 +261,4 @@ saved cursor.
 | Preparation canaries redact credentials/cursors and zero protected response bytes | Automated: `dataforrest-catalog-bridge-operator-materialization.test.mjs` |
 | Successor plist includes awaited first run and its raw bytes are policy-bound | Automated: operator-materialization and bootstrap-macOS tests |
 | Per-provider full-census timeouts exactly match reviewed counts and adapter bounds | Automated: execution-budget and catalog-live tests |
+| End-to-end operator sequence against disposable migrated databases and an isolated process harness | Required rehearsal evidence before live authorization; not asserted by repository tests |

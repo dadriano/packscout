@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
@@ -37,6 +39,20 @@ test("provider facts specializations follow the declared adapter versions", () =
     )?.kind,
     "pack",
   );
+  for (const adapterVersion of [
+    DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+    DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  ]) {
+    assert.deepEqual(
+      readDataforrestProviderFacts(
+        adapterVersion,
+        "collector_crypt",
+        "card",
+        { asset: { itemName: "Collector card" } },
+      )?.displayName,
+      { state: "present", value: "Collector card" },
+    );
+  }
   assert.equal(
     readDataforrestProviderFacts(
       DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
