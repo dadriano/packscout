@@ -75,6 +75,23 @@ test("recovery queue pins both the stored cursor hash and actual cursor before a
   }
 });
 
+test("admin runtime command read returns bounded pause provenance", async () => {
+  const row = { id: request.commandId, idempotency_key: "catalog-bridge/pause", command_type: "pause" as const,
+    state: "completed" as const, target_run_id: null, target_quarantine_id: null, expected_generation: 3n,
+    requested_by_operator_id: request.operatorId, correlation_id: request.correlationId,
+    reason: "catalog bridge drain", result: { outcome: "accepted", code: "RUNTIME_TRANSITION_APPLIED",
+      generation: "4" }, resulting_run_id: null, requested_at: now, completed_at: now };
+  const database = { control_commands: { findUnique: async () => row } };
+  const repository = new PrismaAdminProviderRuntimeRepository(database as unknown as ProviderPrismaClient);
+  assert.deepEqual(await repository.getRuntimeCommand(request.commandId), {
+    id: row.id, idempotencyKey: row.idempotency_key, commandType: row.command_type, state: row.state,
+    targetRunId: null, targetQuarantineId: null, expectedGeneration: 3n,
+    requestedByOperatorId: request.operatorId, correlationId: request.correlationId, reason: row.reason,
+    result: row.result, resultingRunId: null, requestedAt: now, completedAt: now,
+  });
+  await assert.rejects(repository.getRuntimeCommand("not-a-uuid"), /commandId must be a UUID/u);
+});
+
 test("recovery refuses unrelated active work atomically while ordinary UI coalescing is unchanged", async () => {
   const recovery = fixture(); recovery.setActive();
   assert.equal((await recovery.repository.requestRunNow({ ...request,

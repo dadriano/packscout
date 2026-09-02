@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   dataforrestEventsConnectionConfigurationV1Schema,
   dataforrestOpaqueCursorV1Schema,
-  dataforrestEventsSourceConfigurationV1Schema,
+  dataforrestEventsSourceConfigurationSchemaForAdapter,
   dataforrestEventsV1SourceAdapterManifest,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
@@ -53,6 +53,7 @@ interface ValidatedCaptureOperation {
   readonly endpointHost: string;
   readonly bearerToken: string;
   readonly platform: LaunchProviderKey | null;
+  readonly stream: "catalog" | null;
 }
 
 type OperationValidation =
@@ -125,6 +126,24 @@ function recordsScopesMatch(operation: Exclude<
       scope.catalogEntity === candidate.catalogEntity &&
       scope.canonicalKind === candidate.canonicalKind;
   });
+}
+
+function sourceConfigurationSchemaForManifest(
+  manifest: SourceAdapterManifestV1,
+): ReturnType<typeof dataforrestEventsSourceConfigurationSchemaForAdapter> | null {
+  try {
+    return dataforrestEventsSourceConfigurationSchemaForAdapter(
+      manifest.adapterVersion,
+    );
+  } catch (error) {
+    if (
+      error instanceof RangeError &&
+      error.message === "dataforrest_events.adapter_version_unsupported"
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function validateCaptureOperation(
@@ -207,16 +226,17 @@ function validateCaptureOperation(
         endpointHost: endpointPolicy.endpointHost,
         bearerToken: connection.data.bearerToken,
         platform: null,
+        stream: null,
       },
     };
   }
 
-  const source = dataforrestEventsSourceConfigurationV1Schema.safeParse(
-    operation.sourceConfiguration,
-  );
+  const sourceSchema = sourceConfigurationSchemaForManifest(manifest);
+  const source = sourceSchema?.safeParse(operation.sourceConfiguration);
   const declaration = manifest
     .supportedProviders.find(({ provider }) => provider === operation.provider);
   if (
+    source === undefined ||
     !source.success ||
     source.data.platform !== operation.provider ||
     declaration === undefined ||
@@ -272,6 +292,10 @@ function validateCaptureOperation(
       endpointHost: endpointPolicy.endpointHost,
       bearerToken: connection.data.bearerToken,
       platform: source.data.platform,
+      stream:
+        "stream" in source.data && source.data.stream === "catalog"
+          ? "catalog"
+          : null,
     },
   };
 }
@@ -286,6 +310,9 @@ function buildRequestUrl(
     return requestUrl;
   }
   requestUrl.searchParams.append("platform", validated.platform!);
+  if (validated.stream !== null) {
+    requestUrl.searchParams.append("stream", validated.stream);
+  }
   requestUrl.searchParams.append("limit", String(operation.bounds.pageLimit));
   if (
     operation.operationKind === "page_read" &&
@@ -427,10 +454,14 @@ export class DataforrestEventsSourceAdapter implements SourceAdapter {
     const supported = this.manifest.supportedProviders.some(
       (declaration) => declaration.provider === provider,
     );
-    const parsed = dataforrestEventsSourceConfigurationV1Schema.safeParse(
-      configuration,
-    );
-    if (!supported || !parsed.success || parsed.data.platform !== provider) {
+    const sourceSchema = sourceConfigurationSchemaForManifest(this.manifest);
+    const parsed = sourceSchema?.safeParse(configuration);
+    if (
+      !supported ||
+      parsed === undefined ||
+      !parsed.success ||
+      parsed.data.platform !== provider
+    ) {
       return {
         ok: false,
         failure: stableFailure(

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { PrismaClient } from "../prisma/generated/provider/index.js";
+import { endPoolFully } from "../prisma/postgres-test-support.ts";
 import { PrismaAdminProviderRuntimeRepository } from "./admin-provider-runtime-repository.ts";
 import { initializeProviderDatabaseIdentity } from "./provider-database.ts";
 import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
@@ -55,22 +56,25 @@ async function createHarness() {
       writer,
       async close() {
         await client?.$disconnect();
-        await writer?.end();
+        // The drop below force-terminates every backend still attached to this
+        // database, so the writer's socket must be fully closed first: pg's
+        // pool.end() resolves before its client sockets do.
+        if (writer) await endPoolFully(writer);
         try {
           if (created) await administrator.query(`drop database "${databaseName}" with (force)`);
         } finally {
           created = false;
-          await administrator.end();
+          await endPoolFully(administrator);
         }
       },
     };
   } catch (error) {
     await client?.$disconnect().catch(() => undefined);
-    await writer?.end().catch(() => undefined);
+    if (writer) await endPoolFully(writer).catch(() => undefined);
     if (created) {
       await administrator.query(`drop database "${databaseName}" with (force)`).catch(() => undefined);
     }
-    await administrator.end().catch(() => undefined);
+    await endPoolFully(administrator).catch(() => undefined);
     throw error;
   }
 }

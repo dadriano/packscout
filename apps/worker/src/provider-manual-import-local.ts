@@ -23,7 +23,7 @@ import { createProviderActivityRelayCoordinator } from
 import {
   providerDataforrestLiveIntegrationRegistry,
 } from "./provider-dataforrest-live-integration.ts";
-import { ProviderDataforrestMixedPageSource } from
+import { ProviderCatalogIdentityCensusSession, ProviderDataforrestMixedPageSource } from
   "./provider-dataforrest-mixed-page-source.ts";
 import { createProviderDataforrestRequestTerminalizer } from
   "./provider-dataforrest-request-terminalizer.ts";
@@ -142,13 +142,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
     const runLane = async (
       lane: ProviderManualImportLane,
     ): Promise<Awaited<ReturnType<typeof runProviderManualImportOnce>>> => {
-      const integration = providerDataforrestLiveIntegrationRegistry
-        .resolveProvider(lane.providerKey);
-      if (integration === null) {
-        throw new ProviderManualImportLocalError(
-          "PROVIDER_IMPORT_CONFIGURATION_INVALID",
-        );
-      }
+      const catalogIdentityCensusSession = new ProviderCatalogIdentityCensusSession();
       return runProviderManualImportOnce({
         environment: {
           PACKSCOUT_PROVIDER_ID: lane.providerId,
@@ -187,9 +181,13 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               || provider.active_config_version === null
               || provider.active_config_version.id !==
                 provider.active_config_version_id
-              || provider.active_config_version.adapter_key !==
-                integration.manifest.adapterVersion
             ) return null;
+            const integration = providerDataforrestLiveIntegrationRegistry
+              .resolve(
+                input.providerKey,
+                provider.active_config_version.adapter_key,
+              );
+            if (integration === null) return null;
             const located = await locateProviderDatabase(central.client, {
               organizationId: provider.organization_id,
               providerId: provider.id,
@@ -230,6 +228,7 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               authorityResolver: input.sourceAuthorityResolver,
               integration: input.integration,
               workerId: input.workerId,
+              catalogIdentityCensusSession,
               maximumPageRecords: providerManualImportExecutionBudget(databaseConfiguration.runtimePolicy.mode).maximumPageRecords,
               translationRecorder: audit,
               terminalizeRequest: createProviderDataforrestRequestTerminalizer({

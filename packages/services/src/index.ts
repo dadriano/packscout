@@ -88,6 +88,7 @@ export * from "./provider-adapter-registry.ts";
 export * from "./provider-adapter.ts";
 export * from "./provider-configuration-service.ts";
 export * from "./provider-catalog-settlement-service.ts";
+export * from "./provider-catalog-identity-digests.ts";
 export * from "./provider-catalog-release-types.ts";
 export * from "./provider-promotion-types.ts";
 export * from "./provider-promotion-operations.ts";

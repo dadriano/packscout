@@ -2,18 +2,28 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_CURSOR_CODEC_KEY,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   PROVIDER_OBSERVATION_CONTRACT_VERSION,
   dataforrestIdentityNamespaceByProvider,
   dataforrestEventsPageV1Schema,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestEventsV1SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
+  dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
+  dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   launchRecordIdScopeDeclarations,
   sourceAdapterFailureSchema,
   type LaunchProviderKey,
@@ -64,6 +74,27 @@ const connectionConfiguration = Object.freeze({
   endpoint: DATAFORREST_EVENTS_V1_ENDPOINT,
   bearerToken: "fixture-secret-never-returned",
 });
+
+const catalogRequestProfiles = [
+  {
+    provider: "collector_crypt",
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+    manifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    predecessor: dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  },
+  {
+    provider: "courtyard",
+    adapterVersion: DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
+    manifest: dataforrestCourtyardCatalogSourceAdapterManifest,
+    predecessor: dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  },
+  {
+    provider: "phygitals",
+    adapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
+    manifest: dataforrestPhygitalsCatalogSourceAdapterManifest,
+    predecessor: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  },
+] as const;
 
 interface TestRuntime {
   readonly coordinator: ConnectionPermitCoordinator;
@@ -188,17 +219,28 @@ async function sourceOperation(
   testRuntime: TestRuntime,
   provider: LaunchProviderKey,
   sourceBounds: ProviderSourceRequestBounds = bounds,
+  adapterIdentity: Readonly<{
+    adapterVersion: string;
+    normalizedContractVersion: string;
+  }> = {
+    adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  },
+  sourceConfiguration: Readonly<Record<string, unknown>> = {
+    platform: provider,
+  },
 ): Promise<SourceTestOperation> {
   const requestIdentity = nextRequestIdentity(`source-${provider}`);
   const pins: SourceTestRequestPins = {
     ...commonPins,
+    adapterVersion: adapterIdentity.adapterVersion,
     ...requestIdentity,
     operationKind: "source_test",
     provider,
     providerId: `provider-${provider}`,
     sourceInstanceId: `source-${provider}`,
     sourceRevisionId: `source-revision-${provider}`,
-    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    normalizedContractVersion: adapterIdentity.normalizedContractVersion,
     identityNamespaceKey: dataforrestIdentityNamespaceByProvider[provider],
     sourceTestJobId: `source-test-${provider}`,
     jobClaimLeaseId: `job-lease-${provider}`,
@@ -209,6 +251,7 @@ async function sourceOperation(
   });
   const operation = createSourceTestOperation({
     ...commonOperationFields,
+    adapterVersion: adapterIdentity.adapterVersion,
     operationKind: "source_test",
     provider,
     providerId: pins.providerId,
@@ -218,7 +261,7 @@ async function sourceOperation(
     identityNamespaceKey: pins.identityNamespaceKey,
     recordIdScopes: launchRecordIdScopeDeclarations,
     connectionConfiguration,
-    sourceConfiguration: { platform: provider },
+    sourceConfiguration,
     requestLease,
     bounds: sourceBounds,
     correlation: {
@@ -243,6 +286,9 @@ async function pageOperation(
   }> = {
     adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
     normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  },
+  sourceConfiguration: Readonly<Record<string, unknown>> = {
+    platform: provider,
   },
 ): Promise<PageReadOperation> {
   const requestedCursor = cursor(
@@ -287,7 +333,7 @@ async function pageOperation(
     identityNamespaceKey: pins.identityNamespaceKey,
     recordIdScopes: launchRecordIdScopeDeclarations,
     connectionConfiguration,
-    sourceConfiguration: { platform: provider },
+    sourceConfiguration,
     requestLease,
     bounds: pageBounds,
     correlation: {
@@ -616,6 +662,401 @@ test("request shapes are operation-specific and preserve an opaque cursor exactl
     assert.deepEqual([...headers.keys()].sort(), ["accept", "authorization"]);
     assert.equal(headers.get("accept"), "application/json");
     assert.equal(headers.get("authorization"), "Bearer fixture-secret-never-returned");
+  }
+});
+
+test("catalog profiles require the exact filter and emit exact initial and continuation queries", async () => {
+  const opaqueCursor = "catalog opaque +/=%?& cursor\tsegment 💎";
+  for (const { provider, adapterVersion, manifest } of catalogRequestProfiles) {
+    const requests: URL[] = [];
+    const adapter = adapterWithClient(async (url) => {
+      requests.push(new URL(url));
+      return jsonResponse(dataforestEventsV1EvidenceFixture[provider].initial);
+    }, manifest);
+    const sourceConfiguration = { platform: provider, stream: "catalog" } as const;
+    const validated = adapter.validateSourceConfiguration(
+      provider,
+      sourceConfiguration,
+    );
+    assert.equal(validated.ok, true);
+    if (validated.ok) assert.equal(Object.isFrozen(validated.value), true);
+    for (const invalid of [
+      { platform: provider },
+      { platform: "clutchpacks", stream: "catalog" },
+      { platform: provider, stream: "pulls" },
+      { platform: provider, stream: "catalog", cursor: "injected" },
+    ]) {
+      assert.equal(adapter.validateSourceConfiguration(provider, invalid).ok, false);
+    }
+
+    const adapterIdentity = {
+      adapterVersion,
+      normalizedContractVersion: manifest.normalizedContractVersion,
+    };
+    const testRuntime = runtime();
+    const initial = await pageOperation(
+      testRuntime,
+      provider,
+      null,
+      manifest.requestBounds,
+      adapterIdentity,
+      sourceConfiguration,
+    );
+    await successfulCapture(adapter, initial);
+    initial.requestLease.close();
+    const continuation = await pageOperation(
+      testRuntime,
+      provider,
+      opaqueCursor,
+      manifest.requestBounds,
+      adapterIdentity,
+      sourceConfiguration,
+    );
+    await successfulCapture(adapter, continuation);
+    continuation.requestLease.close();
+
+    assert.equal(requests.length, 2);
+    const initialQuery = new URLSearchParams([
+      ["platform", provider],
+      ["stream", "catalog"],
+      ["limit", String(manifest.requestBounds.pageLimit)],
+    ]);
+    const continuationQuery = new URLSearchParams(initialQuery);
+    continuationQuery.append("cursor", opaqueCursor);
+    assert.equal(requests[0]!.search, `?${initialQuery.toString()}`);
+    assert.equal(requests[1]!.search, `?${continuationQuery.toString()}`);
+    assert.deepEqual(
+      [...requests[1]!.searchParams.keys()],
+      ["platform", "stream", "limit", "cursor"],
+    );
+    assert.deepEqual(
+      Buffer.from(requests[1]!.searchParams.get("cursor")!, "utf8"),
+      Buffer.from(opaqueCursor, "utf8"),
+    );
+    const unfiltered = await pageOperation(
+      runtime(),
+      provider,
+      null,
+      manifest.requestBounds,
+      adapterIdentity,
+      { platform: provider },
+    );
+    const rejected = await captureRequest(adapter, unfiltered);
+    assert.equal(rejected.ok, false);
+    if (!rejected.ok) {
+      assert.equal(rejected.failure.code, "invalid_source_configuration");
+    }
+    unfiltered.requestLease.close();
+    assert.equal(requests.length, 2);
+  }
+});
+
+test("catalog filter behavior does not change predecessor request shapes", async () => {
+  for (const { provider, predecessor } of catalogRequestProfiles) {
+    const requests: URL[] = [];
+    const adapter = adapterWithClient(async (url) => {
+      requests.push(new URL(url));
+      return jsonResponse(dataforestEventsV1EvidenceFixture[provider].initial);
+    }, predecessor);
+    assert.equal(
+      adapter.validateSourceConfiguration(provider, { platform: provider }).ok,
+      true,
+    );
+    assert.equal(adapter.validateSourceConfiguration(provider, {
+      platform: provider,
+      stream: "catalog",
+    }).ok, false);
+    const operation = await pageOperation(
+      runtime(),
+      provider,
+      null,
+      predecessor.requestBounds,
+      predecessor,
+    );
+    await successfulCapture(adapter, operation);
+    operation.requestLease.close();
+    assert.equal(
+      requests[0]!.search,
+      `?platform=${provider}&limit=${predecessor.requestBounds.pageLimit}`,
+    );
+    assert.deepEqual(
+      [...requests[0]!.searchParams.keys()],
+      ["platform", "limit"],
+    );
+  }
+});
+
+test("Collector Crypt V2 admits only missing pack availability as unknown", async () => {
+  const base = {
+    platform: "collector_crypt" as const,
+    stream: "catalog" as const,
+    record_id: "collector-pack-without-availability",
+    occurred_at: "2026-09-01T00:00:00.000Z",
+    collected_at: "2026-09-01T00:00:01.000Z",
+    first_seen_at: "2026-09-01T00:00:00.000Z",
+  };
+  const packWithoutAvailability = {
+    ...base,
+    entity: "pack" as const,
+    data: { name: "Collector pack" },
+  };
+  const records = [
+    packWithoutAvailability,
+    {
+      ...base,
+      entity: "card" as const,
+      record_id: "collector-card-without-availability",
+      data: { asset: { itemName: "Collector card" } },
+    },
+    {
+      ...base,
+      entity: "pack" as const,
+      record_id: "collector-pack-with-malformed-availability",
+      available: "yes",
+      data: { name: "Malformed availability pack" },
+    },
+  ];
+  const page = {
+    records,
+    next_cursor: "collector-catalog-next",
+    poll_after_seconds: 0,
+  };
+  const configuration = {
+    platform: "collector_crypt" as const,
+    stream: "catalog" as const,
+  };
+
+  const current = dataforrestCollectorCryptCatalogV2SourceAdapterManifest;
+  const currentAdapter = adapterWithClient(async () => jsonResponse(page), current);
+  const currentOperation = await pageOperation(
+    runtime(),
+    "collector_crypt",
+    null,
+    current.requestBounds,
+    current,
+    configuration,
+  );
+  const interpreted = await completedPage(currentAdapter, currentOperation);
+  assert.equal(interpreted.ok, true);
+  if (interpreted.ok) {
+    const [pack, card, malformed] = interpreted.value.normalizedPage.outcomes;
+    assert.equal(pack?.status, "valid");
+    if (pack?.status === "valid" && pack.observation.kind === "catalog") {
+      assert.equal(pack.observation.entity, "pack");
+      assert.equal(pack.observation.availability, "unknown");
+      assert.deepEqual(pack.observation.providerFacts.displayName, {
+        state: "present",
+        value: "Collector pack",
+      });
+    }
+    for (const outcome of [card, malformed]) {
+      assert.equal(outcome?.status, "invalid");
+      if (outcome?.status === "invalid") {
+        assert.equal(outcome.reasonCode, "missing_required_fields");
+        assert.deepEqual(outcome.fieldPaths, ["available"]);
+      }
+    }
+  }
+  currentOperation.requestLease.close();
+
+  const old = dataforrestCollectorCryptCatalogSourceAdapterManifest;
+  const oldAdapter = adapterWithClient(async () => jsonResponse({
+    ...page,
+    records: [packWithoutAvailability],
+  }), old);
+  const oldOperation = await pageOperation(
+    runtime(),
+    "collector_crypt",
+    null,
+    old.requestBounds,
+    old,
+    configuration,
+  );
+  const oldInterpretation = await completedPage(oldAdapter, oldOperation);
+  assert.equal(oldInterpretation.ok, true);
+  if (oldInterpretation.ok) {
+    const [pack] = oldInterpretation.value.normalizedPage.outcomes;
+    assert.equal(pack?.status, "invalid");
+    if (pack?.status === "invalid") {
+      assert.equal(pack.reasonCode, "missing_required_fields");
+      assert.deepEqual(pack.fieldPaths, ["available"]);
+    }
+  }
+  oldOperation.requestLease.close();
+});
+
+test("catalog profiles interpret catalog-only pages and source tests", async () => {
+  for (const { provider, adapterVersion, manifest } of catalogRequestProfiles) {
+    const records = dataforestEventsV1EvidenceFixture[provider].initial.records
+      .filter((record) => record.stream === "catalog");
+    assert.ok(records.length > 0);
+    const page = {
+      records,
+      next_cursor: "catalog-only-next",
+      poll_after_seconds: 0,
+    };
+    const adapterIdentity = {
+      adapterVersion,
+      normalizedContractVersion: manifest.normalizedContractVersion,
+    };
+    const sourceConfiguration = { platform: provider, stream: "catalog" } as const;
+    const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+    const operation = await pageOperation(
+      runtime(),
+      provider,
+      null,
+      manifest.requestBounds,
+      adapterIdentity,
+      sourceConfiguration,
+    );
+    const capture = await successfulCapture(adapter, operation);
+    const interpreted = await interpretSourceAdapterPage(
+      adapter,
+      operation,
+      capture,
+    );
+    assert.equal(interpreted.ok, true);
+    if (interpreted.ok) {
+      assert.equal(
+        interpreted.value.normalizedPage.outcomes.every(
+          (outcome) => outcome.status === "valid",
+        ),
+        true,
+      );
+      assert.equal(
+        interpreted.value.normalizedPage.outcomes.length,
+        records.length,
+      );
+    }
+    const inspected = adapter.inspectRawResponse({
+      provider,
+      sourceTypeKey: manifest.sourceTypeKey,
+      adapterVersion,
+      pageLimit: manifest.requestBounds.pageLimit,
+      protectedRawResponse: capture.value.protectedRawResponse,
+    });
+    assert.equal(inspected.ok, true);
+    operation.requestLease.close();
+
+    const source = await sourceOperation(
+      runtime(),
+      provider,
+      manifest.requestBounds,
+      adapterIdentity,
+      sourceConfiguration,
+    );
+    const sourceCapture = await successfulCapture(adapter, source);
+    const sourceInterpretation = await interpretSourceAdapterSourceTest(
+      adapter,
+      source,
+      sourceCapture,
+    );
+    assert.equal(sourceInterpretation.ok, true);
+    assert.equal(sourceInterpretation.recordCount, records.length);
+    source.requestLease.close();
+  }
+});
+
+test("catalog profiles reject mixed and non-catalog envelopes before page completion", async () => {
+  for (const { provider, adapterVersion, manifest } of catalogRequestProfiles) {
+    const records = dataforestEventsV1EvidenceFixture[provider].initial.records;
+    const catalog = records.find((record) => record.stream === "catalog");
+    const pull = records.find((record) => record.stream === "pulls");
+    const trade = records.find((record) => record.stream === "trades");
+    assert.ok(catalog);
+    assert.ok(pull);
+    assert.ok(trade);
+    const { stream: _catalogStream, ...missingStream } = catalog;
+    void _catalogStream;
+    const variants = [
+      { label: "mixed", records: [catalog, pull] },
+      { label: "pulls", records: [pull] },
+      { label: "trades", records: [trade] },
+      { label: "unknown", records: [{ ...catalog, stream: "unknown" }] },
+      { label: "missing", records: [missingStream] },
+    ] as const;
+    const adapterIdentity = {
+      adapterVersion,
+      normalizedContractVersion: manifest.normalizedContractVersion,
+    };
+    const sourceConfiguration = { platform: provider, stream: "catalog" } as const;
+
+    for (const variant of variants) {
+      const page = {
+        records: variant.records,
+        next_cursor: `catalog-filter-${variant.label}-next`,
+        poll_after_seconds: 0,
+      };
+      const adapter = adapterWithClient(async () => jsonResponse(page), manifest);
+      const operation = await pageOperation(
+        runtime(),
+        provider,
+        null,
+        manifest.requestBounds,
+        adapterIdentity,
+        sourceConfiguration,
+      );
+      const capture = await successfulCapture(adapter, operation);
+      const interpreted = await interpretSourceAdapterPage(
+        adapter,
+        operation,
+        capture,
+      );
+      assert.equal(interpreted.ok, false, `${provider}: ${variant.label}`);
+      if (!interpreted.ok) {
+        assert.equal(interpreted.failure.code, "invalid_response");
+        assert.deepEqual(
+          interpreted.diagnostics.map(({ code }) => code),
+          ["catalog_stream_filter_violated"],
+        );
+      }
+      const inspected = adapter.inspectRawResponse({
+        provider,
+        sourceTypeKey: manifest.sourceTypeKey,
+        adapterVersion,
+        pageLimit: manifest.requestBounds.pageLimit,
+        protectedRawResponse: capture.value.protectedRawResponse,
+      });
+      assert.deepEqual(inspected, {
+        kind: "untrusted_inspection",
+        ok: false,
+        code: "inspection_response_invalid",
+      });
+      operation.requestLease.close();
+    }
+
+    const mixedPage = {
+      records: [catalog, pull],
+      next_cursor: "catalog-source-test-next",
+      poll_after_seconds: 0,
+    };
+    const sourceAdapter = adapterWithClient(
+      async () => jsonResponse(mixedPage),
+      manifest,
+    );
+    const source = await sourceOperation(
+      runtime(),
+      provider,
+      manifest.requestBounds,
+      adapterIdentity,
+      sourceConfiguration,
+    );
+    const sourceCapture = await successfulCapture(sourceAdapter, source);
+    const sourceInterpretation = await interpretSourceAdapterSourceTest(
+      sourceAdapter,
+      source,
+      sourceCapture,
+    );
+    assert.equal(sourceInterpretation.ok, false);
+    if (!sourceInterpretation.ok) {
+      assert.equal(sourceInterpretation.failure.code, "invalid_response");
+      assert.equal(sourceInterpretation.recordCount, 2);
+      assert.deepEqual(
+        sourceInterpretation.diagnostics.map(({ code }) => code),
+        ["catalog_stream_filter_violated"],
+      );
+    }
+    source.requestLease.close();
   }
 });
 

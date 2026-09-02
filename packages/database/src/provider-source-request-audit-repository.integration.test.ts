@@ -230,6 +230,7 @@ test("request and page translation audits require the exact live import lease an
       normalizedRecordCount: 1_987,
       recordCounts: { catalogRecordCount: 1_500, collectibleRecordCount: 1_490, packContentSnapshotCount: 7,
         pullRecordCount: 400, marketEventRecordCount: 80, rejectedRecordCount: 7 },
+      catalogIdentityCensus: null,
     });
     assert.equal(translated.kind, "recorded");
     if (translated.kind !== "recorded") {
@@ -275,9 +276,34 @@ test("request and page translation audits require the exact live import lease an
       sourceRecordCount: 1, normalizedRecordCount: 1,
       recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
         pullRecordCount: 0, marketEventRecordCount: 0, rejectedRecordCount: 0 },
+      catalogIdentityCensus: null,
     }), /counts do not match/);
     assert.equal(await harness.client.local_audit_events.count(), 2,
       "Invalid measurements must not append misleading audit evidence.");
+    const census = { schemaVersion: "provider_catalog_identity_census_v1" as const,
+      pageResponseDigest: "a".repeat(64), rawCardObservationCount: 1,
+      rawPackObservationCount: 0, distinctCardIdentityCount: 1,
+      distinctPackIdentityCount: 0, identityChainDigest: "b".repeat(64),
+      pageIdentityMultisetDigest: "c".repeat(64),
+      identityMultisetDigest: "c".repeat(64) };
+    const catalogTranslation = { runId: runningRunId, workerId: firstWorkerId,
+      workerFence: firstLease.lease.fence, requestAttemptId: randomUUID(),
+      pageAttemptId: randomUUID(), pageNumber: 5, sourceRecordCount: 1,
+      normalizedRecordCount: 1,
+      recordCounts: { catalogRecordCount: 1, collectibleRecordCount: 1,
+        packContentSnapshotCount: 0, pullRecordCount: 0,
+        marketEventRecordCount: 0, rejectedRecordCount: 0 },
+      catalogIdentityCensus: census };
+    assert.equal((await requestAudits.recordPageTranslation(catalogTranslation)).kind, "recorded");
+    assert.equal((await requestAudits.recordPageTranslation({ ...catalogTranslation,
+      requestAttemptId: randomUUID(), pageAttemptId: randomUUID() })).kind, "recorded");
+    assert.equal(await harness.client.local_audit_events.count(), 3,
+      "An exact catalog page replay must reuse its durable translation evidence.");
+    await assert.rejects(requestAudits.recordPageTranslation({ ...catalogTranslation,
+      requestAttemptId: randomUUID(), pageAttemptId: randomUUID(),
+      catalogIdentityCensus: { ...census, pageResponseDigest: "d".repeat(64) } }),
+    /replay conflicts/);
+    assert.equal(await harness.client.local_audit_events.count(), 3);
     assert.equal(
       /authorization|bearer|credential|cursor|payload|secret|token/iu.test(
         JSON.stringify(translationAudit.details),
@@ -323,6 +349,7 @@ test("request and page translation audits require the exact live import lease an
       normalizedRecordCount: 1,
       recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
         pullRecordCount: 1, marketEventRecordCount: 0, rejectedRecordCount: 0 },
+      catalogIdentityCensus: null,
     });
     assert.deepEqual(staleTranslation, { kind: "lease_lost" });
 
@@ -369,9 +396,10 @@ test("request and page translation audits require the exact live import lease an
       normalizedRecordCount: 1,
       recordCounts: { catalogRecordCount: 0, collectibleRecordCount: 0, packContentSnapshotCount: 0,
         pullRecordCount: 1, marketEventRecordCount: 0, rejectedRecordCount: 0 },
+      catalogIdentityCensus: null,
     });
     assert.deepEqual(terminalTranslation, { kind: "run_not_running" });
-    assert.equal(await harness.client.local_audit_events.count(), 2);
+    assert.equal(await harness.client.local_audit_events.count(), 3);
   } finally {
     await harness.close();
   }
