@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
@@ -87,10 +92,27 @@ test("only explicitly installed source integrations advertise execution capabili
   );
 });
 
-test("launch registry installs exact tuples for all four providers and refuses unknown tuples", () => {
+test("launch registry installs exact live and catalog tuples and refuses crossed tuples", () => {
   const installed = createLaunchSourceIntegrationCapabilities();
   const adapterKey =
     dataforrestLaunchDistributedSourceAdapterManifest.adapterVersion;
+  const catalogProfiles = [
+    ["courtyard", dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion],
+    ["phygitals", dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion],
+  ] as const;
+
+  assert.deepEqual(installed.keys(), [
+    `clutchpacks:${CLUTCHPACKS_CAPTURE_ADAPTER_KEY}`,
+    `clutchpacks:${dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion}`,
+    `courtyard:${dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion}`,
+    `courtyard:${dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion}`,
+    `phygitals:${dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion}`,
+    `phygitals:${dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion}`,
+  ].sort());
   assert.equal(installed.has("courtyard", adapterKey), false);
   assert.equal(installed.has("courtyard",
     dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), false);
@@ -102,14 +124,26 @@ test("launch registry installs exact tuples for all four providers and refuses u
   }
   assert.equal(installed.has("collector_crypt", adapterKey), false);
   assert.equal(installed.has("collector_crypt",
+    dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion), true);
+  assert.equal(installed.has("collector_crypt",
     dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), true);
   for (const providerKey of ["courtyard", "clutchpacks", "phygitals"]) {
     assert.equal(installed.has(providerKey,
-      dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion), false);
+      dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion), false);
   }
+  assert.equal(installed.has("collector_crypt",
+    dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion), false);
   assert.equal(installed.has("phygitals", adapterKey), false);
   assert.equal(installed.has("phygitals",
     dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion), true);
+  for (const [providerKey, catalogAdapterVersion] of catalogProfiles) {
+    assert.equal(installed.has(providerKey, catalogAdapterVersion), true);
+    for (const crossedProviderKey of ["clutchpacks", "collector_crypt", "courtyard", "phygitals"]) {
+      if (crossedProviderKey !== providerKey) {
+        assert.equal(installed.has(crossedProviderKey, catalogAdapterVersion), false);
+      }
+    }
+  }
   assert.equal(installed.has("clutchpacks",
     dataforrestClutchpacksDistributedSourceAdapterManifest.adapterVersion), true);
   assert.equal(installed.has("clutchpacks", adapterKey), false);

@@ -134,6 +134,8 @@ export function packDraft(
       displayName: candidate.displayName,
       description: candidate.description,
       packFormat: "repack",
+      // The provider database has no unknown availability state. Fail closed
+      // instead of publishing an availability claim the source did not make.
       availability: candidate.availability === "available"
         ? "available"
         : candidate.availability === "sold_out"

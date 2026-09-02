@@ -1,7 +1,7 @@
 import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   dataforrestEventsConnectionConfigurationV1Schema,
-  dataforrestEventsSourceConfigurationV1Schema,
+  dataforrestEventsSourceConfigurationSchemaForAdapter,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import type { CentralQueryClient } from "@packscout/database";
@@ -61,7 +61,9 @@ export interface ResolvedDataforrestSourceAuthority {
     endpoint: typeof DATAFORREST_EVENTS_V1_ENDPOINT;
     bearerToken: string;
   }>;
-  readonly sourceConfiguration: Readonly<{ platform: LaunchProviderKey }>;
+  readonly sourceConfiguration:
+    | Readonly<{ platform: LaunchProviderKey }>
+    | Readonly<{ platform: LaunchProviderKey; stream: "catalog" }>;
 }
 
 interface StoredSourceCredential {
@@ -250,9 +252,9 @@ export class CentralDataforrestSourceAuthorityResolver {
     if (config.endpoint_url !== DATAFORREST_EVENTS_V1_ENDPOINT) {
       return failure("PROVIDER_SOURCE_CONFIGURATION_CONFLICT");
     }
-    const source = dataforrestEventsSourceConfigurationV1Schema.safeParse(
-      config.configuration,
-    );
+    const source = dataforrestEventsSourceConfigurationSchemaForAdapter(
+      integration.manifest.adapterVersion,
+    ).safeParse(config.configuration);
     if (
       !source.success
       || source.data.platform !== provider.provider_key

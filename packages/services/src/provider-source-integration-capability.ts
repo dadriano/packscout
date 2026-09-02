@@ -1,7 +1,11 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
@@ -140,12 +144,28 @@ ProviderSourceIntegrationCapabilityRegistry {
       dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion,
     ),
     providerSourceIntegrationCapability(
+      "courtyard",
+      dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
       "collector_crypt",
       dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion,
     ),
     providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptCatalogV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
       "phygitals",
       dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion,
     ),
   ]);
 }

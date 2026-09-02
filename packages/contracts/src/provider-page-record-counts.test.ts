@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { countProviderPageRecords, validateProviderPageRecordCounts } from "./provider-page-record-counts.ts";
+import {
+  countProviderPageRecords,
+  validateProviderPageRecordCounts,
+} from "./provider-page-record-counts.ts";
 
 test("translation counts partition canonical kinds and rejections without reading record bodies", () => {
   const records = [

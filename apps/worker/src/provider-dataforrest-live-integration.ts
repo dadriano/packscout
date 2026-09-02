@@ -1,7 +1,11 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   launchProviderKeySchema,
   sourceAdapterManifestV1Schema,
@@ -84,6 +88,13 @@ export class ProviderDataforrestLiveIntegrationRegistry {
     return matches.length === 1 ? matches[0]! : null;
   }
 
+  supportsProvider(providerKey: string): boolean {
+    if (!launchProviderKeySchema.safeParse(providerKey).success) return false;
+    return [...this.#integrations.values()].some(
+      (integration) => integration.providerKey === providerKey,
+    );
+  }
+
   entries(): readonly ProviderDataforrestLiveIntegration[] {
     return Object.freeze([...this.#integrations.values()]);
   }
@@ -100,11 +111,27 @@ export const providerDataforrestLiveIntegrationRegistry =
       dataforrestCourtyardDistributedV2SourceAdapterManifest,
     ),
     createProviderDataforrestLiveIntegration(
+      "courtyard",
+      dataforrestCourtyardCatalogSourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
       "collector_crypt",
       dataforrestCollectorCryptDistributedSourceAdapterManifest,
     ),
     createProviderDataforrestLiveIntegration(
+      "collector_crypt",
+      dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "collector_crypt",
+      dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
       "phygitals",
       dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "phygitals",
+      dataforrestPhygitalsCatalogSourceAdapterManifest,
     ),
   ]);

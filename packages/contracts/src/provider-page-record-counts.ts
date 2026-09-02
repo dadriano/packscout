@@ -1,5 +1,34 @@
 import { z } from "zod";
 
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+
+export const PROVIDER_CATALOG_IDENTITY_CENSUS_VERSION =
+  "provider_catalog_identity_census_v1" as const;
+
+export const providerCatalogIdentityCensusSchema = z.object({
+  schemaVersion: z.literal(PROVIDER_CATALOG_IDENTITY_CENSUS_VERSION),
+  pageResponseDigest: sha256Schema,
+  rawCardObservationCount: z.number().int().nonnegative().safe(),
+  rawPackObservationCount: z.number().int().nonnegative().safe(),
+  distinctCardIdentityCount: z.number().int().nonnegative().safe(),
+  distinctPackIdentityCount: z.number().int().nonnegative().safe(),
+  identityChainDigest: sha256Schema,
+  pageIdentityMultisetDigest: sha256Schema,
+  identityMultisetDigest: sha256Schema.nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.distinctCardIdentityCount > value.rawCardObservationCount) {
+    context.addIssue({ code: "custom", path: ["distinctCardIdentityCount"],
+      message: "Distinct card identities exceed raw card observations." });
+  }
+  if (value.distinctPackIdentityCount > value.rawPackObservationCount) {
+    context.addIssue({ code: "custom", path: ["distinctPackIdentityCount"],
+      message: "Distinct pack identities exceed raw pack observations." });
+  }
+});
+export type ProviderCatalogIdentityCensus = z.infer<
+  typeof providerCatalogIdentityCensusSchema
+>;
+
 export const providerPageRecordCountsSchema = z.object({
   catalogRecordCount: z.number().int().nonnegative().safe(),
   collectibleRecordCount: z.number().int().nonnegative().safe(),

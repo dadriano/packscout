@@ -409,10 +409,15 @@ test("configurable source limits do not redefine any distributed capacity profil
     ["dataforrest-clutchpacks-distributed-adapter-v1", 2_000, 8_388_608, 480_000],
     ["dataforrest-launch-distributed-adapter-v1", 100, 8_388_608, 480_000],
     ["dataforrest-collector-crypt-distributed-adapter-v1", 1_000, 8_388_608, 480_000],
+    ["dataforrest-collector-crypt-distributed-adapter-v2", 1_000, 8_388_608, 480_000],
+    ["dataforrest-collector-crypt-catalog-adapter-v1", 1_000, 8_388_608, 480_000],
+    ["dataforrest-collector-crypt-catalog-adapter-v2", 100, 8_388_608, 480_000],
     ["dataforrest-courtyard-distributed-adapter-v1", 100, 8_388_608, 480_000],
     ["dataforrest-courtyard-distributed-adapter-v2", 100, 33_554_432, 640_000],
+    ["dataforrest-courtyard-catalog-adapter-v1", 100, 33_554_432, 640_000],
     ["dataforrest-phygitals-distributed-adapter-v1", 100, 8_388_608, 480_000],
     ["dataforrest-phygitals-distributed-adapter-v2", 100, 8_388_608, 480_000],
+    ["dataforrest-phygitals-catalog-adapter-v1", 100, 8_388_608, 480_000],
   ];
   assert.deepEqual(dataforrestEventsV1SourceAdapterManifests.map((manifest) => [
     manifest.adapterVersion,

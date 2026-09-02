@@ -1,6 +1,9 @@
+import { isDeepStrictEqual } from "node:util";
 import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
 import {
+  providerCatalogIdentityCensusSchema,
   providerSourceResponseLimitDiagnosticSchema,
+  type ProviderCatalogIdentityCensus,
   type ProviderSourceResponseLimitDiagnostic,
   validateProviderPageRecordCounts, type ProviderPageRecordCounts,
 } from "@packscout/contracts";
@@ -183,6 +186,7 @@ export class PrismaProviderSourceRequestAuditRepository {
     sourceRecordCount: number;
     normalizedRecordCount: number;
     recordCounts: ProviderPageRecordCounts;
+    catalogIdentityCensus: ProviderCatalogIdentityCensus | null;
   }>): Promise<ProviderSourceRequestAuditResult> {
     requireUuid(input.runId, "runId");
     requireUuid(input.requestAttemptId, "requestAttemptId");
@@ -196,24 +200,61 @@ export class PrismaProviderSourceRequestAuditRepository {
     requireMeasurement(input.sourceRecordCount, "sourceRecordCount");
     requireMeasurement(input.normalizedRecordCount, "normalizedRecordCount");
     const recordCounts = validateProviderPageRecordCounts(input.recordCounts, input.normalizedRecordCount);
+    const catalogIdentityCensus = input.catalogIdentityCensus === null
+      ? null
+      : providerCatalogIdentityCensusSchema.parse(input.catalogIdentityCensus);
+    const details = {
+      leaseFence: input.workerFence.toString(),
+      normalizedRecordCount: input.normalizedRecordCount,
+      ...recordCounts,
+      pageNumber: input.pageNumber,
+      runId: input.runId,
+      sourceRecordCount: input.sourceRecordCount,
+      ...(catalogIdentityCensus === null ? {} : {
+        catalogCensusVersion: catalogIdentityCensus.schemaVersion,
+        catalogPageResponseDigest: catalogIdentityCensus.pageResponseDigest,
+        catalogRawCardCount: catalogIdentityCensus.rawCardObservationCount,
+        catalogRawPackCount: catalogIdentityCensus.rawPackObservationCount,
+        catalogDistinctCardCount:
+          catalogIdentityCensus.distinctCardIdentityCount,
+        catalogDistinctPackCount:
+          catalogIdentityCensus.distinctPackIdentityCount,
+        catalogIdentityChainDigest: catalogIdentityCensus.identityChainDigest,
+        catalogPageIdentityMultisetDigest:
+          catalogIdentityCensus.pageIdentityMultisetDigest,
+        catalogIdentityMultisetDigest:
+          catalogIdentityCensus.identityMultisetDigest,
+      }),
+    };
 
     return this.#recordWithLiveImportAuthority(
       input,
       async (transaction, occurredAt) => {
+        if (catalogIdentityCensus !== null) {
+          const prior = await transaction.$queryRaw<Array<{
+            details: unknown;
+          }>>(ProviderPrisma.sql`
+            select details
+            from local_audit_events
+            where action = 'provider.source.page.translated'
+              and details->>'runId' = ${input.runId}
+              and details->>'pageNumber' = ${input.pageNumber.toString()}
+            order by sequence asc
+            for update
+          `);
+          if (prior.length > 1 ||
+            (prior.length === 1 && !isDeepStrictEqual(prior[0]?.details, details))) {
+            throw new TypeError("Source page translation replay conflicts with durable evidence.");
+          }
+          if (prior.length === 1) return;
+        }
         await appendProviderLocalAudit(transaction, {
           correlationId: input.requestAttemptId,
           action: "provider.source.page.translated",
           targetType: "source_page_attempt",
           targetId: input.pageAttemptId,
           outcome: "success",
-          details: {
-            leaseFence: input.workerFence.toString(),
-            normalizedRecordCount: input.normalizedRecordCount,
-            ...recordCounts,
-            pageNumber: input.pageNumber,
-            runId: input.runId,
-            sourceRecordCount: input.sourceRecordCount,
-          },
+          details,
           occurredAt,
         });
       },
