@@ -15,6 +15,7 @@ import {
   type PromotionJobWakeMonitoring,
 } from "@packscout/contracts";
 import {
+  PROMOTION_JOB_LIVENESS_DEFAULT_MAXIMUM_PROVIDERS,
   PrismaManifestReconciliationJobRepository,
   PrismaPromotionJobLivenessRepository,
   PrismaPromotionJobLivenessRosterRepository,
@@ -44,7 +45,7 @@ import {
   type ProviderPromotionMonitoringLocalFacts,
 } from "@packscout/services";
 
-const PROVIDER_LIMIT = 256;
+const ORGANIZATION_ROSTER_PAGE_SIZE = 256;
 const DISTRIBUTED_READ_CONCURRENCY = 4;
 const OVERVIEW_PROVIDER_READ_TIMEOUT_MS = 15_000;
 const HISTORY_SIDE_LIMIT = 101;
@@ -112,6 +113,18 @@ export interface LiveProviderPromotionMonitoringSnapshot {
   readonly settledPosition: bigint;
   readonly completedRelease: PromotionJobPublicReleaseMonitoring | null;
   readonly executionState: ProviderPromotionMonitoringLocalFacts["executionState"];
+}
+
+interface ManifestGateQueueAggregateRow {
+  readonly queue_depth: bigint;
+  readonly oldest_requested_at: Date | null;
+}
+
+interface PromotionJobMonitoringRosterRow {
+  readonly id: string;
+  readonly provider_key: string;
+  readonly display_name: string;
+  readonly lifecycle: PromotionJobMonitoringRosterProvider["lifecycle"];
 }
 
 function asFailureCode(value: string | null): string | null {
@@ -475,19 +488,41 @@ export class PrismaPromotionJobMonitoringReadRepository {
   }
 
   async listRoster(organizationId: string): Promise<readonly PromotionJobMonitoringRosterProvider[]> {
-    const rows = await this.central.providers.findMany({
-      where: { organization_id: organizationId },
-      orderBy: [{ provider_key: "asc" }, { id: "asc" }],
-      take: PROVIDER_LIMIT + 1,
-      select: {
-        id: true,
-        provider_key: true,
-        display_name: true,
-        lifecycle: true,
-      },
-    });
-    if (rows.length > PROVIDER_LIMIT) {
-      throw new Error("Promotion monitoring roster exceeds its safe bound.");
+    const rows: PromotionJobMonitoringRosterRow[] = [];
+    let after: Readonly<{ providerKey: string; id: string }> | null = null;
+    for (;;) {
+      const page: PromotionJobMonitoringRosterRow[] =
+        await this.central.providers.findMany({
+          where: {
+            organization_id: organizationId,
+            ...(after === null ? {} : {
+              OR: [{ provider_key: { gt: after.providerKey } }, {
+                provider_key: after.providerKey,
+                id: { gt: after.id },
+              }],
+            }),
+          },
+          orderBy: [{ provider_key: "asc" }, { id: "asc" }],
+          take: ORGANIZATION_ROSTER_PAGE_SIZE,
+          select: {
+            id: true,
+            provider_key: true,
+            display_name: true,
+            lifecycle: true,
+          },
+        });
+      if (
+        rows.length + page.length
+          > PROMOTION_JOB_LIVENESS_DEFAULT_MAXIMUM_PROVIDERS
+      ) {
+        throw new RangeError(
+          "Promotion monitoring roster exceeds evaluator capacity.",
+        );
+      }
+      rows.push(...page);
+      if (page.length < ORGANIZATION_ROSTER_PAGE_SIZE) break;
+      const last: PromotionJobMonitoringRosterRow = page.at(-1)!;
+      after = { providerKey: last.provider_key, id: last.id };
     }
     return rows.map((row) => ({
       id: row.id,
@@ -515,7 +550,15 @@ export class PrismaPromotionJobMonitoringReadRepository {
     const manifestJobs = new PrismaManifestReconciliationJobRepository(
       this.central,
     );
-    const [state, schedule, wake, observation, latest, gateRows] =
+    const [
+      state,
+      schedule,
+      wake,
+      observation,
+      latest,
+      gateRows,
+      gateQueueRows,
+    ] =
       await Promise.all([
         this.central.manifest_activation_state.findUnique({
           where: { singleton_key: true },
@@ -539,24 +582,22 @@ export class PrismaPromotionJobMonitoringReadRepository {
             provider: { select: { provider_key: true } },
           },
         }),
+        this.central.$queryRaw<readonly ManifestGateQueueAggregateRow[]>`
+          select count(*)::bigint as queue_depth,
+            min(latest_requested_at) as oldest_requested_at
+          from manifest_gate_intents
+          where requested_generation > acknowledged_generation
+            and latest_requested_at is not null
+        `,
       ]);
-    const pendingIntents = await this.central.manifest_gate_intents.findMany({
-      where: { latest_requested_at: { not: null } },
-      select: {
-        requested_generation: true,
-        acknowledged_generation: true,
-        latest_requested_at: true,
-      },
-    });
-    const pendingTimes = pendingIntents
-      .filter((row) => row.requested_generation > row.acknowledged_generation)
-      .flatMap((row) => row.latest_requested_at === null ? [] : [row.latest_requested_at]);
-    const queueDepth = pendingIntents.filter((row) =>
-      row.requested_generation > row.acknowledged_generation
-    ).length;
-    const oldest = pendingTimes.sort((left, right) =>
-      left.getTime() - right.getTime()
-    )[0] ?? null;
+    const gateQueue = gateQueueRows[0];
+    if (
+      gateQueue === undefined
+      || gateQueue.queue_depth < 0n
+      || gateQueue.queue_depth > BigInt(Number.MAX_SAFE_INTEGER)
+    ) throw new Error("Manifest gate queue aggregate is invalid.");
+    const queueDepth = Number(gateQueue.queue_depth);
+    const oldest = gateQueue.oldest_requested_at;
 
     let manifest = null;
     let activeReleases = new Map<string, {

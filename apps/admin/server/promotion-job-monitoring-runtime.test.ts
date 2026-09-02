@@ -9,11 +9,14 @@ import {
 import {
   promotionJobSha256,
   type BoundedProviderDatabaseGateway,
+  type CentralPrismaClient,
   type PromotionJobLivenessEvaluatorStateRecord,
   type PromotionJobLivenessRosterSnapshotRecord,
   type ProviderPrismaClient,
 } from "@packscout/database";
+import { PromotionJobMonitoringIdCodec } from "@packscout/services";
 import {
+  PrismaPromotionJobMonitoringReadRepository,
   PromotionJobMonitoringReadService,
   type CentralManifestPromotionMonitoringEvidence,
   type CentralPromotionJobMonitoringInvocationRecord,
@@ -34,6 +37,17 @@ const archivedProjectionId = "30000000-0000-4000-8000-000000000003";
 const manifestInvocationId = "40000000-0000-4000-8000-000000000001";
 const observedAt = new Date("2026-09-01T12:00:00.000Z");
 const digest = "a".repeat(64);
+
+function rawSqlText(statement: unknown): string {
+  if (Array.isArray(statement)) return statement.join("?");
+  if (
+    typeof statement === "object"
+    && statement !== null
+    && "strings" in statement
+    && Array.isArray(statement.strings)
+  ) return statement.strings.join("?");
+  throw new TypeError("Expected a Prisma SQL statement.");
+}
 
 function release(token: string, position = "2") {
   return {
@@ -640,4 +654,66 @@ test("history merges newest-first and detail exposes only bounded safe evidence"
     organizationId: otherOrganizationId,
     monitoringId: second.items[0]!.monitoringId,
   }), null);
+});
+
+test("manifest evidence aggregates the pending gate queue in Postgres", async () => {
+  const oldestRequestedAt = new Date(observedAt.getTime() - 120_000);
+  const gateAggregateStatements: string[] = [];
+  const central = {
+    $queryRaw: async (statement: unknown) => {
+      const sql = rawSqlText(statement);
+      if (sql.includes("manifest_reconciliation_job_schedule")) {
+        return [{
+          lifecycle: "paused",
+          scheduleEpoch: 0n,
+          cadenceSeconds: 60,
+          baselineAt: null,
+          activatedAt: null,
+          pausedAt: null,
+          lastAdmittedWindowIndex: null,
+          lastScheduledCheckinAt: null,
+          nextExpectedCheckinAt: null,
+        }];
+      }
+      if (sql.includes("manifest_reconciliation_job_wake")) return [];
+      if (sql.includes("promotion_job_liveness_observations")) return [];
+      if (sql.includes("manifest_gate_intents")) {
+        gateAggregateStatements.push(sql);
+        return [{
+          queue_depth: 2n,
+          oldest_requested_at: oldestRequestedAt,
+        }];
+      }
+      throw new Error(`Unexpected SQL statement: ${sql}`);
+    },
+    manifest_activation_state: { findUnique: async () => null },
+    manifest_reconciliation_job_invocations: {
+      findFirst: async () => null,
+    },
+    manifest_activation_operations: { findMany: async () => [] },
+    manifest_gate_intents: {
+      findMany: async () => {
+        throw new Error("Gate intents must not be materialized in monitoring.");
+      },
+    },
+  } as unknown as CentralPrismaClient;
+  const repository = new PrismaPromotionJobMonitoringReadRepository(central);
+
+  const evidence = await repository.readManifestEvidence({
+    organizationId,
+    deployment: "test",
+    now: observedAt,
+    idCodec: new PromotionJobMonitoringIdCodec(new Uint8Array(32).fill(7)),
+    evaluatorCurrent: true,
+  });
+
+  assert.equal(evidence.view.gateQueueDepth, 2);
+  assert.equal(evidence.view.oldestGateAgeMs, 120_000);
+  assert.equal(gateAggregateStatements.length, 1);
+  assert.match(gateAggregateStatements[0]!, /count\(\*\)::bigint/iu);
+  assert.match(gateAggregateStatements[0]!, /min\(latest_requested_at\)/iu);
+  assert.match(
+    gateAggregateStatements[0]!,
+    /requested_generation > acknowledged_generation/iu,
+  );
 });

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import {
@@ -28,6 +35,7 @@ import { interruptibleSha256CanonicalJson } from
 
 const providerId = "17000000-0000-4000-8000-000000000001";
 const MEMORY_CHILD_ENV = "PACKSCOUT_BOOTSTRAP_MEMORY_CHILD";
+const MEMORY_FIXTURE_PATH_ENV = "PACKSCOUT_BOOTSTRAP_MEMORY_FIXTURE_PATH";
 const MEMORY_CHILD_HEAP_MIB = 256;
 const options = (
   fetch: typeof globalThis.fetch,
@@ -337,10 +345,16 @@ function deferred() {
   return { promise, resolve };
 }
 
-function runConstrainedMemoryChild(): Promise<string> {
+function runMemoryChild(
+  mode: "prepare" | "consume",
+  fixturePath: string,
+  maximumOldSpaceMib?: number,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
-      `--max-old-space-size=${MEMORY_CHILD_HEAP_MIB}`,
+      ...(maximumOldSpaceMib === undefined
+        ? []
+        : [`--max-old-space-size=${maximumOldSpaceMib}`]),
       "--import",
       "tsx",
       "--test",
@@ -351,7 +365,8 @@ function runConstrainedMemoryChild(): Promise<string> {
       env: {
         ...process.env,
         NODE_TEST_CONTEXT: undefined,
-        [MEMORY_CHILD_ENV]: "1",
+        [MEMORY_CHILD_ENV]: mode,
+        [MEMORY_FIXTURE_PATH_ENV]: fixturePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -370,6 +385,43 @@ function runConstrainedMemoryChild(): Promise<string> {
       ));
     });
   });
+}
+
+async function runConstrainedMemoryChild(): Promise<string> {
+  const directory = await mkdtemp(join(
+    tmpdir(),
+    "packscout-bootstrap-memory-",
+  ));
+  const fixturePath = join(directory, "maximum-bootstrap.ndjson");
+  try {
+    await runMemoryChild("prepare", fixturePath);
+    return await runMemoryChild(
+      "consume",
+      fixturePath,
+      MEMORY_CHILD_HEAP_MIB,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function writeFrameFixture(
+  fixturePath: string,
+  frames: readonly Record<string, unknown>[],
+): Promise<void> {
+  const output = createWriteStream(fixturePath, { flags: "wx" });
+  try {
+    for (const frame of frames) {
+      if (!output.write(`${JSON.stringify(frame)}\n`)) {
+        await once(output, "drain");
+      }
+    }
+    output.end();
+    await finished(output);
+  } catch (error) {
+    output.destroy();
+    throw error;
+  }
 }
 
 function blockPostEofValidationDigest(context: TestContext) {
@@ -527,7 +579,8 @@ test("bootstrap accepts a framed graph larger than the former 16 MiB cap", async
 test("bootstrap accepts the maximum-count representative consumer graph", {
   timeout: 120_000,
 }, async (context) => {
-  if (process.env[MEMORY_CHILD_ENV] !== "1") {
+  const childMode = process.env[MEMORY_CHILD_ENV];
+  if (childMode === undefined) {
     const output = await runConstrainedMemoryChild();
     const measurement = output.match(
       /maximum-count bootstrap wire=[^\n]+/u,
@@ -538,47 +591,65 @@ test("bootstrap accepts the maximum-count representative consumer graph", {
     );
     return;
   }
-  const catalogCategories = Array.from(
-    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCategories },
-    (_, index) => catalogCategoryAt(index + 1),
-  );
-  const catalogCollectibles = Array.from(
-    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles },
-    (_, index) => catalogCollectible(index + 1),
-  );
-  const catalogAliases = Array.from(
-    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases },
-    (_, index) => catalogAlias(index + 1),
-  );
-  const categoryCorrelations = Array.from(
-    { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.categoryCorrelations },
-    (_, index) => ({
-      localCategoryId: `57000000-0000-4000-8000-${String(index + 1)
-        .padStart(12, "0")}`,
-      localEntityVersion: "1",
-      publicCategoryId: catalogCategoryId,
-    }),
-  );
-  const collectibleCorrelations = catalogCollectibles.map((collectible, index) => ({
-    localCollectibleId: `57000000-0000-4000-8000-${String(index + 1)
-      .padStart(12, "0")}`,
-    localEntityVersion: "1",
-    publicCollectibleId: collectible.publicCollectibleId as string,
-  }));
-  const frames = await streamFrames(await serializedPin({
-    catalogCategories,
-    catalogCollectibles,
-    catalogAliases,
-    categoryCorrelations,
-    collectibleCorrelations,
-  }));
-  const totalBytes = frames.reduce((total, frame) =>
-    total + Buffer.byteLength(`${JSON.stringify(frame)}\n`, "utf8"), 0);
+  const fixturePath = process.env[MEMORY_FIXTURE_PATH_ENV];
+  assert.ok(fixturePath, "The maximum-count child requires its fixture path.");
+  if (childMode === "prepare") {
+    const catalogCategories = Array.from(
+      { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCategories },
+      (_, index) => catalogCategoryAt(index + 1),
+    );
+    const catalogCollectibles = Array.from(
+      { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogCollectibles },
+      (_, index) => catalogCollectible(index + 1),
+    );
+    const catalogAliases = Array.from(
+      { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.catalogAliases },
+      (_, index) => catalogAlias(index + 1),
+    );
+    const categoryCorrelations = Array.from(
+      { length: PROVIDER_PROMOTION_BOOTSTRAP_COUNT_LIMITS.categoryCorrelations },
+      (_, index) => ({
+        localCategoryId: `57000000-0000-4000-8000-${String(index + 1)
+          .padStart(12, "0")}`,
+        localEntityVersion: "1",
+        publicCategoryId: catalogCategoryId,
+      }),
+    );
+    const collectibleCorrelations = catalogCollectibles.map(
+      (collectible, index) => ({
+        localCollectibleId: `57000000-0000-4000-8000-${String(index + 1)
+          .padStart(12, "0")}`,
+        localEntityVersion: "1",
+        publicCollectibleId: collectible.publicCollectibleId as string,
+      }),
+    );
+    await writeFrameFixture(fixturePath, await streamFrames(await serializedPin({
+      catalogCategories,
+      catalogCollectibles,
+      catalogAliases,
+      categoryCorrelations,
+      collectibleCorrelations,
+    })));
+    return;
+  }
+  assert.equal(childMode, "consume");
+  const totalBytes = (await stat(fixturePath)).size;
   assert.ok(totalBytes > 64 * 1_024 * 1_024);
   assert.ok(totalBytes < PROVIDER_PROMOTION_BOOTSTRAP_MAXIMUM_STREAM_BYTES);
 
+  const fixtureStream = createReadStream(fixturePath);
   const client = new ProviderPromotionBootstrapGatewayClient(options(
-    (async () => streamResponse(frames)) as typeof globalThis.fetch,
+    (async () => new Response(
+      Readable.toWeb(fixtureStream) as ReadableStream<Uint8Array>,
+      {
+        status: 200,
+        headers: {
+          "content-type":
+            PROVIDER_PROMOTION_BOOTSTRAP_STREAM_CONTENT_TYPE,
+          "content-length": String(totalBytes),
+        },
+      },
+    )) as typeof globalThis.fetch,
     30_000,
   ));
   const pin = await client.load(providerId);

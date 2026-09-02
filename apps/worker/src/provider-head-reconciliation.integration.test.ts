@@ -49,7 +49,13 @@ test("head progress survives a callback crash, resumes receipts without source r
         nextCursorFingerprint: providerMixedCursorFingerprint(nextCursor), continuation: "head", records: [] };
       return { ...body, responseDigest: providerMixedPageDigest(body) };
     } };
-    const create = () => new ProviderManualImportExecutor({ database: client, workerId, source });
+    const immediateDelivery = { async request() {} };
+    const create = () => new ProviderManualImportExecutor({
+      database: client,
+      workerId,
+      source,
+      immediateDelivery,
+    });
     const first = await create().executeNextPage();
     if (first.kind !== "progress") context.diagnostic(JSON.stringify({ first, run: await client.provider_runs.findUnique({ where: { id: runId }, select: { failure_summary: true } }) }));
     assert.equal(first.kind, "progress");

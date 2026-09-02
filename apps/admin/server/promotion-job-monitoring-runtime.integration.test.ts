@@ -11,6 +11,7 @@ import {
 } from "@packscout/database";
 import { createMigratedCentralTestDatabase } from
   "@packscout/database/test-support";
+import { PromotionJobMonitoringIdCodec } from "@packscout/services";
 import {
   PrismaPromotionJobMonitoringReadRepository,
   PromotionJobMonitoringReadService,
@@ -23,7 +24,7 @@ const providerId = "92000000-0000-4000-8000-000000000001";
 const disabledProviderId = "92000000-0000-4000-8000-000000000002";
 const base = new Date("2026-09-01T12:00:00.000Z");
 
-test("real central repository scopes roster, merged history, and provider detail", async () => {
+test("real central repository pages rosters, aggregates gates, and scopes history", async () => {
   const harness = await createMigratedCentralTestDatabase();
   try {
     await harness.client.organizations.createMany({
@@ -54,7 +55,13 @@ test("real central repository scopes roster, merged history, and provider detail
           provider_key: "monitoring_disabled",
           display_name: "Monitoring disabled",
           lifecycle: "disabled",
-        }],
+        }, ...Array.from({ length: 255 }, (_, index) => ({
+          id: `92000000-0000-4000-9000-${String(index).padStart(12, "0")}`,
+          organization_id: organizationId,
+          provider_key: `monitoring_retained_${String(index).padStart(3, "0")}`,
+          display_name: `Monitoring retained ${index}`,
+          lifecycle: "archived" as const,
+        }))],
       });
     } finally {
       await harness.client.$executeRawUnsafe(
@@ -132,6 +139,29 @@ test("real central repository scopes roster, merged history, and provider detail
     const repository = new PrismaPromotionJobMonitoringReadRepository(
       harness.client,
     );
+    const pendingGateRequestedAt = new Date(base.getTime() - 120_000);
+    await harness.client.manifest_gate_intents.createMany({
+      data: [{
+        provider_id: providerId,
+        requested_generation: 2n,
+        acknowledged_generation: 1n,
+        latest_cause: "provider_completion",
+        latest_evidence_digest: promotionJobSha256("pending-gate"),
+        latest_requested_at: pendingGateRequestedAt,
+        provider_source_generation: 1n,
+        provider_source_gate_generation: 2n,
+        provider_source_cause: "provider_completion",
+        provider_source_evidence_digest: promotionJobSha256("pending-gate"),
+        provider_source_requested_at: pendingGateRequestedAt,
+      }, {
+        provider_id: disabledProviderId,
+        requested_generation: 1n,
+        acknowledged_generation: 1n,
+        latest_cause: "provider_completion",
+        latest_evidence_digest: promotionJobSha256("acknowledged-gate"),
+        latest_requested_at: new Date(base.getTime() - 240_000),
+      }],
+    });
 
     const [roster, retained, history] = await Promise.all([
       repository.captureEligibleRoster(),
@@ -143,7 +173,8 @@ test("real central repository scopes roster, merged history, and provider detail
       }),
     ]);
     assert.equal(roster.providers.length, 1);
-    assert.deepEqual(retained.map(({ providerKey, lifecycle }) => ({
+    assert.equal(retained.length, 257);
+    assert.deepEqual(retained.slice(0, 2).map(({ providerKey, lifecycle }) => ({
       providerKey,
       lifecycle,
     })), [{
@@ -153,7 +184,17 @@ test("real central repository scopes roster, merged history, and provider detail
       providerKey: "monitoring_disabled",
       lifecycle: "disabled",
     }]);
+    assert.equal(retained.at(-1)?.providerKey, "monitoring_retained_254");
     assert.deepEqual(history.map(({ kind }) => kind), ["manifest", "provider"]);
+    const manifestEvidence = await repository.readManifestEvidence({
+      organizationId,
+      deployment: "test",
+      now: base,
+      idCodec: new PromotionJobMonitoringIdCodec(new Uint8Array(32).fill(7)),
+      evaluatorCurrent: true,
+    });
+    assert.equal(manifestEvidence.view.gateQueueDepth, 1);
+    assert.equal(manifestEvidence.view.oldestGateAgeMs, 120_000);
     const providerRecord = history.find(({ kind }) => kind === "provider")!;
     assert.equal(providerRecord.centralId, projected.id);
     assert.equal(providerRecord.settledPosition, 2n);

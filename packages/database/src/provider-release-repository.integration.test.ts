@@ -40,6 +40,44 @@ interface CleanupTransactionBudget {
   readonly timeout: number;
 }
 
+const SNAPSHOT_READ_MODELS = new Set([
+  "categories",
+  "collectibles",
+  "collectible_name_aliases",
+  "packs",
+  "pack_contents",
+] as const);
+
+type SnapshotReadModel = typeof SNAPSHOT_READ_MODELS extends Set<infer T>
+  ? T
+  : never;
+
+interface SnapshotReadObservation {
+  readonly model: SnapshotReadModel;
+  readonly arguments: unknown;
+}
+
+function observeProviderReleaseSnapshotReads(
+  provider: ProviderPrismaClient,
+  observations: SnapshotReadObservation[],
+): ProviderPrismaClient {
+  const database = provider.$extends({ query: { $allModels: {
+    $allOperations({ model, operation, args, query }) {
+      if (
+        operation === "findMany"
+        && SNAPSHOT_READ_MODELS.has(model as SnapshotReadModel)
+      ) {
+        observations.push({
+          model: model as SnapshotReadModel,
+          arguments: args,
+        });
+      }
+      return query(args);
+    },
+  } } });
+  return database as unknown as ProviderPrismaClient;
+}
+
 function failReleaseLeaseCleanupWithPrismaTimeout(
   provider: ProviderPrismaClient,
   code: "P2024" | "P2028",
@@ -556,8 +594,61 @@ test("migrated provider assembly is immutable, resumable, reusable, isolated, an
       displayOrder: 0,
     });
     const pin = await releasePin({ migrated: pair.first, category, collectible });
+    const snapshotReads: SnapshotReadObservation[] = [];
+    const boundedSnapshotRepository = new ProviderReleaseRepository(
+      observeProviderReleaseSnapshotReads(first, snapshotReads),
+    );
+    const initial = await boundedSnapshotRepository.assemble({
+      workerId: "assembly-a",
+      leaseMilliseconds: 10_000,
+      pin,
+    });
+    assert.deepEqual(
+      snapshotReads.map(({ model }) => model),
+      ["packs", "pack_contents", "categories", "collectibles"],
+      "the snapshot never scans the provider-wide local alias table",
+    );
+    const [packsRead, contentsRead, categoriesRead, collectiblesRead] =
+      snapshotReads.map(({ arguments: value }) =>
+        value as {
+          readonly take?: number;
+          readonly where?: unknown;
+          readonly select?: Readonly<Record<string, boolean>>;
+        }
+      );
+    assert.equal(packsRead?.take, 8_001);
+    assert.equal(packsRead?.select?.attributes, undefined);
+    assert.equal(contentsRead?.take, 250_001);
+    assert.deepEqual(contentsRead?.where, {
+      lifecycle: "active",
+      pack: {
+        lifecycle: "active",
+        availability: { not: "unavailable" },
+      },
+    });
+    assert.equal(contentsRead?.select?.total_quantity, undefined);
+    assert.equal(categoriesRead?.take, 8_001);
+    assert.deepEqual(categoriesRead?.where, {
+      packs: {
+        some: {
+          lifecycle: "active",
+          availability: { not: "unavailable" },
+        },
+      },
+    });
+    assert.equal(collectiblesRead?.take, 250_001);
+    assert.deepEqual(collectiblesRead?.where, {
+      pack_contents: {
+        some: {
+          lifecycle: "active",
+          pack: {
+            lifecycle: "active",
+            availability: { not: "unavailable" },
+          },
+        },
+      },
+    });
     const repository = new ProviderReleaseRepository(first);
-    const initial = await repository.assemble({ workerId: "assembly-a", leaseMilliseconds: 10_000, pin });
     assert.equal(initial.release.lifecycle, "assembled");
     const assembledSource = await repository.publicationSource(initial.release.id);
     assert.equal(assembledSource.release.lifecycle, "assembled");
@@ -755,13 +846,13 @@ test("migrated provider assembly is immutable, resumable, reusable, isolated, an
 
     const lateQueryLock = new Client({ connectionString: pair.first.databaseUrl });
     await lateQueryLock.connect();
-    let categoryLockOpen = false;
+    let packLockOpen = false;
     try {
       await lateQueryLock.query("begin");
-      await lateQueryLock.query("lock table packs in access exclusive mode");
+      await lateQueryLock.query("lock table categories in access exclusive mode");
       await pair.first.db.query("begin");
-      categoryLockOpen = true;
-      await pair.first.db.query("lock table categories in access exclusive mode");
+      packLockOpen = true;
+      await pair.first.db.query("lock table packs in access exclusive mode");
       const boundedStartedAt = Date.now();
       let boundedSettled = false;
       const boundedOutcome = repository.assemble({
@@ -779,12 +870,12 @@ test("migrated provider assembly is immutable, resumable, reusable, isolated, an
           return { error, value: null } as const;
         },
       );
-      await waitForBlockedSnapshotRead(pair.first, "categories");
+      await waitForBlockedSnapshotRead(pair.first, "packs");
       await delay(3_000);
       assert.equal(boundedSettled, false);
       await pair.first.db.query("commit");
-      categoryLockOpen = false;
-      await waitForBlockedSnapshotRead(pair.first, "packs");
+      packLockOpen = false;
+      await waitForBlockedSnapshotRead(pair.first, "categories");
       const outcome = await boundedOutcome;
       assert.ok(outcome.error instanceof ProviderReleaseAssemblyError);
       assert.equal(outcome.error.code, "PROVIDER_RELEASE_DEADLINE");
@@ -793,7 +884,7 @@ test("migrated provider assembly is immutable, resumable, reusable, isolated, an
         where: { consumer_key: "provider_release" },
       })).lease_owner, null);
     } finally {
-      if (categoryLockOpen) await pair.first.db.query("rollback");
+      if (packLockOpen) await pair.first.db.query("rollback");
       await lateQueryLock.query("rollback").catch(() => undefined);
       await lateQueryLock.end();
     }

@@ -19,6 +19,12 @@ const PROVIDER_KEY_PATTERN = /^[a-z][a-z0-9_]{0,52}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/u;
 
+/** Default complete-roster capacity shared by evaluation and monitoring. */
+export const PROMOTION_JOB_LIVENESS_DEFAULT_MAXIMUM_PROVIDERS = 4_096;
+
+/** Default database page size used to capture a complete liveness roster. */
+export const PROMOTION_JOB_LIVENESS_DEFAULT_ROSTER_PAGE_SIZE = 250;
+
 const SERIALIZABLE_TRANSACTION = Object.freeze({
   ...CENTRAL_TRANSACTION_OPTIONS,
   isolationLevel: CentralPrisma.TransactionIsolationLevel.Serializable,
@@ -463,8 +469,10 @@ export class PrismaPromotionJobLivenessRosterRepository {
       maximumProviders?: number;
     }> = {},
   ) {
-    this.#pageSize = options.pageSize ?? 250;
-    this.#maximumProviders = options.maximumProviders ?? 4_096;
+    this.#pageSize = options.pageSize
+      ?? PROMOTION_JOB_LIVENESS_DEFAULT_ROSTER_PAGE_SIZE;
+    this.#maximumProviders = options.maximumProviders
+      ?? PROMOTION_JOB_LIVENESS_DEFAULT_MAXIMUM_PROVIDERS;
     if (
       !Number.isInteger(this.#pageSize)
       || this.#pageSize < 1

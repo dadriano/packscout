@@ -223,12 +223,15 @@ const MINIMUM_TRANSACTION_TIMEOUT_MILLISECONDS = 1_000;
 const TRANSACTION_SETTLEMENT_RESERVE_MILLISECONDS = 250;
 const RELEASE_LEASE_CLEANUP_WINDOW_MILLISECONDS = 2_000;
 const SNAPSHOT_LIMITS = Object.freeze({
-  categories: 100_000,
-  collectibles: 1_000_000,
-  aliases: 4_000_000,
+  categories: 8_000,
+  collectibles: 250_000,
   packs: 8_000,
   contents: 250_000,
 });
+const PROVIDER_RELEASE_PUBLIC_PACK_SCOPE = {
+  lifecycle: "active",
+  availability: { not: "unavailable" },
+} satisfies ProviderPrisma.packsWhereInput;
 
 export type ProviderReleaseAssemblyFailureCode =
   | "PROVIDER_RELEASE_CANCELLED"
@@ -563,8 +566,75 @@ async function loadSnapshot(
   const ledger = await phases.run(() =>
     transaction.promotion_ledger.findUniqueOrThrow({ where: { singleton_key: true } })
   );
+  const packs = await phases.run(() =>
+    transaction.packs.findMany({
+      take: SNAPSHOT_LIMITS.packs + 1,
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        category_id: true,
+        display_name: true,
+        description: true,
+        pack_format: true,
+        lifecycle: true,
+        availability: true,
+        content_evidence: true,
+        price_amount: true,
+        price_currency: true,
+        price_usd_amount: true,
+        price_unavailable_reason: true,
+        buyback_rate: true,
+        buyback_source_kind: true,
+        vendor_ev_amount: true,
+        vendor_ev_currency: true,
+        vendor_ev_observed_at: true,
+        vendor_ev_unavailable_reason: true,
+        packscout_ev_amount: true,
+        packscout_ev_currency: true,
+        packscout_ev_model_version: true,
+        packscout_ev_confidence_policy_version: true,
+        packscout_ev_confidence: true,
+        packscout_ev_data_as_of: true,
+        packscout_ev_calculated_at: true,
+        packscout_ev_unavailable_reason: true,
+        primary_image_url: true,
+        primary_image_alt: true,
+        listing_url: true,
+        source_updated_at: true,
+        retired_at: true,
+        updated_at: true,
+      },
+    })
+  );
+  requireSnapshotLimit("packs", packs.length);
+  const contents = await phases.run(() =>
+    transaction.pack_contents.findMany({
+      where: {
+        lifecycle: "active",
+        pack: PROVIDER_RELEASE_PUBLIC_PACK_SCOPE,
+      },
+      take: SNAPSHOT_LIMITS.contents + 1,
+      orderBy: [{ pack_id: "asc" }, { display_order: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        pack_id: true,
+        collectible_id: true,
+        collectible_instance_id: true,
+        content_role: true,
+        probability: true,
+        evidence_kinds: true,
+        match_confidence_basis_points: true,
+        match_confidence_band: true,
+        observed_at: true,
+        display_order: true,
+        lifecycle: true,
+      },
+    })
+  );
+  requireSnapshotLimit("contents", contents.length);
   const categories = await phases.run(() =>
     transaction.categories.findMany({
+      where: { packs: { some: PROVIDER_RELEASE_PUBLIC_PACK_SCOPE } },
       take: SNAPSHOT_LIMITS.categories + 1,
       orderBy: { id: "asc" },
       select: {
@@ -575,35 +645,21 @@ async function loadSnapshot(
   );
   const collectibles = await phases.run(() =>
     transaction.collectibles.findMany({
+      where: {
+        pack_contents: {
+          some: {
+            lifecycle: "active",
+            pack: PROVIDER_RELEASE_PUBLIC_PACK_SCOPE,
+          },
+        },
+      },
       take: SNAPSHOT_LIMITS.collectibles + 1,
       orderBy: { id: "asc" },
       select: { id: true, collectible_type: true, lifecycle: true, row_version: true },
     })
   );
-  const aliases = await phases.run(() =>
-    transaction.collectible_name_aliases.findMany({
-      take: SNAPSHOT_LIMITS.aliases + 1,
-      orderBy: [{ collectible_id: "asc" }, { normalized_name: "asc" }, { id: "asc" }],
-      select: { id: true, collectible_id: true, normalized_name: true, lifecycle: true },
-    })
-  );
-  const packs = await phases.run(() =>
-    transaction.packs.findMany({
-      take: SNAPSHOT_LIMITS.packs + 1,
-      orderBy: { id: "asc" },
-    })
-  );
-  const contents = await phases.run(() =>
-    transaction.pack_contents.findMany({
-      take: SNAPSHOT_LIMITS.contents + 1,
-      orderBy: [{ pack_id: "asc" }, { display_order: "asc" }, { id: "asc" }],
-    })
-  );
   requireSnapshotLimit("categories", categories.length);
   requireSnapshotLimit("collectibles", collectibles.length);
-  requireSnapshotLimit("aliases", aliases.length);
-  requireSnapshotLimit("packs", packs.length);
-  requireSnapshotLimit("contents", contents.length);
   if (
     identity.database_role !== "provider"
     || runtime.central_provider_id !== identity.provider_id
@@ -630,12 +686,11 @@ async function loadSnapshot(
       lifecycle: row.lifecycle,
       rowVersion: row.row_version,
     })),
-    aliases: aliases.map((row) => ({
-      id: row.id,
-      collectibleId: row.collectible_id,
-      normalizedName: row.normalized_name,
-      lifecycle: row.lifecycle,
-    })),
+    // Local aliases never contribute to provider release bytes. Public aliases
+    // arrive through the verified central catalog pin, so materializing the
+    // provider's potentially multi-million-row alias table is both unnecessary
+    // and unsafe for a single assembly transaction.
+    aliases: [],
     packs: packs.map((row) => ({
       id: row.id,
       categoryId: row.category_id,
