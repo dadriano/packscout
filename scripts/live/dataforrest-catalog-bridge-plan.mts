@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import {
-  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
-  dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
@@ -72,9 +73,10 @@ export const catalogBridgeProviderDefinitions = Object.freeze([
     residencyPort: 56_434,
     currentConfigId: "0d53bce0-fe5d-54bf-bd07-f47142690a8f",
     currentConfigNumber: 3,
-    eventManifest: dataforrestCollectorCryptDistributedSourceAdapterManifest,
-    catalogManifest: dataforrestCollectorCryptCatalogSourceAdapterManifest,
-    catalogAdapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+    currentEventManifest: dataforrestCollectorCryptDistributedSourceAdapterManifest,
+    eventSuccessorManifest: dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+    catalogManifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    catalogAdapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
     documentedCatalogFloor: Object.freeze({ card: 191_383, pack: 69 }),
   }),
   Object.freeze({
@@ -87,7 +89,8 @@ export const catalogBridgeProviderDefinitions = Object.freeze([
     residencyPort: 56_433,
     currentConfigId: "cb42130b-c474-56cf-81e2-63e603aadeb8",
     currentConfigNumber: 3,
-    eventManifest: dataforrestCourtyardDistributedV2SourceAdapterManifest,
+    currentEventManifest: dataforrestCourtyardDistributedV2SourceAdapterManifest,
+    eventSuccessorManifest: dataforrestCourtyardDistributedV2SourceAdapterManifest,
     catalogManifest: dataforrestCourtyardCatalogSourceAdapterManifest,
     catalogAdapterVersion: DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
     documentedCatalogFloor: Object.freeze({ card: 1_056_550, pack: 100 }),
@@ -102,7 +105,8 @@ export const catalogBridgeProviderDefinitions = Object.freeze([
     residencyPort: 56_435,
     currentConfigId: "e3e31fff-115f-59df-bdf4-a8975c6ab1b5",
     currentConfigNumber: 4,
-    eventManifest: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+    currentEventManifest: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+    eventSuccessorManifest: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
     catalogManifest: dataforrestPhygitalsCatalogSourceAdapterManifest,
     catalogAdapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     documentedCatalogFloor: Object.freeze({ card: 276_719, pack: 143 }),
@@ -362,7 +366,7 @@ export function prepareCatalogBridge(input: Readonly<{
     central.providerKey !== definition.providerKey || !positiveInteger.test(central.providerRowVersion) ||
     central.activeConfigId !== definition.currentConfigId || central.activeConfigNumber !== definition.currentConfigNumber ||
     central.maximumConfigNumber !== definition.currentConfigNumber ||
-    central.activeAdapterVersion !== definition.eventManifest.adapterVersion ||
+    central.activeAdapterVersion !== definition.currentEventManifest.adapterVersion ||
     catalogBridgeDigest(central.configuration) !== catalogBridgeDigest({ platform: definition.providerKey }) ||
     central.configurationDigest !== catalogBridgeDigest(central.configuration) ||
     ![central.configurationDigest, central.authorityDigest, central.sourceCredentialDigest,
@@ -375,7 +379,8 @@ export function prepareCatalogBridge(input: Readonly<{
     runtime.runtimeState !== "paused" || !positiveInteger.test(runtime.generation) || !positiveInteger.test(runtime.rowVersion) ||
     runtime.cachedConfigId !== definition.currentConfigId || runtime.cachedConfigNumber !== definition.currentConfigNumber ||
     catalogBridgeDigest(runtime.cachedConfiguration) !== catalogBridgeDigest({
-      adapterKey: definition.eventManifest.adapterVersion, settings: { platform: definition.providerKey },
+      adapterKey: definition.currentEventManifest.adapterVersion,
+      settings: { platform: definition.providerKey },
     }) ||
     runtime.activeRunCount !== 0 || runtime.actionableCommandCount !== 0 || runtime.importLeaseOwner !== null ||
     runtime.otherOwnedLeaseCount !== 0 || runtime.otherActiveTransactionCount !== 0 || !sha256.test(runtime.sourceCursorHash)) {
@@ -414,9 +419,10 @@ export function prepareCatalogBridge(input: Readonly<{
   const parsedCursor = opaqueCursorEnvelopeSchema.safeParse(runtime.sourceCursor);
   if (!parsedCursor.success || parsedCursor.data.value === null || parsedCursor.data.sourceInstanceId !== definition.providerId ||
     parsedCursor.data.sourceRevisionId !== definition.currentConfigId ||
-    parsedCursor.data.adapterVersion !== definition.eventManifest.adapterVersion ||
-    parsedCursor.data.sourceTypeKey !== definition.eventManifest.sourceTypeKey ||
-    parsedCursor.data.cursorCodecKey !== definition.eventManifest.cursorCodecKey || parsedCursor.data.cursorGeneration !== 1 ||
+    parsedCursor.data.adapterVersion !== definition.currentEventManifest.adapterVersion ||
+    parsedCursor.data.sourceTypeKey !== definition.currentEventManifest.sourceTypeKey ||
+    parsedCursor.data.cursorCodecKey !== definition.currentEventManifest.cursorCodecKey ||
+    parsedCursor.data.cursorGeneration !== 1 ||
     providerMixedCursorFingerprint(parsedCursor.data) !== runtime.sourceCursorHash) {
     refuseCatalogBridge("CATALOG_BRIDGE_EVENT_CURSOR_INVALID");
   }
@@ -434,12 +440,13 @@ export function prepareCatalogBridge(input: Readonly<{
     refuseCatalogBridge("CATALOG_BRIDGE_CATALOG_ORIGIN_CANARY_INVALID");
   }
   const savedCanary = sourceCanaries.savedEventCursor;
-  if (savedCanary.adapterVersion !== definition.eventManifest.adapterVersion ||
+  if (savedCanary.adapterVersion !== definition.eventSuccessorManifest.adapterVersion ||
     savedCanary.requestedCursorHash !== runtime.sourceCursorHash || savedCanary.opaqueValueHash !== opaqueValueHash ||
     savedCanary.status !== 200 || !validCount(savedCanary.recordCount) ||
-    savedCanary.recordCount > definition.eventManifest.requestBounds.pageLimit || !sha256.test(savedCanary.responseSha256) ||
+    savedCanary.recordCount > definition.eventSuccessorManifest.requestBounds.pageLimit ||
+    !sha256.test(savedCanary.responseSha256) ||
     !validCount(savedCanary.responseBytes) || savedCanary.responseBytes < 1 ||
-    savedCanary.responseBytes > definition.eventManifest.requestBounds.maximumResponseBytes ||
+    savedCanary.responseBytes > definition.eventSuccessorManifest.requestBounds.maximumResponseBytes ||
     !Number.isFinite(savedCanary.durationMilliseconds) || savedCanary.durationMilliseconds < 0) {
     refuseCatalogBridge("CATALOG_BRIDGE_SAVED_EVENT_CANARY_INVALID");
   }
@@ -496,14 +503,34 @@ export function reEnvelopeSavedEventCursor(state: CatalogBridgePrivatePreparedSt
   const parsed = opaqueCursorEnvelopeSchema.safeParse(state.savedEventCursor);
   if (!parsed.success || parsed.data.value === null || parsed.data.sourceInstanceId !== definition.providerId ||
     parsed.data.sourceRevisionId !== definition.currentConfigId ||
-    parsed.data.adapterVersion !== definition.eventManifest.adapterVersion ||
-    parsed.data.sourceTypeKey !== definition.eventManifest.sourceTypeKey ||
-    parsed.data.cursorCodecKey !== definition.eventManifest.cursorCodecKey || parsed.data.cursorGeneration !== 1 ||
+    parsed.data.adapterVersion !== definition.currentEventManifest.adapterVersion ||
+    parsed.data.sourceTypeKey !== definition.currentEventManifest.sourceTypeKey ||
+    parsed.data.cursorCodecKey !== definition.currentEventManifest.cursorCodecKey ||
+    parsed.data.cursorGeneration !== 1 ||
     providerMixedCursorFingerprint(parsed.data) !== state.savedEventCursorHash ||
-    catalogBridgeDigest(parsed.data.value) !== state.savedOpaqueValueHash || !uuid.test(state.eventSuccessorConfigId)) {
+    catalogBridgeDigest(parsed.data.value) !== state.savedOpaqueValueHash ||
+    definition.currentEventManifest.sourceTypeKey !==
+      definition.eventSuccessorManifest.sourceTypeKey ||
+    definition.currentEventManifest.cursorCodecKey !==
+      definition.eventSuccessorManifest.cursorCodecKey ||
+    definition.currentEventManifest.providerSourceContractVersion !==
+      definition.eventSuccessorManifest.providerSourceContractVersion ||
+    definition.currentEventManifest.normalizedContractVersion !==
+      definition.eventSuccessorManifest.normalizedContractVersion ||
+    definition.currentEventManifest.compatibleConnectionTypeKey !==
+      definition.eventSuccessorManifest.compatibleConnectionTypeKey ||
+    catalogBridgeDigest(definition.currentEventManifest.supportedProviders) !==
+      catalogBridgeDigest(definition.eventSuccessorManifest.supportedProviders) ||
+    !uuid.test(state.eventSuccessorConfigId)) {
     refuseCatalogBridge("CATALOG_BRIDGE_PRIVATE_CURSOR_DRIFT");
   }
-  const cursor = opaqueCursorEnvelopeSchema.parse({ ...parsed.data, sourceRevisionId: state.eventSuccessorConfigId });
+  const cursor = opaqueCursorEnvelopeSchema.parse({
+    ...parsed.data,
+    sourceRevisionId: state.eventSuccessorConfigId,
+    sourceTypeKey: definition.eventSuccessorManifest.sourceTypeKey,
+    adapterVersion: definition.eventSuccessorManifest.adapterVersion,
+    cursorCodecKey: definition.eventSuccessorManifest.cursorCodecKey,
+  });
   return Object.freeze({ cursor, cursorHash: providerMixedCursorFingerprint(cursor)!, opaqueValueHash: state.savedOpaqueValueHash });
 }
 
@@ -514,7 +541,8 @@ export function catalogBridgeConfigurationPlan(state: CatalogBridgePrivatePrepar
       adapterVersion: definition.catalogAdapterVersion,
       configuration: Object.freeze({ platform: definition.providerKey, stream: "catalog" as const }) }),
     eventSuccessor: Object.freeze({ id: state.eventSuccessorConfigId, versionNumber: definition.currentConfigNumber + 2,
-      adapterVersion: definition.eventManifest.adapterVersion, configuration: Object.freeze({ platform: definition.providerKey }) }),
+      adapterVersion: definition.eventSuccessorManifest.adapterVersion,
+      configuration: Object.freeze({ platform: definition.providerKey }) }),
   });
 }
 

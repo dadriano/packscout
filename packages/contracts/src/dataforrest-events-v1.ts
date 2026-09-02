@@ -21,7 +21,9 @@ import {
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
@@ -35,6 +37,8 @@ import {
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
+import { adaptDataforrestCollectorCryptRecordV2 } from
+  "./dataforrest-collector-crypt-record-v2.ts";
 import {
   normalizedProviderObservationSchema,
   type NormalizedProviderObservation,
@@ -45,7 +49,9 @@ export const DATAFORREST_EVENTS_V1_SOURCE_TYPE_KEY =
 export {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
@@ -66,6 +72,7 @@ export const DATAFORREST_EVENTS_V1_ENDPOINT =
 export const DATAFORREST_EVENTS_V1_MAXIMUM_PAGE_LIMIT = 5_000;
 export const DATAFORREST_CLUTCHPACKS_DISTRIBUTED_PAGE_TARGET_RECORDS = 2_000;
 export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS = 1_000;
+export const DATAFORREST_COLLECTOR_CRYPT_CATALOG_PAGE_TARGET_RECORDS = 100;
 export const DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS = 100;
 // Only the reviewed Courtyard-v2 profile and its catalog-filter derivative admit
 // this response budget. Historical profiles retain their exact 8 MiB budget.
@@ -196,6 +203,7 @@ export function dataforrestEventsSourceConfigurationSchemaForAdapter(
   | typeof dataforrestEventsCatalogSourceConfigurationV1Schema {
   switch (adapterVersion) {
     case DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION:
     case DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION:
     case DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION:
       return dataforrestEventsCatalogSourceConfigurationV1Schema;
@@ -204,12 +212,46 @@ export function dataforrestEventsSourceConfigurationSchemaForAdapter(
     case DATAFORREST_EVENTS_V1_ADAPTER_VERSION:
     case DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION:
     case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION:
     case DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION:
       return dataforrestEventsSourceConfigurationV1Schema;
+    default:
+      throw new RangeError("dataforrest_events.adapter_version_unsupported");
+  }
+}
+
+/**
+ * Applies only version-owned native-envelope adaptations before strict parsing.
+ * Historical adapter identities remain byte-for-byte reproducible.
+ */
+export function adaptDataforrestEventRecordForAdapter(
+  record: Readonly<Record<string, unknown>>,
+  adapterVersion: string,
+): Readonly<Record<string, unknown>> {
+  switch (adapterVersion) {
+    case DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION:
+      return adaptDataforrestCollectorCryptRecordV2(record) as Readonly<
+        Record<string, unknown>
+      >;
+    case DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION:
+    case DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION:
+    case DATAFORREST_EVENTS_V1_ADAPTER_VERSION:
+    case DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION:
+    case DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION:
+      return record;
     default:
       throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }
@@ -228,7 +270,9 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_EVENTS_V1_ADAPTER_VERSION
     | typeof DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION
+    | typeof DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION
     | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION
+    | typeof DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION
     | typeof DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION
     | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION
@@ -331,12 +375,42 @@ export const dataforrestCollectorCryptDistributedSourceAdapterManifest =
     },
   );
 
+/**
+ * Collector-only event profile with the reviewed native catalog-card and
+ * catalog-pack interpretation. Distributed-v1 remains reproducible.
+ */
+export const dataforrestCollectorCryptDistributedV2SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+    {
+      pageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "collector_crypt",
+      ),
+    },
+  );
+
 /** Catalog-only Collector Crypt profile; distributed-v1 remains unfiltered. */
 export const dataforrestCollectorCryptCatalogSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
     DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
     {
       pageLimit: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "collector_crypt",
+      ),
+    },
+  );
+
+/**
+ * Catalog-only Collector profile for the reviewed native record shapes. The
+ * smaller bound is independently evidenced below the fixed 8 MiB ceiling.
+ */
+export const dataforrestCollectorCryptCatalogV2SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+    {
+      pageLimit: DATAFORREST_COLLECTOR_CRYPT_CATALOG_PAGE_TARGET_RECORDS,
       supportedProviders: dataforrestProviderDeclarations.filter(
         ({ provider }) => provider === "collector_crypt",
       ),
@@ -424,7 +498,9 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
@@ -527,7 +603,9 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_EVENTS_V1_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION &&
+    adapterVersion !== DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION &&

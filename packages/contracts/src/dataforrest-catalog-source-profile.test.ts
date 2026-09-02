@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
-  dataforrestCollectorCryptCatalogSourceAdapterManifest,
-  dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestEventsCatalogSourceConfigurationV1Schema,
@@ -22,21 +23,24 @@ import {
 const catalogProfiles = [
   {
     provider: "collector_crypt",
-    version: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
-    manifest: dataforrestCollectorCryptCatalogSourceAdapterManifest,
-    predecessor: dataforrestCollectorCryptDistributedSourceAdapterManifest,
+    version: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+    manifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    predecessor: dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+    pageLimit: 100,
   },
   {
     provider: "courtyard",
     version: DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
     manifest: dataforrestCourtyardCatalogSourceAdapterManifest,
     predecessor: dataforrestCourtyardDistributedV2SourceAdapterManifest,
+    pageLimit: 100,
   },
   {
     provider: "phygitals",
     version: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     manifest: dataforrestPhygitalsCatalogSourceAdapterManifest,
     predecessor: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+    pageLimit: 100,
   },
 ] as const;
 
@@ -46,6 +50,10 @@ test("catalog profiles keep provider-local bounds under new immutable identities
     "dataforrest-collector-crypt-catalog-adapter-v1",
   );
   assert.equal(
+    DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+    "dataforrest-collector-crypt-catalog-adapter-v2",
+  );
+  assert.equal(
     DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
     "dataforrest-courtyard-catalog-adapter-v1",
   );
@@ -53,9 +61,17 @@ test("catalog profiles keep provider-local bounds under new immutable identities
     DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     "dataforrest-phygitals-catalog-adapter-v1",
   );
-  for (const { provider, version, manifest, predecessor } of catalogProfiles) {
+  for (const { provider, version, manifest, predecessor, pageLimit } of catalogProfiles) {
     assert.equal(manifest.adapterVersion, version);
-    assert.deepEqual(manifest.requestBounds, predecessor.requestBounds);
+    assert.equal(manifest.requestBounds.pageLimit, pageLimit);
+    assert.equal(
+      manifest.requestBounds.maximumResponseBytes,
+      predecessor.requestBounds.maximumResponseBytes,
+    );
+    assert.equal(
+      manifest.requestBounds.timeoutMilliseconds,
+      predecessor.requestBounds.timeoutMilliseconds,
+    );
     assert.equal(manifest.cursorCodecKey, predecessor.cursorCodecKey);
     assert.equal(
       manifest.normalizedContractVersion,
@@ -109,7 +125,10 @@ test("catalog source configuration is exact and selected only by catalog version
     );
   }
   const catalogVersions: ReadonlySet<string> = new Set(
-    catalogProfiles.map(({ version }) => version),
+    [
+      ...catalogProfiles.map(({ version }) => version),
+      DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+    ],
   );
   for (const manifest of dataforrestEventsV1SourceAdapterManifests) {
     assert.equal(
@@ -136,9 +155,9 @@ test("catalog profiles preserve their predecessor provider-facts semantics", () 
   }>> = [
     {
       provider: "collector_crypt",
-      currentVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
+      currentVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
       predecessorVersion:
-        dataforrestCollectorCryptDistributedSourceAdapterManifest.adapterVersion,
+        dataforrestCollectorCryptDistributedV2SourceAdapterManifest.adapterVersion,
       record: {
         platform: "collector_crypt",
         stream: "catalog",

@@ -4,7 +4,9 @@ import {
   DATAFORREST_EVENTS_V1_ENDPOINT,
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogSourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
@@ -226,9 +228,10 @@ describe("central DataForrest source authority", () => {
   for (const [providerKey, manifest] of [
     ["courtyard", dataforrestCourtyardDistributedV2SourceAdapterManifest],
     ["collector_crypt", dataforrestCollectorCryptDistributedSourceAdapterManifest],
+    ["collector_crypt", dataforrestCollectorCryptDistributedV2SourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsDistributedV2SourceAdapterManifest],
   ] as const) {
-    test(`resolves ${providerKey} only through its exact distributed tuple`, async () => {
+    test(`resolves ${providerKey} ${manifest.adapterVersion} through its exact distributed tuple`, async () => {
       const row = validConfiguration();
       row.adapter_key = manifest.adapterVersion;
       row.configuration = { platform: providerKey };
@@ -266,7 +269,7 @@ describe("central DataForrest source authority", () => {
 
   for (const [providerKey, manifest] of [
     ["courtyard", dataforrestCourtyardCatalogSourceAdapterManifest],
-    ["collector_crypt", dataforrestCollectorCryptCatalogSourceAdapterManifest],
+    ["collector_crypt", dataforrestCollectorCryptCatalogV2SourceAdapterManifest],
     ["phygitals", dataforrestPhygitalsCatalogSourceAdapterManifest],
   ] as const) {
     test(`resolves ${providerKey} catalog authority only with its strict stream pin`, async () => {
@@ -323,7 +326,7 @@ describe("central DataForrest source authority", () => {
       },
       {
         providerKey: "collector_crypt" as const,
-        manifest: dataforrestCollectorCryptCatalogSourceAdapterManifest,
+        manifest: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
         configuration: { platform: "collector_crypt", stream: "pulls" },
       },
       {
@@ -374,6 +377,12 @@ describe("central DataForrest source authority", () => {
         ...request,
         providerKey: "collector_crypt",
         adapterKey: dataforrestCourtyardCatalogSourceAdapterManifest.adapterVersion,
+      },
+      {
+        ...request,
+        providerKey: "collector_crypt",
+        adapterKey:
+          dataforrestCollectorCryptCatalogSourceAdapterManifest.adapterVersion,
       },
       {
         ...request,

@@ -16,8 +16,10 @@ const pins = { operationId: "30000000-0000-4000-8000-000000000001", providerKey:
 const definition = plan.catalogBridgeProvider(pins.providerKey);
 const secretCursor = "cursor-material-that-must-not-escape";
 const cursor = { sourceInstanceId: definition.providerId, sourceRevisionId: definition.currentConfigId,
-  sourceTypeKey: definition.eventManifest.sourceTypeKey, adapterVersion: definition.eventManifest.adapterVersion,
-  cursorCodecKey: definition.eventManifest.cursorCodecKey, cursorGeneration: 1, value: secretCursor };
+  sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+  adapterVersion: definition.currentEventManifest.adapterVersion,
+  cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
+  cursorGeneration: 1, value: secretCursor };
 const cursorHash = providerMixedCursorFingerprint(cursor);
 const hash = letter => letter.repeat(64);
 
@@ -36,13 +38,14 @@ function runningBoundary() {
     central: { organizationId: definition.organizationId, providerId: definition.providerId,
       providerKey: definition.providerKey, providerRowVersion: "4", activeConfigId: definition.currentConfigId,
       activeConfigNumber: definition.currentConfigNumber, maximumConfigNumber: definition.currentConfigNumber,
-      activeAdapterVersion: definition.eventManifest.adapterVersion, configuration: { platform: definition.providerKey },
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
+      configuration: { platform: definition.providerKey },
       configurationDigest: plan.catalogBridgeDigest({ platform: definition.providerKey }), authorityDigest: hash("b") },
     runtime: { providerId: definition.providerId, providerKey: definition.providerKey,
       databaseName: definition.databaseName, databasePort: definition.databasePort, databaseRole: "provider",
       schemaVersion: "distributed-provider-v1", state: "running", generation: "26", rowVersion: "50",
       cachedConfigId: definition.currentConfigId, cachedConfigNumber: definition.currentConfigNumber,
-      cachedConfiguration: { adapterKey: definition.eventManifest.adapterVersion,
+      cachedConfiguration: { adapterKey: definition.currentEventManifest.adapterVersion,
         settings: { platform: definition.providerKey } }, sourceCursor: structuredClone(cursor), sourceCursorHash: cursorHash,
       activeRunCount: 1, actionableCommandCount: 0, otherOwnedLeaseCount: 0, otherActiveTransactionCount: 0 },
     importLease: { owner: "provider-import:collector", fence: "14", expiresAt: "2026-09-01T03:02:00.000Z" },

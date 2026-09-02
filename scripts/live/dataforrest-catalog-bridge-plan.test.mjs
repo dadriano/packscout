@@ -17,9 +17,9 @@ function fixture(providerKey = "collector_crypt") {
   const cursor = {
     sourceInstanceId: definition.providerId,
     sourceRevisionId: definition.currentConfigId,
-    sourceTypeKey: definition.eventManifest.sourceTypeKey,
-    adapterVersion: definition.eventManifest.adapterVersion,
-    cursorCodecKey: definition.eventManifest.cursorCodecKey,
+    sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
+    adapterVersion: definition.currentEventManifest.adapterVersion,
+    cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
     cursorGeneration: 1,
     value: secretCursor,
   };
@@ -43,7 +43,7 @@ function fixture(providerKey = "collector_crypt") {
     central: { organizationId: definition.organizationId, providerId: definition.providerId,
       providerKey, providerRowVersion: "20", activeConfigId: definition.currentConfigId,
       activeConfigNumber: definition.currentConfigNumber, maximumConfigNumber: definition.currentConfigNumber,
-      activeAdapterVersion: definition.eventManifest.adapterVersion,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
       configuration: { platform: providerKey }, configurationDigest: plan.catalogBridgeDigest({ platform: providerKey }),
       authorityDigest: hash("1"), sourceCredentialDigest: hash("2"),
       databaseRouteDigest: hash("3") },
@@ -51,7 +51,8 @@ function fixture(providerKey = "collector_crypt") {
       databasePort: definition.databasePort, databaseRole: "provider", schemaVersion: "distributed-provider-v1",
       runtimeState: "paused", generation: "30", rowVersion: "40", cachedConfigId: definition.currentConfigId,
       cachedConfigNumber: definition.currentConfigNumber,
-      cachedConfiguration: { adapterKey: definition.eventManifest.adapterVersion, settings: { platform: providerKey } },
+      cachedConfiguration: { adapterKey: definition.currentEventManifest.adapterVersion,
+        settings: { platform: providerKey } },
       sourceCursor: cursor, sourceCursorHash: cursorHash,
       activeRunCount: 0, actionableCommandCount: 0, importLeaseOwner: null, otherOwnedLeaseCount: 0,
       otherActiveTransactionCount: 0,
@@ -73,7 +74,7 @@ function fixture(providerKey = "collector_crypt") {
         status: 200, recordCount: 2, cardCount: 1, packCount: 1, pullCount: 0, tradeCount: 0,
         responseSha256: hash("4"), nextCursorHash: hash("5"), checkedAt: "2026-09-01T01:59:30.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },
-      savedEventCursor: { adapterVersion: definition.eventManifest.adapterVersion,
+      savedEventCursor: { adapterVersion: definition.eventSuccessorManifest.adapterVersion,
         requestedCursorHash: cursorHash, opaqueValueHash: plan.catalogBridgeDigest(secretCursor), status: 200,
         recordCount: 1, responseSha256: hash("6"), checkedAt: "2026-09-01T01:59:45.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },
@@ -128,6 +129,43 @@ test("all three catalog bridges bind exact current revisions and immutable catal
   }
 });
 
+test("Collector config 3 stays V1 while catalog and event successors are V2", () => {
+  const value = fixture("collector_crypt");
+  assert.equal(
+    value.definition.currentConfigId,
+    "0d53bce0-fe5d-54bf-bd07-f47142690a8f",
+  );
+  assert.equal(value.definition.currentConfigNumber, 3);
+  assert.equal(
+    value.definition.currentEventManifest.adapterVersion,
+    "dataforrest-collector-crypt-distributed-adapter-v1",
+  );
+  assert.equal(
+    value.definition.eventSuccessorManifest.adapterVersion,
+    "dataforrest-collector-crypt-distributed-adapter-v2",
+  );
+  assert.equal(
+    value.definition.catalogManifest.adapterVersion,
+    "dataforrest-collector-crypt-catalog-adapter-v2",
+  );
+  assert.equal(
+    value.cursor.adapterVersion,
+    "dataforrest-collector-crypt-distributed-adapter-v1",
+  );
+
+  const prepared = plan.prepareCatalogBridge({
+    pins: value.pins,
+    observation: value.observation,
+  });
+  const restored = plan.reEnvelopeSavedEventCursor(prepared.privateState);
+  assert.equal(
+    restored.cursor.adapterVersion,
+    "dataforrest-collector-crypt-distributed-adapter-v2",
+  );
+  assert.equal(restored.cursor.value, value.cursor.value);
+  assert.notEqual(restored.cursorHash, value.cursorHash);
+});
+
 test("prepare refuses resident, process, central, runtime, cursor and canary drift", () => {
   const changes = [
     (f) => { f.observation.repository.clean = false; },
@@ -177,13 +215,16 @@ test("prepare accepts a separately proved reconciled head that wins the pause ra
     .privateState.preflight.runtime.latestTerminalRun.terminalKind, "succeeded_reconciled_head");
 });
 
-test("private saved event cursor re-envelopes only to the deterministic successor revision", () => {
+test("private saved event cursor re-envelopes to the deterministic successor identity", () => {
   const value = fixture();
   const prepared = plan.prepareCatalogBridge({ pins: value.pins, observation: value.observation });
   const restored = plan.reEnvelopeSavedEventCursor(prepared.privateState);
   const configurations = plan.catalogBridgeConfigurationPlan(prepared.privateState);
   assert.equal(restored.cursor.sourceRevisionId, configurations.eventSuccessor.id);
-  assert.equal(restored.cursor.adapterVersion, value.definition.eventManifest.adapterVersion);
+  assert.equal(
+    restored.cursor.adapterVersion,
+    value.definition.eventSuccessorManifest.adapterVersion,
+  );
   assert.equal(restored.cursor.value, secretCursor);
   assert.equal(restored.opaqueValueHash, plan.catalogBridgeDigest(secretCursor));
   assert.notEqual(restored.cursorHash, value.cursorHash);
