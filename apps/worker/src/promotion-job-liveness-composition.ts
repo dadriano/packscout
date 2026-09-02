@@ -26,6 +26,7 @@ export interface PromotionJobSystemConditionSink {
     delivery: PromotionJobLivenessConditionDelivery & Readonly<{
       scope: "system";
     }>,
+    input: Readonly<{ deadlineAt: number }>,
   ): Promise<Readonly<{
     state: "delivered";
   }> | Readonly<{
@@ -93,9 +94,12 @@ implements PromotionJobLivenessConditionPublisher {
     this.#alerts = alerts ?? new CentralAdminNotificationPublisher(central);
   }
 
-  async publish(delivery: PromotionJobLivenessConditionDelivery) {
+  async publish(
+    delivery: PromotionJobLivenessConditionDelivery,
+    input: Readonly<{ deadlineAt: number }>,
+  ) {
     if (delivery.scope === "system") {
-      return this.system.publish({ ...delivery, scope: "system" });
+      return this.system.publish({ ...delivery, scope: "system" }, input);
     }
     if (
       delivery.organizationId === null

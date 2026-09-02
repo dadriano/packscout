@@ -39,6 +39,7 @@ export interface PromotionJobSystemConditionWebhookOptions {
   readonly bearerToken: Uint8Array;
   readonly timeoutMilliseconds: number;
   readonly fetch?: typeof fetch;
+  readonly now?: () => number;
 }
 
 export class PromotionJobSystemConditionWebhookConfigurationError
@@ -273,6 +274,7 @@ implements PromotionJobSystemConditionSink,
   readonly #authorization: string;
   readonly #timeoutMilliseconds: number;
   readonly #fetch: typeof fetch;
+  readonly #now: () => number;
 
   constructor(options: PromotionJobSystemConditionWebhookOptions) {
     this.#origin = webhookOrigin(options.baseUrl);
@@ -288,19 +290,21 @@ implements PromotionJobSystemConditionSink,
     this.#authorization = `Bearer ${Buffer.from(token).toString("base64")}`;
     this.#timeoutMilliseconds = options.timeoutMilliseconds;
     this.#fetch = options.fetch ?? fetch;
+    this.#now = options.now ?? Date.now;
   }
 
   publish(
     delivery: PromotionJobLivenessConditionDelivery & Readonly<{
       scope: "system";
     }>,
+    input?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobSystemConditionWebhookResult> {
     const payload = manifestPayload(delivery);
     return payload === null
       ? Promise.resolve(retryable(
           "PROMOTION_JOB_SYSTEM_CONDITION_SCOPE_INVALID",
         ))
-      : this.send(SYSTEM_CONDITION_PATH, payload);
+      : this.send(SYSTEM_CONDITION_PATH, payload, input?.deadlineAt);
   }
 
   publishEvaluatorObservation(
@@ -317,17 +321,33 @@ implements PromotionJobSystemConditionSink,
   private async send(
     path: string,
     payload: Readonly<Record<string, unknown>>,
+    deadlineAt?: number,
   ): Promise<PromotionJobSystemConditionWebhookResult> {
     const body = JSON.stringify(payload);
     if (Buffer.byteLength(body, "utf8") > MAXIMUM_WEBHOOK_BODY_BYTES) {
       return retryable("PROMOTION_JOB_SYSTEM_CONDITION_PAYLOAD_INVALID");
     }
+    const startedAt = this.#now();
+    const remainingMilliseconds = deadlineAt === undefined
+      ? this.#timeoutMilliseconds
+      : Math.floor(deadlineAt - startedAt);
+    if (
+      !Number.isSafeInteger(startedAt)
+      || (deadlineAt !== undefined && !Number.isSafeInteger(deadlineAt))
+      || remainingMilliseconds <= 0
+    ) {
+      return retryable("PROMOTION_JOB_SYSTEM_CONDITION_WEBHOOK_TIMEOUT");
+    }
+    const timeoutMilliseconds = Math.min(
+      this.#timeoutMilliseconds,
+      remainingMilliseconds,
+    );
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, this.#timeoutMilliseconds);
+    }, timeoutMilliseconds);
     try {
       const response = await this.#fetch(`${this.#origin}${path}`, {
         method: "POST",

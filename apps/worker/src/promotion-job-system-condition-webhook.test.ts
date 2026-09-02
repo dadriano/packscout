@@ -262,6 +262,37 @@ test("timeout aborts the request and returns no underlying failure detail", asyn
   assert.equal(aborted, true);
 });
 
+test("the evaluator deadline shortens the configured webhook timeout", async () => {
+  let requests = 0;
+  let aborted = false;
+  const client = new PromotionJobSystemConditionWebhook({
+    baseUrl: "https://system-conditions.example",
+    bearerToken: token,
+    timeoutMilliseconds: 1_000,
+    now: () => 10_000,
+    fetch: ((_input, init) => new Promise<Response>((_resolve, reject) => {
+      requests += 1;
+      const signal = init?.signal as AbortSignal;
+      signal.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("protected upstream detail"));
+      }, { once: true });
+    })) as typeof globalThis.fetch,
+  });
+  assert.deepEqual(await client.publish(delivery(), { deadlineAt: 10_005 }), {
+    state: "retryable_failure",
+    failureCode: "PROMOTION_JOB_SYSTEM_CONDITION_WEBHOOK_TIMEOUT",
+  });
+  assert.equal(requests, 1);
+  assert.equal(aborted, true);
+
+  assert.deepEqual(await client.publish(delivery(), { deadlineAt: 10_000 }), {
+    state: "retryable_failure",
+    failureCode: "PROMOTION_JOB_SYSTEM_CONDITION_WEBHOOK_TIMEOUT",
+  });
+  assert.equal(requests, 1);
+});
+
 test("watchdog observations use a separate fixed system-only projection", async () => {
   let capturedUrl = "";
   let capturedBody = "";

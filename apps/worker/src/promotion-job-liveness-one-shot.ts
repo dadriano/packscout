@@ -7,6 +7,8 @@ import type {
 
 const SAFE_FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/u;
 const MAXIMUM_RETRY_DELAY_MS = 15 * 60_000;
+const DEFAULT_DELIVERY_BUDGET_MS = 10_000;
+const MAXIMUM_DELIVERY_BUDGET_MS = 10_000;
 
 export interface PromotionJobLivenessEvaluatorPort {
   runCycle(): Promise<SuccessfulPromotionJobLivenessCycle>;
@@ -39,6 +41,7 @@ export interface PromotionJobLivenessConditionStorePort {
 export interface PromotionJobLivenessConditionPublisher {
   publish(
     delivery: PromotionJobLivenessConditionDelivery,
+    input: Readonly<{ deadlineAt: number }>,
   ): Promise<Readonly<{
     state: "delivered";
   }> | Readonly<{
@@ -77,21 +80,33 @@ function retryDelay(attemptCount: number): number {
 export class PromotionJobLivenessOneShot {
   readonly #limit: number;
   readonly #now: () => Date;
+  readonly #deliveryBudgetMs: number;
+  readonly #deadlineNow: () => number;
 
   constructor(private readonly dependencies: Readonly<{
     evaluator: PromotionJobLivenessEvaluatorPort;
     conditions: PromotionJobLivenessConditionStorePort;
     publisher: PromotionJobLivenessConditionPublisher;
     deliveryLimit?: number;
+    deliveryBudgetMs?: number;
     now?: () => Date;
+    deadlineNow?: () => number;
   }>) {
     this.#limit = dependencies.deliveryLimit ?? 50;
+    this.#deliveryBudgetMs = dependencies.deliveryBudgetMs
+      ?? DEFAULT_DELIVERY_BUDGET_MS;
     this.#now = dependencies.now ?? (() => new Date());
+    this.#deadlineNow = dependencies.deadlineNow ?? Date.now;
     if (
       !Number.isInteger(this.#limit)
       || this.#limit < 1
       || this.#limit > 100
     ) throw new TypeError("Promotion job condition delivery limit is invalid.");
+    if (
+      !Number.isInteger(this.#deliveryBudgetMs)
+      || this.#deliveryBudgetMs < 1
+      || this.#deliveryBudgetMs > MAXIMUM_DELIVERY_BUDGET_MS
+    ) throw new TypeError("Promotion job condition delivery budget is invalid.");
   }
 
   async run(): Promise<PromotionJobLivenessOneShotResult> {
@@ -109,7 +124,11 @@ export class PromotionJobLivenessOneShot {
 
   private async deliverPending(): Promise<PromotionJobLivenessOneShotResult["delivery"]> {
     const selectedAt = this.#now();
-    if (!Number.isFinite(selectedAt.getTime())) {
+    const deliveryStartedAt = this.#deadlineNow();
+    if (
+      !Number.isFinite(selectedAt.getTime())
+      || !Number.isSafeInteger(deliveryStartedAt)
+    ) {
       return {
         state: "store_unavailable",
         selectedCount: 0,
@@ -118,6 +137,7 @@ export class PromotionJobLivenessOneShot {
         acknowledgementFailureCount: 0,
       };
     }
+    const deadlineAt = deliveryStartedAt + this.#deliveryBudgetMs;
     let deliveries: readonly PromotionJobLivenessConditionDelivery[];
     try {
       deliveries = await this.dependencies.conditions
@@ -138,6 +158,7 @@ export class PromotionJobLivenessOneShot {
     let retryScheduledCount = 0;
     let acknowledgementFailureCount = 0;
     for (const delivery of deliveries) {
+      if (this.#deadlineNow() >= deadlineAt) break;
       const attemptedAt = this.#now();
       try {
         const admitted = await this.dependencies.conditions
@@ -158,7 +179,10 @@ export class PromotionJobLivenessOneShot {
         | Readonly<{ state: "delivered" }>
         | Readonly<{ state: "retryable_failure"; failureCode: string }>;
       try {
-        published = await this.dependencies.publisher.publish(delivery);
+        published = await this.dependencies.publisher.publish(
+          delivery,
+          { deadlineAt },
+        );
       } catch {
         published = {
           state: "retryable_failure",

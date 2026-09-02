@@ -201,3 +201,34 @@ test("condition-store outage does not roll back a successful evaluation", async 
     acknowledgementFailureCount: 0,
   });
 });
+
+test("one delivery deadline prevents a failed sink backlog from overrunning the evaluator cadence", async () => {
+  const deliveries = Array.from({ length: 50 }, () => delivery());
+  const conditions = store({ deliveries });
+  let deadlineClock = 0;
+  let publishCount = 0;
+  const result = await new PromotionJobLivenessOneShot({
+    evaluator: { runCycle: () => Promise.resolve(cycle()) },
+    conditions: conditions.implementation,
+    publisher: {
+      publish(_delivery, { deadlineAt }) {
+        publishCount += 1;
+        assert.equal(deadlineAt, 10_000);
+        deadlineClock = deadlineAt;
+        return Promise.resolve({
+          state: "retryable_failure",
+          failureCode: "SYSTEM_SINK_OFFLINE",
+        });
+      },
+    },
+    deliveryBudgetMs: 10_000,
+    deadlineNow: () => deadlineClock,
+    now: () => base,
+  }).run();
+
+  assert.equal(result.delivery.selectedCount, 50);
+  assert.equal(result.delivery.retryScheduledCount, 1);
+  assert.equal(publishCount, 1);
+  assert.equal(conditions.attempts.length, 1);
+  assert.equal(conditions.recorded.length, 1);
+});

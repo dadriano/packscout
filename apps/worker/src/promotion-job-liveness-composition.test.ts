@@ -74,19 +74,24 @@ test("provider schedule reads use the exact roster identity through the bounded 
 
 test("manifest conditions go only to the external system sink", async () => {
   const received: PromotionJobLivenessConditionDelivery[] = [];
+  const deadlines: number[] = [];
   const publisher = new CentralPromotionJobLivenessConditionPublisher(
     {} as CentralPrismaClient,
     {
-      publish(delivery) {
+      publish(delivery, input) {
         received.push(delivery);
+        deadlines.push(input.deadlineAt);
         return Promise.resolve({ state: "delivered" });
       },
     },
   );
-  assert.deepEqual(await publisher.publish(systemDelivery()), {
+  assert.deepEqual(await publisher.publish(systemDelivery(), {
+    deadlineAt: 1_800_000_000_000,
+  }), {
     state: "delivered",
   });
   assert.deepEqual(received, [systemDelivery()]);
+  assert.deepEqual(deadlines, [1_800_000_000_000]);
 });
 
 test("malformed provider delivery is rejected before any tenant alert write", async () => {
@@ -101,7 +106,9 @@ test("malformed provider delivery is rejected before any tenant alert write", as
     scope: "provider" as const,
     subject: "provider_schedule" as const,
   };
-  assert.deepEqual(await publisher.publish(malformed), {
+  assert.deepEqual(await publisher.publish(malformed, {
+    deadlineAt: 1_800_000_000_000,
+  }), {
     state: "retryable_failure",
     failureCode: "PROMOTION_JOB_CONDITION_SCOPE_INVALID",
   });
@@ -132,7 +139,9 @@ test("provider condition alerts carry only scoped schedule evidence", async () =
     organizationId,
     providerId,
   };
-  assert.deepEqual(await publisher.publish(raised), { state: "delivered" });
+  assert.deepEqual(await publisher.publish(raised, {
+    deadlineAt: 1_800_000_000_000,
+  }), { state: "delivered" });
   assert.deepEqual(received[0], {
     id: raised.eventId,
     organizationId,
@@ -158,7 +167,9 @@ test("provider condition alerts carry only scoped schedule evidence", async () =
     eventId: "40000000-0000-4000-8000-000000000002",
     action: "recover" as const,
   };
-  assert.deepEqual(await publisher.publish(recovered), { state: "delivered" });
+  assert.deepEqual(await publisher.publish(recovered, {
+    deadlineAt: 1_800_000_000_000,
+  }), { state: "delivered" });
   assert.deepEqual(received[1], {
     id: recovered.eventId,
     organizationId,
