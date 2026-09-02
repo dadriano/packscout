@@ -1,23 +1,52 @@
+import assert from "node:assert/strict";
 import { tsImport } from "tsx/esm/api";
 import { failedHeadFixture } from "./provider-failed-head-test-fixture.mjs";
 const { failedHeadReviewSchema, failedHeadDigest: digest, failedHeadIds, failedHeadAction: action } =
   await tsImport("./provider-failed-head-policy.mts", import.meta.url);
 const { createFailedHeadContinuation } = await tsImport("./provider-failed-head-control.mts", import.meta.url);
+const { PrismaProviderRunRepository, PrismaProviderWorkerLeaseRepository } = await tsImport("@packscout/database", import.meta.url);
 export async function failedHeadChainFixture() {
   const f = await failedHeadFixture(), root = f.parent;
   root.requested_at = new Date(f.now.getTime() - 3); root.started_at = root.requested_at;
   root.finished_at = new Date(f.now.getTime() - 2);
   f.review.parentDigest = digest(root); f.review.finishedAt = root.finished_at.toISOString();
   const previousReview = structuredClone(f.review), previousIds = f.ids;
+  // Exercise the production queued-start and terminal lifecycle; do not invent terminal rows without their audits.
+  f.database.provider_runs.findUnique = async ({ where }) => [...f.runs.values()].find(row =>
+    Object.entries(where).every(([key, value]) => row[key] === value)) ?? null;
+  f.database.provider_runs.update = async ({ where, data }) => {
+    const row = f.runs.get(where.id), { row_version, ...rest } = data;
+    Object.assign(row, structuredClone(rest)); if (row_version) row.row_version += row_version.increment;
+    f.writes.push("run-update"); return row;
+  };
+  const originalQuery = f.database.$queryRaw;
+  f.database.$queryRaw = async (sql, ...values) => {
+    const text = (Array.isArray(sql) ? sql : sql.strings).join(" ");
+    if (text.includes("set_config('packscout.import_lease_owner'")) return [];
+    // Real database reads are snapshots, not references mutated by a subsequent update.
+    if (text.includes("from provider_runtime")) return [structuredClone(f.runtime)];
+    if (text.includes("from provider_runs where id")) return [structuredClone(f.runs.get(Array.isArray(sql) ? values[0] : sql.values[0]))].filter(Boolean);
+    return originalQuery(sql);
+  };
   const prior = await f.control.inspect(f.database, f.authority);
   await f.control.apply(f.database, prior.receipt, async () => f.authority, async () => {});
   const leaf = f.runs.get(previousIds.run), command = f.commands.find(row => row.id === previousIds.command);
-  Object.assign(command, { state: "completed", completed_at: f.now, row_version: command.row_version + 1n,
-    result: { outcome: "accepted", code: "RUN_STARTED", generation: "37" } });
-  Object.assign(leaf, { state: "failed", started_at: f.now, finished_at: f.now, worker_fence: 486n,
-    final_cursor: structuredClone(f.cursor), final_cursor_hash: f.hash, failure_code: "DATABASE_TRANSACTION_INVALID", row_version: 3n });
-  Object.assign(f.runtime, { operating_state: "error", state_generation: 38n, row_version: 136n });
-  Object.assign(f.lease, { lease_fence: 486n });
+  Object.assign(f.runtime, { consecutive_failures: 1, recovered_at: null });
+  const workerId = "synthetic:chain-worker", leases = new PrismaProviderWorkerLeaseRepository(f.database);
+  const acquired = await leases.acquire({ role: "import", owner: workerId, leaseMilliseconds: 120_000 });
+  assert.equal(acquired.kind, "acquired"); assert.equal(acquired.lease.fence, 486n);
+  const runs = new PrismaProviderRunRepository(f.database);
+  assert.equal((await runs.start({ runId: leaf.id, idempotencyKey: leaf.idempotency_key,
+    trigger: "manual", requestedByOperatorId: previousReview.pins.operatorId,
+    configVersionId: previousReview.pins.configId, configVersionNumber: 4n,
+    workerId, workerFence: acquired.lease.fence, correlationId: previousReview.pins.operationId,
+    requestedAt: leaf.requested_at, controlCommandId: command.id })).kind, "started");
+  assert.equal((await runs.finish({ runId: leaf.id, workerId, workerFence: acquired.lease.fence, state: "failed",
+    failureCode: "DATABASE_TRANSACTION_INVALID", failureClass: "database", failureSummary: "Synthetic transaction failure",
+    correlationId: "ba333333-3333-4333-8333-333333333335", finishedAt: f.now })).kind, "finished");
+  assert.equal(await leases.release({ role: "import", owner: workerId, fence: acquired.lease.fence }), true);
+  assert.equal(f.runtime.operating_state, "error"); assert.equal(f.runtime.state_generation, 38n);
+  assert.equal(f.runtime.row_version, 136n);
   const edge = name => f.audits.find(row => row.correlation_id === previousReview.pins.operationId && row.action === name);
   const evidence = row => ({ sequence: row.sequence.toString(), digest: digest(row) });
   const resume = f.commands.find(row => row.id === previousIds.resume);

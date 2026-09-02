@@ -100,6 +100,7 @@ test("proven live child waits across terminal head until release; pause interrup
     backfill.ownedLeaseExpiresAt = new Date(backfill.snapshot.now.getTime() + 20000);
     backfill.snapshot.lease = { owner: "owned", fence: 459n, expiresAt: backfill.ownedLeaseExpiresAt };
     const continuous = { snapshot: backfill.snapshot, cycle: null, cycleQueued: false, scheduleSeconds: 300,
+      cadence: { kind: "central" }, postHeadPolicy: { kind: "none" },
       authorityDigest: f.authority.digest, ownedLeaseExpiresAt: backfill.ownedLeaseExpiresAt };
     assert.equal(continuousDecision(continuous, pins).state, "waiting");
     const result = await superviseProviderBackfill({ pins, read: async () => backfill,

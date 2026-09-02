@@ -315,8 +315,24 @@ function retireCandidate(value: CanonicalJsonObject): RetireCanonicalEntityInput
   };
 }
 
+export interface ProviderFactReferenceLookup {
+  pack(key: string | null): Promise<string | null>;
+  collectible(key: string | null): Promise<string | null>;
+  instance(key: string, field: string): Promise<string | null>;
+  account(key: string | null, field: string): Promise<string | null>;
+}
+
+function factReferenceLookup(transaction: ProviderTransactionClient): ProviderFactReferenceLookup {
+  return {
+    pack: key => resolveFactPackId(transaction, key),
+    collectible: key => resolveFactCollectibleId(transaction, key),
+    instance: (key, field) => resolveInstanceId(transaction, { [field]: key }, field),
+    account: (key, field) => resolveAccountId(transaction, { [field]: key }, field),
+  };
+}
+
 async function pullItem(
-  transaction: ProviderTransactionClient,
+  references: ProviderFactReferenceLookup,
   value: CanonicalJsonValue,
   index: number,
 ): Promise<PullItemWriteInput> {
@@ -327,7 +343,7 @@ async function pullItem(
     object,
     "collectibleInstanceKey",
   );
-  const collectibleId = await resolveFactCollectibleId(transaction, collectibleKey);
+  const collectibleId = await references.collectible(collectibleKey);
   if (collectibleInstanceKey !== null && collectibleId === null) {
     candidateError(`items[${index}].collectibleInstanceKey`);
   }
@@ -336,35 +352,37 @@ async function pullItem(
     collectibleId,
     collectibleInstanceId: collectibleInstanceKey === null
       ? null
-      : await resolveInstanceId(transaction, object, "collectibleInstanceKey"),
+      : await references.instance(collectibleInstanceKey, "collectibleInstanceKey"),
     quantity: bigintValue(object, "quantity"), statedValueAmount: nullableString(object, "statedValueAmount"),
     statedValueCurrency: nullableString(object, "statedValueCurrency"),
   };
 }
 
-async function pullCandidate(
+export async function pullCandidate(
   transaction: ProviderTransactionClient,
   value: CanonicalJsonObject,
+  references: ProviderFactReferenceLookup = factReferenceLookup(transaction),
 ): Promise<PullWriteInput> {
   if (!Array.isArray(value.items)) candidateError("items");
   const packKey = nullableString(value, "packKey");
   const items: PullItemWriteInput[] = [];
   for (const [index, item] of value.items.entries()) {
-    items.push(await pullItem(transaction, item, index));
+    items.push(await pullItem(references, item, index));
   }
   return {
     pullKey: stringValue(value, "pullKey"), factDigest: stringValue(value, "factDigest"),
-    packKey, packId: await resolveFactPackId(transaction, packKey),
-    providerAccountId: await resolveAccountId(transaction, value, "providerAccountKey"),
+    packKey, packId: await references.pack(packKey),
+    providerAccountId: await references.account(nullableString(value, "providerAccountKey"), "providerAccountKey"),
     occurredAt: dateValue(value, "occurredAt"), paidAmount: nullableString(value, "paidAmount"),
     paidCurrency: nullableString(value, "paidCurrency"),
     items,
   };
 }
 
-async function marketEventCandidate(
+export async function marketEventCandidate(
   transaction: ProviderTransactionClient,
   value: CanonicalJsonObject,
+  references: ProviderFactReferenceLookup = factReferenceLookup(transaction),
 ): Promise<MarketEventWriteInput> {
   const packKey = nullableString(value, "packKey");
   const collectibleKey = nullableString(value, "collectibleKey");
@@ -372,7 +390,7 @@ async function marketEventCandidate(
     value,
     "collectibleInstanceKey",
   );
-  const collectibleId = await resolveFactCollectibleId(transaction, collectibleKey);
+  const collectibleId = await references.collectible(collectibleKey);
   if (collectibleInstanceKey !== null && collectibleId === null) {
     candidateError("collectibleInstanceKey");
   }
@@ -380,13 +398,13 @@ async function marketEventCandidate(
     eventKey: stringValue(value, "eventKey"), factDigest: stringValue(value, "factDigest"),
     eventGroupId: nullableUuid(value, "eventGroupId"),
     eventType: enumValue(value, "eventType", ["sale", "buyback", "mint", "burn", "transfer", "list", "unlist", "swap", "ship", "other"]),
-    packKey, packId: await resolveFactPackId(transaction, packKey),
+    packKey, packId: await references.pack(packKey),
     collectibleKey, collectibleId,
     collectibleInstanceId: collectibleInstanceKey === null
       ? null
-      : await resolveInstanceId(transaction, value, "collectibleInstanceKey"),
-    fromProviderAccountId: await resolveAccountId(transaction, value, "fromProviderAccountKey"),
-    toProviderAccountId: await resolveAccountId(transaction, value, "toProviderAccountKey"),
+      : await references.instance(collectibleInstanceKey, "collectibleInstanceKey"),
+    fromProviderAccountId: await references.account(nullableString(value, "fromProviderAccountKey"), "fromProviderAccountKey"),
+    toProviderAccountId: await references.account(nullableString(value, "toProviderAccountKey"), "toProviderAccountKey"),
     quantity: nullableBigint(value, "quantity"), occurredAt: dateValue(value, "occurredAt"),
     amount: nullableString(value, "amount"), currency: nullableString(value, "currency"),
     details: jsonObject(value, "details"),

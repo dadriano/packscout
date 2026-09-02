@@ -4,26 +4,26 @@ import { tsImport } from "tsx/esm/api";
 const { providerMixedCursorFingerprint, PrismaAdminProviderRuntimeRepository } = await tsImport("@packscout/database", import.meta.url);
 const { DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION } = await tsImport("@packscout/contracts", import.meta.url);
 const { providerDataforrestLiveIntegrationRegistry } = await tsImport("../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
-const { readContinuousView, persistContinuousCycle, queueContinuousCycle, findContinuousQueuedRun } = await tsImport("./provider-continuous-persistence.mts", import.meta.url);
+const { readContinuousView, persistContinuousOperation, persistContinuousCycle, queueContinuousCycle, findContinuousQueuedRun } = await tsImport("./provider-continuous-persistence.mts", import.meta.url);
 const { continuousQueueOwner, continuousDecision } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
 const pins = { organizationId: "8b333333-3333-4333-8333-333333333331", providerId: "8b333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "8b333333-3333-4333-8333-333333333333", initialRunId: "8b333333-3333-4333-8333-333333333334",
   operationId: "8b333333-3333-4333-8333-333333333335", operatorId: "8b333333-3333-4333-8333-333333333336" };
-function fixture() {
+function fixture(cadence = { kind: "central" }, scheduleSeconds = 300, postHeadPolicy = { kind: "none" }) {
   const now = new Date("2026-08-30T06:05:00Z");
   const integration = providerDataforrestLiveIntegrationRegistry.resolve(
     "clutchpacks",
     DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   );
   const authority = { configNumber: 4n, integration, cachedConfiguration: { adapterKey: integration.manifest.adapterVersion,
-    settings: { platform: "clutchpacks" } }, expiresAt: null, scheduleSeconds: 300, digest: "d".repeat(64) };
+    settings: { platform: "clutchpacks" } }, expiresAt: null, scheduleSeconds, digest: "d".repeat(64) };
   const cursor = { sourceInstanceId: pins.providerId, sourceRevisionId: pins.configId, sourceTypeKey: integration.manifest.sourceTypeKey,
     adapterVersion: integration.manifest.adapterVersion, cursorCodecKey: integration.manifest.cursorCodecKey,
     cursorGeneration: 1, value: "synthetic-private-continuation" };
   const hash = providerMixedCursorFingerprint(cursor);
   const runtime = { central_provider_id: pins.providerId, provider_key: pins.providerKey, operating_state: "idle",
     state_generation: 11n, cached_config_version_id: pins.configId, cached_config_version_number: 4n,
-    cached_configuration: authority.cachedConfiguration, config_expires_at: null, schedule_seconds: 300,
+    cached_configuration: authority.cachedConfiguration, config_expires_at: null, schedule_seconds: scheduleSeconds,
     source_cursor: cursor, source_cursor_hash: hash };
   const parent = { id: pins.initialRunId, trigger: "manual", state: "succeeded", config_version_id: pins.configId,
     config_version_number: 4n, worker_fence: 459n, requested_cursor: cursor, requested_cursor_hash: hash,
@@ -76,12 +76,106 @@ function fixture() {
     },
     provider_activity_outbox: { create: async () => { writes.push("activity"); } },
   };
-  const view = () => readContinuousView(database, pins, authority);
-  const persist = async () => persistContinuousCycle(database, pins, authority, await view());
+  const view = () => readContinuousView(database, pins, authority, cadence, postHeadPolicy);
+  const persist = async () => persistContinuousCycle(database, pins, authority, await view(), undefined, cadence, postHeadPolicy);
   return { now, cursor, hash, authority, database, runtime, parent, last, runs, commands, audits, writes, lease, view, persist,
-    queue: cycle => queueContinuousCycle({ database, cycle, readAuthority: async () => authority }),
+    queue: cycle => queueContinuousCycle({ database, cycle, readAuthority: async () => authority, cadence, postHeadPolicy }),
     onNextLease(callback) { beforeAcquire = callback; } };
 }
+test("minute operation persists before first due time without altering hourly configuration or saved history", async () => {
+  const cadence = { kind: "operator_interval", intervalSeconds: 60 }, f = fixture(cadence, 3600);
+  f.now.setTime(Date.parse("2026-08-30T06:00:30Z"));
+  const before = structuredClone({ runtime: f.runtime, parent: f.parent, last: f.last });
+  await persistContinuousOperation(f.database, pins, f.authority, await f.view(), undefined, cadence);
+  assert.deepEqual(f.writes, ["audit"]); assert.equal(f.audits[0].details.version, 2);
+  assert.deepEqual(f.audits[0].details.cadence, cadence); assert.equal(f.audits[0].details.effectiveIntervalSeconds, 60);
+  await persistContinuousOperation(f.database, pins, f.authority, await f.view(), undefined, cadence);
+  assert.equal(f.audits.length, 1);
+  await assert.rejects(f.persist(), /NOT_DUE/);
+  assert.deepEqual({ runtime: f.runtime, parent: f.parent, last: f.last }, before);
+  f.now.setTime(Date.parse("2026-08-30T06:01:00Z"));
+  const cycle = await f.persist(); assert.equal(cycle.effectiveIntervalSeconds, 60); await f.queue(cycle);
+  assert.equal(f.runs.size, 2); assert.deepEqual(f.runs.get(cycle.runId).requested_cursor, f.cursor);
+  assert.equal(f.runtime.schedule_seconds, 3600); assert.equal(f.authority.scheduleSeconds, 3600);
+  assert.equal(f.runtime.state_generation, 11n);
+  const writes = f.writes.length;
+  await persistContinuousOperation(f.database, pins, f.authority, await f.view(), undefined, cadence);
+  assert.equal(f.writes.length, writes, "Matching operation replay admits its own queued cycle without re-adopting an old head.");
+});
+test("restarting a bound operation with another cadence or old receipt fails before queue or lease writes", async () => {
+  const cadence = { kind: "operator_interval", intervalSeconds: 60 }, f = fixture(cadence, 3600);
+  await persistContinuousOperation(f.database, pins, f.authority, await f.view(), undefined, cadence);
+  const cycle = await f.persist(), writes = f.writes.length;
+  for (const changed of [{ kind: "central" }, { kind: "operator_interval", intervalSeconds: 120 }]) {
+    await assert.rejects(readContinuousView(f.database, pins, f.authority, changed), /OPERATION_DRIFT/);
+    await assert.rejects(queueContinuousCycle({ database: f.database, cycle, cadence: changed,
+      readAuthority: async () => f.authority }), /CYCLE_DRIFT/);
+  }
+  assert.equal(f.writes.length, writes); assert.equal(f.runs.size, 1);
+  const operation = f.audits.find(row => row.action === "local.provider_continuous.operation");
+  operation.details = { pins, authorityDigest: f.authority.digest };
+  await assert.rejects(f.view(), /OPERATION_DRIFT/);
+  await assert.rejects(f.queue(cycle), /OPERATION_DRIFT/);
+  assert.equal(f.writes.length, writes);
+});
+test("stored cycle cadence, effective interval and due-time drift cannot admit a run", async () => {
+  for (const change of [{ cadence: { kind: "central" } }, { effectiveIntervalSeconds: 120 },
+    { notBefore: "2026-08-30T06:00:00.000Z" }, { version: 1 }]) {
+    const cadence = { kind: "operator_interval", intervalSeconds: 60 }, f = fixture(cadence, 3600);
+    const cycle = await f.persist(), writes = f.writes.length;
+    Object.assign(f.audits.find(row => row.action === "local.provider_continuous.cycle").details, change);
+    await assert.rejects(f.view(), /CYCLE_DRIFT/); await assert.rejects(f.queue(cycle), /CYCLE_DRIFT/);
+    assert.equal(f.writes.length, writes); assert.equal(f.runs.size, 1); assert.equal(f.commands.size, 0);
+  }
+});
+test("required post-head policy binds before waiting and cannot be removed on queued-cycle replay", async () => {
+  const cadence = { kind: "operator_interval", intervalSeconds: 60 };
+  const postHeadPolicy = { kind: "callback", fingerprint: "e".repeat(64), timeoutMilliseconds: 1000 };
+  const f = fixture(cadence, 3600, postHeadPolicy);
+  f.now.setTime(Date.parse("2026-08-30T06:00:30Z"));
+  const before = structuredClone({ runtime: f.runtime, parent: f.parent, last: f.last });
+  await persistContinuousOperation(f.database, pins, f.authority, await f.view(), undefined, cadence, postHeadPolicy);
+  assert.deepEqual(f.writes, ["audit"]); assert.deepEqual(f.audits[0].details.postHeadPolicy, postHeadPolicy);
+  f.now.setTime(Date.parse("2026-08-30T06:01:00Z"));
+  const cycle = await f.persist(); assert.deepEqual(cycle.postHeadPolicy, postHeadPolicy);
+  for (const queued of [false, true]) {
+    if (queued) await f.queue(cycle);
+    const writes = f.writes.length, view = await f.view();
+    for (const changed of [undefined, { kind: "none" }, { ...postHeadPolicy, timeoutMilliseconds: 1001 },
+      { ...postHeadPolicy, fingerprint: "f".repeat(64) }]) {
+      await assert.rejects(readContinuousView(f.database, pins, f.authority, cadence, changed), /OPERATION_DRIFT/);
+      await assert.rejects(persistContinuousOperation(f.database, pins, f.authority, view, undefined, cadence, changed), /OPERATION_DRIFT/);
+      await assert.rejects(persistContinuousCycle(f.database, pins, f.authority, view, undefined, cadence, changed), /OPERATION_DRIFT/);
+      await assert.rejects(queueContinuousCycle({ database: f.database, cycle, cadence, postHeadPolicy: changed,
+        readAuthority: async () => f.authority }), /CYCLE_DRIFT/);
+    }
+    assert.equal(f.writes.length, writes, "Policy drift must refuse before lease or run mutation, even for already-queued cycles.");
+    await persistContinuousOperation(f.database, pins, f.authority, view, undefined, cadence, postHeadPolicy);
+    assert.equal(f.writes.length, writes, "Matching callback policy must replay without re-adopting the initial head.");
+  }
+  await f.queue(cycle); assert.equal(f.runs.size, 2);
+  assert.deepEqual({ runtime: f.runtime, parent: f.parent, last: f.last }, before);
+});
+test("missing, changed or malformed post-head receipt policy never admits new work", async () => {
+  const postHeadPolicy = { kind: "callback", fingerprint: "e".repeat(64), timeoutMilliseconds: 1000 };
+  for (const action of ["operation", "cycle"]) {
+    for (const changed of [undefined, { kind: "none" }, { ...postHeadPolicy, timeoutMilliseconds: 1001 },
+      { ...postHeadPolicy, fingerprint: "f".repeat(64) }, { ...postHeadPolicy, unknown: true }]) {
+      const f = fixture(undefined, 300, postHeadPolicy), cycle = await f.persist(), writes = f.writes.length;
+      const receipt = f.audits.find(row => row.action === `local.provider_continuous.${action}`);
+      if (changed === undefined) delete receipt.details.postHeadPolicy;
+      else receipt.details.postHeadPolicy = changed;
+      const error = action === "operation" ? /OPERATION_DRIFT/ : /CYCLE_DRIFT/;
+      await assert.rejects(f.view(), error); await assert.rejects(f.queue(cycle), error);
+      assert.equal(f.writes.length, writes); assert.equal(f.runs.size, 1); assert.equal(f.commands.size, 0);
+    }
+  }
+  const f = fixture(), cycle = await f.persist(), writes = f.writes.length;
+  assert.deepEqual(cycle.postHeadPolicy, { kind: "none" });
+  await assert.rejects(queueContinuousCycle({ database: f.database, cycle, postHeadPolicy: null,
+    readAuthority: async () => assert.fail("Null policy must fail before any authority read.") }), /POST_HEAD_POLICY_INVALID/);
+  assert.equal(f.writes.length, writes);
+});
 test("durable head receipt and queue copy exact full checkpoint once, retain history, and never resume", async () => {
   const f = fixture(); const before = structuredClone(f.parent); const original = structuredClone(f.runtime.source_cursor);
   const view = await f.view(); const cycle = await f.persist();

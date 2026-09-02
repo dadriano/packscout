@@ -1,6 +1,8 @@
 import net from "node:net";
 import { localBackfillProviderPorts } from "./provider-backfill-supervisor-authority.mts";
 import { refuseBackfill, type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
+import type { ContinuousCadence } from "./provider-continuous-cadence.mts";
+import type { ContinuousPostHeadPolicy } from "./provider-continuous-post-head-policy.mts";
 
 export const continuousResidencyPort = (pins: BackfillPins) => localBackfillProviderPorts[pins.providerKey] + 1000;
 export interface ContinuousHealth {
@@ -8,6 +10,9 @@ export interface ContinuousHealth {
   runId?: string;
   nextDueAt?: string;
   code?: string;
+  cadence?: ContinuousCadence;
+  effectiveIntervalSeconds?: number;
+  postHeadPolicy?: ContinuousPostHeadPolicy;
 }
 /** Local-host exclusivity, not a replacement for database fencing. The kernel
  * releases the port after a crash, so no PID file is deleted or trusted. */

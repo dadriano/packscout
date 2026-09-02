@@ -53,7 +53,7 @@ export async function readBackfillSnapshot(database: ProviderQueryClient, pins: 
     configurationMatches: providerMixedPageDigest(runtime.cached_configuration) === providerMixedPageDigest(authority.cachedConfiguration) &&
       runtime.config_expires_at?.getTime() === authority.expiresAt?.getTime() &&
       (!runtime.config_expires_at || runtime.config_expires_at > clock.now) && runtime.schedule_seconds === authority.scheduleSeconds,
-    state: runtime.operating_state, generation: runtime.state_generation,
+    state: runtime.operating_state, generation: runtime.state_generation, runtimeRowVersion: runtime.row_version,
     checkpointHash: runtime.source_cursor_hash,
     checkpointValid: checkpointValid || (run.state === "succeeded" && run.reached_source_head && runtime.source_cursor === null && runtime.source_cursor_hash === null),
     activeRunIds: active.map((item) => item.id),

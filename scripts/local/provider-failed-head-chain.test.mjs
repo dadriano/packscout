@@ -124,3 +124,38 @@ test("public chain guard refuses expired or short caller budgets and forged reha
   assert.equal((await new db.PrismaProviderCommandRepository(f.database).submit(command)).code, "RUNTIME_RESUME_GUARD_CONFLICT");
   assert.equal(f.writes.length, count);
 });
+test("actual queued-start audits bind the runner null actor only to its exact transition and operator commands", async () => {
+  const lifecycle = f => f.audits.filter(row => row.correlation_id === f.previousReview.pins.operationId &&
+    ["provider.runtime.transition", "provider.command.terminal", "provider.run.started"].includes(row.action));
+  const baseline = await fixture(), rows = lifecycle(baseline);
+  assert.equal(rows.length, 5);
+  assert.equal(rows.filter(row => row.actor_operator_id === null).length, 1);
+  assert.equal(rows.find(row => row.actor_operator_id === null).details.toState, "running");
+  await inspect(baseline); assert.deepEqual(baseline.writes, []);
+  for (let index = 0; index < 5; index++) for (const mutate of [
+    row => { row.actor_operator_id = row.actor_operator_id === null ? baseline.pins.operatorId : null; },
+    row => { row.command_id = baseline.pins.operationId; }, row => { row.target_id = baseline.root.id; },
+    row => { row.target_type = "foreign"; }, row => { row.correlation_id = baseline.pins.operationId; },
+    row => { row.outcome = "failure"; }, row => { row.details = { ...row.details, stateGeneration: "999" }; },
+    row => { row.occurred_at = new Date(row.occurred_at.getTime() - 1); }, row => { row.sequence = 1n; },
+  ]) {
+    const f = await fixture(); mutate(lifecycle(f)[index]);
+    await assert.rejects(inspect(f)); assert.deepEqual(f.writes, []);
+  }
+});
+test("missing duplicate unknown or misbound queued-start evidence refuses without weakening the chain guard", async () => {
+  for (const mutate of [
+    (f, row) => { f.audits.splice(f.audits.indexOf(row), 1); },
+    (f, row) => { f.audits.push({ ...row, sequence: 999n }); },
+    (f, row) => { f.audits.push({ ...row, sequence: 999n, action: "provider.unreviewed" }); },
+    (_f, row) => { row.details.leaseFence = "1"; },
+    (f, row) => { row.details.runId = f.root.id; },
+  ]) {
+    const f = await fixture(), row = f.audits.find(a => a.action === "provider.run.started");
+    mutate(f, row); await assert.rejects(inspect(f)); assert.deepEqual(f.writes, []);
+  }
+  const f = await fixture(); await inspect(f); const command = await input(f), count = f.writes.length;
+  f.onNextTransaction(() => { f.audits.find(row => row.action === "provider.run.started").details.leaseFence = "999"; });
+  assert.equal((await new db.PrismaProviderCommandRepository(f.database).submit(command)).code, "RUNTIME_RESUME_GUARD_CONFLICT");
+  assert.equal(f.writes.length, count); assert.equal(f.runtime.operating_state, "error");
+});

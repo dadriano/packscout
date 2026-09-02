@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { backfillDigest, backfillId, backfillPinsSchema } from "./provider-backfill-supervisor-policy.mts";
+import { providerHeadProductionWriterCommand } from "./provider-head-process-scope.mts";
 
 const decimal = z.string().regex(/^(0|[1-9][0-9]*)$/u);
 export const continuationReviewSchema = z.object({
@@ -53,6 +54,7 @@ export function assertNoContinuationWriter(text: string, review: ContinuationRev
     || command.includes(`--provider-key ${review.pins.providerKey}`);
   for (const row of rows) {
     if (row.pid === ownPid) continue;
+    if (providerHeadProductionWriterCommand(row.command)) refuseContinuation("CONTINUATION_UNSCOPED_WRITER_PRESENT");
     if (supervisor(row.command) && target(row.command)) refuseContinuation("CONTINUATION_WRITER_PRESENT");
     if (!/(?:provider-manual-import-local|clutchpacks-manual-import-local)\.ts/u.test(row.command)) continue;
     let current: typeof row | undefined = row; let identified = false;

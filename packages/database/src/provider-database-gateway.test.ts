@@ -4,7 +4,7 @@ import type { CentralDatabaseLifecycle } from "./central-database.ts";
 import { providerDatabaseTarget } from "./database-topology.ts";
 import type { ProviderDatabaseLifecycle } from "./provider-database.ts";
 import { ProviderDatabaseDestinationPolicy } from "./provider-database-destination-policy.ts";
-import { BoundedProviderDatabaseGateway } from "./provider-database-gateway.ts";
+import { BoundedProviderDatabaseGateway, type BoundedProviderDatabaseGatewayOptions } from "./provider-database-gateway.ts";
 import type { ProviderDatabaseRoute } from "./provider-database-locator.ts";
 
 const route: ProviderDatabaseRoute = {
@@ -36,6 +36,8 @@ const credential = { username: "synthetic@role", password: "synthetic:@/?#passwo
 function fixture(input: {
   allowedModes?: ("disable" | "require" | "verify-ca" | "verify-full")[];
   allowedHost?: string;
+  operationProfile?: BoundedProviderDatabaseGatewayOptions["operationProfile"];
+  operationTimeoutMs?: number;
 } = {}) {
   const opened: { databaseUrl: string; providerId: string; providerKey: string; connectionLimit: number }[] = [];
   let resolved = 0;
@@ -70,10 +72,28 @@ function fixture(input: {
     connectionLimitPerProvider: 2,
     maximumCachedProviders: 1,
     connectionTimeoutMs: 1500,
-    operationTimeoutMs: 1000,
+    ...(input.operationProfile === undefined ? {} : { operationProfile: input.operationProfile }),
+    operationTimeoutMs: input.operationTimeoutMs ?? 1000,
   });
   return { gateway, opened, resolved: () => resolved, closed: () => closed };
 }
+
+test("long atomic page operations require explicit opt-in and retain strict destination checks", async () => {
+  assert.throws(() => fixture({ operationTimeoutMs: 60_001 }), /bounds are invalid/u);
+  assert.throws(() => fixture({ operationProfile: "atomic_import_page", operationTimeoutMs: 600_001 }), /bounds are invalid/u);
+  assert.throws(() => fixture({ operationProfile: "unknown" as "standard" }), /bounds are invalid/u);
+  const state = fixture({ operationProfile: "atomic_import_page", operationTimeoutMs: 600_000 });
+  try {
+    const denied = await state.gateway.runWithCachedProviderDatabase({
+      ...route, node: { ...route.node, host: "unapproved.example.test" },
+    }, async () => assert.fail("Long operation windows do not grant destination authority."));
+    assert.equal(denied.state, "unreachable");
+    assert.equal(state.resolved(), 0);
+    const permitted = await state.gateway.runWithCachedProviderDatabase(route, async () => "committed");
+    assert.equal(permitted.state, "reachable");
+    assert.equal(state.opened[0]!.connectionLimit, 2);
+  } finally { await state.gateway.close(); }
+});
 
 test("gateway preserves verify-full authorization and encodes strict native Prisma TLS without changing cache bounds", async () => {
   const state = fixture();
