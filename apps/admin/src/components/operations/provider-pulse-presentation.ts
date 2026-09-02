@@ -108,14 +108,35 @@ export function measurementTotal(sources: readonly ProviderSourceOperationsSourc
       ? ["counts" in measurement ? measurement.counts.total : measurement.processed]
       : [];
   });
+  // A total that mixes counted and estimated providers is itself an estimate.
+  const estimated = sources.some((source) => source.measurements[metric].state === "available"
+    && isEstimatedStorage(source.measurements[metric]));
   const total = values.reduce((sum, value) => sum + value, 0);
   const safeTotal = Number.isSafeInteger(total);
   return {
     value: values.length > 0 && safeTotal ? total : null,
+    estimated: estimated && values.length > 0 && safeTotal,
     coverage: !safeTotal ? "Total exceeds safe numeric range" : values.length === sources.length && sources.length > 0
       ? `All ${sources.length} providers`
       : `${values.length > 0 ? "Partial · " : ""}${values.length}/${sources.length} providers`,
   };
+}
+
+/** True only for a storage measurement the database reported as estimated. */
+export function isEstimatedStorage(
+  measurement: ProviderSourceOperationsSource["measurements"]["storage" | "records"],
+): boolean {
+  return measurement.state === "available" && "precision" in measurement
+    && measurement.precision === "estimated";
+}
+
+/**
+ * Estimated rows are marked so a reader never mistakes a statistics estimate
+ * for a count. Unavailable stays unavailable; only measured values are marked.
+ */
+export function storedCount(value: number | null, estimated: boolean): string {
+  const rendered = count(value);
+  return value !== null && estimated ? `≈${rendered}` : rendered;
 }
 
 export function count(value: number | null): string {
@@ -127,7 +148,7 @@ export function measuredAge(value: string | null, observedAt: string): string {
 }
 
 export const metricDescriptions = {
-  stored: "Exact rows in canonical entity tables, including child and relationship rows. These are not unique source records. Counts are cached for up to 60 seconds; measurement times are in Details.",
+  stored: "Rows in canonical entity tables, including child and relationship rows. These are not unique source records. Values marked \u2248 are the database's live-tuple estimate, used where an exact count would cost more than its measurement budget; unmarked values are exact. Cached for up to 60 seconds; precision and measurement times are in Details.",
   processed: "Source records processed across all retained runs. Repeat processing is counted again; this is not the number of unique stored entities. Cached for up to 60 seconds.",
   page: "Time since the last durably committed page found by the history check, relative to the displayed status time. History is cached for up to 60 seconds; newer pages may exist. A heartbeat is not committed progress.",
   quarantine: "Open quarantine entries across retained runs, excluding resolved and expired entries. History is cached for up to 60 seconds; newer changes may exist. This is separate from the current run's quarantine count.",

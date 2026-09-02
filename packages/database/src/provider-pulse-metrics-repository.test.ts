@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Prisma } from "../prisma/generated/provider/index.js";
 import type { ProviderPrismaClient, ProviderTransactionClient } from "./provider-database.ts";
-import { PrismaProviderPulseMetricsRepository } from "./provider-pulse-metrics-repository.ts";
+import { EXACT_STORAGE_COUNT_CEILING, PrismaProviderPulseMetricsRepository } from "./provider-pulse-metrics-repository.ts";
 
 const measuredAt = new Date("2026-08-30T12:00:00.000Z");
-const totalsRow = {
-  measured_at: measuredAt, processed: 0n, accepted: 0n,
+const countsRow = {
+  measured_at: measuredAt,
   categories: 0n, packs: 0n, collectibles: 0n, aliases: 0n,
   instances: 0n, packContents: 0n, accounts: 0n, pulls: 0n,
   pullItems: 0n, marketEvents: 0n,
 };
+const recordTotalsRow = { measured_at: measuredAt, processed: 0n, accepted: 0n };
 
 function repositoryFor(read: (query: Prisma.Sql) => readonly unknown[]) {
   const database = {
@@ -25,29 +26,69 @@ function repositoryFor(read: (query: Prisma.Sql) => readonly unknown[]) {
 test("provider pulse refuses lossy numbers and totals that exceed safe JSON integer precision", async () => {
   const tooLarge = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
   for (const row of [
-    { ...totalsRow, categories: tooLarge },
-    { ...totalsRow, categories: BigInt(Number.MAX_SAFE_INTEGER), pulls: 1n },
-    { ...totalsRow, processed: tooLarge },
-    { ...totalsRow, accepted: tooLarge },
-    { ...totalsRow, categories: -1n },
+    { ...countsRow, categories: tooLarge },
+    { ...countsRow, categories: BigInt(Number.MAX_SAFE_INTEGER), pulls: 1n },
+    { ...countsRow, categories: -1n },
   ]) {
-    await assert.rejects(repositoryFor(() => [row]).readTotals(), RangeError);
+    await assert.rejects(repositoryFor(() => [row]).readStorageCounts(), RangeError);
+  }
+  for (const row of [
+    { ...recordTotalsRow, processed: tooLarge },
+    { ...recordTotalsRow, accepted: tooLarge },
+  ]) {
+    await assert.rejects(repositoryFor(() => [row]).readRecordTotals(), RangeError);
   }
   const largest = await repositoryFor(() => [{
-    ...totalsRow, processed: BigInt(Number.MAX_SAFE_INTEGER),
-  }]).readTotals();
+    ...recordTotalsRow, processed: BigInt(Number.MAX_SAFE_INTEGER),
+  }]).readRecordTotals();
   assert.equal(largest.processed, Number.MAX_SAFE_INTEGER);
   assert.equal(JSON.parse(JSON.stringify(largest)).measuredAt, measuredAt.toISOString());
 });
 
+test("storage counts stay exact below the ceiling and become estimates above it", async () => {
+  const statements: string[] = [];
+  const exact = await repositoryFor((query) => {
+    statements.push(query.sql);
+    return [{ ...countsRow, pulls: BigInt(EXACT_STORAGE_COUNT_CEILING) }];
+  }).readStorageCounts();
+  assert.equal(exact.precision, "exact");
+  assert.equal(exact.counts.total, EXACT_STORAGE_COUNT_CEILING);
+  // The estimate decides, then the exact scan runs: two separate statements.
+  assert.equal(statements.filter((sql) => sql.includes("pg_stat_user_tables")).length, 1);
+  assert.equal(statements.filter((sql) => sql.includes("count(*)")).length, 1);
+
+  const estimateOnly: string[] = [];
+  const estimated = await repositoryFor((query) => {
+    estimateOnly.push(query.sql);
+    return [{ ...countsRow, pulls: BigInt(EXACT_STORAGE_COUNT_CEILING) + 1n }];
+  }).readStorageCounts();
+  assert.equal(estimated.precision, "estimated");
+  assert.equal(estimated.counts.total, EXACT_STORAGE_COUNT_CEILING + 1);
+  // Above the ceiling no row is ever counted, so nothing scans the tables.
+  assert.equal(estimateOnly.some((sql) => sql.includes("count(*)")), false);
+});
+
+test("an unreported provider database estimates zero and is counted exactly", async () => {
+  const statements: string[] = [];
+  const measured = await repositoryFor((query) => {
+    statements.push(query.sql);
+    return [countsRow];
+  }).readStorageCounts();
+  assert.equal(measured.precision, "exact");
+  assert.equal(measured.counts.total, 0);
+  assert.equal(statements.filter((sql) => sql.includes("count(*)")).length, 1);
+});
+
 test("provider pulse surfaces missing or failed measurements rather than inventing zeros", async () => {
   const empty = repositoryFor(() => []);
-  await assert.rejects(empty.readTotals(), /totals are unavailable/u);
+  await assert.rejects(empty.readStorageCounts(), /storage estimates are unavailable/u);
+  await assert.rejects(empty.readRecordTotals(), /record totals are unavailable/u);
   await assert.rejects(empty.readLeases(), /leases are unavailable/u);
   await assert.rejects(empty.readHistory(), /history is unavailable/u);
   const failure = new Error("database timeout");
   const failed = repositoryFor(() => { throw failure; });
-  await assert.rejects(failed.readTotals(), (error) => error === failure);
+  await assert.rejects(failed.readStorageCounts(), (error) => error === failure);
+  await assert.rejects(failed.readRecordTotals(), (error) => error === failure);
   await assert.rejects(failed.readLeases(), (error) => error === failure);
   await assert.rejects(failed.readHistory(), (error) => error === failure);
 });

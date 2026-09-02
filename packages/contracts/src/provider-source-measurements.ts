@@ -26,10 +26,19 @@ const canonicalCountsSchema = z.object({
   Object.values(kinds).reduce((sum, value) => sum + value, 0) === total,
 { message: "Stored rows must equal the sum of the canonical table counts." });
 
+/**
+ * Exact counts scan every canonical row and cost time proportional to stored
+ * rows. Estimated counts come from the collector's live-tuple statistics and
+ * are read in constant time, so a large provider stays measurable. Precision
+ * travels with the measurement; it is never inferred from the counts alone.
+ */
+export const providerStorageCountPrecisionSchema = z.enum(["exact", "estimated"]);
+
 const storageSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("available"),
     measuredAt: instant,
+    precision: providerStorageCountPrecisionSchema,
     counts: canonicalCountsSchema,
   }).strict(),
   providerMeasurementUnavailableSchema,
@@ -73,23 +82,20 @@ const activitySchema = z.discriminatedUnion("state", [
 ]);
 
 /** Exact snapshots are distinct from missing evidence and from live run counters. */
+// Storage counts and retained-run totals are read by separate statements so
+// that the cost of counting stored rows cannot withhold the retained-run
+// totals. They therefore observe separate snapshots and carry separate
+// measurement times, which callers must display rather than conflate.
 export const providerSourceMeasurementsSchema = z.object({
   storage: storageSchema,
   records: recordsSchema,
   activity: activitySchema,
-}).strict().superRefine((measurements, context) => {
-  if (measurements.storage.state === "available" &&
-    measurements.records.state === "available" &&
-    measurements.storage.measuredAt !== measurements.records.measuredAt) {
-    context.addIssue({
-      code: "custom",
-      path: ["records", "measuredAt"],
-      message: "Storage and retained-run totals must share their snapshot time.",
-    });
-  }
-});
+}).strict();
 
 export type ProviderSourceMeasurements = z.infer<typeof providerSourceMeasurementsSchema>;
+export type ProviderStorageCountPrecision = z.infer<
+  typeof providerStorageCountPrecisionSchema
+>;
 export type ProviderMeasurementUnavailableReason = z.infer<
   typeof providerMeasurementUnavailableSchema
 >["reason"];

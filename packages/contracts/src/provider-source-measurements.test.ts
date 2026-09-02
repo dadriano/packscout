@@ -8,7 +8,7 @@ import {
 const measuredAt = "2026-08-30T12:00:00.000Z";
 const measured = {
   storage: {
-    state: "available", measuredAt,
+    state: "available", measuredAt, precision: "exact",
     counts: { total: 10, categories: 1, packs: 1, collectibles: 1, aliases: 1,
       instances: 1, packContents: 1, accounts: 1, pulls: 1, pullItems: 1, marketEvents: 1 },
   },
@@ -46,9 +46,28 @@ test("exact provider measurements reconcile totals and preserve safe numeric pre
   assert.equal(providerSourceMeasurementsSchema.safeParse({
     ...measured, records: { ...measured.records, accepted: 13 },
   }).success, false);
-  assert.equal(providerSourceMeasurementsSchema.safeParse({
+});
+
+test("storage counts declare their precision and keep their own snapshot time", () => {
+  for (const precision of ["exact", "estimated"]) {
+    const result = providerSourceMeasurementsSchema.parse({
+      ...measured, storage: { ...measured.storage, precision },
+    });
+    assert.equal(result.storage.state === "available" && result.storage.precision, precision);
+  }
+  // Precision is carried, never guessed from the counts.
+  for (const invalid of [undefined, null, "approximate"]) {
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, storage: { ...measured.storage, precision: invalid },
+    }).success, false);
+  }
+  // Separate statements observe separate snapshots, so the times may differ.
+  const split = providerSourceMeasurementsSchema.parse({
     ...measured, records: { ...measured.records, measuredAt: "2026-08-30T11:00:00.000Z" },
-  }).success, false);
+  });
+  assert.equal(split.records.state === "available" && split.records.measuredAt,
+    "2026-08-30T11:00:00.000Z");
+  assert.equal(split.storage.state === "available" && split.storage.measuredAt, measuredAt);
 });
 
 test("lease measurements never expose owners or claim to verify OS process liveness", () => {

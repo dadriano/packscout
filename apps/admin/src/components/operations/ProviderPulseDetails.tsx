@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { age, dateTime, humanize, interval } from "./OperationStatus";
 import { SourceOperationControls, type SourceOperationControlsProps } from "./SourceOperationControls";
-import { count, isDatabaseUnavailable, isUnsupportedSource, measuredAge, metricDescriptions } from "./provider-pulse-presentation";
+import { count, isDatabaseUnavailable, isEstimatedStorage, isUnsupportedSource, measuredAge, metricDescriptions, storedCount } from "./provider-pulse-presentation";
 
 const entityLabels = {
   categories: "Categories", packs: "Packs", collectibles: "Collectibles", aliases: "Aliases",
@@ -52,6 +52,7 @@ function QualityEvidence({ source }: { source: ProviderSourceOperationsSource })
 export function ProviderPulseDetails(props: SourceOperationControlsProps & { observedAt: string }) {
   const { source, observedAt } = props;
   const { storage, records, activity } = source.measurements;
+  const estimatedStorage = isEstimatedStorage(storage);
   const unsupportedSource = isUnsupportedSource(source);
   const databaseUnavailable = isDatabaseUnavailable(source);
   const runtimeUnavailable = unsupportedSource || databaseUnavailable;
@@ -66,15 +67,17 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
       <div className="provider-pulse__details-body">
         <QualityEvidence source={source} />
         <section>
-          <h3><IndicatorTooltip label="Stored entities" description={metricDescriptions.stored} /></h3>
+          <h3><IndicatorTooltip label={estimatedStorage ? "Stored entities (estimated)" : "Stored entities"} description={metricDescriptions.stored} /></h3>
           <table className="provider-pulse__entity-table">
             <caption className="admin-visually-hidden">{source.displayName} canonical entity counts</caption>
             <thead><tr><th scope="col">Entity</th><th scope="col">Rows</th></tr></thead>
             <tbody>{Object.entries(entityLabels).map(([key, label]) => (
-              <tr key={key}><th scope="row">{label}</th><td>{count(storage.state === "available" ? storage.counts[key as keyof typeof entityLabels] : null)}</td></tr>
+              <tr key={key}><th scope="row">{label}</th><td>{storedCount(storage.state === "available" ? storage.counts[key as keyof typeof entityLabels] : null, estimatedStorage)}</td></tr>
             ))}</tbody>
           </table>
-          <p className="provider-pulse__subtext">{storage.state === "available" ? `Counted ${dateTime(storage.measuredAt)} · ${measuredAge(storage.measuredAt, observedAt)}` : `Counts unavailable: ${humanize(storage.reason).toLowerCase()}.`}</p>
+          <p className="provider-pulse__subtext">{storage.state !== "available" ? `Counts unavailable: ${humanize(storage.reason).toLowerCase()}.`
+            : estimatedStorage ? `Estimated ${dateTime(storage.measuredAt)} · ${measuredAge(storage.measuredAt, observedAt)}. These are the database's live-tuple estimates, not exact counts; an exact count of this provider would exceed its measurement budget.`
+              : `Counted ${dateTime(storage.measuredAt)} · ${measuredAge(storage.measuredAt, observedAt)}`}</p>
         </section>
         <section>
           <h3>Run & schedule</h3>

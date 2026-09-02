@@ -204,10 +204,13 @@ test("provider pulse counts exact stored rows and all retained runs without infe
   const harness = await createHarness();
   try {
     const repository = new PrismaProviderPulseMetricsRepository(harness.client);
-    const empty = await repository.readTotals();
+    const empty = await repository.readStorageCounts();
     assert.deepEqual(empty.counts, emptyCounts);
-    assert.equal(empty.processed, 0);
-    assert.equal(empty.accepted, 0);
+    // An empty database is below the ceiling, so it is counted, not estimated.
+    assert.equal(empty.precision, "exact");
+    const emptyRecords = await repository.readRecordTotals();
+    assert.equal(emptyRecords.processed, 0);
+    assert.equal(emptyRecords.accepted, 0);
     const emptyHistory = await repository.readHistory();
     const emptyLeases = await repository.readLeases();
     assert.equal(emptyHistory.lastCommittedPageAt, null);
@@ -217,14 +220,16 @@ test("provider pulse counts exact stored rows and all retained runs without infe
 
     await seedCanonicalRows(harness.client);
     const seeded = await seedRetainedRuns(harness.client);
-    const totals = await repository.readTotals();
+    const totals = await repository.readStorageCounts();
+    assert.equal(totals.precision, "exact");
     assert.deepEqual(totals.counts, {
       total: 11, categories: 1, packs: 1, collectibles: 1, aliases: 1,
       instances: 1, packContents: 1, accounts: 1, pulls: 1, pullItems: 2, marketEvents: 1,
     });
     assert.equal(await harness.client.promotion_changes.count(), 18);
-    assert.equal(totals.processed, 162);
-    assert.equal(totals.accepted, 131);
+    const records = await repository.readRecordTotals();
+    assert.equal(records.processed, 162);
+    assert.equal(records.accepted, 131);
     const history = await repository.readHistory();
     const leases = await repository.readLeases();
     assert.equal(history.lastCommittedPageAt, seeded.lastCommittedPageAt.toISOString());
@@ -296,12 +301,16 @@ test("provider pulse reads are read-only, bounded, and do not wait for runtime o
     await harness.client.$transaction(async (transaction) => {
       await transaction.$queryRaw(Prisma.sql`select singleton_key from provider_runtime for update`);
       await transaction.$queryRaw(Prisma.sql`select worker_role from provider_worker_states for update`);
-      assert.deepEqual((await repository.readTotals()).counts, emptyCounts);
+      assert.deepEqual((await repository.readStorageCounts()).counts, emptyCounts);
+      assert.equal((await repository.readRecordTotals()).processed, 0);
       assert.equal((await repository.readLeases()).importLease.state, "unowned");
       assert.equal((await repository.readHistory()).lastCommittedPageAt, null);
     });
+    // Storage counts read the estimate first, then the exact scan it allowed.
+    // Every read is its own read-only transaction with its own budget.
     assert.deepEqual(settings, [
-      { read_only: "on", timeout: "6s" },
+      { read_only: "on", timeout: "2s" }, { read_only: "on", timeout: "6s" },
+      { read_only: "on", timeout: "2s" },
       { read_only: "on", timeout: "2s" }, { read_only: "on", timeout: "2s" },
     ]);
     await harness.client.$transaction(async (transaction) => {
