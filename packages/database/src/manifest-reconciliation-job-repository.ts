@@ -2,7 +2,6 @@ import { Prisma as CentralPrisma } from
   "../prisma/generated/central/index.js";
 import type {
   CentralPrismaClient,
-  CentralQueryClient,
   CentralTransactionClient,
 } from "./central-database.ts";
 import {
@@ -29,8 +28,9 @@ import {
 import {
   MANIFEST_PROMOTION_JOB_STORE_CONFIGURATION,
   SplitPromotionJobStore,
-  type PromotionJobSqlClient,
 } from "./split-promotion-job-store.ts";
+import { centralPromotionJobSqlClient as sqlClient } from
+  "./promotion-job-sql-client.ts";
 
 const TRANSACTION = Object.freeze({
   maxWait: 5_000,
@@ -58,15 +58,6 @@ function transactionOptions(
 interface ProtectedRetentionCandidate {
   readonly runId: string;
   readonly relatedAttemptSetDigest: string;
-}
-
-function sqlClient(client: CentralQueryClient): PromotionJobSqlClient {
-  return {
-    query: async <T>(statement: import("@prisma/client").Prisma.Sql) =>
-      client.$queryRaw<T[]>(statement as CentralPrisma.Sql),
-    execute: async (statement: import("@prisma/client").Prisma.Sql) =>
-      client.$executeRaw(statement as CentralPrisma.Sql),
-  };
 }
 
 /** Central-only durable admission ledger for manifest reconciliation. */

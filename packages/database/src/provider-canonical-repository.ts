@@ -55,8 +55,9 @@ import {
 import {
   PROVIDER_PROMOTION_JOB_STORE_CONFIGURATION,
   SplitPromotionJobStore,
-  type PromotionJobSqlClient,
 } from "./split-promotion-job-store.ts";
+import { providerPromotionJobSqlClient } from
+  "./promotion-job-sql-client.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
@@ -66,17 +67,6 @@ const TRANSACTION_OPTIONS = Object.freeze({
 const providerPromotionJobs = new SplitPromotionJobStore(
   PROVIDER_PROMOTION_JOB_STORE_CONFIGURATION,
 );
-
-function promotionJobClient(
-  client: ProviderQueryClient,
-): PromotionJobSqlClient {
-  return {
-    query: async <T>(statement: import("@prisma/client").Prisma.Sql) =>
-      client.$queryRaw<T[]>(statement as ProviderPrisma.Sql),
-    execute: async (statement: import("@prisma/client").Prisma.Sql) =>
-      client.$executeRaw(statement as ProviderPrisma.Sql),
-  };
-}
 
 interface PromotionChangeDraft {
   readonly entityType: ProviderCanonicalEntityType;
@@ -202,7 +192,7 @@ export async function appendPromotionRange(
   // This uses the same already-open provider transaction as the canonical
   // rows and promotion range. A rollback therefore removes both the material
   // change and its durable publication wake.
-  await providerPromotionJobs.coalesceWake(promotionJobClient(client), {
+  await providerPromotionJobs.coalesceWake(providerPromotionJobSqlClient(client), {
     requestedGeneration: head.last_sequence,
     cause: "canonical_settlement",
     requestedAt: changedAt,

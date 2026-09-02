@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ProviderPrismaClient } from "./provider-database.ts";
 import { createProviderHarness } from
   "./provider-canonical-integration-support.ts";
 import {
@@ -12,10 +13,17 @@ import { PrismaProviderPromotionJobRepository } from
 test("material canonical changes and their provider wake commit or roll back together", async () => {
   const harness = await createProviderHarness();
   try {
-    const jobs = new PrismaProviderPromotionJobRepository(harness.client);
+    const rawOperations: string[] = [];
+    const database = harness.client.$extends({ query: {
+      async $allOperations({ model, operation, args, query }) {
+        if (model === undefined) rawOperations.push(operation);
+        return query(args);
+      },
+    } }) as unknown as ProviderPrismaClient;
+    const jobs = new PrismaProviderPromotionJobRepository(database);
     assert.equal((await jobs.loadWakeIntent()).requestedGeneration, 0n);
 
-    await assert.rejects(harness.client.$transaction(async (transaction) => {
+    await assert.rejects(database.$transaction(async (transaction) => {
       await createProviderCanonicalTransaction(transaction).upsertCategory({
         categoryKey: "atomic-wake-rollback",
         parentCategoryId: null,
@@ -27,7 +35,7 @@ test("material canonical changes and their provider wake commit or roll back tog
     assert.equal(await harness.client.promotion_changes.count(), 0);
     assert.equal((await jobs.loadWakeIntent()).requestedGeneration, 0n);
 
-    const canonical = new ProviderCanonicalRepository(harness.client);
+    const canonical = new ProviderCanonicalRepository(database);
     const first = await canonical.upsertCategory({
       categoryKey: "atomic-wake",
       parentCategoryId: null,
@@ -55,6 +63,8 @@ test("material canonical changes and their provider wake commit or roll back tog
     });
     assert.equal(second.materialChange, true);
     assert.equal((await jobs.loadWakeIntent()).requestedGeneration, 2n);
+    assert.ok(rawOperations.length > 0,
+      "the extended client must intercept the shared raw job SQL");
   } finally {
     await harness.close();
   }

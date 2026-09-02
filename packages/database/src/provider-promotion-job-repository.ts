@@ -2,7 +2,6 @@ import { Prisma as ProviderPrisma } from
   "../prisma/generated/provider/index.js";
 import type {
   ProviderPrismaClient,
-  ProviderQueryClient,
   ProviderTransactionClient,
 } from "./provider-database.ts";
 import {
@@ -37,8 +36,9 @@ import {
 import {
   PROVIDER_PROMOTION_JOB_STORE_CONFIGURATION,
   SplitPromotionJobStore,
-  type PromotionJobSqlClient,
 } from "./split-promotion-job-store.ts";
+import { providerPromotionJobSqlClient as sqlClient } from
+  "./promotion-job-sql-client.ts";
 
 const TRANSACTION = Object.freeze({
   maxWait: 5_000,
@@ -61,15 +61,6 @@ function transactionOptions(
     throw new PromotionJobPersistenceError("PROMOTION_JOB_DEADLINE_EXCEEDED");
   }
   return { ...TRANSACTION, maxWait, timeout };
-}
-
-function sqlClient(client: ProviderQueryClient): PromotionJobSqlClient {
-  return {
-    query: async <T>(statement: import("@prisma/client").Prisma.Sql) =>
-      client.$queryRaw<T[]>(statement as ProviderPrisma.Sql),
-    execute: async (statement: import("@prisma/client").Prisma.Sql) =>
-      client.$executeRaw(statement as ProviderPrisma.Sql),
-  };
 }
 
 function projectionInput(
