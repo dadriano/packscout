@@ -205,30 +205,85 @@ test("condition-store outage does not roll back a successful evaluation", async 
 test("one delivery deadline prevents a failed sink backlog from overrunning the evaluator cadence", async () => {
   const deliveries = Array.from({ length: 50 }, () => delivery());
   const conditions = store({ deliveries });
-  let deadlineClock = 0;
+  let expire: () => void = () => {
+    assert.fail("delivery deadline was not scheduled");
+  };
+  let publishStarted = () => {};
+  const started = new Promise<void>((resolve) => {
+    publishStarted = resolve;
+  });
   let publishCount = 0;
-  const result = await new PromotionJobLivenessOneShot({
+  const running = new PromotionJobLivenessOneShot({
     evaluator: { runCycle: () => Promise.resolve(cycle()) },
     conditions: conditions.implementation,
     publisher: {
-      publish(_delivery, { deadlineAt }) {
+      publish(_delivery, { deadlineAt, signal }) {
         publishCount += 1;
         assert.equal(deadlineAt, 10_000);
-        deadlineClock = deadlineAt;
-        return Promise.resolve({
-          state: "retryable_failure",
-          failureCode: "SYSTEM_SINK_OFFLINE",
+        assert.equal(signal.aborted, false);
+        publishStarted();
+        return new Promise(() => {
+          // The shared deadline, not this dependency, settles the cycle.
         });
       },
     },
     deliveryBudgetMs: 10_000,
-    deadlineNow: () => deadlineClock,
+    deadlineNow: () => 0,
+    scheduleDeliveryDeadline(callback, timeoutMs) {
+      assert.equal(timeoutMs, 10_000);
+      expire = callback;
+      return () => {};
+    },
     now: () => base,
   }).run();
 
+  await started;
+  expire();
+  const result = await running;
+
   assert.equal(result.delivery.selectedCount, 50);
-  assert.equal(result.delivery.retryScheduledCount, 1);
+  assert.equal(result.delivery.retryScheduledCount, 0);
   assert.equal(publishCount, 1);
   assert.equal(conditions.attempts.length, 1);
-  assert.equal(conditions.recorded.length, 1);
+  assert.equal(conditions.recorded.length, 0);
+});
+
+test("the same deadline also bounds a non-settling condition-store read", async () => {
+  let expire: () => void = () => {
+    assert.fail("delivery deadline was not scheduled");
+  };
+  let listStarted = () => {};
+  const started = new Promise<void>((resolve) => {
+    listStarted = resolve;
+  });
+  const running = new PromotionJobLivenessOneShot({
+    evaluator: { runCycle: () => Promise.resolve(cycle()) },
+    conditions: {
+      listPendingConditionDeliveries({ signal }) {
+        assert.equal(signal.aborted, false);
+        listStarted();
+        return new Promise(() => {});
+      },
+      recordConditionDeliveryAttempt: () => Promise.resolve(true),
+      recordConditionDeliveryResult: () => Promise.resolve(true),
+    },
+    publisher: { publish: () => Promise.resolve({ state: "delivered" }) },
+    deliveryBudgetMs: 10_000,
+    deadlineNow: () => 0,
+    scheduleDeliveryDeadline(callback) {
+      expire = callback;
+      return () => {};
+    },
+    now: () => base,
+  }).run();
+
+  await started;
+  expire();
+  assert.deepEqual((await running).delivery, {
+    state: "store_unavailable",
+    selectedCount: 0,
+    deliveredCount: 0,
+    retryScheduledCount: 0,
+    acknowledgementFailureCount: 0,
+  });
 });

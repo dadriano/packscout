@@ -19,6 +19,7 @@ import {
 import {
   PromotionJobLivenessOneShot,
   type PromotionJobLivenessConditionPublisher,
+  type PromotionJobLivenessDeliveryDeadline,
 } from "./promotion-job-liveness-one-shot.ts";
 
 export interface PromotionJobSystemConditionSink {
@@ -26,7 +27,7 @@ export interface PromotionJobSystemConditionSink {
     delivery: PromotionJobLivenessConditionDelivery & Readonly<{
       scope: "system";
     }>,
-    input: Readonly<{ deadlineAt: number }>,
+    input: PromotionJobLivenessDeliveryDeadline,
   ): Promise<Readonly<{
     state: "delivered";
   }> | Readonly<{
@@ -96,10 +97,16 @@ implements PromotionJobLivenessConditionPublisher {
 
   async publish(
     delivery: PromotionJobLivenessConditionDelivery,
-    input: Readonly<{ deadlineAt: number }>,
+    input: PromotionJobLivenessDeliveryDeadline,
   ) {
     if (delivery.scope === "system") {
       return this.system.publish({ ...delivery, scope: "system" }, input);
+    }
+    if (input.signal.aborted) {
+      return {
+        state: "retryable_failure" as const,
+        failureCode: "PROMOTION_JOB_CONDITION_DELIVERY_TIMEOUT",
+      };
     }
     if (
       delivery.organizationId === null

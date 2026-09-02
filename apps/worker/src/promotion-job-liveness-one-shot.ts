@@ -10,6 +10,53 @@ const MAXIMUM_RETRY_DELAY_MS = 15 * 60_000;
 const DEFAULT_DELIVERY_BUDGET_MS = 10_000;
 const MAXIMUM_DELIVERY_BUDGET_MS = 10_000;
 
+export interface PromotionJobLivenessDeliveryDeadline {
+  readonly deadlineAt: number;
+  readonly signal: AbortSignal;
+}
+
+type DeadlineSettlement<T> =
+  | Readonly<{ state: "fulfilled"; value: T }>
+  | Readonly<{ state: "rejected" }>
+  | Readonly<{ state: "timed_out" }>;
+
+function scheduleDeliveryDeadline(
+  expire: () => void,
+  timeoutMs: number,
+): () => void {
+  const timer = setTimeout(expire, timeoutMs);
+  return () => clearTimeout(timer);
+}
+
+async function settleByDeadline<T>(
+  operation: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<DeadlineSettlement<T>> {
+  if (signal.aborted) return { state: "timed_out" };
+  let pending: Promise<T>;
+  try {
+    pending = Promise.resolve(operation());
+  } catch {
+    return { state: "rejected" };
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: DeadlineSettlement<T>) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", timedOut);
+      resolve(result);
+    };
+    const timedOut = () => finish({ state: "timed_out" });
+    signal.addEventListener("abort", timedOut, { once: true });
+    if (signal.aborted) timedOut();
+    void pending.then(
+      (value) => finish({ state: "fulfilled", value }),
+      () => finish({ state: "rejected" }),
+    );
+  });
+}
+
 export interface PromotionJobLivenessEvaluatorPort {
   runCycle(): Promise<SuccessfulPromotionJobLivenessCycle>;
 }
@@ -18,12 +65,14 @@ export interface PromotionJobLivenessConditionStorePort {
   listPendingConditionDeliveries(input: Readonly<{
     now: Date;
     limit: number;
-  }>): Promise<readonly PromotionJobLivenessConditionDelivery[]>;
+  }> & PromotionJobLivenessDeliveryDeadline): Promise<
+    readonly PromotionJobLivenessConditionDelivery[]
+  >;
   recordConditionDeliveryAttempt(input: Readonly<{
     conditionId: string;
     eventId: string;
     attemptedAt: Date;
-  }>): Promise<boolean>;
+  }> & PromotionJobLivenessDeliveryDeadline): Promise<boolean>;
   recordConditionDeliveryResult(input: Readonly<{
     conditionId: string;
     eventId: string;
@@ -35,13 +84,13 @@ export interface PromotionJobLivenessConditionStorePort {
           failureCode: string;
           retryAt: Date;
         }>;
-  }>): Promise<boolean>;
+  }> & PromotionJobLivenessDeliveryDeadline): Promise<boolean>;
 }
 
 export interface PromotionJobLivenessConditionPublisher {
   publish(
     delivery: PromotionJobLivenessConditionDelivery,
-    input: Readonly<{ deadlineAt: number }>,
+    input: PromotionJobLivenessDeliveryDeadline,
   ): Promise<Readonly<{
     state: "delivered";
   }> | Readonly<{
@@ -82,6 +131,10 @@ export class PromotionJobLivenessOneShot {
   readonly #now: () => Date;
   readonly #deliveryBudgetMs: number;
   readonly #deadlineNow: () => number;
+  readonly #scheduleDeliveryDeadline: (
+    expire: () => void,
+    timeoutMs: number,
+  ) => () => void;
 
   constructor(private readonly dependencies: Readonly<{
     evaluator: PromotionJobLivenessEvaluatorPort;
@@ -91,12 +144,18 @@ export class PromotionJobLivenessOneShot {
     deliveryBudgetMs?: number;
     now?: () => Date;
     deadlineNow?: () => number;
+    scheduleDeliveryDeadline?: (
+      expire: () => void,
+      timeoutMs: number,
+    ) => () => void;
   }>) {
     this.#limit = dependencies.deliveryLimit ?? 50;
     this.#deliveryBudgetMs = dependencies.deliveryBudgetMs
       ?? DEFAULT_DELIVERY_BUDGET_MS;
     this.#now = dependencies.now ?? (() => new Date());
     this.#deadlineNow = dependencies.deadlineNow ?? Date.now;
+    this.#scheduleDeliveryDeadline = dependencies.scheduleDeliveryDeadline
+      ?? scheduleDeliveryDeadline;
     if (
       !Number.isInteger(this.#limit)
       || this.#limit < 1
@@ -138,14 +197,7 @@ export class PromotionJobLivenessOneShot {
       };
     }
     const deadlineAt = deliveryStartedAt + this.#deliveryBudgetMs;
-    let deliveries: readonly PromotionJobLivenessConditionDelivery[];
-    try {
-      deliveries = await this.dependencies.conditions
-        .listPendingConditionDeliveries({
-          now: selectedAt,
-          limit: this.#limit,
-        });
-    } catch {
+    if (!Number.isSafeInteger(deadlineAt)) {
       return {
         state: "store_unavailable",
         selectedCount: 0,
@@ -154,41 +206,77 @@ export class PromotionJobLivenessOneShot {
         acknowledgementFailureCount: 0,
       };
     }
+    const controller = new AbortController();
+    const cancelDeadline = this.#scheduleDeliveryDeadline(
+      () => controller.abort(),
+      this.#deliveryBudgetMs,
+    );
+    try {
+      return await this.deliverPendingBeforeDeadline(selectedAt, {
+        deadlineAt,
+        signal: controller.signal,
+      });
+    } finally {
+      cancelDeadline();
+    }
+  }
+
+  private async deliverPendingBeforeDeadline(
+    selectedAt: Date,
+    deadline: PromotionJobLivenessDeliveryDeadline,
+  ): Promise<PromotionJobLivenessOneShotResult["delivery"]> {
+    const listed = await settleByDeadline(
+      () => this.dependencies.conditions.listPendingConditionDeliveries({
+        now: selectedAt,
+        limit: this.#limit,
+        ...deadline,
+      }),
+      deadline.signal,
+    );
+    if (listed.state !== "fulfilled") {
+      return {
+        state: "store_unavailable",
+        selectedCount: 0,
+        deliveredCount: 0,
+        retryScheduledCount: 0,
+        acknowledgementFailureCount: 0,
+      };
+    }
+    const deliveries = listed.value;
     let deliveredCount = 0;
     let retryScheduledCount = 0;
     let acknowledgementFailureCount = 0;
     for (const delivery of deliveries) {
-      if (this.#deadlineNow() >= deadlineAt) break;
+      if (deadline.signal.aborted) break;
       const attemptedAt = this.#now();
-      try {
-        const admitted = await this.dependencies.conditions
-          .recordConditionDeliveryAttempt({
+      const attempt = await settleByDeadline(
+        () => this.dependencies.conditions.recordConditionDeliveryAttempt({
             conditionId: delivery.conditionId,
             eventId: delivery.eventId,
             attemptedAt,
-          });
-        if (!admitted) {
-          acknowledgementFailureCount += 1;
-          continue;
-        }
-      } catch {
+            ...deadline,
+          }),
+        deadline.signal,
+      );
+      if (attempt.state === "timed_out") break;
+      if (attempt.state === "rejected" || !attempt.value) {
         acknowledgementFailureCount += 1;
         continue;
       }
-      let published:
-        | Readonly<{ state: "delivered" }>
-        | Readonly<{ state: "retryable_failure"; failureCode: string }>;
-      try {
-        published = await this.dependencies.publisher.publish(
+      const publication = await settleByDeadline(
+        () => this.dependencies.publisher.publish(
           delivery,
-          { deadlineAt },
-        );
-      } catch {
-        published = {
+          deadline,
+        ),
+        deadline.signal,
+      );
+      if (publication.state === "timed_out") break;
+      const published = publication.state === "fulfilled"
+        ? publication.value
+        : {
           state: "retryable_failure",
           failureCode: "PROMOTION_JOB_CONDITION_DELIVERY_FAILED",
-        };
-      }
+        } as const;
       const result = published.state === "delivered"
         ? { state: "delivered" as const }
         : {
@@ -198,20 +286,21 @@ export class PromotionJobLivenessOneShot {
               attemptedAt.getTime() + retryDelay(delivery.attemptCount),
             ),
           };
-      try {
-        const acknowledged = await this.dependencies.conditions
-          .recordConditionDeliveryResult({
+      const acknowledgement = await settleByDeadline(
+        () => this.dependencies.conditions.recordConditionDeliveryResult({
             conditionId: delivery.conditionId,
             eventId: delivery.eventId,
             attemptedAt,
             result,
-          });
-        if (!acknowledged) acknowledgementFailureCount += 1;
-        else if (result.state === "delivered") deliveredCount += 1;
-        else retryScheduledCount += 1;
-      } catch {
+            ...deadline,
+          }),
+        deadline.signal,
+      );
+      if (acknowledgement.state === "timed_out") break;
+      if (acknowledgement.state === "rejected" || !acknowledgement.value) {
         acknowledgementFailureCount += 1;
-      }
+      } else if (result.state === "delivered") deliveredCount += 1;
+      else retryScheduledCount += 1;
     }
     return {
       state: "complete",

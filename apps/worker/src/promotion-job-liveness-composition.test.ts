@@ -87,6 +87,7 @@ test("manifest conditions go only to the external system sink", async () => {
   );
   assert.deepEqual(await publisher.publish(systemDelivery(), {
     deadlineAt: 1_800_000_000_000,
+    signal: new AbortController().signal,
   }), {
     state: "delivered",
   });
@@ -108,6 +109,7 @@ test("malformed provider delivery is rejected before any tenant alert write", as
   };
   assert.deepEqual(await publisher.publish(malformed, {
     deadlineAt: 1_800_000_000_000,
+    signal: new AbortController().signal,
   }), {
     state: "retryable_failure",
     failureCode: "PROMOTION_JOB_CONDITION_SCOPE_INVALID",
@@ -141,6 +143,7 @@ test("provider condition alerts carry only scoped schedule evidence", async () =
   };
   assert.deepEqual(await publisher.publish(raised, {
     deadlineAt: 1_800_000_000_000,
+    signal: new AbortController().signal,
   }), { state: "delivered" });
   assert.deepEqual(received[0], {
     id: raised.eventId,
@@ -169,6 +172,7 @@ test("provider condition alerts carry only scoped schedule evidence", async () =
   };
   assert.deepEqual(await publisher.publish(recovered, {
     deadlineAt: 1_800_000_000_000,
+    signal: new AbortController().signal,
   }), { state: "delivered" });
   assert.deepEqual(received[1], {
     id: recovered.eventId,

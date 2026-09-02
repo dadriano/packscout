@@ -8,6 +8,8 @@ import type {
 import type {
   PromotionJobSystemConditionSink,
 } from "./promotion-job-liveness-composition.ts";
+import type { PromotionJobLivenessDeliveryDeadline } from
+  "./promotion-job-liveness-one-shot.ts";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -297,14 +299,17 @@ implements PromotionJobSystemConditionSink,
     delivery: PromotionJobLivenessConditionDelivery & Readonly<{
       scope: "system";
     }>,
-    input?: Readonly<{ deadlineAt: number }>,
+    input?: Readonly<{
+      deadlineAt: number;
+      signal?: AbortSignal;
+    }>,
   ): Promise<PromotionJobSystemConditionWebhookResult> {
     const payload = manifestPayload(delivery);
     return payload === null
       ? Promise.resolve(retryable(
           "PROMOTION_JOB_SYSTEM_CONDITION_SCOPE_INVALID",
         ))
-      : this.send(SYSTEM_CONDITION_PATH, payload, input?.deadlineAt);
+      : this.send(SYSTEM_CONDITION_PATH, payload, input);
   }
 
   publishEvaluatorObservation(
@@ -321,19 +326,21 @@ implements PromotionJobSystemConditionSink,
   private async send(
     path: string,
     payload: Readonly<Record<string, unknown>>,
-    deadlineAt?: number,
+    deadline?: Partial<PromotionJobLivenessDeliveryDeadline>,
   ): Promise<PromotionJobSystemConditionWebhookResult> {
     const body = JSON.stringify(payload);
     if (Buffer.byteLength(body, "utf8") > MAXIMUM_WEBHOOK_BODY_BYTES) {
       return retryable("PROMOTION_JOB_SYSTEM_CONDITION_PAYLOAD_INVALID");
     }
     const startedAt = this.#now();
-    const remainingMilliseconds = deadlineAt === undefined
+    const remainingMilliseconds = deadline?.deadlineAt === undefined
       ? this.#timeoutMilliseconds
-      : Math.floor(deadlineAt - startedAt);
+      : Math.floor(deadline.deadlineAt - startedAt);
     if (
       !Number.isSafeInteger(startedAt)
-      || (deadlineAt !== undefined && !Number.isSafeInteger(deadlineAt))
+      || (deadline?.deadlineAt !== undefined
+        && !Number.isSafeInteger(deadline.deadlineAt))
+      || deadline?.signal?.aborted === true
       || remainingMilliseconds <= 0
     ) {
       return retryable("PROMOTION_JOB_SYSTEM_CONDITION_WEBHOOK_TIMEOUT");
@@ -344,9 +351,15 @@ implements PromotionJobSystemConditionSink,
     );
     const controller = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => {
+    const abortForDeadline = () => {
       timedOut = true;
       controller.abort();
+    };
+    deadline?.signal?.addEventListener("abort", abortForDeadline, {
+      once: true,
+    });
+    const timer = setTimeout(() => {
+      abortForDeadline();
     }, timeoutMilliseconds);
     try {
       const response = await this.#fetch(`${this.#origin}${path}`, {
@@ -371,6 +384,7 @@ implements PromotionJobSystemConditionSink,
         : "PROMOTION_JOB_SYSTEM_CONDITION_WEBHOOK_UNAVAILABLE");
     } finally {
       clearTimeout(timer);
+      deadline?.signal?.removeEventListener("abort", abortForDeadline);
     }
   }
 }
