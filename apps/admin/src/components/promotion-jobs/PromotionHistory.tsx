@@ -63,14 +63,15 @@ export function PromotionHistory({
       tabIndex={0}
     >
       <table className="promotion-history-table">
+        <caption className="admin-visually-hidden">Promotion job history</caption>
         <thead>
           <tr>
-            <th>Job</th>
-            <th>Status</th>
-            <th>Started</th>
-            <th>Duration</th>
-            <th>Work</th>
-            <th>Failure</th>
+            <th scope="col">Job</th>
+            <th scope="col">Status</th>
+            <th scope="col">Started</th>
+            <th scope="col">Duration</th>
+            <th scope="col">Work</th>
+            <th scope="col">Failure</th>
           </tr>
         </thead>
         <tbody>{page.items.map((item) => <InvocationRow key={item.monitoringId} invocation={item} />)}</tbody>

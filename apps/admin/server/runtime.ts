@@ -4,6 +4,7 @@ import {
   CentralAuthRepository,
   CentralLoginAttemptLimiter,
   CentralWorkerPresenceRepository,
+  ProviderReleaseCentralRepository,
   createCentralDatabaseLifecycle,
   type CentralPrismaClient,
   type PrismaWorkerFleetReadRepository,
@@ -34,6 +35,10 @@ import { withProductUserProfiles } from "./product-user-profiles.ts";
 import { createPrivyProductUserProfileReader } from "./privy-product-user-profile.ts";
 import { createCentralProviderAdminRuntime } from "./provider-runtime.ts";
 import { createPublishedCatalogReader } from "./published-catalog-reader.ts";
+import {
+  ProviderPromotionBootstrapService,
+  readProviderPromotionBootstrapCredentials,
+} from "./promotion-job-provider-bootstrap.ts";
 import {
   adminDevelopmentAllowedOrigins,
   readAllowedOrigins,
@@ -226,6 +231,11 @@ export async function createAdminRuntime(
     token: environment.PACKSCOUT_ADMIN_DIRECTORY_TOKEN,
   });
   const emailLinkTokenSecret = resolveEmailLinkTokenSecret(environment);
+  const providerPromotionBootstrapCredentials =
+    readProviderPromotionBootstrapCredentials(
+      environment
+        .PACKSCOUT_PROMOTION_PROVIDER_BOOTSTRAP_TOKEN_SHA256_BY_PROVIDER_JSON,
+    );
   const centralLifecycle = createCentralDatabaseLifecycle({
     databaseUrl: centralDatabaseUrl,
   });
@@ -280,6 +290,15 @@ export async function createAdminRuntime(
       trustedProxyHops: input.trustedProxyHops,
       auth,
       providers: createCentralProviderAdminRuntime(central),
+      providerPromotionBootstrap:
+        providerPromotionBootstrapCredentials === null
+          ? undefined
+          : {
+              bootstrap: new ProviderPromotionBootstrapService({
+                credentials: providerPromotionBootstrapCredentials,
+                repository: new ProviderReleaseCentralRepository(central),
+              }),
+            },
       ...providerRuntime.app,
       workerFleet: createDistributedAdminWorkerFleetRuntime({
         presence: new CentralWorkerPresenceRepository(central),

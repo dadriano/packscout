@@ -56,14 +56,26 @@ export function parsePromotionHistoryLocation(
 function SectionState<T>({
   state,
   loadingLabel,
+  retryLabel,
   children,
 }: {
   state: PromotionJobLiveRead<T>;
   loadingLabel: string;
+  retryLabel: string;
   children: (data: T) => ReactNode;
 }) {
   if (state.loading && state.data === null) {
-    return <div className="ops-loading" aria-live="polite" aria-busy="true">{loadingLabel}</div>;
+    return (
+      <div
+        className="ops-loading"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-busy="true"
+      >
+        {loadingLabel}
+      </div>
+    );
   }
   return (
     <>
@@ -73,10 +85,16 @@ function SectionState<T>({
             {state.error}
             {state.stale ? " Last safe evidence for this exact view remains below and is marked stale." : ""}
           </p>
-          <button type="button" className="admin-button admin-button-secondary" onClick={state.reload}>Try again</button>
+          <button type="button" className="admin-button admin-button-secondary" onClick={state.reload}>
+            {retryLabel}
+          </button>
         </div>
       ) : null}
-      {state.refreshing ? <span className="promotion-refreshing" role="status">Refreshing…</span> : null}
+      {state.refreshing ? (
+        <span className="promotion-refreshing" role="status" aria-atomic="true">
+          Refreshing…
+        </span>
+      ) : null}
       {state.data ? children(state.data) : null}
     </>
   );
@@ -138,8 +156,8 @@ export function PromotionJobsPage() {
         }
       />
 
-      <aside className="promotion-readonly-note">
-        <strong>Independent by design</strong>
+      <aside className="promotion-readonly-note" aria-labelledby="promotion-readonly-title">
+        <strong id="promotion-readonly-title">Independent by design</strong>
         <p>
           Each provider publishes on its own. Central activates only that
           provider, so a delayed provider does not block a healthy one.
@@ -147,7 +165,11 @@ export function PromotionJobsPage() {
         </p>
       </aside>
 
-      <SectionState state={overview} loadingLabel="Loading current promotion status…">
+      <SectionState
+        state={overview}
+        loadingLabel="Loading current promotion status…"
+        retryLabel="Retry current promotion status"
+      >
         {(data) => <PromotionOverview overview={data} />}
       </SectionState>
 
@@ -202,7 +224,11 @@ export function PromotionJobsPage() {
             <button type="button" className="admin-button admin-button-secondary" onClick={resetFilters}>Reset filters</button>
           </div>
         ) : history ? (
-          <SectionState state={history} loadingLabel="Loading promotion job history…">
+          <SectionState
+            state={history}
+            loadingLabel="Loading promotion job history…"
+            retryLabel="Retry promotion job history"
+          >
             {(data) => <PromotionHistory page={data} />}
           </SectionState>
         ) : null}

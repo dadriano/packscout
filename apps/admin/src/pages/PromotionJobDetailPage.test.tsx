@@ -5,6 +5,7 @@ import * as React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   cleanupPage,
+  deferred,
   jsonResponse,
   pageText,
   renderPage,
@@ -88,10 +89,61 @@ test("shows bounded safe attempt evidence with semantic, keyboard-openable detai
   assert.match(text, /At most 25 attempts and 25 operations per attempt are shown/);
   assert.match(text, /Attempt 1/);
   assert.equal(rendered.container.querySelectorAll("details").length, 1);
-  assert.ok(rendered.container.querySelector("summary"));
+  const summary = rendered.container.querySelector<HTMLElement>("summary");
+  assert.ok(summary);
+  assert.equal(summary.tabIndex, 0);
+  summary.focus();
+  assert.equal(rendered.dom.window.document.activeElement, summary);
   assert.equal(rendered.container.querySelectorAll(".promotion-operation-table tbody tr").length, 1);
+  assert.equal(rendered.container.querySelectorAll("h1").length, 1);
+  for (const section of rendered.container.querySelectorAll<HTMLElement>("section[aria-labelledby]")) {
+    const reference = section.getAttribute("aria-labelledby");
+    assert.ok(reference);
+    assert.ok(rendered.dom.window.document.getElementById(reference));
+  }
+  const operationTable = rendered.container.querySelector<HTMLTableElement>(".promotion-operation-table");
+  assert.ok(operationTable);
+  assert.ok(operationTable.caption?.textContent?.includes("Attempt 1 operations"));
+  assert.equal(operationTable.querySelectorAll('thead th:not([scope="col"])').length, 0);
+  assert.equal(operationTable.querySelectorAll('tbody th:not([scope="row"])').length, 0);
+  const operationRegion = rendered.container.querySelector<HTMLElement>(
+    '.promotion-table-region[role="region"][aria-label="Attempt 1 operations"]',
+  );
+  assert.equal(operationRegion?.tabIndex, 0);
   assert.doesNotMatch(rendered.container.innerHTML, /requestBody|responseBody|receiptBody|credential|claimToken/u);
   assert.equal(rendered.container.querySelectorAll("button").length, 0);
+});
+
+test("announces detail loading as a polite busy status", async (context) => {
+  const load = deferred<Response>();
+  stubFetch(context, () => load.promise);
+  const rendered = await renderPage(route(monitoringId));
+  cleanupPage(context, rendered);
+
+  assert.equal(rendered.container.querySelectorAll("h1").length, 1);
+  const status = rendered.container.querySelector<HTMLElement>(
+    '[role="status"][aria-live="polite"][aria-atomic="true"][aria-busy="true"]',
+  );
+  assert.equal(status?.textContent?.trim(), "Loading promotion job evidence…");
+
+  load.resolve(jsonResponse(detail));
+  await settlePage();
+});
+
+test("reports a detail failure with an unambiguous retry control", async (context) => {
+  stubFetch(context, () => jsonResponse(
+    { error: "Unavailable", code: "SERVICE_UNAVAILABLE" },
+    503,
+  ));
+  const rendered = await renderPage(route(monitoringId));
+  cleanupPage(context, rendered);
+  await settlePage();
+
+  const alert = rendered.container.querySelector<HTMLElement>('[role="alert"]');
+  assert.match(alert?.textContent ?? "", /promotion job is temporarily unavailable/);
+  const retry = alert?.querySelector<HTMLButtonElement>("button");
+  assert.equal(retry?.textContent?.trim(), "Retry promotion job detail");
+  assert.equal(retry?.type, "button");
 });
 
 test("rejects a non-opaque detail path before any monitoring request", async (context) => {

@@ -16,7 +16,15 @@ function ValidPromotionJobDetailPage({ monitoringId }: { monitoringId: string })
         actions={<Link className="admin-button admin-button-secondary" to="/promotion-jobs">Back to promotion jobs</Link>}
       />
       {detail.loading && detail.data === null ? (
-        <div className="ops-loading" aria-live="polite" aria-busy="true">Loading promotion job evidence…</div>
+        <div
+          className="ops-loading"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-busy="true"
+        >
+          Loading promotion job evidence…
+        </div>
       ) : null}
       {detail.error ? (
         <div className="ops-error" role="alert">
@@ -24,10 +32,16 @@ function ValidPromotionJobDetailPage({ monitoringId }: { monitoringId: string })
             {detail.error}
             {detail.stale ? " Last safe evidence for this exact job remains below and is marked stale." : ""}
           </p>
-          <button type="button" className="admin-button admin-button-secondary" onClick={detail.reload}>Try again</button>
+          <button type="button" className="admin-button admin-button-secondary" onClick={detail.reload}>
+            Retry promotion job detail
+          </button>
         </div>
       ) : null}
-      {detail.refreshing ? <span className="promotion-refreshing" role="status">Refreshing…</span> : null}
+      {detail.refreshing ? (
+        <span className="promotion-refreshing" role="status" aria-atomic="true">
+          Refreshing…
+        </span>
+      ) : null}
       {detail.data ? <PromotionJobDetail detail={detail.data} /> : null}
     </div>
   );

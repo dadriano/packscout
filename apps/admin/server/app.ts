@@ -66,6 +66,10 @@ import {
   createPromotionJobsRouter,
   type PromotionJobsRouterDependencies,
 } from "./routes/promotion-jobs.ts";
+import {
+  createProviderPromotionBootstrapRouter,
+  type ProviderPromotionBootstrapRouterDependencies,
+} from "./routes/promotion-job-provider-bootstrap.ts";
 
 export interface AdminAuthHttpDependencies {
   service: AuthService;
@@ -119,6 +123,7 @@ export interface AdminAppDependencies {
     PromotionJobsRouterDependencies,
     "auth" | "cookiePolicy"
   >;
+  providerPromotionBootstrap?: ProviderPromotionBootstrapRouterDependencies;
   canonical?: DataInspectionRouterDependencies["canonical"];
   published?: DataInspectionRouterDependencies["published"];
   parity?: DataInspectionRouterDependencies["parity"];
@@ -152,6 +157,17 @@ const sourceAdministrationUnconfigured: RequestHandler = (
   response.status(503).json({
     error: "Source administration is not configured on this deployment.",
     code: "SOURCE_ADMIN_UNCONFIGURED",
+  });
+};
+
+const promotionBootstrapUnconfigured: RequestHandler = (
+  _request,
+  response,
+) => {
+  response.setHeader("Cache-Control", "no-store");
+  response.status(503).json({
+    error: "Provider promotion bootstrap is temporarily unavailable.",
+    code: "PROVIDER_PROMOTION_BOOTSTRAP_UNAVAILABLE",
   });
 };
 
@@ -206,6 +222,14 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}) {
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api/health", createHealthRouter());
+  app.use(
+    "/api/internal/promotion-jobs/provider-bootstrap",
+    dependencies.providerPromotionBootstrap
+      ? createProviderPromotionBootstrapRouter(
+          dependencies.providerPromotionBootstrap,
+        )
+      : promotionBootstrapUnconfigured,
+  );
   if (dependencies.auth) {
     const { service, cookiePolicy, sameOrigin } = dependencies.auth;
     app.use(

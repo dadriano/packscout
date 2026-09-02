@@ -225,6 +225,33 @@ function requestPath(input: RequestInfo | URL): string {
   return String(input);
 }
 
+function assertLabelledByReferencesResolve(container: HTMLElement): void {
+  for (const element of container.querySelectorAll<HTMLElement>("[aria-labelledby]")) {
+    const references = element.getAttribute("aria-labelledby")?.split(/\s+/u) ?? [];
+    assert.ok(references.length > 0, "aria-labelledby must contain a reference");
+    for (const reference of references) {
+      assert.ok(
+        container.ownerDocument.getElementById(reference),
+        `aria-labelledby reference ${reference} must resolve`,
+      );
+    }
+  }
+}
+
+function assertSemanticTable(table: HTMLTableElement): void {
+  assert.ok(table.caption?.textContent?.trim(), "data tables need an accessible caption");
+  assert.equal(
+    table.querySelectorAll('thead th:not([scope="col"])').length,
+    0,
+    "every column header declares column scope",
+  );
+  assert.equal(
+    table.querySelectorAll('tbody th:not([scope="row"])').length,
+    0,
+    "every row header declares row scope",
+  );
+}
+
 test("renders central activation and each independent provider exactly once without mutation controls", async (context) => {
   stubFetch(context, ({ input }) => requestPath(input).includes("/overview")
     ? jsonResponse(overviewFixture())
@@ -241,10 +268,79 @@ test("renders central activation and each independent provider exactly once with
   assert.match(text, /Disabled, but its last release is still active/);
   assert.equal(rendered.container.querySelectorAll(".promotion-provider-table tbody tr").length, 3);
   assert.equal(rendered.container.querySelectorAll('a[href="/data/published?provider=alpha"]').length, 1);
+  assert.equal(rendered.container.querySelectorAll("h1").length, 1);
+  assertLabelledByReferencesResolve(rendered.container);
+  const landmarkLabels = [...rendered.container.querySelectorAll("aside")]
+    .map((landmark) => landmark.getAttribute("aria-labelledby"));
+  assert.deepEqual(landmarkLabels, [
+    "promotion-readonly-title",
+    "promotion-evaluator-title",
+  ]);
+  assert.equal(new Set(landmarkLabels).size, landmarkLabels.length);
+  for (const table of rendered.container.querySelectorAll("table")) {
+    assertSemanticTable(table);
+  }
+  const tableRegions = [...rendered.container.querySelectorAll<HTMLElement>('.promotion-table-region[role="region"]')];
+  assert.equal(tableRegions.length, 2);
+  assert.ok(tableRegions.every((region) => region.tabIndex === 0));
+  assert.ok(tableRegions.every((region) => Boolean(region.getAttribute("aria-label")?.trim())));
+  assert.equal(
+    rendered.container.querySelector('a[aria-label="Latest central job: Caught up"]')?.textContent,
+    "Caught up",
+  );
+  assert.equal(
+    rendered.container.querySelector('a[aria-label="Latest job for Alpha Cards: Caught up"]')?.textContent,
+    "Caught up",
+  );
+  for (const id of ["promotion-filter", "promotion-trigger", "promotion-outcome"]) {
+    assert.ok(rendered.container.querySelector(`label[for="${id}"]`));
+  }
   for (const forbidden of ["Run job", "Retry job", "Cancel", "Pause", "Rollback", "Activate"]) {
     assert.doesNotMatch(text, new RegExp(`\\b${forbidden}\\b`, "u"));
   }
   assert.doesNotMatch(rendered.container.innerHTML, /databaseUrl|organizationId|credential|claimToken/u);
+});
+
+test("announces both loading regions without hiding the page heading", async (context) => {
+  const overviewLoad = deferred<Response>();
+  const historyLoad = deferred<Response>();
+  stubFetch(context, ({ input }) => requestPath(input).includes("/overview")
+    ? overviewLoad.promise
+    : historyLoad.promise);
+  const rendered = await renderPage(route());
+  cleanupPage(context, rendered);
+
+  assert.equal(rendered.container.querySelectorAll("h1").length, 1);
+  const loadingRegions = [...rendered.container.querySelectorAll<HTMLElement>(
+    '[role="status"][aria-live="polite"][aria-atomic="true"][aria-busy="true"]',
+  )];
+  assert.deepEqual(
+    loadingRegions.map((region) => region.textContent?.trim()),
+    ["Loading current promotion status…", "Loading promotion job history…"],
+  );
+
+  overviewLoad.resolve(jsonResponse(overviewFixture()));
+  historyLoad.resolve(jsonResponse(historyFixture()));
+  await settlePage();
+});
+
+test("gives simultaneous overview and history failures distinct retry names", async (context) => {
+  stubFetch(context, () => jsonResponse(
+    { error: "Unavailable", code: "SERVICE_UNAVAILABLE" },
+    503,
+  ));
+  const rendered = await renderPage(route());
+  cleanupPage(context, rendered);
+  await settlePage();
+
+  assert.equal(rendered.container.querySelectorAll('[role="alert"]').length, 2);
+  const retryNames = [...rendered.container.querySelectorAll<HTMLButtonElement>('[role="alert"] button')]
+    .map((button) => button.textContent?.trim());
+  assert.deepEqual(retryNames, [
+    "Retry current promotion status",
+    "Retry promotion job history",
+  ]);
+  assert.equal(new Set(retryNames).size, retryNames.length);
 });
 
 test("invalid shared URL filters stay visible and never broaden into a history read", async (context) => {

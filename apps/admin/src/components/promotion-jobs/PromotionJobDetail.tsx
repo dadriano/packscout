@@ -38,7 +38,18 @@ function Attempt({ attempt }: { attempt: PromotionJobAttemptMonitoring }) {
       {attempt.operations.length > 0 ? (
         <div className="promotion-table-region" role="region" aria-label={`Attempt ${attempt.attemptNumber} operations`} tabIndex={0}>
           <table className="promotion-operation-table">
-            <thead><tr><th>#</th><th>Kind</th><th>State</th><th>Sends</th><th>Sent</th><th>Acknowledged</th><th>Evidence digests</th></tr></thead>
+            <caption className="admin-visually-hidden">Attempt {attempt.attemptNumber} operations</caption>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Kind</th>
+                <th scope="col">State</th>
+                <th scope="col">Sends</th>
+                <th scope="col">Sent</th>
+                <th scope="col">Acknowledged</th>
+                <th scope="col">Evidence digests</th>
+              </tr>
+            </thead>
             <tbody>
               {attempt.operations.map((operation) => (
                 <tr key={operation.operationNumber}>

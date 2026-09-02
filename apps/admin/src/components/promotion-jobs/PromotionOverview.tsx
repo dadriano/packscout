@@ -14,11 +14,16 @@ import {
 
 function latestJobLink(
   invocation: ProviderPromotionJobMonitoring["latestInvocation"],
+  providerName: string,
 ) {
   if (!invocation) return <span>None recorded</span>;
+  const outcome = humanize(invocation.outcome ?? invocation.state);
   return (
-    <Link to={`/promotion-jobs/${invocation.monitoringId}`}>
-      {humanize(invocation.outcome ?? invocation.state)}
+    <Link
+      to={`/promotion-jobs/${invocation.monitoringId}`}
+      aria-label={`Latest job for ${providerName}: ${outcome}`}
+    >
+      {outcome}
     </Link>
   );
 }
@@ -34,10 +39,13 @@ function EvaluatorNotice({
     evaluator.rosterDigest !== null && evaluator.rosterDigest !== rosterDigest;
   if (evaluator.state === "current" && !rosterChanged) {
     return (
-      <aside className="promotion-evaluator promotion-evaluator--current">
+      <aside
+        className="promotion-evaluator promotion-evaluator--current"
+        aria-labelledby="promotion-evaluator-title"
+      >
         <div>
           <span className="admin-kicker">Liveness evaluator</span>
-          <strong>Current for this provider roster</strong>
+          <strong id="promotion-evaluator-title">Current for this provider roster</strong>
         </div>
         <dl>
           <div><dt>Reachable</dt><dd>{evaluator.reachableCount ?? "—"}</dd></div>
@@ -51,11 +59,12 @@ function EvaluatorNotice({
     <aside
       className="promotion-evaluator promotion-evaluator--attention"
       role="status"
+      aria-labelledby="promotion-evaluator-title"
       aria-live="polite"
     >
       <div>
         <span className="admin-kicker">Liveness evaluator</span>
-        <strong>
+        <strong id="promotion-evaluator-title">
           {rosterChanged
             ? "Provider roster changed; liveness is last-known"
             : evaluator.state === "stale"
@@ -173,7 +182,10 @@ function ManifestCoordinator({
       <div className="promotion-latest-job">
         <span>Latest central job</span>
         {manifest.latestInvocation ? (
-          <Link to={`/promotion-jobs/${manifest.latestInvocation.monitoringId}`}>
+          <Link
+            to={`/promotion-jobs/${manifest.latestInvocation.monitoringId}`}
+            aria-label={`Latest central job: ${humanize(manifest.latestInvocation.outcome ?? manifest.latestInvocation.state)}`}
+          >
             {humanize(manifest.latestInvocation.outcome ?? manifest.latestInvocation.state)}
           </Link>
         ) : <strong>None recorded</strong>}
@@ -232,14 +244,15 @@ function ProviderRoster({
         tabIndex={0}
       >
         <table className="promotion-provider-table">
+          <caption className="admin-visually-hidden">Provider promotion status</caption>
           <thead>
             <tr>
-              <th>Provider</th>
-              <th>Publication</th>
-              <th>Central selection</th>
-              <th>Schedule</th>
-              <th>Evidence</th>
-              <th>Latest job</th>
+              <th scope="col">Provider</th>
+              <th scope="col">Publication</th>
+              <th scope="col">Central selection</th>
+              <th scope="col">Schedule</th>
+              <th scope="col">Evidence</th>
+              <th scope="col">Latest job</th>
             </tr>
           </thead>
           <tbody>
@@ -284,7 +297,7 @@ function ProviderRoster({
                     {provider.routeFailureCode ? <code>{provider.routeFailureCode}</code> : null}
                   </td>
                   <td data-label="Latest job">
-                    {latestJobLink(provider.latestInvocation)}
+                    {latestJobLink(provider.latestInvocation, provider.displayName)}
                     {provider.latestInvocation ? (
                       <small><MonitoringTime value={provider.latestInvocation.finishedAt ?? provider.latestInvocation.startedAt} /></small>
                     ) : null}
