@@ -68,6 +68,7 @@ test("head progress survives a callback crash, resumes receipts without source r
     assert.equal(child.page_count, 0); assert.equal(child.reached_source_head, true);
     const proof = await readProviderRunHeadProof(client, child.id);
     assert.equal(proof?.sourceRunId, runId); assert.equal(proof?.reconciliationComplete, false);
+    assert.equal(proof?.reconciliationBatchNumber, 1);
     await client.provider_runtime.update({ where: { singleton_key: true }, data: { cached_config_version_id: randomUUID(), row_version: { increment: 1n } } });
     assert.equal(await readProviderRunHeadProof(client, child.id), null);
     assert.equal(await new PrismaProviderHeadReconciliationRepository(client).step({ runId: child.id, workerId, workerFence: child.worker_fence }), "run_not_ready");
@@ -92,7 +93,9 @@ test("head progress survives a callback crash, resumes receipts without source r
     assert.equal(terminal.state, "succeeded"); assert.equal(terminal.page_count, 0); assert.equal(terminal.accepted_count, 0);
     assert.equal(await client.local_audit_events.count({ where: { action: PROVIDER_HEAD_RECONCILIATION_ACTION, target_id: child.id } }), 2);
     assert.equal((await client.provider_runs.findUniqueOrThrow({ where: { id: runId } })).state, "incomplete");
-    assert.equal((await readProviderRunHeadProof(client, child.id))?.reconciliationComplete, true);
+    const terminalProof = await readProviderRunHeadProof(client, child.id);
+    assert.equal(terminalProof?.reconciliationComplete, true);
+    assert.equal(terminalProof?.reconciliationBatchNumber, 2);
     assert.equal(JSON.stringify(before.details).includes("target-"), false, "Audit positions must contain canonical UUIDs, never source keys.");
   } finally { await harness.close(); }
 });

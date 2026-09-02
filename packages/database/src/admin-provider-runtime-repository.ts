@@ -18,6 +18,14 @@ const TRANSACTION_OPTIONS = Object.freeze({
   timeout: 15_000,
   isolationLevel: ProviderPrisma.TransactionIsolationLevel.Serializable,
 });
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const COMMAND_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/u;
+const COMMAND_GENERATION_PATTERN = /^(?:0|[1-9][0-9]{0,18})$/u;
+const MAXIMUM_DATABASE_BIGINT = 9_223_372_036_854_775_807n;
+
+function requireCommandUuid(value: string): void {
+  if (!UUID_PATTERN.test(value)) throw new TypeError("commandId must be a UUID.");
+}
 
 export type AdminLocalRunState =
   | "queued"
@@ -113,6 +121,23 @@ export interface AdminLocalProviderOverview {
     readonly startedAt: Date;
     readonly failureCode: string | null;
   } | null;
+}
+
+export interface AdminRuntimeCommandRecord {
+  readonly id: string;
+  readonly idempotencyKey: string;
+  readonly commandType: "run" | "pause" | "resume" | "stop" | "retry_run" | "retry_quarantine";
+  readonly state: "pending" | "accepted" | "rejected" | "completed" | "failed";
+  readonly targetRunId: string | null;
+  readonly targetQuarantineId: string | null;
+  readonly expectedGeneration: bigint;
+  readonly requestedByOperatorId: string;
+  readonly correlationId: string;
+  readonly reason: string | null;
+  readonly result: Readonly<{ outcome: ProviderCommandOutcome; code: string; generation: string }> | null;
+  readonly resultingRunId: string | null;
+  readonly requestedAt: Date;
+  readonly completedAt: Date | null;
 }
 
 export type AdminRunNowPersistenceResult =
@@ -417,6 +442,28 @@ export class PrismaAdminProviderRuntimeRepository {
         reasonCode: entry.reason_code,
       })),
     };
+  }
+
+  async getRuntimeCommand(commandId: string): Promise<AdminRuntimeCommandRecord | null> {
+    requireCommandUuid(commandId);
+    const row = await this.database.control_commands.findUnique({ where: { id: commandId } });
+    if (!row) return null;
+    const stored = typeof row.result === "object" && row.result !== null && !Array.isArray(row.result)
+      ? row.result as Record<string, unknown> : null;
+    const outcome = stored?.outcome;
+    const code = stored?.code;
+    const generation = stored?.generation;
+    const result = typeof outcome === "string" &&
+      ["accepted", "deduplicated", "conflict", "forbidden", "failed"].includes(outcome) &&
+      typeof code === "string" && COMMAND_CODE_PATTERN.test(code) &&
+      typeof generation === "string" && COMMAND_GENERATION_PATTERN.test(generation) &&
+      BigInt(generation) <= MAXIMUM_DATABASE_BIGINT
+      ? Object.freeze({ outcome: outcome as ProviderCommandOutcome, code, generation }) : null;
+    return Object.freeze({ id: row.id, idempotencyKey: row.idempotency_key, commandType: row.command_type,
+      state: row.state, targetRunId: row.target_run_id, targetQuarantineId: row.target_quarantine_id,
+      expectedGeneration: row.expected_generation, requestedByOperatorId: row.requested_by_operator_id,
+      correlationId: row.correlation_id, reason: row.reason, result, resultingRunId: row.resulting_run_id,
+      requestedAt: row.requested_at, completedAt: row.completed_at });
   }
 
   async requestRunNow(input: {

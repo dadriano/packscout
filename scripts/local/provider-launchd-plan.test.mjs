@@ -12,16 +12,23 @@ test("launchd plan preserves exact pins, checkout and selective crash restart wi
   assert.equal(plan.label, "com.packscout.provider-import.clutchpacks");
   assert.equal(plan.workingDirectory, input.checkoutRoot);
   assert.equal(plan.restartPolicy, "unexpected_exit_only");
-  assert.deepEqual(parseContinuousArguments(plan.arguments.slice(4)), { mode: "--run", pins, bootstrapBackfill: true, launchd: true });
+  assert.deepEqual(parseContinuousArguments(plan.arguments.slice(4)), {
+    mode: "--run", pins, bootstrapBackfill: true, awaitInitialRun: false, launchd: true,
+  });
   assert.match(plan.plist, /<key>KeepAlive<\/key><dict><key>SuccessfulExit<\/key><false\/><\/dict>/);
   assert.match(plan.plist, /reviewed &amp; coherent tree/);
   assert.equal(/DATABASE_URL|CREDENTIAL|TOKEN|PASSWORD|SECRET/u.test(plan.plist), false);
   const headOnly = createProviderLaunchdPlan({ ...input, bootstrapBackfill: false });
   assert.equal(parseContinuousArguments(headOnly.arguments.slice(4)).bootstrapBackfill, false);
+  const awaited = createProviderLaunchdPlan({ ...input, awaitInitialRun: true });
+  assert.deepEqual(parseContinuousArguments(awaited.arguments.slice(4)), {
+    mode: "--run", pins, bootstrapBackfill: true, awaitInitialRun: true, launchd: true,
+  });
 });
 test("launchd rejects invalid host/path/pins and CLI rejects duplicated or invalid activation flags", () => {
   for (const changed of [{ platform: "linux" }, { checkoutRoot: "relative" }, { nodeExecutable: "node" },
-    { logPath: "/private/log\nextra" }, { pins: { ...pins, providerKey: "unknown" } }]) {
+    { logPath: "/private/log\nextra" }, { pins: { ...pins, providerKey: "unknown" } },
+    { bootstrapBackfill: false, awaitInitialRun: true }]) {
     assert.throws(() => createProviderLaunchdPlan({ ...input, ...changed }));
   }
   const args = createProviderLaunchdPlan(input).arguments.slice(4);

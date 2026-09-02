@@ -1,4 +1,5 @@
-import { classifyBackfillCheckpoint, type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
+import { classifyBackfillCheckpoint, refuseBackfill,
+  type BackfillPins } from "./provider-backfill-supervisor-policy.mts";
 import { backfillHasOwnedExpiredHeadLease, type BackfillView } from "./provider-backfill-supervisor.mts";
 import { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
 export { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
@@ -29,7 +30,12 @@ export async function superviseResidentBootstrap(port: ResidentBootstrapPort, si
         await port.wait(continuousObservationMilliseconds); continue;
       }
       if (view.handoff) return residentContinuousPins(view.handoff);
+      if ("awaitingInitialRun" in view && view.awaitingInitialRun) {
+        port.emit({ state: "waiting_initial_run" });
+        await port.wait(continuousObservationMilliseconds); continue;
+      }
       const backfill = view.backfill;
+      if (!backfill) refuseBackfill("CONTINUOUS_BOOTSTRAP_VIEW_INVALID");
       if (backfill.snapshot.state === "paused") {
         port.emit({ state: "paused", runId: backfill.snapshot.run.id });
         await port.wait(continuousObservationMilliseconds); continue;
@@ -43,7 +49,8 @@ export async function superviseResidentBootstrap(port: ResidentBootstrapPort, si
       const disposition = backfillHasOwnedExpiredHeadLease(backfill) ? "execute" : classifyBackfillCheckpoint(backfill.snapshot);
       if (disposition === "head") {
         port.emit({ state: "handoff", runId: backfill.snapshot.run.id });
-        return residentContinuousPins(await port.persist(backfill));
+        await port.persist(backfill);
+        continue;
       }
       port.emit({ state: "backfilling", runId: backfill.snapshot.run.id });
       if (await port.execute() === "operator_stop") {

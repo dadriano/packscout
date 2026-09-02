@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ENDPOINT,
   type LaunchProviderKey,
 } from "@packscout/contracts";
@@ -63,8 +65,11 @@ function laneState(
   lane: (typeof lanes)[number],
   index: number,
 ): LaneState {
+  const adapterKey = lane.providerKey === "clutchpacks"
+    ? DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION
+    : DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION;
   const integration = providerDataforrestLiveIntegrationRegistry
-    .resolveProvider(lane.providerKey);
+    .resolve(lane.providerKey, adapterKey);
   if (integration === null) {
     throw new TypeError(`Missing ${lane.providerKey} integration fixture.`);
   }

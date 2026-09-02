@@ -9,6 +9,7 @@ export interface ProviderRunHeadProof {
   readonly runId: string; readonly sourceRunId: string; readonly headPageId: string; readonly pageNumber: number;
   readonly checkpointHash: string | null; readonly configVersionId: string; readonly configVersionNumber: bigint;
   readonly fullReplay: boolean; readonly reconciliationComplete: boolean;
+  readonly reconciliationBatchNumber: number;
   readonly receipt: Readonly<{ details: Prisma.JsonValue; outcome: string; targetType: string; workerFence: bigint }> | null;
 }
 const fingerprint = (value: Prisma.JsonValue) => providerMixedCursorFingerprint(value as CanonicalJsonValue);
@@ -35,7 +36,7 @@ export async function readProviderRunHeadProof(database: ProviderQueryClient, ru
     if (page) {
       if (page.continuation !== "head" || page.page_number !== run.page_count
         || page.next_cursor_hash !== runtime.source_cursor_hash || fingerprint(page.next_cursor) !== runtime.source_cursor_hash) return null;
-      let reconciliationComplete = false;
+      let reconciliationComplete = false; let reconciliationBatchNumber = 0;
       if (receipt) {
         try {
           const progress = parseProviderHeadProgress(receipt.details);
@@ -44,11 +45,13 @@ export async function readProviderRunHeadProof(database: ProviderQueryClient, ru
             || progress.checkpointHash !== runtime.source_cursor_hash
             || progress.leaseFence !== receipt.workerFence.toString()) return null;
           reconciliationComplete = progress.phase === "complete";
+          reconciliationBatchNumber = progress.batchNumber;
         } catch { return null; }
       }
       return { runId, sourceRunId: run.id, headPageId: page.id, pageNumber: page.page_number,
         checkpointHash: runtime.source_cursor_hash, configVersionId: run.config_version_id,
-        configVersionNumber: run.config_version_number, fullReplay: run.requested_cursor === null && run.requested_cursor_hash === null, reconciliationComplete, receipt };
+        configVersionNumber: run.config_version_number, fullReplay: run.requested_cursor === null && run.requested_cursor_hash === null,
+        reconciliationComplete, reconciliationBatchNumber, receipt };
     }
     if (run.page_count !== 0 || run.trigger !== "recovery" || !run.recovery_of_run_id
       || run.requested_cursor_hash !== runtime.source_cursor_hash || fingerprint(run.requested_cursor) !== runtime.source_cursor_hash) return null;
