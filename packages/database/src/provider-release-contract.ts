@@ -169,7 +169,11 @@ function invalid(code: ProviderReleaseValidationCode, message: string): never {
   throw new ProviderReleaseValidationError(code, message);
 }
 
-async function validatePinnedInputs(pin: PinnedProviderReleaseInputs): Promise<void> {
+async function validatePinnedInputs(
+  pin: PinnedProviderReleaseInputs,
+  checkpoint?: () => void,
+): Promise<void> {
+  checkpoint?.();
   if (
     pin.centralSchemaVersion !== CENTRAL_SCHEMA_VERSION
     || pin.catalogSchemaVersion !== "catalog-v1"
@@ -199,10 +203,16 @@ async function validatePinnedInputs(pin: PinnedProviderReleaseInputs): Promise<v
     invalid("PUBLIC_PROJECTION_INVALID", "The pinned public provider hash is invalid.");
   }
   const categoryIdentityCount = new Set(
-    pin.categoryCorrelations.map(({ localCategoryId }) => localCategoryId),
+    pin.categoryCorrelations.map(({ localCategoryId }) => {
+      checkpoint?.();
+      return localCategoryId;
+    }),
   ).size;
   const collectibleIdentityCount = new Set(
-    pin.collectibleCorrelations.map(({ localCollectibleId }) => localCollectibleId),
+    pin.collectibleCorrelations.map(({ localCollectibleId }) => {
+      checkpoint?.();
+      return localCollectibleId;
+    }),
   ).size;
   if (
     categoryIdentityCount !== pin.categoryCorrelations.length
@@ -213,15 +223,22 @@ async function validatePinnedInputs(pin: PinnedProviderReleaseInputs): Promise<v
   const correlationHash = await providerReleaseCorrelationSnapshotHash({
     providerId: pin.providerId,
     correlationEventSequence: pin.correlationEventSequence.toString(),
-    categories: pin.categoryCorrelations.map((row) => ({
-      ...row,
-      localEntityVersion: row.localEntityVersion.toString(),
-    })),
-    collectibles: pin.collectibleCorrelations.map((row) => ({
-      ...row,
-      localEntityVersion: row.localEntityVersion.toString(),
-    })),
+    categories: pin.categoryCorrelations.map((row) => {
+      checkpoint?.();
+      return {
+        ...row,
+        localEntityVersion: row.localEntityVersion.toString(),
+      };
+    }),
+    collectibles: pin.collectibleCorrelations.map((row) => {
+      checkpoint?.();
+      return {
+        ...row,
+        localEntityVersion: row.localEntityVersion.toString(),
+      };
+    }),
   });
+  checkpoint?.();
   if (correlationHash !== pin.correlationSnapshotHash) {
     invalid("PUBLIC_REFERENCE_INVALID", "The pinned correlation hash is invalid.");
   }
@@ -237,6 +254,7 @@ async function validatePinnedInputs(pin: PinnedProviderReleaseInputs): Promise<v
   if (catalogPinHash !== pin.catalogArtifactVerificationHash) {
     invalid("PUBLIC_REFERENCE_INVALID", "The verified catalog pin hash is invalid.");
   }
+  checkpoint?.();
   if (containsProtectedProviderCatalogReleaseField({
     provider: pin.publicProvider,
     categories: pin.catalogCategories,
@@ -348,12 +366,22 @@ function publicCollectibleDisplay(row: PublicCollectible) {
   };
 }
 
-function validateLocalAliases(snapshot: ProviderReleaseSnapshot): void {
+function validateLocalAliases(
+  snapshot: ProviderReleaseSnapshot,
+  checkpoint?: () => void,
+): void {
   const activeCollectibles = new Set(snapshot.collectibles
-    .filter(({ lifecycle }) => lifecycle === "active")
+    .filter(({ lifecycle }) => {
+      checkpoint?.();
+      return lifecycle === "active";
+    })
     .map(({ id }) => id));
   const identities = new Set<string>();
-  for (const alias of snapshot.aliases.filter(({ lifecycle }) => lifecycle === "active")) {
+  for (const alias of snapshot.aliases.filter(({ lifecycle }) => {
+    checkpoint?.();
+    return lifecycle === "active";
+  })) {
+    checkpoint?.();
     if (!activeCollectibles.has(alias.collectibleId)) {
       invalid("PUBLIC_REFERENCE_INVALID", "An active local alias belongs to a retired collectible.");
     }
@@ -456,19 +484,50 @@ interface ProjectedProviderContent {
 function projectProviderContent(
   snapshot: ProviderReleaseSnapshot,
   pin: PinnedProviderReleaseInputs,
+  checkpoint?: () => void,
 ): ProjectedProviderContent {
-  validateLocalAliases(snapshot);
-  const localCategories = new Map(snapshot.categories.map((row) => [requireUuid(row.id), row]));
-  const localCollectibles = new Map(snapshot.collectibles.map((row) => [requireUuid(row.id), row]));
-  const categoryCorrelations = new Map(pin.categoryCorrelations.map((row) => [row.localCategoryId, row]));
-  const collectibleCorrelations = new Map(pin.collectibleCorrelations.map((row) => [row.localCollectibleId, row]));
-  const allCategories = pin.catalogCategories.map(mapCatalogCategory);
-  const categoryById = new Map(allCategories.map((row) => [row.publicCategoryId, row]));
-  const catalogCollectibles = pin.catalogCollectibles.map(mapCatalogCollectible);
-  const collectibleById = new Map(catalogCollectibles.map((row) => [row.publicCollectibleId, row]));
+  validateLocalAliases(snapshot, checkpoint);
+  const localCategories = new Map(snapshot.categories.map((row) => {
+    checkpoint?.();
+    return [requireUuid(row.id), row] as const;
+  }));
+  const localCollectibles = new Map(snapshot.collectibles.map((row) => {
+    checkpoint?.();
+    return [requireUuid(row.id), row] as const;
+  }));
+  const categoryCorrelations = new Map(pin.categoryCorrelations.map((row) => {
+    checkpoint?.();
+    return [row.localCategoryId, row] as const;
+  }));
+  const collectibleCorrelations = new Map(
+    pin.collectibleCorrelations.map((row) => {
+      checkpoint?.();
+      return [row.localCollectibleId, row] as const;
+    }),
+  );
+  const allCategories = pin.catalogCategories.map((row) => {
+    checkpoint?.();
+    return mapCatalogCategory(row);
+  });
+  const categoryById = new Map(allCategories.map((row) => {
+    checkpoint?.();
+    return [row.publicCategoryId, row] as const;
+  }));
+  const catalogCollectibles = pin.catalogCollectibles.map((row) => {
+    checkpoint?.();
+    return mapCatalogCollectible(row);
+  });
+  const collectibleById = new Map(catalogCollectibles.map((row) => {
+    checkpoint?.();
+    return [row.publicCollectibleId, row] as const;
+  }));
   const contentsByPack = new Map<string, ProviderReleaseContentSnapshotRow[]>();
-  const packIds = new Set(snapshot.packs.map(({ id }) => id));
+  const packIds = new Set(snapshot.packs.map(({ id }) => {
+    checkpoint?.();
+    return id;
+  }));
   for (const content of snapshot.contents) {
+    checkpoint?.();
     if (
       !Number.isFinite(content.observedAt.getTime())
       || content.observedAt.getTime() > snapshot.lastSuccessfulObservationAt.getTime()
@@ -489,6 +548,7 @@ function projectProviderContent(
   const chases: PublicRepackChase[] = [];
   const retiredRepacks: ProviderReleaseRetiredRepack[] = [];
   for (const pack of [...snapshot.packs].sort((left, right) => left.id.localeCompare(right.id))) {
+    checkpoint?.();
     ensurePublicTiming(pack, snapshot.lastSuccessfulObservationAt);
     const publicRepackId = packscoutPublicIdentityUuid(
       `provider:${pin.providerId}:pack:${requireUuid(pack.id)}`,
@@ -525,6 +585,7 @@ function projectProviderContent(
     }> = [];
     const publicContentIds = new Set<string>();
     for (const content of packContents) {
+      checkpoint?.();
       const local = localCollectibles.get(content.collectibleId);
       const correlation = collectibleCorrelations.get(content.collectibleId);
       if (!local || local.lifecycle !== "active" || !correlation) {
@@ -654,28 +715,42 @@ function projectProviderContent(
     || left.publicCollectibleId.localeCompare(right.publicCollectibleId)
   ));
   retiredRepacks.sort((left, right) => left.publicRepackId.localeCompare(right.publicRepackId));
-  const categories = allCategories.filter(({ publicCategoryId }) => selectedCategoryIds.has(publicCategoryId));
+  const categories = allCategories.filter(({ publicCategoryId }) => {
+    checkpoint?.();
+    return selectedCategoryIds.has(publicCategoryId);
+  });
   const collectibles = catalogCollectibles
-    .filter(({ publicCollectibleId }) => referencedCollectibleIds.has(publicCollectibleId))
+    .filter(({ publicCollectibleId }) => {
+      checkpoint?.();
+      return referencedCollectibleIds.has(publicCollectibleId);
+    })
     .sort((left, right) => left.publicCollectibleId.localeCompare(right.publicCollectibleId));
-  const searchIndex = repacks.map((repack): ProviderReleaseSearchRecord => ({
-    publicRepackId: repack.publicRepackId,
-    publicVendorId: repack.publicVendorId,
-    vendorKey: repack.vendorKey,
-    normalizedName: normalizePublicSearchText(repack.name),
-    publicCategoryIds: repack.categories.map(({ publicCategoryId }) => publicCategoryId),
-    collectibleTypes: repack.collectibleTypes,
-    availability: repack.availability,
-    priceUsdMinor: repack.price.usdComparison.status === "available"
-      ? repack.price.usdComparison.value.minorUnits
-      : null,
-    packScoutEvPercentBasisPoints: repack.evEstimates.packScout.status === "available"
-      ? repack.evEstimates.packScout.metrics.evPercentBasisPoints
-      : null,
-    topChaseUsdMinor: repack.topChase?.collectible.valuation?.usdComparison.status === "available"
-      ? repack.topChase.collectible.valuation.usdComparison.value.minorUnits
-      : null,
-  }));
+  const searchIndex = repacks.map((repack): ProviderReleaseSearchRecord => {
+    checkpoint?.();
+    return {
+      publicRepackId: repack.publicRepackId,
+      publicVendorId: repack.publicVendorId,
+      vendorKey: repack.vendorKey,
+      normalizedName: normalizePublicSearchText(repack.name),
+      publicCategoryIds: repack.categories.map(
+        ({ publicCategoryId }) => publicCategoryId,
+      ),
+      collectibleTypes: repack.collectibleTypes,
+      availability: repack.availability,
+      priceUsdMinor: repack.price.usdComparison.status === "available"
+        ? repack.price.usdComparison.value.minorUnits
+        : null,
+      packScoutEvPercentBasisPoints:
+        repack.evEstimates.packScout.status === "available"
+          ? repack.evEstimates.packScout.metrics.evPercentBasisPoints
+          : null,
+      topChaseUsdMinor:
+        repack.topChase?.collectible.valuation?.usdComparison.status ===
+            "available"
+          ? repack.topChase.collectible.valuation.usdComparison.value.minorUnits
+          : null,
+    };
+  });
   return {
     categories,
     collectibles,
@@ -689,12 +764,15 @@ function projectProviderContent(
 
 async function buildBatches(
   valuesByKind: ReadonlyMap<ProviderReleaseBatchKind, readonly ProviderReleaseRecord[]>,
+  checkpoint?: () => void,
 ): Promise<readonly ProviderReleaseBatch[]> {
   const batches: Omit<ProviderReleaseBatch, "batchOrdinal">[] = [];
   for (const batchKind of BATCH_KINDS) {
+    checkpoint?.();
     const values = valuesByKind.get(batchKind) ?? [];
     let current: ProviderReleaseRecord[] = [];
     const flush = async () => {
+      checkpoint?.();
       const batchIndex = batches.filter((batch) => batch.batchKind === batchKind).length;
       const body = { batchKind, batchIndex, records: current };
       const byteCount = canonicalJsonBytes(body).byteLength;
@@ -709,9 +787,11 @@ async function buildBatches(
         byteCount,
         bodyHash: await sha256CanonicalJson(PROVIDER_RELEASE_BATCH_HASH_DOMAIN, body),
       });
+      checkpoint?.();
       current = [];
     };
     for (const record of values) {
+      checkpoint?.();
       const candidate = [...current, record];
       const byteCount = canonicalJsonBytes({
         batchKind,
@@ -739,12 +819,16 @@ export async function buildProviderRelease(input: {
   readonly snapshot: ProviderReleaseSnapshot;
   readonly pin: PinnedProviderReleaseInputs;
   readonly predecessorCompleteReleaseId: string | null;
+  /** Cooperative absolute-deadline/cancellation check owned by the caller. */
+  readonly checkpoint?: () => void;
 }): Promise<BuiltProviderRelease> {
   const { snapshot, pin } = input;
+  input.checkpoint?.();
   const predecessorCompleteReleaseId = input.predecessorCompleteReleaseId === null
     ? null
     : requireUuid(input.predecessorCompleteReleaseId);
-  await validatePinnedInputs(pin);
+  await validatePinnedInputs(pin, input.checkpoint);
+  input.checkpoint?.();
   if (snapshot.providerId !== pin.providerId || snapshot.providerKey !== pin.providerKey) {
     invalid("PROVIDER_IDENTITY_MISMATCH", "The provider snapshot does not match its central pin.");
   }
@@ -767,7 +851,7 @@ export async function buildProviderRelease(input: {
   }
   let projection: ProjectedProviderContent;
   try {
-    projection = projectProviderContent(snapshot, pin);
+    projection = projectProviderContent(snapshot, pin, input.checkpoint);
   } catch (error) {
     if (error instanceof ProviderReleaseValidationError) throw error;
     if (error instanceof ProviderReleaseValueError) {
@@ -792,6 +876,7 @@ export async function buildProviderRelease(input: {
     PROVIDER_RELEASE_INDEX_HASH_DOMAIN,
     projection.searchIndex,
   );
+  input.checkpoint?.();
   const valuesByKind = new Map<ProviderReleaseBatchKind, readonly ProviderReleaseRecord[]>([
     ["provider", [pin.publicProvider]],
     ["category", projection.categories],
@@ -801,7 +886,8 @@ export async function buildProviderRelease(input: {
     ["retired-repack", projection.retiredRepacks],
     ["search-index", projection.searchIndex],
   ]);
-  const batches = await buildBatches(valuesByKind);
+  const batches = await buildBatches(valuesByKind, input.checkpoint);
+  input.checkpoint?.();
   const freshness = snapshot.freshnessState === "fresh" ? "fresh" as const : "delayed" as const;
   const descriptorSeed = {
     predecessorCompleteReleaseId,
@@ -835,6 +921,7 @@ export async function buildProviderRelease(input: {
     descriptorSeed,
   );
   for (const batch of batches) {
+    input.checkpoint?.();
     contentHash = await sha256CanonicalJson(
       PROVIDER_RELEASE_CONTENT_CHAIN_HASH_DOMAIN,
       {
@@ -859,7 +946,13 @@ export async function buildProviderRelease(input: {
   if (containsProtectedProviderCatalogReleaseField(batches)) {
     invalid("PUBLIC_PROJECTION_INVALID", "A protected provider field reached the public release plan.");
   }
-  const publicEquivalenceHash = await assertProviderReleaseIntegrity({ descriptor, batches });
+  input.checkpoint?.();
+  const publicEquivalenceHash = await assertProviderReleaseIntegrity({
+    descriptor,
+    batches,
+    checkpoint: input.checkpoint,
+  });
+  input.checkpoint?.();
   return {
     descriptor,
     publicEquivalenceHash,

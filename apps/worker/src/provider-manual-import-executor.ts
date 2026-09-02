@@ -8,6 +8,7 @@ import {
   PrismaProviderWorkerLeaseRepository,
   validateProviderMixedPage,
   type ProviderPrismaClient,
+  type ProviderPromotionImmediateDeliveryPort,
   type ProviderRunCounters,
   type ProviderRunSummary,
 } from "@packscout/database";
@@ -30,6 +31,10 @@ import {
 
 import { finishProviderImportHead } from "./provider-manual-import-head.ts";
 import { reconcileProviderPageFactReferences } from "./provider-manual-import-reconciliation.ts";
+import {
+  createProviderCanonicalPromotionImmediateDelivery,
+  type ProviderCanonicalPromotionImmediateDelivery,
+} from "./provider-canonical-promotion-immediate-delivery.ts";
 
 const DEFAULT_LEASE_MILLISECONDS = 5 * 60_000;
 const MAXIMUM_HEAD_RECONCILIATION_BATCHES = 10_000;
@@ -111,6 +116,10 @@ implements ProviderManualImportPageSource {
  * the provider-local lease, and commits deterministic mixed pages.
  */
 export class ProviderManualImportExecutor {
+  readonly #immediateDelivery: Pick<
+    ProviderCanonicalPromotionImmediateDelivery,
+    "request"
+  >;
   readonly #leaseMilliseconds: number;
   readonly #workerId: string;
 
@@ -119,6 +128,7 @@ export class ProviderManualImportExecutor {
     source: ProviderManualImportPageSource;
     workerId: string;
     leaseMilliseconds?: number;
+    immediateDelivery?: ProviderPromotionImmediateDeliveryPort;
   }>) {
     const leaseMilliseconds = dependencies.leaseMilliseconds
       ?? DEFAULT_LEASE_MILLISECONDS;
@@ -131,6 +141,10 @@ export class ProviderManualImportExecutor {
     }
     this.#leaseMilliseconds = leaseMilliseconds;
     this.#workerId = dependencies.workerId;
+    this.#immediateDelivery = createProviderCanonicalPromotionImmediateDelivery(
+      dependencies.database,
+      dependencies.immediateDelivery,
+    );
   }
 
   async executeNext(
@@ -343,9 +357,19 @@ export class ProviderManualImportExecutor {
         };
       }
 
-      const finishHead = () => finishProviderImportHead({ database: this.dependencies.database,
-        runId: runId!, workerId: this.#workerId, fence, leaseMilliseconds: this.#leaseMilliseconds,
-        signal, onStage: (next) => { stage = next; } });
+      const finishHead = async () => {
+        const result = await finishProviderImportHead({
+          database: this.dependencies.database,
+          runId: runId!,
+          workerId: this.#workerId,
+          fence,
+          leaseMilliseconds: this.#leaseMilliseconds,
+          signal,
+          onStage: (next) => { stage = next; },
+        });
+        await this.#immediateDelivery.request(runtime.providerId);
+        return result;
+      };
       if (runningRun.reachedSourceHead) {
         const result = await finishHead();
         retainLeaseForNextPage = result.kind === "progress";
@@ -425,6 +449,9 @@ export class ProviderManualImportExecutor {
             "PROVIDER_MIXED_PAGE_" + committed.kind.toUpperCase(),
           );
         }
+        if (committed.counts.materialChanges > 0) {
+          await this.#immediateDelivery.request(runtime.providerId);
+        }
         pagesProcessed = index + 1;
         checkpoint = validatedPage.nextCursor;
         checkpointFingerprint = committed.resultingCursorFingerprint;
@@ -438,6 +465,7 @@ export class ProviderManualImportExecutor {
           retainLeaseForNextPage = result.kind === "progress";
           return result;
         }
+        let reconciliationChanged = false;
         const reconciled = await reconcileProviderPageFactReferences({
           page: validatedPage, reachedHead: committed.reachedHead, signal,
           maximumBatches: MAXIMUM_HEAD_RECONCILIATION_BATCHES,
@@ -446,12 +474,18 @@ export class ProviderManualImportExecutor {
             return await leases.renew({ role: "import", owner: this.#workerId,
               fence, leaseMilliseconds: this.#leaseMilliseconds }) !== null;
           },
-          reconcile: (scan) => {
+          reconcile: async (scan) => {
             stage = "fact_reference_reconciliation";
-            return canonical.reconcileFactReferences({ workerId: this.#workerId,
+            const result = await canonical.reconcileFactReferences({ workerId: this.#workerId,
               workerFence: fence, ...scan });
+            reconciliationChanged ||= result?.promotionRange !== null &&
+              result?.promotionRange !== undefined;
+            return result;
           },
         });
+        if (reconciliationChanged) {
+          await this.#immediateDelivery.request(runtime.providerId);
+        }
         if (reconciled === "lease_lost") {
           return { kind: "blocked", runId, failureCode: "PROVIDER_IMPORT_LEASE_LOST" };
         }
@@ -552,6 +586,7 @@ export function createProviderManualImportExecutor(input: Readonly<{
   workerId: string;
   liveSource?: ProviderManualImportPageSource;
   leaseMilliseconds?: number;
+  immediateDelivery?: ProviderPromotionImmediateDeliveryPort;
 }>): ProviderManualImportExecutor {
   const source = input.liveSource ?? (() => {
     if (input.captureRoot === null || input.actorHmacKey === null) {
@@ -571,5 +606,8 @@ export function createProviderManualImportExecutor(input: Readonly<{
     ...(input.leaseMilliseconds === undefined
       ? {}
       : { leaseMilliseconds: input.leaseMilliseconds }),
+    ...(input.immediateDelivery === undefined
+      ? {}
+      : { immediateDelivery: input.immediateDelivery }),
   });
 }

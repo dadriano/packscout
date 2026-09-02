@@ -198,6 +198,7 @@ function claim(input: Readonly<{
 
 class MemoryPlanStore {
   readonly retainedRequests: string[][] = [];
+  readonly readDeadlines: number[] = [];
 
   constructor(
     private readonly values: readonly CachedProviderCompletionPublishPlan[],
@@ -206,7 +207,8 @@ class MemoryPlanStore {
   async loadByEvidence(input: Readonly<{
     providerId: string;
     evidenceDigest: string;
-  }>) {
+  }>, deadline?: Readonly<{ deadlineAt: number }>) {
+    if (deadline !== undefined) this.readDeadlines.push(deadline.deadlineAt);
     return this.values.find((value) =>
       value.providerId === input.providerId &&
       value.evidenceDigest === input.evidenceDigest) ?? null;
@@ -216,7 +218,8 @@ class MemoryPlanStore {
     providerId: string;
     providerReleaseId: string;
     catalogVersionId: string;
-  }>) {
+  }>, deadline?: Readonly<{ deadlineAt: number }>) {
+    if (deadline !== undefined) this.readDeadlines.push(deadline.deadlineAt);
     const matches = this.values.filter((value) =>
       value.providerId === input.providerId &&
       value.providerReleaseId === input.providerReleaseId &&
@@ -231,7 +234,8 @@ class MemoryPlanStore {
     providerKey: string;
     publicProviderReleaseId: string;
     providerReleaseFingerprint: string;
-  }>[]) {
+  }>[], deadline?: Readonly<{ deadlineAt: number }>) {
+    if (deadline !== undefined) this.readDeadlines.push(deadline.deadlineAt);
     this.retainedRequests.push(references.map(({ providerKey }) => providerKey));
     const matches = references.map((reference) => this.values.find((value) =>
       value.providerKey === reference.providerKey &&
@@ -248,11 +252,15 @@ function source(input: Readonly<{
   plans: MemoryPlanStore;
   mirror: ManifestActivationMirror;
   staleClaim?: boolean;
+  claimDeadlines?: number[];
   initialConfiguration?: CentralApprovedManifestConfigurationSource;
 }>) {
   return new DirectCentralManifestGateProofSource({
     claims: {
-      async verifyActiveClaim(value) {
+      async verifyActiveClaim(value, _now, deadline) {
+        if (deadline !== undefined) {
+          input.claimDeadlines?.push(deadline.deadlineAt);
+        }
         if (input.staleClaim === true) {
           throw new PromotionJobPersistenceError(
             "PROMOTION_JOB_GATE_INTENT_INVALID",
@@ -305,15 +313,24 @@ test("advances A from central cache while unavailable B needs no provider read",
   ]);
   const active = await activeFixture([a1, b1]);
   const plans = new MemoryPlanStore([a1, a2, b1]);
-  const result = await source({ plans, mirror: active.mirror }).resolveTarget({
+  const claimDeadlines: number[] = [];
+  const deadlineAt = NOW.getTime() + 40_000;
+  const result = await source({
+    plans,
+    mirror: active.mirror,
+    claimDeadlines,
+  }).resolveTarget({
     claim: claim({ evidenceDigest: a2.evidenceDigest }),
     currentManifest: active.manifest,
     currentActiveState: active.state,
+    deadlineAt,
   });
   assert.equal(result.state, "ready");
   if (result.state !== "ready") return;
   assert.equal(result.target.operation, "advance");
   assert.deepEqual(plans.retainedRequests, [["beta"]]);
+  assert.deepEqual(claimDeadlines, [deadlineAt]);
+  assert.deepEqual(plans.readDeadlines, [deadlineAt, deadlineAt]);
   const beforeB = active.manifest.providerReferences.find(
     ({ platformKey }) => platformKey === "beta",
   );

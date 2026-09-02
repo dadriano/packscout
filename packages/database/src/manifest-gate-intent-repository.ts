@@ -73,6 +73,25 @@ const VERIFY_TRANSACTION = Object.freeze({
   isolationLevel: CentralPrisma.TransactionIsolationLevel.RepeatableRead,
 });
 
+interface ManifestGateTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function transactionOptions<T extends Readonly<{
+  maxWait: number;
+  timeout: number;
+  isolationLevel: CentralPrisma.TransactionIsolationLevel;
+}>>(base: T, deadline?: ManifestGateTransactionDeadline) {
+  if (deadline === undefined) return base;
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(base.maxWait, Math.max(1, Math.floor(available / 5)));
+  const timeout = Math.min(base.timeout, available - maxWait);
+  if (timeout < 1) {
+    throw new PromotionJobPersistenceError("PROMOTION_JOB_DEADLINE_EXCEEDED");
+  }
+  return { ...base, maxWait, timeout };
+}
+
 const OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
 const FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/u;
 const MAX_CLAIM_MILLISECONDS = 15 * 60_000;
@@ -418,7 +437,7 @@ export class PrismaManifestGateIntentRepository {
     owner: string;
     now: Date;
     claimMilliseconds: number;
-  }>): Promise<ManifestGateClaim | null> {
+  }>, deadline?: ManifestGateTransactionDeadline): Promise<ManifestGateClaim | null> {
     assertClaimInput(input);
     const token = randomUUID();
     return this.central.$transaction(async (transaction) => {
@@ -536,7 +555,7 @@ export class PrismaManifestGateIntentRepository {
         claimToken: row.claimToken,
         claimExpiresAt: row.claimExpiresAt,
       };
-    }, TRANSACTION);
+    }, transactionOptions(TRANSACTION, deadline));
   }
 
   /**
@@ -547,6 +566,7 @@ export class PrismaManifestGateIntentRepository {
   async verifyActiveClaim(
     claim: ManifestGateClaim,
     now: Date,
+    deadline?: ManifestGateTransactionDeadline,
   ): Promise<ManifestGateClaim> {
     assertPromotionJobUuid(claim.providerId);
     assertPromotionJobUuid(claim.organizationId);
@@ -646,7 +666,7 @@ export class PrismaManifestGateIntentRepository {
         claimToken: row.claimToken,
         claimExpiresAt: row.claimExpiresAt,
       };
-    }, VERIFY_TRANSACTION);
+    }, transactionOptions(VERIFY_TRANSACTION, deadline));
   }
 
   async acknowledgeClaim(input: Readonly<{
@@ -654,7 +674,7 @@ export class PrismaManifestGateIntentRepository {
     claimToken: string;
     observedGeneration: bigint;
     acknowledgedAt: Date;
-  }>): Promise<ManifestGateIntent> {
+  }>, deadline?: ManifestGateTransactionDeadline): Promise<ManifestGateIntent> {
     assertPromotionJobUuid(input.providerId);
     assertPromotionJobUuid(input.claimToken);
     if (input.observedGeneration < 1n || !validDate(input.acknowledgedAt)) {
@@ -719,7 +739,7 @@ export class PrismaManifestGateIntentRepository {
         "PROMOTION_JOB_GATE_INTENT_INVALID",
       );
       return mapGate(row);
-    }, TRANSACTION);
+    }, transactionOptions(TRANSACTION, deadline));
   }
 
   async deferClaim(input: Readonly<{
@@ -729,7 +749,7 @@ export class PrismaManifestGateIntentRepository {
     failureCode: string;
     observedAt: Date;
     retryAt: Date;
-  }>): Promise<ManifestGateIntent> {
+  }>, deadline?: ManifestGateTransactionDeadline): Promise<ManifestGateIntent> {
     assertPromotionJobUuid(input.providerId);
     assertPromotionJobUuid(input.claimToken);
     if (
@@ -781,17 +801,20 @@ export class PrismaManifestGateIntentRepository {
         "PROMOTION_JOB_GATE_INTENT_INVALID",
       );
       return mapGate(row);
-    }, TRANSACTION);
+    }, transactionOptions(TRANSACTION, deadline));
   }
 
-  async hasPending(): Promise<boolean> {
-    const [row] = await this.central.$queryRaw<Array<{ pending: boolean }>>(
-      CentralPrisma.sql`
-        select exists (
-          select 1 from manifest_gate_intents
-          where requested_generation > acknowledged_generation
-        ) as pending
-      `,
+  async hasPending(deadline?: ManifestGateTransactionDeadline): Promise<boolean> {
+    const [row] = await this.central.$transaction(
+      (transaction) => transaction.$queryRaw<Array<{ pending: boolean }>>(
+        CentralPrisma.sql`
+          select exists (
+            select 1 from manifest_gate_intents
+            where requested_generation > acknowledged_generation
+          ) as pending
+        `,
+      ),
+      transactionOptions(TRANSACTION, deadline),
     );
     return row?.pending === true;
   }

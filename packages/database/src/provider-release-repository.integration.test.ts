@@ -13,7 +13,10 @@ import {
   publicVendorSchema,
   sha256CanonicalJson,
 } from "@packscout/contracts";
-import { PrismaClient as ProviderPrismaClient } from "../prisma/generated/provider/index.js";
+import {
+  Prisma as ProviderPrisma,
+  PrismaClient as ProviderPrismaClient,
+} from "../prisma/generated/provider/index.js";
 import {
   createProviderHarness,
   type ProviderHarness,
@@ -31,6 +34,50 @@ const providerConfigVersionId = "16000000-0000-4000-8000-000000000005";
 const categoryGlobalId = "16000000-0000-4000-8000-000000000001";
 const collectiblePublicId = packscoutPublicIdentityUuid("release-integration:collectible");
 const protectedMarker = "private-account-pull-event-certification";
+
+interface CleanupTransactionBudget {
+  readonly maxWait: number;
+  readonly timeout: number;
+}
+
+function failReleaseLeaseCleanupWithPrismaTimeout(
+  provider: ProviderPrismaClient,
+  code: "P2024" | "P2028",
+  observeBudget: (budget: CleanupTransactionBudget) => void,
+): ProviderPrismaClient {
+  let transactionCount = 0;
+  return new Proxy(provider, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return (...args: unknown[]) => {
+          transactionCount += 1;
+          if (transactionCount === 4) {
+            const options = args[1];
+            const maxWait = options === null || typeof options !== "object"
+              ? undefined
+              : Reflect.get(options, "maxWait");
+            const timeout = options === null || typeof options !== "object"
+              ? undefined
+              : Reflect.get(options, "timeout");
+            if (typeof maxWait !== "number" || typeof timeout !== "number") {
+              throw new TypeError("Cleanup transaction budget is unavailable.");
+            }
+            observeBudget({ maxWait, timeout });
+            return Promise.reject(
+              new ProviderPrisma.PrismaClientKnownRequestError(
+                "bounded cleanup Prisma timeout",
+                { code, clientVersion: "test" },
+              ),
+            );
+          }
+          return Reflect.apply(target.$transaction, target, args);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as ProviderPrismaClient;
+}
 
 interface MigratedProviderDatabase {
   readonly databaseUrl: string;
@@ -334,7 +381,10 @@ async function completeRelease(
   `, [releaseId]);
 }
 
-async function waitForBlockedPackRead(migrated: MigratedProviderDatabase): Promise<void> {
+async function waitForBlockedSnapshotRead(
+  migrated: MigratedProviderDatabase,
+  tableName: "categories" | "packs",
+): Promise<void> {
   const observer = new Client({ connectionString: migrated.databaseUrl });
   await observer.connect();
   try {
@@ -345,16 +395,16 @@ async function waitForBlockedPackRead(migrated: MigratedProviderDatabase): Promi
           where datname = current_database()
             and pid <> pg_backend_pid()
             and wait_event_type = 'Lock'
-            and query ilike '%packs%'
+            and query ilike $1
         ) as found
-      `);
+      `, [`%${tableName}%`]);
       if (result.rows[0]?.found) return;
       await delay(20);
     }
   } finally {
     await observer.end();
   }
-  throw new Error("Provider snapshot did not reach its blocked pack read.");
+  throw new Error(`Provider snapshot did not reach its blocked ${tableName} read.`);
 }
 
 async function changePackDescription(input: {
@@ -640,10 +690,118 @@ test("migrated provider assembly is immutable, resumable, reusable, isolated, an
     assert.equal(scannedReuse.reusedCompleteRelease, true);
     assert.equal(scannedReuse.release.id, initial.release.id);
 
+    for (const [code, workerId, callerDeadline] of [
+      ["P2024", "assembly-cleanup-pool-timeout", true],
+      ["P2028", "assembly-cleanup-transaction-timeout", true],
+      ["P2024", "assembly-cleanup-without-caller-deadline", false],
+    ] as const) {
+      const cleanupBudgets: CleanupTransactionBudget[] = [];
+      const cleanupTimeoutRepository = new ProviderReleaseRepository(
+        failReleaseLeaseCleanupWithPrismaTimeout(
+          first,
+          code,
+          (budget) => cleanupBudgets.push(budget),
+        ),
+      );
+      const cleanupTimeoutResult = await cleanupTimeoutRepository.assemble({
+        workerId,
+        leaseMilliseconds: 10_000,
+        pin,
+        ...(callerDeadline ? { deadlineAt: Date.now() + 10_000 } : {}),
+      });
+      assert.equal(cleanupTimeoutResult.release.id, initial.release.id);
+      assert.equal(cleanupBudgets.length, 1);
+      assert.ok(cleanupBudgets[0]!.maxWait >= 1);
+      assert.ok(cleanupBudgets[0]!.timeout >= 1_000);
+      assert.ok(
+        cleanupBudgets[0]!.maxWait + cleanupBudgets[0]!.timeout <= 2_000,
+        "lease cleanup has one absolute two-second transaction budget",
+      );
+      assert.equal(
+        (await first.provider_change_consumers.findUniqueOrThrow({
+          where: { consumer_key: "provider_release" },
+        })).lease_owner,
+        workerId,
+        "bounded cleanup failure leaves the fenced lease to expire",
+      );
+      const clearedCleanupTimeoutLease = await first.$executeRaw`
+        update provider_change_consumers
+        set lease_owner = null,
+            lease_expires_at = null,
+            row_version = row_version + 1,
+            updated_at = clock_timestamp()
+        where consumer_key = 'provider_release'
+          and lease_owner = ${workerId}
+      `;
+      assert.equal(clearedCleanupTimeoutLease, 1);
+    }
+
+    const cancelled = new AbortController();
+    cancelled.abort(new Error("cancelled fixture"));
+    await assert.rejects(
+      repository.assemble({
+        workerId: "assembly-cancelled",
+        leaseMilliseconds: 10_000,
+        pin,
+        signal: cancelled.signal,
+        deadlineAt: Date.now() + 10_000,
+      }),
+      (error: unknown) => error instanceof ProviderReleaseAssemblyError
+        && error.code === "PROVIDER_RELEASE_CANCELLED",
+    );
+    assert.equal((await first.provider_change_consumers.findUniqueOrThrow({
+      where: { consumer_key: "provider_release" },
+    })).lease_owner, null);
+
+    const lateQueryLock = new Client({ connectionString: pair.first.databaseUrl });
+    await lateQueryLock.connect();
+    let categoryLockOpen = false;
+    try {
+      await lateQueryLock.query("begin");
+      await lateQueryLock.query("lock table packs in access exclusive mode");
+      await pair.first.db.query("begin");
+      categoryLockOpen = true;
+      await pair.first.db.query("lock table categories in access exclusive mode");
+      const boundedStartedAt = Date.now();
+      let boundedSettled = false;
+      const boundedOutcome = repository.assemble({
+        workerId: "assembly-deadline",
+        leaseMilliseconds: 10_000,
+        pin,
+        deadlineAt: boundedStartedAt + 8_000,
+      }).then(
+        (value) => {
+          boundedSettled = true;
+          return { error: null, value } as const;
+        },
+        (error: unknown) => {
+          boundedSettled = true;
+          return { error, value: null } as const;
+        },
+      );
+      await waitForBlockedSnapshotRead(pair.first, "categories");
+      await delay(3_000);
+      assert.equal(boundedSettled, false);
+      await pair.first.db.query("commit");
+      categoryLockOpen = false;
+      await waitForBlockedSnapshotRead(pair.first, "packs");
+      const outcome = await boundedOutcome;
+      assert.ok(outcome.error instanceof ProviderReleaseAssemblyError);
+      assert.equal(outcome.error.code, "PROVIDER_RELEASE_DEADLINE");
+      assert.ok(Date.now() - boundedStartedAt < 7_000);
+      assert.equal((await first.provider_change_consumers.findUniqueOrThrow({
+        where: { consumer_key: "provider_release" },
+      })).lease_owner, null);
+    } finally {
+      if (categoryLockOpen) await pair.first.db.query("rollback");
+      await lateQueryLock.query("rollback").catch(() => undefined);
+      await lateQueryLock.end();
+    }
+
     await pair.first.db.query("begin");
     await pair.first.db.query("lock table packs in access exclusive mode");
     const stablePromise = repository.assemble({ workerId: "assembly-d", leaseMilliseconds: 10_000, pin });
-    await waitForBlockedPackRead(pair.first);
+    await waitForBlockedSnapshotRead(pair.first, "packs");
     await assert.rejects(
       repository.assemble({ workerId: "assembly-d", leaseMilliseconds: 10_000, pin }),
       (error: unknown) => error instanceof ProviderReleaseAssemblyError

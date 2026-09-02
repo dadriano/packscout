@@ -3,7 +3,10 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { createCentralDatabaseLifecycle } from "@packscout/database";
+import {
+  createCentralDatabaseLifecycle,
+  type ManifestPromotionImmediateDeliveryRequest,
+} from "@packscout/database";
 import { createDirectCentralManifestGateProofSource } from
   "./direct-central-manifest-gate-proof-source.ts";
 import { Ed25519DistributedPromotionManualCommandVerifier } from
@@ -16,6 +19,10 @@ import { JsonConsoleDistributedPromotionJobRuntimeLogger } from
   "./distributed-promotion-job-runtime.ts";
 import { createManifestReconciliationJobRuntime } from
   "./manifest-reconciliation-job-runtime-composition.ts";
+import {
+  logPromotionImmediateDeliveryDisabled,
+  PostgresPromotionImmediateDeliverySubscriber,
+} from "./postgres-promotion-immediate-delivery.ts";
 
 const workspaceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -58,7 +65,7 @@ async function main(): Promise<void> {
     database,
     createRuntime(central) {
       const proofs = createDirectCentralManifestGateProofSource({ central });
-      return createManifestReconciliationJobRuntime({
+      const composed = createManifestReconciliationJobRuntime({
         authority: configuration.authority,
         central,
         proofs,
@@ -66,7 +73,22 @@ async function main(): Promise<void> {
         logger,
         manualCommands,
         pollMilliseconds: configuration.pollMilliseconds,
-      }).runtime;
+      });
+      if (configuration.listenDatabaseUrl === null) {
+        logPromotionImmediateDeliveryDisabled("manifest_reconciliation");
+        return composed.runtime;
+      }
+      return {
+        runtime: composed.runtime,
+        immediateDelivery:
+          new PostgresPromotionImmediateDeliverySubscriber<
+            ManifestPromotionImmediateDeliveryRequest
+          >({
+            databaseUrl: configuration.listenDatabaseUrl,
+            authority: "manifest_reconciliation",
+            delivery: composed.immediateDelivery,
+          }),
+      };
     },
   });
 }

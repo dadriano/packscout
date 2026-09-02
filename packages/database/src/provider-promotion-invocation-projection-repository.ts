@@ -40,11 +40,24 @@ interface ProjectionRow {
   projectedAt: Date;
 }
 
+interface ProjectionRetentionStateRow {
+  readonly afterProviderId: string | null;
+}
+
+interface ProjectionRetentionProviderRow {
+  readonly providerId: string;
+}
+
+interface ProjectionRetentionCandidateRow {
+  readonly id: string;
+}
+
 const TRANSACTION = Object.freeze({
   maxWait: 5_000,
   timeout: 15_000,
   isolationLevel: CentralPrisma.TransactionIsolationLevel.ReadCommitted,
 });
+const SCHEDULED_RETENTION_PROVIDER_BATCH_SIZE = 4;
 
 const projection = CentralPrisma.sql`
   id::text as "id", provider_id::text as "providerId",
@@ -166,6 +179,135 @@ export class PrismaProviderPromotionInvocationProjectionRepository {
       `,
     );
     return { deleted: rows.length, moreEligible: rows.length === maximumRows };
+  }
+
+  /**
+   * One roster-independent scheduled pass. A durable provider keyset limits
+   * count-bound inspection to four indexed provider partitions, while a
+   * separate finished-at index supplies the global age candidates.
+   */
+  async pruneScheduled(input: Readonly<{
+    now: Date;
+    maximumRows?: number;
+  }>): Promise<Readonly<{ deleted: number; moreEligible: boolean }>> {
+    const maximumRows = input.maximumRows ?? 1_000;
+    if (!validDate(input.now) || !Number.isSafeInteger(maximumRows)
+      || maximumRows < 1 || maximumRows > 10_000) {
+      throw new PromotionJobPersistenceError("PROMOTION_JOB_INPUT_INVALID");
+    }
+    const cutoff = new Date(
+      input.now.getTime() - PROMOTION_JOB_INVOCATION_RETENTION_MS,
+    );
+    return this.central.$transaction(async (transaction) => {
+      const [state] = await transaction.$queryRaw<
+        ProjectionRetentionStateRow[]
+      >(CentralPrisma.sql`
+        select after_provider_id::text as "afterProviderId"
+        from provider_promotion_projection_retention_state
+        where singleton_key = true
+        for update
+      `);
+      if (state === undefined) {
+        throw new PromotionJobPersistenceError(
+          "PROMOTION_JOB_PROJECTION_CONFLICT",
+        );
+      }
+      const ageCandidates = await transaction.$queryRaw<
+        ProjectionRetentionCandidateRow[]
+      >(CentralPrisma.sql`
+        select id::text as id
+        from provider_promotion_invocation_projections
+        where finished_at <= ${cutoff}
+        order by finished_at, id
+        limit ${maximumRows + 1}
+      `);
+      const providers = await transaction.$queryRaw<
+        ProjectionRetentionProviderRow[]
+      >(CentralPrisma.sql`
+        with recursive provider_batch(provider_id, ordinal) as (
+          (
+            select provider_id, 1
+            from provider_promotion_invocation_projections
+            where (${state.afterProviderId}::uuid is null
+              or provider_id > ${state.afterProviderId}::uuid)
+            order by provider_id
+            limit 1
+          )
+          union all
+          select next_provider.provider_id, provider_batch.ordinal + 1
+          from provider_batch
+          cross join lateral (
+            select provider_id
+            from provider_promotion_invocation_projections
+            where provider_id > provider_batch.provider_id
+            order by provider_id
+            limit 1
+          ) next_provider
+          where provider_batch.ordinal <
+            ${SCHEDULED_RETENTION_PROVIDER_BATCH_SIZE}
+        )
+        select provider_id::text as "providerId"
+        from provider_batch
+        order by ordinal
+      `);
+      const countCandidates: ProjectionRetentionCandidateRow[] = [];
+      for (const provider of providers) {
+        countCandidates.push(...await transaction.$queryRaw<
+          ProjectionRetentionCandidateRow[]
+        >(CentralPrisma.sql`
+          select id::text as id
+          from provider_promotion_invocation_projections
+          where provider_id = ${provider.providerId}::uuid
+          order by finished_at desc, id desc
+          offset ${PROMOTION_JOB_INVOCATION_LIMIT}
+          limit ${maximumRows + 1}
+        `));
+      }
+      const nextProviderId =
+        providers.length === SCHEDULED_RETENTION_PROVIDER_BATCH_SIZE
+          ? providers.at(-1)!.providerId
+          : null;
+      if (nextProviderId !== state.afterProviderId) {
+        await transaction.$executeRaw(CentralPrisma.sql`
+          update provider_promotion_projection_retention_state
+          set after_provider_id = ${nextProviderId}::uuid,
+              row_version = row_version + 1,
+              updated_at = greatest(
+                updated_at + interval '1 microsecond',
+                ${input.now},
+                clock_timestamp()
+              )
+          where singleton_key = true
+        `);
+      }
+      const allCandidateIds = [...new Set([
+        ...ageCandidates.map(({ id }) => id),
+        ...countCandidates.map(({ id }) => id),
+      ])];
+      const selectedIds = allCandidateIds.slice(0, maximumRows);
+      if (selectedIds.length === 0) {
+        return {
+          deleted: 0,
+          moreEligible:
+            providers.length === SCHEDULED_RETENTION_PROVIDER_BATCH_SIZE,
+        };
+      }
+      const rows = await transaction.$queryRaw<
+        ProjectionRetentionCandidateRow[]
+      >(CentralPrisma.sql`
+        delete from provider_promotion_invocation_projections
+        where id in (${CentralPrisma.join(selectedIds.map((id) =>
+          CentralPrisma.sql`${id}::uuid`
+        ))})
+        returning id::text as id
+      `);
+      return {
+        deleted: rows.length,
+        moreEligible:
+          allCandidateIds.length > maximumRows ||
+          providers.length === SCHEDULED_RETENTION_PROVIDER_BATCH_SIZE,
+      };
+    }, TRANSACTION);
   }
 }
 

@@ -15,6 +15,8 @@ export interface BoundProviderReleasePublicationExecutor {
   publish(
     assembly: ProviderReleaseAssemblyResult,
     signal?: AbortSignal,
+    deadlineAt?: number,
+    cleanupDeadlineAt?: number,
   ): Promise<DistributedProviderPublicationResult>;
 }
 
@@ -44,6 +46,7 @@ export function createBoundProviderReleasePublicationExecutor(input: {
     ...(input.emitMetric === undefined ? {} : { emitMetric: input.emitMetric }),
   });
   return {
-    publish: (assembly, signal) => service.publish(assembly, signal),
+    publish: (assembly, signal, deadlineAt, cleanupDeadlineAt) =>
+      service.publish(assembly, signal, deadlineAt, cleanupDeadlineAt),
   };
 }

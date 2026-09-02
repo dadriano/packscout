@@ -5,20 +5,26 @@ import type {
   CentralQueryClient,
   CentralTransactionClient,
 } from "./central-database.ts";
-import type {
-  ActivatePromotionJobScheduleInput,
-  BeginPromotionJobInvocationInput,
-  ManifestReconciliationWakeCause,
-  PausePromotionJobScheduleInput,
-  PromotionJobAdmission,
-  PromotionJobInvocation,
-  PromotionJobPruneResult,
-  PromotionJobSchedule,
-  PromotionWakeDeliveryState,
-  PromotionWakeIntent,
-  ReconcileInterruptedPromotionJobInvocationInput,
-  RecordPromotionJobProgressInput,
-  TerminalizePromotionJobInvocationInput,
+import {
+  PROMOTION_JOB_INVOCATION_LIMIT,
+  PROMOTION_JOB_INVOCATION_RETENTION_MS,
+  PromotionJobPersistenceError,
+  validDate,
+  type ActivatePromotionJobScheduleInput,
+  type BeginPromotionJobInvocationInput,
+  type ManifestReconciliationWakeCause,
+  type PausePromotionJobScheduleInput,
+  type PromotionJobAdmission,
+  type PromotionJobInvocation,
+  type PromotionJobPruneResult,
+  type PromotionJobSchedule,
+  type PromotionWakeDeliveryState,
+  type PromotionWakeIntent,
+  type ReconcileExpiredPromotionJobInvocationsInput,
+  type ReconcileExpiredPromotionJobInvocationsResult,
+  type ReconcileInterruptedPromotionJobInvocationInput,
+  type RecordPromotionJobProgressInput,
+  type TerminalizePromotionJobInvocationInput,
 } from "./promotion-job-persistence-types.ts";
 import {
   MANIFEST_PROMOTION_JOB_STORE_CONFIGURATION,
@@ -31,6 +37,28 @@ const TRANSACTION = Object.freeze({
   timeout: 30_000,
   isolationLevel: CentralPrisma.TransactionIsolationLevel.ReadCommitted,
 });
+
+interface PromotionJobTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function transactionOptions(
+  deadline?: PromotionJobTransactionDeadline,
+) {
+  if (deadline === undefined) return TRANSACTION;
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(TRANSACTION.maxWait, Math.max(1, Math.floor(available / 5)));
+  const timeout = Math.min(TRANSACTION.timeout, available - maxWait);
+  if (timeout < 1) {
+    throw new PromotionJobPersistenceError("PROMOTION_JOB_DEADLINE_EXCEEDED");
+  }
+  return { ...TRANSACTION, maxWait, timeout };
+}
+
+interface ProtectedRetentionCandidate {
+  readonly runId: string;
+  readonly relatedAttemptSetDigest: string;
+}
 
 function sqlClient(client: CentralQueryClient): PromotionJobSqlClient {
   return {
@@ -111,34 +139,57 @@ export class PrismaManifestReconciliationJobRepository {
 
   beginOrRecoverInvocation(
     input: BeginPromotionJobInvocationInput,
+    deadline?: PromotionJobTransactionDeadline,
   ): Promise<PromotionJobAdmission> {
     return this.central.$transaction((transaction) =>
       this.#store.beginOrRecoverInvocation(sqlClient(transaction), input),
-    TRANSACTION);
+    transactionOptions(deadline));
   }
 
   recordProgress(
     input: RecordPromotionJobProgressInput,
+    deadline?: PromotionJobTransactionDeadline,
   ): Promise<PromotionJobInvocation> {
     return this.central.$transaction((transaction) =>
       this.#store.recordProgress(sqlClient(transaction), input),
-    TRANSACTION);
+    transactionOptions(deadline));
   }
 
   terminalize(
     input: TerminalizePromotionJobInvocationInput,
+    deadline?: PromotionJobTransactionDeadline,
   ): Promise<PromotionJobInvocation> {
     return this.central.$transaction((transaction) =>
       this.#store.terminalize(sqlClient(transaction), input),
-    TRANSACTION);
+    transactionOptions(deadline));
   }
 
   reconcileInterrupted(
     input: ReconcileInterruptedPromotionJobInvocationInput,
+    deadline?: PromotionJobTransactionDeadline,
   ): Promise<PromotionJobInvocation> {
     return this.central.$transaction((transaction) =>
       this.#store.reconcileInterrupted(sqlClient(transaction), input),
-    TRANSACTION);
+    transactionOptions(deadline));
+  }
+
+  reconcileExpiredInvocations(
+    input: ReconcileExpiredPromotionJobInvocationsInput,
+    deadline?: PromotionJobTransactionDeadline,
+  ): Promise<ReconcileExpiredPromotionJobInvocationsResult> {
+    return this.central.$transaction(async (transaction) => {
+      const result = await this.#store.reconcileExpiredInvocations(
+        sqlClient(transaction),
+        {
+          ...input,
+          safeFailureCode: "MANIFEST_RECONCILIATION_INTERRUPTED",
+        },
+      );
+      return {
+        reconciled: result.invocations.length,
+        moreEligible: result.moreEligible,
+      };
+    }, transactionOptions(deadline));
   }
 
   loadInvocation(
@@ -168,6 +219,94 @@ export class PrismaManifestReconciliationJobRepository {
         (digest) => input.validateRelease(transaction, digest),
       ),
     TRANSACTION);
+  }
+
+  /**
+   * Releases only terminal history that is already eligible for the bounded
+   * invocation-retention policy. Manifest mutation requests and receipts live
+   * in separate immutable tables, so this validates the compact detail before
+   * allowing the monitoring copy to age out.
+   */
+  releasePrunableRetentionProtection(input: Readonly<{
+    now: Date;
+    maximumRows?: number;
+  }>): Promise<Readonly<{ released: number; moreEligible: boolean }>> {
+    const maximumRows = input.maximumRows ?? 100;
+    if (
+      !validDate(input.now) || !Number.isSafeInteger(maximumRows) ||
+      maximumRows < 1 || maximumRows > 1_000
+    ) {
+      return Promise.reject(new PromotionJobPersistenceError(
+        "PROMOTION_JOB_INPUT_INVALID",
+      ));
+    }
+    const cutoff = new Date(
+      input.now.getTime() - PROMOTION_JOB_INVOCATION_RETENTION_MS,
+    );
+    return this.central.$transaction(async (transaction) => {
+      const candidates = await transaction.$queryRaw<
+        ProtectedRetentionCandidate[]
+      >(CentralPrisma.sql`
+        with retained_boundary as (
+          select finished_at, run_id
+          from public.manifest_reconciliation_job_invocations
+          where lifecycle_state = 'terminal'
+          order by finished_at desc, run_id desc
+          offset ${PROMOTION_JOB_INVOCATION_LIMIT - 1}
+          limit 1
+        )
+        select invocation.run_id::text as "runId",
+          invocation.related_attempt_set_digest as "relatedAttemptSetDigest"
+        from public.manifest_reconciliation_job_invocations invocation
+        left join retained_boundary boundary on true
+        where invocation.lifecycle_state = 'terminal'
+          and invocation.retention_protected = true
+          and (
+            invocation.finished_at <= ${cutoff}
+            or (
+              boundary.run_id is not null
+              and (invocation.finished_at, invocation.run_id) <
+                (boundary.finished_at, boundary.run_id)
+            )
+          )
+        order by invocation.finished_at, invocation.run_id
+        limit ${maximumRows + 1}
+        for update of invocation skip locked
+      `);
+      let released = 0;
+      for (const candidate of candidates.slice(0, maximumRows)) {
+        const changed = await this.#store.releaseRetentionProtection(
+          sqlClient(transaction),
+          {
+            runId: candidate.runId,
+            releasedAt: input.now,
+            expectedRelatedAttemptSetDigest:
+              candidate.relatedAttemptSetDigest,
+          },
+          async (digest) => {
+            const invocation = await this.#store.loadInvocation(
+              sqlClient(transaction),
+              candidate.runId,
+              true,
+            );
+            if (
+              invocation === null || invocation.lifecycleState !== "terminal" ||
+              invocation.relatedAttemptSetDigest !== digest ||
+              invocation.attemptSnapshots === undefined
+            ) {
+              throw new PromotionJobPersistenceError(
+                "PROMOTION_JOB_ATTEMPT_CONFLICT",
+              );
+            }
+          },
+        );
+        if (changed) released += 1;
+      }
+      return {
+        released,
+        moreEligible: candidates.length > maximumRows,
+      };
+    }, TRANSACTION);
   }
 
   prune(input: Readonly<{

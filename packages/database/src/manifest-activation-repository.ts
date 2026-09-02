@@ -39,6 +39,31 @@ const TRANSACTION = Object.freeze({
   isolationLevel: CentralPrisma.TransactionIsolationLevel.Serializable,
 });
 
+export interface ManifestActivationTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function transactionOptions(
+  deadline?: ManifestActivationTransactionDeadline,
+) {
+  if (deadline === undefined) return TRANSACTION;
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(TRANSACTION.maxWait, Math.max(1, Math.floor(
+    available / 5,
+  )));
+  const timeout = Math.min(TRANSACTION.timeout, available - maxWait);
+  if (timeout < 1) {
+    throw Object.assign(new Error("Manifest activation deadline reached."), {
+      code: "PROMOTION_JOB_DEADLINE_EXCEEDED",
+    });
+  }
+  return {
+    maxWait,
+    timeout,
+    isolationLevel: CentralPrisma.TransactionIsolationLevel.Serializable,
+  };
+}
+
 export type DistributedManifestOperation =
   | "advance"
   | "add"
@@ -767,12 +792,17 @@ async function receiptFor(
 export class PrismaManifestActivationRepository {
   constructor(private readonly central: CentralPrismaClient) {}
 
-  async loadMirror(): Promise<ManifestActivationMirror> {
-    const [row] = await this.central.$queryRaw<StateRow[]>(CentralPrisma.sql`
-      select ${stateProjection}
-      from manifest_activation_state
-      where singleton_key
-    `);
+  async loadMirror(
+    deadline?: ManifestActivationTransactionDeadline,
+  ): Promise<ManifestActivationMirror> {
+    const [row] = await this.central.$transaction(
+      (transaction) => transaction.$queryRaw<StateRow[]>(CentralPrisma.sql`
+        select ${stateProjection}
+        from manifest_activation_state
+        where singleton_key
+      `),
+      transactionOptions(deadline),
+    );
     if (!row) throw new Error("Manifest activation singleton is missing.");
     return mapState(row);
   }
@@ -790,6 +820,7 @@ export class PrismaManifestActivationRepository {
   async claimLease(
     owner: string,
     leaseMilliseconds: number,
+    deadline?: ManifestActivationTransactionDeadline,
   ): Promise<ManifestActivationLease> {
     assertLeaseInput(owner, leaseMilliseconds);
     return this.central.$transaction(async (transaction) => {
@@ -823,7 +854,7 @@ export class PrismaManifestActivationRepository {
         fence: claimed.leaseFence,
         expiresAt: claimed.leaseExpiresAt,
       };
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   async renewLease(
@@ -854,7 +885,10 @@ export class PrismaManifestActivationRepository {
     }, TRANSACTION);
   }
 
-  async releaseLease(lease: ManifestActivationLease): Promise<boolean> {
+  async releaseLease(
+    lease: ManifestActivationLease,
+    deadline?: ManifestActivationTransactionDeadline,
+  ): Promise<boolean> {
     return this.central.$transaction(async (transaction) => {
       const state = await lockState(transaction);
       requireLease(state, lease);
@@ -871,12 +905,13 @@ export class PrismaManifestActivationRepository {
           and lease_fence = ${lease.fence}
       `);
       return changed === 1;
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   async persistIntent(
     lease: ManifestActivationLease,
     input: ExactManifestActivationIntentInput,
+    deadline?: ManifestActivationTransactionDeadline,
   ): Promise<ManifestActivationIntent> {
     assertUuid(input.providerId);
     if (input.requestedByOperatorId !== undefined &&
@@ -968,14 +1003,14 @@ export class PrismaManifestActivationRepository {
       `);
       if (!row) failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
       return mapOperation(row);
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   async recordAttempt(input: Readonly<{
     lease: ManifestActivationLease;
     operationId: string;
     attemptedAt: Date;
-  }>): Promise<ManifestActivationIntent> {
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<ManifestActivationIntent> {
     if (!validDate(input.attemptedAt)) {
       failure("MANIFEST_ACTIVATION_INPUT_INVALID");
     }
@@ -997,7 +1032,7 @@ export class PrismaManifestActivationRepository {
       `);
       if (!row) failure("MANIFEST_ACTIVATION_LEASE_LOST");
       return mapOperation(row);
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   async recordAmbiguous(input: Readonly<{
@@ -1005,8 +1040,8 @@ export class PrismaManifestActivationRepository {
     operationId: string;
     failureCode: string;
     observedAt: Date;
-  }>): Promise<ManifestActivationIntent> {
-    return this.#recordNonAccepted("ambiguous", input);
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<ManifestActivationIntent> {
+    return this.#recordNonAccepted("ambiguous", input, deadline);
   }
 
   async recordFailed(input: Readonly<{
@@ -1014,8 +1049,8 @@ export class PrismaManifestActivationRepository {
     operationId: string;
     failureCode: string;
     observedAt: Date;
-  }>): Promise<ManifestActivationIntent> {
-    return this.#recordNonAccepted("failed", input);
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<ManifestActivationIntent> {
+    return this.#recordNonAccepted("failed", input, deadline);
   }
 
   /** Persists every exact signed status response before recovery dispatch or
@@ -1026,7 +1061,7 @@ export class PrismaManifestActivationRepository {
     operationId: string;
     evidence: ExactManifestActivationReceiptEvidence;
     observedAt: Date;
-  }>): Promise<ManifestActivationStatusObservation> {
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<ManifestActivationStatusObservation> {
     assertUuid(input.operationId);
     if (!validDate(input.observedAt)) {
       failure("MANIFEST_ACTIVATION_INPUT_INVALID");
@@ -1116,7 +1151,7 @@ export class PrismaManifestActivationRepository {
         responseDigest: input.evidence.exactResponseSha256,
         observedAt: input.observedAt,
       };
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   /** Adopts an already-active signed Convex state or reconciles a later signed
@@ -1127,7 +1162,7 @@ export class PrismaManifestActivationRepository {
     observationKind: "bootstrap" | "reconciliation";
     evidence: SignedManifestActiveStateEvidence;
     observedAt: Date;
-  }>): Promise<ManifestActivationMirror> {
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<ManifestActivationMirror> {
     if (!validDate(input.observedAt)) {
       failure("MANIFEST_ACTIVATION_INPUT_INVALID");
     }
@@ -1262,7 +1297,7 @@ export class PrismaManifestActivationRepository {
       `);
       if (!updated) failure("MANIFEST_ACTIVATION_LEASE_LOST");
       return mapState(updated);
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   async accept(input: Readonly<{
@@ -1270,7 +1305,7 @@ export class PrismaManifestActivationRepository {
     operationId: string;
     evidence: ExactManifestActivationReceiptEvidence;
     receivedAt: Date;
-  }>): Promise<Readonly<{
+  }>, deadline?: ManifestActivationTransactionDeadline): Promise<Readonly<{
     operation: ManifestActivationIntent;
     mirror: ManifestActivationMirror;
   }>> {
@@ -1377,7 +1412,7 @@ export class PrismaManifestActivationRepository {
         operation: await mapOperation(operation),
         mirror: await mapState(updated),
       };
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 
   statusRequest(intent: ManifestActivationIntent): CatalogManifestStatusRequest {
@@ -1404,6 +1439,7 @@ export class PrismaManifestActivationRepository {
       failureCode: string;
       observedAt: Date;
     }>,
+    deadline?: ManifestActivationTransactionDeadline,
   ): Promise<ManifestActivationIntent> {
     if (
       !FAILURE_CODE_PATTERN.test(input.failureCode) ||
@@ -1439,6 +1475,6 @@ export class PrismaManifestActivationRepository {
       `);
       if (!row) failure("MANIFEST_ACTIVATION_LEASE_LOST");
       return mapOperation(row);
-    }, TRANSACTION);
+    }, transactionOptions(deadline));
   }
 }

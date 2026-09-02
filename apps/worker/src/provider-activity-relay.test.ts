@@ -7,6 +7,8 @@ import {
   type ProviderCompletedPublishPlanRelayProof,
   type ProviderActivityRelayTarget,
   type ProviderLocalHealthObservation,
+  type ProjectProviderPromotionInvocationInput,
+  type ProviderPromotionInvocationProjection,
 } from "@packscout/database";
 import {
   GatewayProviderActivityLocalStore,
@@ -95,6 +97,35 @@ function completionActivity(
       providerReleaseFingerprint: "c".repeat(64),
       completedThroughChangeSequence: sequence,
       terminalReceiptSha256: "d".repeat(64),
+    },
+    eventAt: observedAt,
+  } as const;
+  return {
+    ...identity,
+    eventDigest: providerActivityEventDigest(identity),
+    deliveryAttemptCount: 0,
+    lastFailureCode: null,
+  };
+}
+
+function promotionInvocationActivity(): ProviderActivityEvent {
+  const providerInvocationIdDigest = "e".repeat(64);
+  const providerInvocationProjectionDigest = "f".repeat(64);
+  const identity = {
+    id: "71000000-0000-4000-8000-000000000016",
+    eventType: "provider_promotion_invocation_terminal",
+    severity: "info" as const,
+    dedupeKey:
+      `provider-promotion-invocation:${providerInvocationIdDigest}`,
+    recoveryKey:
+      `provider-promotion-invocation:${providerInvocationIdDigest}`,
+    localRunId: null,
+    localQuarantineId: null,
+    title: "Provider promotion job finished",
+    summary: "A provider promotion invocation reached a terminal state.",
+    evidence: {
+      providerInvocationIdDigest,
+      providerInvocationProjectionDigest,
     },
     eventAt: observedAt,
   } as const;
@@ -409,9 +440,10 @@ test("completion acceptance acknowledges locally even when immediate delivery dr
     immediateDelivery: {
       request(input) {
         notifications.push(input);
-        return Promise.reject(new Error("hosting transport unavailable"));
+        return new Promise<void>(() => undefined);
       },
     },
+    immediateDeliveryTimeoutMilliseconds: 5,
     clock: () => new Date("2026-08-29T12:01:00.000Z"),
     observability: { log: (entry) => void logs.push(entry) },
   });
@@ -507,6 +539,69 @@ test("a lost local acknowledgement replays central completion and reissues one s
   assert.equal(acceptances, 2);
   assert.equal(acknowledgements, 2);
   assert.equal(notifications, 1);
+});
+
+test("terminal provider jobs project and acknowledge without inline retention pruning", async () => {
+  const event = promotionInvocationActivity();
+  const calls: string[] = [];
+  const projectionInput = Object.freeze({
+    providerId: providerA.providerId,
+  }) as unknown as ProjectProviderPromotionInvocationInput;
+  const projected = Object.freeze({
+    providerInvocationIdDigest: event.evidence.providerInvocationIdDigest,
+    projectionDigest: event.evidence.providerInvocationProjectionDigest,
+  }) as unknown as ProviderPromotionInvocationProjection;
+  const projections = {
+    project(input: ProjectProviderPromotionInvocationInput) {
+      calls.push("project");
+      assert.equal(input, projectionInput);
+      return Promise.resolve(projected);
+    },
+    prune(): never {
+      calls.push("unexpected-prune");
+      throw new Error("projection delivery must not invoke retention pruning");
+    },
+  };
+  const relay = new ProviderActivityRelayCoordinator({
+    directory: {
+      listRelayTargets: () => Promise.resolve({
+        targets: [providerA],
+        nextCursor: null,
+      }),
+      observeReachableHealth: () => Promise.resolve(),
+      recordDirectProbe: () => Promise.resolve(),
+      acceptProviderActivity: () => {
+        throw new Error("projection envelopes must bypass generic activity");
+      },
+    },
+    local: {
+      read: () => Promise.resolve({
+        state: "reachable",
+        batch: {
+          providerId: providerA.providerId,
+          health: health(providerA.providerId),
+          events: [event],
+        },
+      }),
+      loadPromotionProjection: () => {
+        calls.push("load");
+        return Promise.resolve(projectionInput);
+      },
+      markDelivered: (_target, _event, _deliveredAt, receipt) => {
+        calls.push("ack");
+        assert.equal(receipt?.providerInvocationIdDigest,
+          projected.providerInvocationIdDigest);
+        assert.equal(receipt?.projectionDigest, projected.projectionDigest);
+        return Promise.resolve();
+      },
+      markFailed: () => Promise.resolve(),
+    },
+    projections,
+    clock: () => new Date("2026-08-29T12:01:00.000Z"),
+  });
+
+  assert.equal((await relay.runCycle()).delivered, 1);
+  assert.deepEqual(calls, ["load", "project", "ack"]);
 });
 
 test("central restart accepts a pending completion after an isolated outage", async () => {

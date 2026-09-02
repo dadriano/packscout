@@ -17,6 +17,8 @@ import { promotionJobSha256 } from "@packscout/database";
 
 export const PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS = 50_000;
 export const PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_ATTEMPTS = 25;
+export const PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS = 10_000;
+const PROVIDER_PROMOTION_COMPLETION_RESERVE_MILLISECONDS = 10_000;
 
 const SAFE_CODE_PATTERN = /^[A-Z0-9_]{1,128}$/u;
 
@@ -46,12 +48,19 @@ export interface ProviderPromotionAttemptObservation {
 }
 
 export interface ProviderPromotionJobWorkPort {
-  readBoundary(signal?: AbortSignal): Promise<ProviderPromotionBoundary>;
+  readBoundary(
+    signal?: AbortSignal,
+    deadlineAt?: number,
+  ): Promise<ProviderPromotionBoundary>;
   attempt(input: Readonly<{
     runId: string;
     attemptId: string;
     targetPosition: bigint;
     retryCount: number;
+    /** Absolute wall-clock boundary for all database work in this attempt. */
+    deadlineAt: number;
+    /** Later boundary reserved only for best-effort lease cleanup. */
+    cleanupDeadlineAt: number;
     signal: AbortSignal;
   }>): Promise<ProviderPromotionAttemptObservation>;
 }
@@ -59,16 +68,20 @@ export interface ProviderPromotionJobWorkPort {
 export interface ProviderPromotionJobLedgerPort {
   beginOrRecoverInvocation(
     input: BeginPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobAdmission>;
   loadWakeIntent(): Promise<PromotionWakeIntent>;
   recordProgress(
     input: RecordPromotionJobProgressInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
   terminalize(
     input: TerminalizePromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
   reconcileInterrupted(
     input: ReconcileInterruptedPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
 }
 
@@ -91,11 +104,15 @@ export interface ProviderPromotionOneShotRequest {
   readonly trigger: PromotionInvocationTriggerRequest;
   readonly requestedAt: Date;
   readonly signal?: AbortSignal;
+  /** Optional earlier absolute wall-clock deadline inherited from bootstrap. */
+  readonly deadlineAt?: number;
 }
 
 interface DeadlineResources {
   readonly signal: AbortSignal;
+  readonly deadlineAt: number;
   readonly deadlineExpired: () => boolean;
+  readonly remainingMilliseconds: () => number;
   readonly dispose: () => void;
 }
 
@@ -112,25 +129,51 @@ function safeFailureCode(error: unknown, fallback: string): string {
 
 function deadlineResources(input: Readonly<{
   durationMilliseconds: number;
+  completionReserveMilliseconds: number;
   externalSignal?: AbortSignal;
   setTimer: typeof setTimeout;
   clearTimer: typeof clearTimeout;
+  nowMilliseconds: () => number;
+  absoluteDeadlineAt?: number;
 }>): DeadlineResources {
   const controller = new AbortController();
+  const startedAt = input.nowMilliseconds();
+  if (
+    input.absoluteDeadlineAt !== undefined
+    && (!Number.isSafeInteger(input.absoluteDeadlineAt)
+      || input.absoluteDeadlineAt < 1)
+  ) throw new TypeError("Provider promotion deadline is invalid.");
+  const deadlineAt = input.absoluteDeadlineAt === undefined
+    ? startedAt + input.durationMilliseconds
+    : Math.min(
+        input.absoluteDeadlineAt,
+        startedAt + input.durationMilliseconds,
+      );
   let expired = false;
   const expire = () => {
+    if (controller.signal.aborted) return;
     expired = true;
     controller.abort(new Error("provider promotion deadline reached"));
   };
   const cancel = () => {
     controller.abort(input.externalSignal?.reason);
   };
-  const timer = input.setTimer(expire, input.durationMilliseconds);
+  const timer = input.setTimer(
+    expire,
+    Math.max(
+      0,
+      deadlineAt - startedAt - input.completionReserveMilliseconds,
+    ),
+  );
   if (input.externalSignal?.aborted === true) cancel();
   else input.externalSignal?.addEventListener("abort", cancel, { once: true });
   return {
     signal: controller.signal,
+    deadlineAt,
     deadlineExpired: () => expired,
+    remainingMilliseconds: () => controller.signal.aborted
+      ? 0
+      : Math.max(0, deadlineAt - input.nowMilliseconds()),
     dispose() {
       input.clearTimer(timer);
       input.externalSignal?.removeEventListener("abort", cancel);
@@ -200,6 +243,8 @@ export class ProviderPromotionOneShot {
   readonly #randomUuid: () => string;
   readonly #setTimer: typeof setTimeout;
   readonly #clearTimer: typeof clearTimeout;
+  readonly #nowMilliseconds: () => number;
+  readonly #completionReserveMilliseconds: number;
 
   constructor(private readonly dependencies: Readonly<{
     providerId: string;
@@ -212,6 +257,7 @@ export class ProviderPromotionOneShot {
     randomUuid?: () => string;
     setTimer?: typeof setTimeout;
     clearTimer?: typeof clearTimeout;
+    nowMilliseconds?: () => number;
   }>) {
     this.#maximumMilliseconds = dependencies.maximumMilliseconds
       ?? PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS;
@@ -221,6 +267,11 @@ export class ProviderPromotionOneShot {
     this.#randomUuid = dependencies.randomUuid ?? randomUUID;
     this.#setTimer = dependencies.setTimer ?? setTimeout;
     this.#clearTimer = dependencies.clearTimer ?? clearTimeout;
+    this.#nowMilliseconds = dependencies.nowMilliseconds ?? Date.now;
+    this.#completionReserveMilliseconds = Math.min(
+      PROVIDER_PROMOTION_COMPLETION_RESERVE_MILLISECONDS,
+      Math.max(1, Math.floor(this.#maximumMilliseconds / 5)),
+    );
     if (
       !Number.isSafeInteger(this.#maximumMilliseconds)
       || this.#maximumMilliseconds < 1
@@ -239,9 +290,14 @@ export class ProviderPromotionOneShot {
   ): Promise<ProviderPromotionOneShotResult> {
     const deadline = deadlineResources({
       durationMilliseconds: this.#maximumMilliseconds,
+      completionReserveMilliseconds: this.#completionReserveMilliseconds,
       externalSignal: request.signal,
       setTimer: this.#setTimer,
       clearTimer: this.#clearTimer,
+      nowMilliseconds: this.#nowMilliseconds,
+      ...(request.deadlineAt === undefined
+        ? {}
+        : { absoluteDeadlineAt: request.deadlineAt }),
     });
     const startedAt = this.#now();
     const ownershipToken = this.#randomUuid();
@@ -256,11 +312,15 @@ export class ProviderPromotionOneShot {
           ownershipKey: this.dependencies.workerId,
           ownershipToken,
           ownershipExpiresAt: new Date(
-            startedAt.getTime() + this.#maximumMilliseconds + 10_000,
+            startedAt.getTime()
+              + deadline.remainingMilliseconds()
+              + PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS,
           ),
+        }, {
+          deadlineAt: deadline.deadlineAt - this.#completionReserveMilliseconds,
         });
       if (admission.disposition !== "started") {
-        return await this.handleExisting(admission, startedAt);
+        return await this.handleExisting(admission, startedAt, deadline);
       }
       const invocation = admission.invocation;
       if (invocation === null) {
@@ -279,6 +339,7 @@ export class ProviderPromotionOneShot {
   private async handleExisting(
     admission: PromotionJobAdmission,
     now: Date,
+    deadline: DeadlineResources,
   ): Promise<ProviderPromotionOneShotResult> {
     const invocation = admission.invocation;
     if (
@@ -297,7 +358,7 @@ export class ProviderPromotionOneShot {
           requestedAt: now,
         },
         retentionProtected: true,
-      });
+      }, { deadlineAt: deadline.deadlineAt });
       return { state: "reconciled_interruption", invocation: reconciled };
     }
     return {
@@ -325,6 +386,7 @@ export class ProviderPromotionOneShot {
     try {
       boundary = await this.dependencies.work.readBoundary(
         input.deadline.signal,
+        input.deadline.deadlineAt - this.#completionReserveMilliseconds,
       );
     } catch (error) {
       return this.continueInvocation(
@@ -344,13 +406,16 @@ export class ProviderPromotionOneShot {
     const initialSettledPosition = boundary.settledPosition;
     let publicationCount = 0;
     let operationCount = 0;
-    await this.recordProgress(input, boundary, {
+    const initialProgressFailure = await this.recordProgress(input, boundary, {
       attempts,
       initialLanePosition,
       initialSettledPosition,
       publicationCount,
       operationCount,
     });
+    if (initialProgressFailure !== null) {
+      return this.continueInvocation(input, initialProgressFailure);
+    }
 
     if (boundary.settledPosition === boundary.lanePosition) {
       return this.terminalize(
@@ -371,6 +436,12 @@ export class ProviderPromotionOneShot {
             : "PROVIDER_PROMOTION_CANCELLED",
         );
       }
+      if (
+        input.deadline.remainingMilliseconds()
+          <= this.#completionReserveMilliseconds
+      ) {
+        return this.continueInvocation(input, "PROVIDER_PROMOTION_DEADLINE");
+      }
       const attemptId = this.#randomUuid();
       const targetPosition = boundary.lanePosition;
       let observation: ProviderPromotionAttemptObservation;
@@ -380,6 +451,10 @@ export class ProviderPromotionOneShot {
           attemptId,
           targetPosition,
           retryCount: attempts.length,
+          deadlineAt: input.deadline.deadlineAt
+            - this.#completionReserveMilliseconds,
+          cleanupDeadlineAt: input.deadline.deadlineAt
+            - Math.floor(this.#completionReserveMilliseconds / 2),
           signal: input.deadline.signal,
         });
       } catch (error) {
@@ -401,13 +476,16 @@ export class ProviderPromotionOneShot {
         publicationCount += 1;
         const confirmed = observation.confirmedPosition;
         if (confirmed === null || confirmed < targetPosition) {
-          await this.recordProgress(input, boundary, {
+          const progressFailure = await this.recordProgress(input, boundary, {
             attempts,
             initialLanePosition,
             initialSettledPosition,
             publicationCount,
             operationCount,
           });
+          if (progressFailure !== null) {
+            return this.continueInvocation(input, progressFailure);
+          }
           return this.terminalize(input, "blocked", {
             failureCode: "PROVIDER_PROMOTION_RECEIPT_POSITION_INVALID",
             acknowledgeObservedWake: false,
@@ -423,6 +501,7 @@ export class ProviderPromotionOneShot {
         try {
           const observed = await this.dependencies.work.readBoundary(
             input.deadline.signal,
+            input.deadline.deadlineAt - this.#completionReserveMilliseconds,
           );
           if (!validBoundary(observed, this.dependencies.providerId)
             || observed.settledPosition < confirmed) {
@@ -432,26 +511,38 @@ export class ProviderPromotionOneShot {
           }
           boundary = observed;
         } catch (error) {
-          await this.recordProgress(input, boundary, {
+          const progressFailure = await this.recordProgress(input, boundary, {
             attempts,
             initialLanePosition,
             initialSettledPosition,
             publicationCount,
             operationCount,
           });
+          if (progressFailure !== null) {
+            return this.continueInvocation(input, progressFailure);
+          }
           return this.continueInvocation(
             input,
             safeFailureCode(error, "PROVIDER_PROMOTION_TARGET_READ_FAILED"),
           );
         }
       }
-      await this.recordProgress(input, boundary, {
+      const progressFailure = await this.recordProgress(input, boundary, {
         attempts,
         initialLanePosition,
         initialSettledPosition,
         publicationCount,
         operationCount,
       });
+      if (progressFailure !== null) {
+        return this.continueInvocation(input, progressFailure);
+      }
+      if (
+        input.deadline.remainingMilliseconds()
+          <= this.#completionReserveMilliseconds
+      ) {
+        return this.continueInvocation(input, "PROVIDER_PROMOTION_DEADLINE");
+      }
       if (observation.disposition === "overlap") {
         return this.terminalize(input, "coalesced", {
           failureCode: observation.safeFailureCode
@@ -494,6 +585,7 @@ export class ProviderPromotionOneShot {
     input: Readonly<{
       invocation: PromotionJobInvocation;
       ownershipToken: string;
+      deadline: DeadlineResources;
     }>,
     boundary: ProviderPromotionBoundary,
     state: Readonly<{
@@ -503,7 +595,7 @@ export class ProviderPromotionOneShot {
       publicationCount: number;
       operationCount: number;
     }>,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const progress: PromotionJobProgress = {
       beforeLanePosition: state.initialLanePosition,
       afterLanePosition: boundary.lanePosition,
@@ -514,31 +606,35 @@ export class ProviderPromotionOneShot {
       publicationCount: state.publicationCount,
       operationCount: state.operationCount,
     };
-    await this.dependencies.ledger.recordProgress({
-      runId: input.invocation.runId,
-      ownershipToken: input.ownershipToken,
-      now: this.#now(),
-      progress,
-      attempts: state.attempts,
-      retentionProtected: state.attempts.length > 0,
-    });
+    try {
+      await this.dependencies.ledger.recordProgress({
+        runId: input.invocation.runId,
+        ownershipToken: input.ownershipToken,
+        now: this.#now(),
+        progress,
+        attempts: state.attempts,
+        retentionProtected: state.attempts.length > 0,
+      }, {
+        deadlineAt: input.deadline.deadlineAt -
+          Math.floor(this.#completionReserveMilliseconds / 2),
+      });
+      return null;
+    } catch (error) {
+      return safeFailureCode(error, "PROVIDER_PROMOTION_PROGRESS_FAILED");
+    }
   }
 
   private async continueInvocation(
     input: Readonly<{
       invocation: PromotionJobInvocation;
       ownershipToken: string;
+      deadline: DeadlineResources;
     }>,
     failureCode: string,
   ): Promise<ProviderPromotionOneShotResult> {
     const finishedAt = this.#now();
-    const wake = await this.dependencies.ledger.loadWakeIntent();
-    const requestedGeneration = (
-      wake.requestedGeneration >
-          (input.invocation.trigger.observedWakeGeneration ?? 0n)
-        ? wake.requestedGeneration
-        : (input.invocation.trigger.observedWakeGeneration ?? 0n)
-    ) + 1n;
+    const requestedGeneration =
+      (input.invocation.trigger.observedWakeGeneration ?? 0n) + 1n;
     const invocation = await this.dependencies.ledger.terminalize({
       runId: input.invocation.runId,
       ownershipToken: input.ownershipToken,
@@ -548,7 +644,7 @@ export class ProviderPromotionOneShot {
       acknowledgeObservedWake: false,
       continuation: { requestedGeneration, requestedAt: finishedAt },
       retentionProtected: true,
-    });
+    }, { deadlineAt: input.deadline.deadlineAt });
     return { state: "terminal", invocation };
   }
 
@@ -556,6 +652,7 @@ export class ProviderPromotionOneShot {
     input: Readonly<{
       invocation: PromotionJobInvocation;
       ownershipToken: string;
+      deadline: DeadlineResources;
     }>,
     outcome: "caught_up" | "no_change" | "coalesced" | "blocked",
     options: Readonly<{
@@ -570,7 +667,7 @@ export class ProviderPromotionOneShot {
       outcome,
       safeFailureCode: options.failureCode,
       acknowledgeObservedWake: options.acknowledgeObservedWake,
-    });
+    }, { deadlineAt: input.deadline.deadlineAt });
     return { state: "terminal", invocation };
   }
 }

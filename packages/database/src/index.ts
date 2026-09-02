@@ -114,6 +114,7 @@ export * from "./provider-scheduling-repository.ts";
 export * from "./provider-stream-write-policy.ts";
 export * from "./promotion-readiness-repository.ts";
 export * from "./promotion-job-persistence-types.ts";
+export * from "./promotion-job-immediate-delivery-repository.ts";
 export * from "./central-promotion-job-records.ts";
 export * from "./provider-promotion-job-repository.ts";
 export * from "./manifest-reconciliation-job-repository.ts";

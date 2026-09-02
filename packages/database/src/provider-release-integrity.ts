@@ -82,12 +82,15 @@ function orderedBatches(
 export async function providerReleaseContentHash(input: {
   readonly descriptor: ProviderReleaseDescriptor;
   readonly batches: readonly ProviderReleaseBatch[];
+  readonly checkpoint?: () => void;
 }): Promise<string> {
+  input.checkpoint?.();
   let hash = await sha256CanonicalJson(
     PROVIDER_RELEASE_CONTENT_SEED_HASH_DOMAIN,
     descriptorContentSeed(input.descriptor),
   );
   for (const batch of orderedBatches(input.batches)) {
+    input.checkpoint?.();
     hash = await sha256CanonicalJson(
       PROVIDER_RELEASE_CONTENT_CHAIN_HASH_DOMAIN,
       {
@@ -101,13 +104,16 @@ export async function providerReleaseContentHash(input: {
       },
     );
   }
+  input.checkpoint?.();
   return hash;
 }
 
 export async function providerReleasePublicEquivalenceHash(input: {
   readonly descriptor: ProviderReleaseDescriptor;
   readonly batches: readonly ProviderReleaseBatch[];
+  readonly checkpoint?: () => void;
 }): Promise<string> {
+  input.checkpoint?.();
   const {
     throughChangeSequence: selectedBoundary,
     predecessorCompleteReleaseId: privateLineage,
@@ -121,15 +127,18 @@ export async function providerReleasePublicEquivalenceHash(input: {
       // Artifact identity, private lineage, and the content hash are derived
       // metadata. The selected ledger boundary is also excluded here.
       publicDescriptor,
-      batches: orderedBatches(input.batches).map((batch) => ({
-        batchOrdinal: batch.batchOrdinal,
-        batchKind: batch.batchKind,
-        batchIndex: batch.batchIndex,
-        recordCount: batch.recordCount,
-        byteCount: batch.byteCount,
-        bodyHash: batch.bodyHash,
-        records: batch.records,
-      })),
+      batches: orderedBatches(input.batches).map((batch) => {
+        input.checkpoint?.();
+        return {
+          batchOrdinal: batch.batchOrdinal,
+          batchKind: batch.batchKind,
+          batchIndex: batch.batchIndex,
+          recordCount: batch.recordCount,
+          byteCount: batch.byteCount,
+          bodyHash: batch.bodyHash,
+          records: batch.records,
+        };
+      }),
     },
   );
 }
@@ -157,7 +166,9 @@ function expectedRecordCounts(descriptor: ProviderReleaseDescriptor) {
 export async function assertProviderReleaseIntegrity(input: {
   readonly descriptor: ProviderReleaseDescriptor;
   readonly batches: readonly ProviderReleaseBatch[];
+  readonly checkpoint?: () => void;
 }): Promise<string> {
+  input.checkpoint?.();
   const ordered = orderedBatches(input.batches);
   if (
     ordered.length !== input.descriptor.batchCount
@@ -168,10 +179,12 @@ export async function assertProviderReleaseIntegrity(input: {
   if (containsProtectedProviderCatalogReleaseField(ordered)) {
     throw new ProviderReleaseIntegrityError("A provider release contains a protected field.");
   }
+  input.checkpoint?.();
   const kindCounts = new Map<ProviderReleaseBatchKind, number>();
   const recordCounts = new Map<ProviderReleaseBatchKind, number>();
   const searchRecords: ProviderReleaseSearchRecord[] = [];
   for (const [ordinal, batch] of ordered.entries()) {
+    input.checkpoint?.();
     if (batch.batchOrdinal !== ordinal || batch.batchIndex !== (kindCounts.get(batch.batchKind) ?? 0)) {
       throw new ProviderReleaseIntegrityError("A provider release batch order is inconsistent.");
     }
@@ -186,6 +199,7 @@ export async function assertProviderReleaseIntegrity(input: {
     const body = batchBody(batch);
     const byteCount = canonicalJsonBytes(body).byteLength;
     const bodyHash = await sha256CanonicalJson(PROVIDER_RELEASE_BATCH_HASH_DOMAIN, body);
+    input.checkpoint?.();
     if (
       batch.byteCount !== byteCount
       || batch.byteCount > PROVIDER_RELEASE_MAX_BATCH_BYTES
@@ -202,11 +216,13 @@ export async function assertProviderReleaseIntegrity(input: {
     }
   }
   for (const kind of BATCH_KINDS) {
+    input.checkpoint?.();
     if ((kindCounts.get(kind) ?? 0) === 0) {
       throw new ProviderReleaseIntegrityError("A provider release batch kind is missing.");
     }
   }
   for (const [kind, expected] of expectedRecordCounts(input.descriptor)) {
+    input.checkpoint?.();
     if ((recordCounts.get(kind) ?? 0) !== expected) {
       throw new ProviderReleaseIntegrityError("A provider release descriptor count is inconsistent.");
     }
@@ -215,6 +231,7 @@ export async function assertProviderReleaseIntegrity(input: {
     PROVIDER_RELEASE_INDEX_HASH_DOMAIN,
     searchRecords,
   );
+  input.checkpoint?.();
   if (indexHash !== input.descriptor.indexHash) {
     throw new ProviderReleaseIntegrityError("A provider release index hash is inconsistent.");
   }
@@ -228,6 +245,7 @@ export async function assertProviderReleaseIntegrity(input: {
   if (expectedReleaseId !== input.descriptor.providerReleaseId) {
     throw new ProviderReleaseIntegrityError("A provider release identity is inconsistent.");
   }
+  input.checkpoint?.();
   return providerReleasePublicEquivalenceHash(input);
 }
 

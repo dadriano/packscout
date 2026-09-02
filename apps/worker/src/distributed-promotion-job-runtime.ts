@@ -8,13 +8,19 @@ import {
   type PromotionJobDeliveryEnvelope,
   type PromotionJobSchedule,
   type PromotionWakeIntent,
+  type ReconcileExpiredPromotionJobInvocationsInput,
+  type ReconcileExpiredPromotionJobInvocationsResult,
 } from "@packscout/database";
 
 const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u;
+export const DISTRIBUTED_PROMOTION_MAXIMUM_RECOVERIES_PER_CYCLE = 10;
 
 export interface DistributedPromotionTriggerLedgerPort {
   loadWakeIntent(): Promise<PromotionWakeIntent>;
   loadSchedule(): Promise<PromotionJobSchedule>;
+  reconcileExpiredInvocations(
+    input: ReconcileExpiredPromotionJobInvocationsInput,
+  ): Promise<ReconcileExpiredPromotionJobInvocationsResult>;
   recordWakeDelivery(input: Readonly<{
     generation: bigint;
     state: "accepted" | "delivered" | "retry_wait";
@@ -30,6 +36,10 @@ export interface DistributedPromotionOneShotPort {
     requestedAt: Date;
     signal?: AbortSignal;
   }>): Promise<unknown>;
+}
+
+export interface DistributedPromotionRetentionPort {
+  runCycle(now: Date): Promise<Readonly<{ moreEligible: boolean }>>;
 }
 
 export interface DistributedPromotionManualCommandVerifier {
@@ -59,7 +69,8 @@ export interface DistributedPromotionJobRuntimeLogger {
     event: "distributed_promotion_job_runtime";
     authority: PromotionJobAuthority;
     scopeIdentitySha256: string;
-    phase: "started" | "stopped" | "invocation" | "state_read";
+    phase: "started" | "stopped" | "invocation" | "state_read" |
+      "reconciliation" | "retention";
     triggerKind: PromotionInvocationTriggerRequest["kind"] | null;
     outcome: string;
     failureCode: string | null;
@@ -75,6 +86,8 @@ export interface DistributedPromotionRuntimeInvocationResult {
 
 export interface DistributedPromotionRuntimeCycleResult {
   readonly invocations: readonly DistributedPromotionRuntimeInvocationResult[];
+  readonly reconciledInvocations: number;
+  readonly reconciliationFailures: number;
   readonly stateReadFailures: number;
 }
 
@@ -174,6 +187,7 @@ export class DistributedPromotionJobRuntime {
   readonly #sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly #controller = new AbortController();
   #activeCycle: Promise<DistributedPromotionRuntimeCycleResult> | null = null;
+  #lastRetentionMinuteBucket: string | null = null;
   #startPromise: Promise<void> | null = null;
   #wakeSleep: (() => void) | null = null;
 
@@ -182,6 +196,7 @@ export class DistributedPromotionJobRuntime {
     scopeIdentitySha256: string;
     ledger: DistributedPromotionTriggerLedgerPort;
     oneShot: DistributedPromotionOneShotPort;
+    retention?: DistributedPromotionRetentionPort;
     manualCommands: DistributedPromotionManualCommandVerifier;
     logger: DistributedPromotionJobRuntimeLogger;
     pollMilliseconds?: number;
@@ -309,6 +324,45 @@ export class DistributedPromotionJobRuntime {
   }
 
   private async executeCycle(): Promise<DistributedPromotionRuntimeCycleResult> {
+    let reconciledInvocations = 0;
+    let reconciliationFailures = 0;
+    try {
+      const reconciliation =
+        await this.dependencies.ledger.reconcileExpiredInvocations({
+          reconciledAt: this.#now(),
+          maximumRows: DISTRIBUTED_PROMOTION_MAXIMUM_RECOVERIES_PER_CYCLE,
+        });
+      reconciledInvocations = reconciliation.reconciled;
+      if (reconciliation.reconciled > 0 || reconciliation.moreEligible) {
+        this.dependencies.logger.log({
+          level: "info",
+          event: "distributed_promotion_job_runtime",
+          authority: this.dependencies.authority,
+          scopeIdentitySha256: this.dependencies.scopeIdentitySha256,
+          phase: "reconciliation",
+          triggerKind: null,
+          outcome: reconciliation.moreEligible
+            ? "bounded"
+            : "continuation_required",
+          failureCode: null,
+        });
+      }
+    } catch (error) {
+      reconciliationFailures = 1;
+      this.dependencies.logger.log({
+        level: "warning",
+        event: "distributed_promotion_job_runtime",
+        authority: this.dependencies.authority,
+        scopeIdentitySha256: this.dependencies.scopeIdentitySha256,
+        phase: "reconciliation",
+        triggerKind: null,
+        outcome: "unavailable",
+        failureCode: safeFailure(
+          error,
+          "DISTRIBUTED_PROMOTION_RECONCILIATION_FAILED",
+        ),
+      });
+    }
     const [wakeRead, scheduleRead] = await Promise.allSettled([
       this.dependencies.ledger.loadWakeIntent(),
       this.dependencies.ledger.loadSchedule(),
@@ -345,12 +399,17 @@ export class DistributedPromotionJobRuntime {
       this.logStateFailure(scheduleRead.reason);
     } else {
       const trigger = dueWindow(scheduleRead.value, this.#now());
-      if (trigger !== null) invocations.push(await this.invoke(
-        trigger,
-        this.#now(),
-      ));
+      if (trigger !== null) {
+        invocations.push(await this.invoke(trigger, this.#now()));
+      }
     }
-    return { invocations, stateReadFailures };
+    await this.runMinuteRetention();
+    return {
+      invocations,
+      reconciledInvocations,
+      reconciliationFailures,
+      stateReadFailures,
+    };
   }
 
   private async invoke(
@@ -422,6 +481,46 @@ export class DistributedPromotionJobRuntime {
         "DISTRIBUTED_PROMOTION_STATE_UNAVAILABLE",
       ),
     });
+  }
+
+  private async runMinuteRetention(): Promise<void> {
+    if (this.dependencies.retention === undefined) return;
+    const now = this.#now();
+    const milliseconds = now.getTime();
+    const minuteBucket = Number.isFinite(milliseconds)
+      ? Math.floor(milliseconds / 60_000).toString()
+      : "invalid";
+    if (minuteBucket === this.#lastRetentionMinuteBucket) return;
+    // Maintenance is independent from promotion schedule lifecycle and state
+    // read health. A process restart may replay this bounded UTC-minute pass.
+    this.#lastRetentionMinuteBucket = minuteBucket;
+    try {
+      const result = await this.dependencies.retention.runCycle(now);
+      this.dependencies.logger.log({
+        level: "info",
+        event: "distributed_promotion_job_runtime",
+        authority: this.dependencies.authority,
+        scopeIdentitySha256: this.dependencies.scopeIdentitySha256,
+        phase: "retention",
+        triggerKind: null,
+        outcome: result.moreEligible ? "bounded" : "completed",
+        failureCode: null,
+      });
+    } catch (error) {
+      this.dependencies.logger.log({
+        level: "warning",
+        event: "distributed_promotion_job_runtime",
+        authority: this.dependencies.authority,
+        scopeIdentitySha256: this.dependencies.scopeIdentitySha256,
+        phase: "retention",
+        triggerKind: null,
+        outcome: "unavailable",
+        failureCode: safeFailure(
+          error,
+          "DISTRIBUTED_PROMOTION_RETENTION_FAILED",
+        ),
+      });
+    }
   }
 }
 

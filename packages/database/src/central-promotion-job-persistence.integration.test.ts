@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { Prisma as CentralPrisma } from
+  "../prisma/generated/central/index.js";
 import { PrismaManifestGateIntentRepository } from
   "./manifest-gate-intent-repository.ts";
 import { PrismaManifestReconciliationJobRepository } from
   "./manifest-reconciliation-job-repository.ts";
 import {
+  EMPTY_PROMOTION_ATTEMPT_SET_DIGEST,
   PROMOTION_JOB_DELIVERY_RETENTION_MS,
+  PROMOTION_JOB_INVOCATION_LIMIT,
+  PROMOTION_JOB_INVOCATION_RETENTION_MS,
   PromotionJobPersistenceError,
   promotionJobDeliveryDigest,
   promotionJobSha256,
@@ -400,6 +405,36 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
     const old = new Date("2026-01-01T00:00:00.000Z");
     const oldInput = beginInput({ opaqueKey: "manifest-old", now: old });
     const oldAdmission = await manifest.beginOrRecoverInvocation(oldInput);
+    await manifest.recordProgress({
+      runId: oldAdmission.invocation!.runId,
+      ownershipToken: oldInput.ownershipToken,
+      now: new Date(old.getTime() + 500),
+      progress: {
+        beforeLanePosition: null,
+        afterLanePosition: null,
+        beforeSettledPosition: null,
+        afterSettledPosition: null,
+        cycleCount: 1,
+        promotionAttemptCount: 1,
+        publicationCount: 0,
+        operationCount: 0,
+      },
+      attempts: [{
+        attemptKind: "manifest",
+        attemptId: randomUUID(),
+        observedState: "deferred",
+        targetPosition: 1n,
+        retryCount: 0,
+        safeFailureCode: "MANIFEST_GATE_RETRY_PENDING",
+        publicReleaseId: null,
+        releaseFingerprint: null,
+        totalOperationCount: 0,
+        orderedOperationDigest: promotionJobSha256("old-manifest-attempt"),
+        recentOperations: [],
+        observedAt: new Date(old.getTime() + 500),
+      }],
+      retentionProtected: true,
+    });
     await manifest.terminalize({
       runId: oldAdmission.invocation!.runId,
       ownershipToken: oldInput.ownershipToken,
@@ -407,6 +442,20 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
       outcome: "no_change",
       resultActiveGeneration: 0n,
     });
+    assert.equal(
+      (await manifest.loadInvocation(oldAdmission.invocation!.runId))
+        ?.retentionProtected,
+      true,
+    );
+    assert.deepEqual(await manifest.releasePrunableRetentionProtection({
+      now: new Date("2026-09-01T00:00:00.000Z"),
+      maximumRows: 100,
+    }), { released: 1, moreEligible: false });
+    assert.equal(
+      (await manifest.loadInvocation(oldAdmission.invocation!.runId))
+        ?.retentionProtected,
+      false,
+    );
     const pruned = await manifest.prune({
       now: new Date("2026-09-01T00:00:00.000Z"),
       maximumRows: 100,
@@ -414,6 +463,250 @@ test("central manifest ledger, gates, and sanitized projections stay separate", 
     assert.ok(pruned.invocationSummariesDeleted >= 1);
     assert.ok(pruned.tombstonesDeleted >= 1);
     assert.equal(await manifest.loadInvocation(oldAdmission.invocation!.runId), null);
+
+    const capNow = new Date("2026-09-02T00:00:00.000Z");
+    const capIssuedAt = new Date("2026-08-31T00:00:00.000Z");
+    const capStartedAt = new Date("2026-09-01T00:00:00.000Z");
+    const capFinishedAt = new Date("2026-09-01T00:00:01.000Z");
+    await harness.client.$executeRaw(CentralPrisma.sql`
+      insert into manifest_reconciliation_job_invocations (
+        delivery_key_digest, trigger_evidence_digest, delivery_issued_at,
+        delivery_expires_at, trigger_kind, lifecycle_state, outcome,
+        requested_at, started_at, finished_at, related_attempt_set_digest,
+        retention_protected, created_at, updated_at
+      )
+      select
+        encode(sha256(convert_to('manifest-cap-delivery:' || ordinal, 'UTF8')),
+          'hex'),
+        encode(sha256(convert_to('manifest-cap-trigger:' || ordinal, 'UTF8')),
+          'hex'),
+        ${capIssuedAt},
+        ${new Date(
+          capIssuedAt.getTime() + PROMOTION_JOB_DELIVERY_RETENTION_MS,
+        )},
+        'manual', 'terminal', 'no_change', ${capStartedAt}, ${capStartedAt},
+        ${capFinishedAt}, ${EMPTY_PROMOTION_ATTEMPT_SET_DIGEST}, true,
+        ${capStartedAt}, ${capFinishedAt}
+      from generate_series(
+        1,
+        ${PROMOTION_JOB_INVOCATION_LIMIT + 1}
+      ) ordinal
+    `);
+    assert.deepEqual(await manifest.releasePrunableRetentionProtection({
+      now: capNow,
+      maximumRows: 1,
+    }), { released: 1, moreEligible: false });
+    const capPrune = await manifest.prune({
+      now: capNow,
+      maximumRows: 2,
+    });
+    assert.equal(capPrune.invocationSummariesDeleted, 2);
+    assert.equal(
+      await harness.client.manifest_reconciliation_job_invocations.count({
+        where: { lifecycle_state: "terminal" },
+      }),
+      PROMOTION_JOB_INVOCATION_LIMIT,
+      "released overflow converges to the total terminal-row cap",
+    );
+
+    assert.deepEqual(await projections.pruneScheduled({
+      now: new Date("2026-10-04T00:00:00.000Z"),
+      maximumRows: 100,
+    }), { deleted: 2, moreEligible: false });
+    assert.equal(
+      await harness.client.provider_promotion_invocation_projections.count(),
+      0,
+    );
+    const overflowDetail = '{"attempts":[]}';
+    await harness.client.$executeRaw(CentralPrisma.sql`
+      insert into provider_promotion_invocation_projections (
+        provider_id, provider_invocation_id_digest, projection_digest,
+        trigger_kind, outcome, scheduled_checkin_at, started_at, finished_at,
+        before_lane_position, after_lane_position,
+        before_settled_position, after_settled_position,
+        cycle_count, promotion_attempt_count, publication_count,
+        operation_count, safe_failure_code, canonical_detail_body,
+        canonical_detail_digest, projected_at, created_at
+      )
+      select
+        ${providerOne}::uuid,
+        encode(sha256(convert_to('overflow-invocation:' || ordinal, 'UTF8')),
+          'hex'),
+        encode(sha256(convert_to('overflow-projection:' || ordinal, 'UTF8')),
+          'hex'),
+        'manual', 'no_change', null,
+        ${new Date("2026-09-01T00:00:00.000Z")},
+        ${new Date("2026-09-01T00:00:01.000Z")},
+        null, null, null, null, 0, 0, 0, 0, null,
+        ${overflowDetail},
+        encode(sha256(convert_to(${overflowDetail}, 'UTF8')), 'hex'),
+        ${new Date("2026-09-01T00:00:02.000Z")},
+        ${new Date("2026-09-01T00:00:02.000Z")}
+      from generate_series(
+        1,
+        ${PROMOTION_JOB_INVOCATION_LIMIT + 1}
+      ) ordinal
+    `);
+    await harness.client.$executeRaw(CentralPrisma.sql`
+      update provider_promotion_projection_retention_state
+      set after_provider_id = ${providerOne}::uuid,
+          row_version = row_version + 1,
+          updated_at = greatest(
+            updated_at + interval '1 microsecond',
+            clock_timestamp()
+          )
+      where singleton_key = true
+    `);
+    const [cursorBefore] = await harness.client.$queryRaw<Array<{
+      afterProviderId: string | null;
+      rowVersion: bigint;
+      updatedAt: Date;
+    }>>(CentralPrisma.sql`
+      select after_provider_id::text as "afterProviderId",
+        row_version as "rowVersion", updated_at as "updatedAt"
+      from provider_promotion_projection_retention_state
+      where singleton_key = true
+    `);
+    assert.equal(cursorBefore?.afterProviderId, providerOne);
+    assert.deepEqual(await projections.pruneScheduled({
+      now: new Date("2000-01-01T00:00:00.000Z"),
+      maximumRows: 1,
+    }), { deleted: 0, moreEligible: false });
+    const [cursorAfter] = await harness.client.$queryRaw<Array<{
+      afterProviderId: string | null;
+      rowVersion: bigint;
+      updatedAt: Date;
+    }>>(CentralPrisma.sql`
+      select after_provider_id::text as "afterProviderId",
+        row_version as "rowVersion", updated_at as "updatedAt"
+      from provider_promotion_projection_retention_state
+      where singleton_key = true
+    `);
+    assert.equal(cursorAfter?.afterProviderId, null);
+    assert.equal(cursorAfter?.rowVersion, cursorBefore!.rowVersion + 1n);
+    assert.ok(cursorAfter!.updatedAt.getTime() > cursorBefore!.updatedAt.getTime());
+    assert.deepEqual(await projections.pruneScheduled({
+      now: new Date("2026-09-02T00:00:00.000Z"),
+      maximumRows: 100,
+    }), { deleted: 1, moreEligible: false });
+    assert.equal(
+      await harness.client.provider_promotion_invocation_projections.count(),
+      PROMOTION_JOB_INVOCATION_LIMIT,
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("manifest recovery sweep terminalizes cron and manual orphans before later work", async () => {
+  const harness = await createMigratedCentralTestDatabase();
+  try {
+    const repository = new PrismaManifestReconciliationJobRepository(
+      harness.client,
+    );
+    const baselineAt = new Date("2026-01-01T00:00:00.000Z");
+    await repository.activateSchedule({
+      scheduleEpoch: 1n,
+      baselineAt,
+      activatedAt: baselineAt,
+    });
+    const manualInput = beginInput({
+      opaqueKey: "manifest-expired-manual",
+      now: baselineAt,
+    });
+    const manualOrphan = await repository.beginOrRecoverInvocation(manualInput);
+    const firstDueAt = new Date(baselineAt.getTime() + 60_000);
+    const orphanInput = beginInput({
+      opaqueKey: "manifest-expired-cron-window-one",
+      now: firstDueAt,
+      trigger: {
+        kind: "reconciliation_cron",
+        scheduleEpoch: 1n,
+        scheduleWindowIndex: 1n,
+        scheduledDueAt: firstDueAt,
+      },
+    });
+    const orphan = await repository.beginOrRecoverInvocation(orphanInput);
+    const reconciledAt = orphanInput.ownershipExpiresAt;
+
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 1, moreEligible: true });
+    const manualTerminal = await repository.loadInvocation(
+      manualOrphan.invocation!.runId,
+    );
+    assert.deepEqual({
+      triggerKind: manualTerminal?.trigger.kind,
+      lifecycleState: manualTerminal?.lifecycleState,
+      outcome: manualTerminal?.outcome,
+      safeFailureCode: manualTerminal?.safeFailureCode,
+      retentionProtected: manualTerminal?.retentionProtected,
+    }, {
+      triggerKind: "manual",
+      lifecycleState: "terminal",
+      outcome: "continuation_required",
+      safeFailureCode: "MANIFEST_RECONCILIATION_INTERRUPTED",
+      retentionProtected: true,
+    });
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 1, moreEligible: false });
+    const terminal = await repository.loadInvocation(orphan.invocation!.runId);
+    assert.deepEqual({
+      lifecycleState: terminal?.lifecycleState,
+      outcome: terminal?.outcome,
+      safeFailureCode: terminal?.safeFailureCode,
+      retentionProtected: terminal?.retentionProtected,
+    }, {
+      lifecycleState: "terminal",
+      outcome: "continuation_required",
+      safeFailureCode: "MANIFEST_RECONCILIATION_INTERRUPTED",
+      retentionProtected: true,
+    });
+    assert.equal((await repository.loadWakeIntent()).pending, true);
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 0, moreEligible: false });
+
+    const secondDueAt = new Date(baselineAt.getTime() + 120_000);
+    const laterInput = beginInput({
+      opaqueKey: "manifest-cron-window-two-after-recovery",
+      now: secondDueAt,
+      trigger: {
+        kind: "reconciliation_cron",
+        scheduleEpoch: 1n,
+        scheduleWindowIndex: 2n,
+        scheduledDueAt: secondDueAt,
+      },
+    });
+    const later = await repository.beginOrRecoverInvocation(laterInput);
+    assert.equal(later.disposition, "started");
+    await repository.terminalize({
+      runId: later.invocation!.runId,
+      ownershipToken: laterInput.ownershipToken,
+      finishedAt: new Date(secondDueAt.getTime() + 1_000),
+      outcome: "no_change",
+      resultActiveGeneration: 0n,
+    });
+    assert.equal((await repository.loadSchedule()).lastAdmittedWindowIndex, 2n);
+
+    const pruneAt = new Date(
+      reconciledAt.getTime() + PROMOTION_JOB_INVOCATION_RETENTION_MS + 1,
+    );
+    assert.deepEqual(await repository.releasePrunableRetentionProtection({
+      now: pruneAt,
+      maximumRows: 10,
+    }), { released: 2, moreEligible: false });
+    const pruned = await repository.prune({ now: pruneAt, maximumRows: 10 });
+    assert.equal(pruned.invocationSummariesDeleted, 2);
+    assert.equal(
+      await repository.loadInvocation(manualOrphan.invocation!.runId),
+      null,
+    );
+    assert.equal(await repository.loadInvocation(orphan.invocation!.runId), null);
   } finally {
     await harness.close();
   }

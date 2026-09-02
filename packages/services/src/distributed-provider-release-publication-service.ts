@@ -45,46 +45,64 @@ type ExecutableOperation = DistributedProviderPublicationOperation & Readonly<{
   requestPath: string;
 }>;
 
+export interface DistributedProviderPublicationDeadline {
+  readonly deadlineAt: number;
+}
+
 export interface DistributedProviderReleasePublicationStore {
   claimLease(
     owner: string,
     leaseMilliseconds: number,
+    deadline?: DistributedProviderPublicationDeadline,
+    cleanupDeadline?: DistributedProviderPublicationDeadline,
   ): Promise<DistributedProviderPublisherLease>;
   renewLease(
     lease: DistributedProviderPublisherLease,
     leaseMilliseconds: number,
+    deadline?: DistributedProviderPublicationDeadline,
   ): Promise<DistributedProviderPublisherLease>;
-  releaseLease(lease: DistributedProviderPublisherLease): Promise<void>;
-  loadExpectedCompletedHead(): Promise<ProviderReleaseExpectedCompletedHeadV1>;
+  releaseLease(
+    lease: DistributedProviderPublisherLease,
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<void>;
+  loadExpectedCompletedHead(
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<ProviderReleaseExpectedCompletedHeadV1>;
   recordIntent(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly providerReleaseId: string;
     readonly operation: DistributedProviderPublicationOperation;
-  }): Promise<DistributedProviderPublicationIntent>;
+  }, deadline?: DistributedProviderPublicationDeadline): Promise<
+    DistributedProviderPublicationIntent
+  >;
   recordAttempt(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
-  }): Promise<void>;
+  }, deadline?: DistributedProviderPublicationDeadline): Promise<void>;
   markAmbiguous(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
-  }): Promise<void>;
+  }, deadline?: DistributedProviderPublicationDeadline): Promise<void>;
   fail(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
     readonly failureCode: string;
-  }): Promise<void>;
+  }, deadline?: DistributedProviderPublicationDeadline): Promise<void>;
   accept(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly providerReleaseId: string;
     readonly operation: DistributedProviderPublicationOperation;
     readonly evidence: DistributedProviderPublicationReceiptEvidence;
-  }): Promise<Readonly<{ receipt: ProviderReleaseReceipt; completed: boolean }>>;
+  }, deadline?: DistributedProviderPublicationDeadline): Promise<Readonly<{
+    receipt: ProviderReleaseReceipt;
+    completed: boolean;
+  }>>;
 }
 
 export interface DistributedProviderReleaseSourceStore {
   publicationSource(
     providerReleaseId: string,
+    deadline?: DistributedProviderPublicationDeadline,
   ): Promise<ProviderReleasePublicationSource>;
 }
 
@@ -132,6 +150,7 @@ export interface DistributedProviderPublicationResult {
 
 export type DistributedProviderPublicationFailureCode =
   | "PROVIDER_PUBLICATION_SOURCE_INVALID"
+  | "PROVIDER_PUBLICATION_DEADLINE"
   | "PROVIDER_PUBLICATION_INTENT_FAILED"
   | "PROVIDER_PUBLICATION_RECEIPT_INVALID"
   | "PROVIDER_PUBLICATION_AMBIGUOUS"
@@ -167,6 +186,33 @@ function boundedFailureCode(error: unknown): string {
     && FAILURE_CODE_PATTERN.test(error.code)
   ) return error.code;
   return "PROVIDER_PUBLICATION_TRANSPORT_FAILED";
+}
+
+function publicationDeadline(deadlineAt: number | undefined):
+  DistributedProviderPublicationDeadline | undefined {
+  if (deadlineAt === undefined) return undefined;
+  if (!Number.isSafeInteger(deadlineAt) || deadlineAt < 1) {
+    throw new TypeError("Provider publication deadline is invalid.");
+  }
+  return { deadlineAt };
+}
+
+function requirePublicationActive(
+  signal: AbortSignal | undefined,
+  deadline: DistributedProviderPublicationDeadline | undefined,
+): void {
+  if (signal?.aborted === true) {
+    throw new DistributedProviderPublicationError(
+      "PROVIDER_PUBLICATION_AMBIGUOUS",
+      true,
+    );
+  }
+  if (deadline !== undefined && Date.now() >= deadline.deadlineAt) {
+    throw new DistributedProviderPublicationError(
+      "PROVIDER_PUBLICATION_DEADLINE",
+      true,
+    );
+  }
 }
 
 function terminalBlockReason(code: string): ProviderReleaseBlockReasonV1 {
@@ -382,17 +428,32 @@ export class DistributedProviderReleasePublicationService {
   async publish(
     assembly: ProviderReleaseAssemblyResult,
     signal?: AbortSignal,
+    deadlineAt?: number,
+    cleanupDeadlineAt?: number,
   ): Promise<DistributedProviderPublicationResult> {
+    const deadline = publicationDeadline(deadlineAt);
+    const cleanupDeadline = publicationDeadline(cleanupDeadlineAt)
+      ?? deadline;
+    if (
+      deadline !== undefined
+      && cleanupDeadline !== undefined
+      && cleanupDeadline.deadlineAt < deadline.deadlineAt
+    ) throw new TypeError("Provider publication cleanup deadline is invalid.");
+    requirePublicationActive(signal, deadline);
     const descriptor = assembly.release.descriptor;
     const startedAt = this.now().getTime();
     let lease = await this.dependencies.publications.claimLease(
       this.dependencies.workerId,
       this.#leaseMilliseconds,
+      deadline,
+      cleanupDeadline,
     );
     try {
       const source = await this.dependencies.releases.publicationSource(
         assembly.release.id,
+        deadline,
       );
+      requirePublicationActive(signal, deadline);
       if (!sameSource(assembly, source)) {
         throw new DistributedProviderPublicationError(
           "PROVIDER_PUBLICATION_SOURCE_INVALID",
@@ -405,6 +466,7 @@ export class DistributedProviderReleasePublicationService {
         selectedThroughChangeSequence: assembly.selectedThroughChangeSequence,
         classification: assembly.reusedCompleteRelease ? "reuse" : "publish",
       });
+      requirePublicationActive(signal, deadline);
       if (plan.classification === "blocked") {
         throw new DistributedProviderPublicationError(
           "PROVIDER_PUBLICATION_SOURCE_INVALID",
@@ -412,7 +474,8 @@ export class DistributedProviderReleasePublicationService {
         );
       }
       const expectedHead = await this.dependencies.publications
-        .loadExpectedCompletedHead();
+        .loadExpectedCompletedHead(deadline);
+      requirePublicationActive(signal, deadline);
       const lag = assembly.selectedThroughChangeSequence
         - BigInt(expectedHead.providerCheckpoint.settledSequence);
       this.emit({
@@ -431,16 +494,12 @@ export class DistributedProviderReleasePublicationService {
       });
       let terminal: ProviderReleasePublicationResult | null = null;
       for (const [index, preparedOperation] of prepared.operations.entries()) {
-        if (signal?.aborted === true) {
-          throw new DistributedProviderPublicationError(
-            "PROVIDER_PUBLICATION_AMBIGUOUS",
-            true,
-          );
-        }
+        requirePublicationActive(signal, deadline);
         if (index > 0) {
           lease = await this.dependencies.publications.renewLease(
             lease,
             this.#leaseMilliseconds,
+            deadline,
           );
         }
         terminal = await this.execute(
@@ -449,6 +508,7 @@ export class DistributedProviderReleasePublicationService {
           executable(preparedOperation),
           descriptor.providerId,
           signal,
+          deadline,
         );
       }
       if (terminal === null) {
@@ -502,7 +562,7 @@ export class DistributedProviderReleasePublicationService {
       });
       throw error;
     } finally {
-      await this.dependencies.publications.releaseLease(lease)
+      await this.dependencies.publications.releaseLease(lease, cleanupDeadline)
         .catch(() => undefined);
     }
   }
@@ -513,12 +573,14 @@ export class DistributedProviderReleasePublicationService {
     operation: ExecutableOperation,
     providerId: string,
     signal: AbortSignal | undefined,
+    deadline: DistributedProviderPublicationDeadline | undefined,
   ): Promise<ProviderReleasePublicationResult> {
+    requirePublicationActive(signal, deadline);
     const intent = await this.dependencies.publications.recordIntent({
       lease,
       providerReleaseId,
       operation,
-    });
+    }, deadline);
     if (intent.state === "accepted") {
       return requireStoredPublication(operation, intent);
     }
@@ -540,6 +602,7 @@ export class DistributedProviderReleasePublicationService {
         providerId,
         true,
         signal,
+        deadline,
       );
     }
     return this.send(
@@ -549,6 +612,7 @@ export class DistributedProviderReleasePublicationService {
       providerId,
       true,
       signal,
+      deadline,
     );
   }
 
@@ -559,11 +623,13 @@ export class DistributedProviderReleasePublicationService {
     providerId: string,
     reconcileAmbiguity: boolean,
     signal: AbortSignal | undefined,
+    deadline: DistributedProviderPublicationDeadline | undefined,
   ): Promise<ProviderReleasePublicationResult> {
+    requirePublicationActive(signal, deadline);
     await this.dependencies.publications.recordAttempt({
       lease,
       idempotencyKey: operation.operationId,
-    });
+    }, deadline);
     const startedAt = this.now().getTime();
     let publication: ProviderReleasePublicationResult;
     try {
@@ -581,6 +647,7 @@ export class DistributedProviderReleasePublicationService {
             providerId,
             error.code,
             signal,
+            deadline,
           );
         }
         throw new DistributedProviderPublicationError(error.code, true);
@@ -588,7 +655,7 @@ export class DistributedProviderReleasePublicationService {
       await this.dependencies.publications.markAmbiguous({
         lease,
         idempotencyKey: operation.operationId,
-      });
+      }, deadline);
       this.emit({
         name: "provider_publication_ambiguity",
         providerId,
@@ -604,6 +671,7 @@ export class DistributedProviderReleasePublicationService {
           providerId,
           true,
           signal,
+          deadline,
         );
       }
       throw new DistributedProviderPublicationError(
@@ -611,6 +679,7 @@ export class DistributedProviderReleasePublicationService {
         true,
       );
     }
+    requirePublicationActive(signal, deadline);
     const receipt = validatePublication(operation, publication);
     await this.dependencies.publications.accept({
       lease,
@@ -620,7 +689,7 @@ export class DistributedProviderReleasePublicationService {
         canonicalReceiptBody: publication.canonicalReceiptBody,
         receiptSha256: publication.receiptSha256,
       },
-    });
+    }, deadline);
     void receipt;
     this.emit({
       name: "provider_publication_operation",
@@ -639,7 +708,9 @@ export class DistributedProviderReleasePublicationService {
     providerId: string,
     allowResend: boolean,
     signal: AbortSignal | undefined,
+    deadline: DistributedProviderPublicationDeadline | undefined,
   ): Promise<ProviderReleasePublicationResult> {
+    requirePublicationActive(signal, deadline);
     let observed: ProviderReleasePublicationResult<
       ProviderReleaseReceipt | ProviderReleaseStatusNotFoundReceipt
     >;
@@ -652,6 +723,7 @@ export class DistributedProviderReleasePublicationService {
         true,
       );
     }
+    requirePublicationActive(signal, deadline);
     if (!exactJson(
       observed.receipt,
       observed.canonicalReceiptBody,
@@ -689,6 +761,7 @@ export class DistributedProviderReleasePublicationService {
         providerId,
         false,
         signal,
+        deadline,
       );
     }
     const receipt = validatePublication(operation, observed);
@@ -704,7 +777,7 @@ export class DistributedProviderReleasePublicationService {
         canonicalReceiptBody: publication.canonicalReceiptBody,
         receiptSha256: publication.receiptSha256,
       },
-    });
+    }, deadline);
     return publication;
   }
 
@@ -715,14 +788,16 @@ export class DistributedProviderReleasePublicationService {
     providerId: string,
     failureCode: string,
     signal: AbortSignal | undefined,
+    deadline: DistributedProviderPublicationDeadline | undefined,
   ): Promise<never> {
+    requirePublicationActive(signal, deadline);
     await this.dependencies.publications.fail({
       lease,
       idempotencyKey: operation.operationId,
       failureCode: FAILURE_CODE_PATTERN.test(failureCode)
         ? failureCode
         : "PROVIDER_PUBLICATION_TRANSPORT_FAILED",
-    });
+    }, deadline);
     if (operation.operationKind !== "block") {
       try {
         const blocked = blockOperation(
@@ -735,6 +810,7 @@ export class DistributedProviderReleasePublicationService {
           blocked,
           providerId,
           signal,
+          deadline,
         );
         this.emit({
           name: "provider_publication_block",

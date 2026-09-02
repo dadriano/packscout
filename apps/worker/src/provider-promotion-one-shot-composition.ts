@@ -21,6 +21,8 @@ import {
   createBoundProviderReleasePublicationExecutor,
 } from "./provider-release-publication-composition.ts";
 import {
+  PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS,
+  PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS,
   ProviderPromotionOneShot,
   type ProviderPromotionAttemptObservation,
   type ProviderPromotionBoundary,
@@ -29,18 +31,26 @@ import {
   type ProviderPromotionOneShotResult,
 } from "./provider-promotion-one-shot.ts";
 
-const RELEASE_LEASE_MILLISECONDS = 60_000;
+const RELEASE_LEASE_MILLISECONDS =
+  PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS
+  + PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_CODE_PATTERN = /^[A-Z0-9_]{1,128}$/u;
 const RETRYABLE_WORK_FAILURE_CODES = new Set([
   "PROVIDER_RELEASE_FENCE_STALE",
+  "PROVIDER_RELEASE_CANCELLED",
+  "PROVIDER_RELEASE_DEADLINE",
+  "PROVIDER_PROMOTION_CANCELLED",
+  "PROVIDER_PROMOTION_DEADLINE",
   "PROVIDER_CONFIG_MISMATCH",
   "CATALOG_VERSION_MISSING",
   "CATALOG_VERSION_INCOMPLETE",
   "CORRELATION_MISSING",
   "CORRELATION_STALE",
   "PROVIDER_PUBLICATION_LEASE_LOST",
+  "PROVIDER_PUBLICATION_DEADLINE",
+  "PROVIDER_WORKER_LEASE_DEADLINE",
   "PROVIDER_PUBLICATION_AMBIGUOUS",
   "PROVIDER_PUBLICATION_TRANSPORT_FAILED",
   "PUBLICATION_CANCELLED",
@@ -108,6 +118,7 @@ export function createBoundProviderPromotionOneShot(input: Readonly<{
   maximumAttempts?: number;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
+  nowMilliseconds?: () => number;
 }>): ProviderPromotionOneShot {
   return new ProviderPromotionOneShot({
     providerId: input.providerId,
@@ -131,6 +142,9 @@ export function createBoundProviderPromotionOneShot(input: Readonly<{
     ...(input.randomUuid === undefined ? {} : { randomUuid: input.randomUuid }),
     ...(input.setTimer === undefined ? {} : { setTimer: input.setTimer }),
     ...(input.clearTimer === undefined ? {} : { clearTimer: input.clearTimer }),
+    ...(input.nowMilliseconds === undefined
+      ? {}
+      : { nowMilliseconds: input.nowMilliseconds }),
   });
 }
 
@@ -179,7 +193,47 @@ function attemptOwner(workerId: string, runId: string): string {
   return `provider-promotion:${promotionJobSha256(workerId).slice(0, 24)}:${runId}`;
 }
 
-class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
+function boundedReadOptions(deadlineAt: number | undefined): Readonly<{
+  maxWait: number;
+  timeout: number;
+}> | undefined {
+  if (deadlineAt === undefined) return undefined;
+  const available = Math.floor(deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(1_000, Math.max(1, Math.floor(available / 5)));
+  const timeout = Math.min(30_000, available - maxWait);
+  if (timeout < 1) {
+    throw Object.assign(new Error("Provider read deadline reached."), {
+      code: "PROVIDER_PROMOTION_DEADLINE",
+    });
+  }
+  return { maxWait, timeout };
+}
+
+function providerReadTransactionExpired(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && (error.code === "P2024" || error.code === "P2028");
+}
+
+async function boundedProviderRead<T>(
+  deadlineAt: number | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (deadlineAt !== undefined && providerReadTransactionExpired(error)) {
+      throw Object.assign(new Error("Provider read deadline reached."), {
+        code: "PROVIDER_PROMOTION_DEADLINE",
+      });
+    }
+    throw error;
+  }
+}
+
+export class PrismaBoundProviderPromotionWork
+implements ProviderPromotionJobWorkPort {
   constructor(private readonly dependencies: Readonly<{
     provider: ProviderPrismaClient;
     providerId: string;
@@ -189,21 +243,43 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
     now?: () => Date;
   }>) {}
 
-  async readBoundary(): Promise<ProviderPromotionBoundary> {
-    const [identity, lane, publication] = await Promise.all([
-      this.dependencies.provider.database_identity.findUniqueOrThrow({
-        where: { singleton_key: true },
-        select: { provider_id: true, provider_key: true },
-      }),
-      this.dependencies.provider.promotion_ledger.findUniqueOrThrow({
-        where: { singleton_key: true },
-        select: { last_sequence: true },
-      }),
-      this.dependencies.provider.provider_publication_state.findUniqueOrThrow({
-        where: { singleton_key: true },
-        select: { completed_through_change_sequence: true },
-      }),
-    ]);
+  async readBoundary(
+    signal?: AbortSignal,
+    deadlineAt?: number,
+  ): Promise<ProviderPromotionBoundary> {
+    if (signal?.aborted) {
+      throw Object.assign(new Error("Provider read cancelled."), {
+        code: "PROVIDER_PROMOTION_CANCELLED",
+      });
+    }
+    const options = boundedReadOptions(deadlineAt);
+    const [identity, lane, publication] = await boundedProviderRead(
+      deadlineAt,
+      () => this.dependencies.provider.$transaction(
+        async (transaction) => Promise.all([
+        transaction.database_identity.findUniqueOrThrow({
+          where: { singleton_key: true },
+          select: { provider_id: true, provider_key: true },
+        }),
+        transaction.promotion_ledger.findUniqueOrThrow({
+          where: { singleton_key: true },
+          select: { last_sequence: true },
+        }),
+        transaction.provider_publication_state.findUniqueOrThrow({
+          where: { singleton_key: true },
+          select: { completed_through_change_sequence: true },
+        }),
+        ]),
+        options,
+      ),
+    );
+    if (signal?.aborted || deadlineAt !== undefined && Date.now() >= deadlineAt) {
+      throw Object.assign(new Error("Provider read deadline reached."), {
+        code: signal?.aborted
+          ? "PROVIDER_PROMOTION_CANCELLED"
+          : "PROVIDER_PROMOTION_DEADLINE",
+      });
+    }
     if (
       identity.provider_id.toLowerCase() !==
         this.dependencies.providerId.toLowerCase()
@@ -228,6 +304,8 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
     attemptId: string;
     targetPosition: bigint;
     retryCount: number;
+    deadlineAt: number;
+    cleanupDeadlineAt: number;
     signal: AbortSignal;
   }>): Promise<ProviderPromotionAttemptObservation> {
     const releases = new ProviderReleaseRepository(this.dependencies.provider);
@@ -238,6 +316,8 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
         workerId: owner,
         leaseMilliseconds: RELEASE_LEASE_MILLISECONDS,
         pin: this.dependencies.pin,
+        deadlineAt: input.deadlineAt,
+        signal: input.signal,
       });
       providerReleaseId = assembly.release.id;
       if (assembly.selectedThroughChangeSequence < input.targetPosition) {
@@ -254,8 +334,17 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
         ...(this.dependencies.now === undefined
           ? {}
           : { now: this.dependencies.now }),
-      }).publish(assembly, input.signal);
-      const operations = await this.operationEvidence(providerReleaseId);
+      }).publish(
+        assembly,
+        input.signal,
+        input.deadlineAt,
+        input.cleanupDeadlineAt,
+      );
+      const operations = await this.operationEvidence(
+        providerReleaseId,
+        input.deadlineAt,
+        input.signal,
+      );
       return {
         disposition: "completed",
         observedState: publication.reusedCompleteRelease
@@ -274,7 +363,11 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
       );
       const operations = providerReleaseId === null
         ? this.emptyOperationEvidence()
-        : await this.operationEvidence(providerReleaseId).catch(() =>
+        : await this.operationEvidence(
+            providerReleaseId,
+            input.deadlineAt,
+            input.signal,
+          ).catch(() =>
             this.emptyOperationEvidence()
           );
       const shouldRetry = retryable(error)
@@ -312,12 +405,26 @@ class PrismaBoundProviderPromotionWork implements ProviderPromotionJobWorkPort {
     };
   }
 
-  private async operationEvidence(providerReleaseId: string) {
-    const rows = await this.dependencies.provider
-      .provider_publication_operations.findMany({
-        where: { provider_release_id: providerReleaseId },
-        include: { receipt: true },
+  private async operationEvidence(
+    providerReleaseId: string,
+    deadlineAt: number,
+    signal: AbortSignal,
+  ) {
+    if (signal.aborted) {
+      throw Object.assign(new Error("Provider evidence read cancelled."), {
+        code: "PROVIDER_PROMOTION_CANCELLED",
       });
+    }
+    const rows = await boundedProviderRead(
+      deadlineAt,
+      () => this.dependencies.provider.$transaction(
+        (transaction) => transaction.provider_publication_operations.findMany({
+          where: { provider_release_id: providerReleaseId },
+          include: { receipt: true },
+        }),
+        boundedReadOptions(deadlineAt),
+      ),
+    );
     const rank = new Map([
       ["start", 0],
       ["applyBatch", 1],

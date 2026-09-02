@@ -26,6 +26,7 @@ import {
   assertProviderReleaseIntegrity,
   releaseBatchRecords,
 } from "./provider-release-integrity.ts";
+import { providerPageQueryExpiration } from "./provider-page-transaction.ts";
 import { PROVIDER_SCHEMA_VERSION } from "./database-topology.ts";
 
 interface ProviderReleaseLease {
@@ -82,29 +83,39 @@ async function acquireReleaseLease(input: {
   readonly provider: ProviderPrismaClient;
   readonly workerId: string;
   readonly leaseMilliseconds: number;
+  readonly control: ProviderReleaseAssemblyControl;
 }): Promise<ProviderReleaseLease | null> {
   requireLeaseInput(input.workerId, input.leaseMilliseconds);
-  const [observed, clock] = await Promise.all([
-    input.provider.provider_change_consumers.findUnique({
-      where: { consumer_key: "provider_release" },
-      select: { lease_owner: true, lease_expires_at: true },
-    }),
-    input.provider.$queryRaw<{ readonly database_now: Date }[]>(
-      ProviderPrisma.sql`SELECT CURRENT_TIMESTAMP AS database_now`,
-    ),
-  ]);
-  const observedNow = clock[0]?.database_now;
-  if (
-    observed !== null
-    && observed.lease_owner !== null
-    && observed.lease_expires_at !== null
-    && observedNow !== undefined
-    && observed.lease_expires_at > observedNow
-  ) {
-    return null;
-  }
+  const transactionOptions = boundedReleaseTransactionOptions(
+    LEASE_TRANSACTION,
+    input.control,
+  );
   return input.provider.$transaction(async (transaction) => {
-    let row = await lockReleaseConsumer(transaction);
+    const phases = releaseTransactionPhases({
+      transaction,
+      transactionTimeoutMilliseconds: transactionOptions.timeout,
+      control: input.control,
+    });
+    const observed = await phases.run(() =>
+      transaction.provider_change_consumers.findUnique({
+        where: { consumer_key: "provider_release" },
+        select: { lease_owner: true, lease_expires_at: true },
+      })
+    );
+    const clock = await phases.run(() =>
+      transaction.$queryRaw<{ readonly database_now: Date }[]>(
+        ProviderPrisma.sql`SELECT CURRENT_TIMESTAMP AS database_now`,
+      )
+    );
+    const observedNow = clock[0]?.database_now;
+    if (
+      observed !== null
+      && observed.lease_owner !== null
+      && observed.lease_expires_at !== null
+      && observedNow !== undefined
+      && observed.lease_expires_at > observedNow
+    ) return null;
+    let row = await phases.run(() => lockReleaseConsumer(transaction));
     const active = row.lease_owner !== null
       && row.lease_expires_at !== null
       && row.lease_expires_at > row.database_now;
@@ -112,20 +123,22 @@ async function acquireReleaseLease(input: {
     const expiresAt = new Date(
       row.database_now.getTime() + input.leaseMilliseconds,
     );
-    const updated = await transaction.provider_change_consumers.updateMany({
-      where: { consumer_key: "provider_release", row_version: row.row_version },
-      data: {
-        lease_owner: input.workerId,
-        lease_fence: row.lease_fence + 1n,
-        lease_expires_at: expiresAt,
-        row_version: { increment: 1n },
-        updated_at: row.database_now,
-      },
-    });
+    const updated = await phases.run(() =>
+      transaction.provider_change_consumers.updateMany({
+        where: { consumer_key: "provider_release", row_version: row.row_version },
+        data: {
+          lease_owner: input.workerId,
+          lease_fence: row.lease_fence + 1n,
+          lease_expires_at: expiresAt,
+          row_version: { increment: 1n },
+          updated_at: row.database_now,
+        },
+      })
+    );
     if (updated.count !== 1) {
       throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_FENCE_STALE");
     }
-    row = await lockReleaseConsumer(transaction);
+    row = await phases.run(() => lockReleaseConsumer(transaction));
     if (
       row.lease_owner !== input.workerId
       || row.lease_expires_at === null
@@ -138,36 +151,61 @@ async function acquireReleaseLease(input: {
       leaseFence: row.lease_fence,
       leaseExpiresAt: row.lease_expires_at,
     };
-  }, LEASE_TRANSACTION);
+  }, transactionOptions);
 }
 
 async function releaseReleaseLease(input: {
   readonly provider: ProviderPrismaClient;
   readonly lease: ProviderReleaseLease;
+  readonly control: ProviderReleaseAssemblyControl;
 }): Promise<boolean> {
+  const transactionOptions = boundedReleaseTransactionOptions(
+    LEASE_TRANSACTION,
+    input.control,
+  );
   return input.provider.$transaction(async (transaction) => {
-    const row = await lockReleaseConsumer(transaction);
+    const phases = releaseTransactionPhases({
+      transaction,
+      transactionTimeoutMilliseconds: transactionOptions.timeout,
+      control: input.control,
+    });
+    const row = await phases.run(() => lockReleaseConsumer(transaction));
     if (row.lease_owner === null) return true;
     if (
       row.lease_owner !== input.lease.leaseOwner
       || row.lease_fence !== input.lease.leaseFence
     ) return false;
-    const updated = await transaction.provider_change_consumers.updateMany({
-      where: {
-        consumer_key: "provider_release",
-        lease_owner: input.lease.leaseOwner,
-        lease_fence: input.lease.leaseFence,
-        row_version: row.row_version,
+    const updated = await phases.run(() =>
+      transaction.provider_change_consumers.updateMany({
+        where: {
+          consumer_key: "provider_release",
+          lease_owner: input.lease.leaseOwner,
+          lease_fence: input.lease.leaseFence,
+          row_version: row.row_version,
+        },
+        data: {
+          lease_owner: null,
+          lease_expires_at: null,
+          row_version: { increment: 1n },
+          updated_at: row.database_now,
+        },
       },
-      data: {
-        lease_owner: null,
-        lease_expires_at: null,
-        row_version: { increment: 1n },
-        updated_at: row.database_now,
-      },
-    });
+    ));
     return updated.count === 1;
-  }, LEASE_TRANSACTION);
+  }, transactionOptions);
+}
+
+async function releaseReleaseLeaseBeforeDeadline(input: {
+  readonly provider: ProviderPrismaClient;
+  readonly lease: ProviderReleaseLease;
+  readonly control: ProviderReleaseAssemblyControl;
+}): Promise<void> {
+  try {
+    await releaseReleaseLease(input);
+  } catch (error) {
+    if (boundedReleaseLeaseCleanupFailure(error)) return;
+    throw error;
+  }
 }
 
 const ASSEMBLY_TRANSACTION = Object.freeze({
@@ -175,6 +213,15 @@ const ASSEMBLY_TRANSACTION = Object.freeze({
   timeout: 120_000,
   isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
 });
+const PREFLIGHT_TRANSACTION = Object.freeze({
+  maxWait: 5_000,
+  timeout: 15_000,
+  isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
+});
+const ASSEMBLY_COMPLETION_RESERVE_MILLISECONDS = 5_000;
+const MINIMUM_TRANSACTION_TIMEOUT_MILLISECONDS = 1_000;
+const TRANSACTION_SETTLEMENT_RESERVE_MILLISECONDS = 250;
+const RELEASE_LEASE_CLEANUP_WINDOW_MILLISECONDS = 2_000;
 const SNAPSHOT_LIMITS = Object.freeze({
   categories: 100_000,
   collectibles: 1_000_000,
@@ -184,6 +231,8 @@ const SNAPSHOT_LIMITS = Object.freeze({
 });
 
 export type ProviderReleaseAssemblyFailureCode =
+  | "PROVIDER_RELEASE_CANCELLED"
+  | "PROVIDER_RELEASE_DEADLINE"
   | "PROVIDER_RELEASE_LEASE_HELD"
   | "PROVIDER_RELEASE_FENCE_STALE"
   | "PROVIDER_RELEASE_SNAPSHOT_LIMIT"
@@ -200,6 +249,182 @@ export class ProviderReleaseAssemblyError extends Error {
     super(`Provider release assembly failed (${code}).`);
     this.name = "ProviderReleaseAssemblyError";
   }
+}
+
+interface ProviderReleaseAssemblyControl {
+  readonly signal: AbortSignal | undefined;
+  readonly deadlineAt: number | null;
+  readonly completionReserveMilliseconds: number;
+}
+
+interface ProviderReleaseTransactionOptions {
+  readonly maxWait: number;
+  readonly timeout: number;
+  readonly isolationLevel: ProviderPrisma.TransactionIsolationLevel;
+}
+
+function releaseAssemblyControl(input: Readonly<{
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}>): ProviderReleaseAssemblyControl {
+  if (
+    input.deadlineAt !== undefined
+    && (!Number.isSafeInteger(input.deadlineAt) || input.deadlineAt < 1)
+  ) throw new TypeError("Provider release assembly deadline is invalid.");
+  const remaining = input.deadlineAt === undefined
+    ? 0
+    : Math.max(0, input.deadlineAt - Date.now());
+  return {
+    signal: input.signal,
+    deadlineAt: input.deadlineAt ?? null,
+    completionReserveMilliseconds: input.deadlineAt === undefined
+      ? 0
+      : Math.min(
+          ASSEMBLY_COMPLETION_RESERVE_MILLISECONDS,
+          Math.max(1_000, Math.floor(remaining / 10)),
+        ),
+  };
+}
+
+function requireReleaseAssemblyActive(
+  control: ProviderReleaseAssemblyControl,
+): void {
+  if (control.signal?.aborted === true) {
+    throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_CANCELLED");
+  }
+  if (control.deadlineAt !== null && Date.now() >= control.deadlineAt) {
+    throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+  }
+}
+
+function boundedReleaseTransactionOptions(
+  base: ProviderReleaseTransactionOptions,
+  control: ProviderReleaseAssemblyControl,
+): ProviderReleaseTransactionOptions {
+  requireReleaseAssemblyActive(control);
+  if (control.deadlineAt === null) return base;
+  const transactionWindow = Math.floor(
+    control.deadlineAt
+      - Date.now()
+      - control.completionReserveMilliseconds,
+  );
+  const maxWait = Math.min(
+    base.maxWait,
+    Math.max(1, Math.floor(transactionWindow / 5)),
+  );
+  const timeout = Math.min(base.timeout, transactionWindow - maxWait);
+  if (timeout < MINIMUM_TRANSACTION_TIMEOUT_MILLISECONDS) {
+    throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+  }
+  return { ...base, maxWait, timeout };
+}
+
+interface ProviderReleaseTransactionPhases {
+  readonly check: () => void;
+  readonly run: <T>(operation: () => Promise<T>) => Promise<T>;
+}
+
+function releaseTransactionPhases(input: Readonly<{
+  transaction: ProviderTransactionClient;
+  transactionTimeoutMilliseconds: number;
+  control: ProviderReleaseAssemblyControl;
+}>): ProviderReleaseTransactionPhases {
+  const transactionDeadlineAt = Date.now()
+    + input.transactionTimeoutMilliseconds;
+  const workDeadlineAt = input.control.deadlineAt === null
+    ? transactionDeadlineAt
+    : Math.min(
+        transactionDeadlineAt,
+        input.control.deadlineAt
+          - input.control.completionReserveMilliseconds,
+      );
+  const check = () => {
+    requireReleaseAssemblyActive(input.control);
+    if (Date.now() >= workDeadlineAt) {
+      throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+    }
+  };
+  return {
+    check,
+    async run<T>(operation: () => Promise<T>): Promise<T> {
+      check();
+      const statementTimeoutMilliseconds = Math.floor(
+        workDeadlineAt
+          - Date.now()
+          - TRANSACTION_SETTLEMENT_RESERVE_MILLISECONDS,
+      );
+      if (statementTimeoutMilliseconds < 1) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+      }
+      await input.transaction.$queryRaw(
+        ProviderPrisma.sql`
+          SELECT set_config(
+            'statement_timeout',
+            ${statementTimeoutMilliseconds.toString()},
+            true
+          )
+        `,
+      );
+      const statementDeadlineAt = Date.now() + statementTimeoutMilliseconds;
+      try {
+        const result = await operation();
+        check();
+        return result;
+      } catch (error) {
+        if (Date.now() + 50 >= statementDeadlineAt) {
+          throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+function releasePhase<T>(
+  phases: ProviderReleaseTransactionPhases | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return phases === undefined ? operation() : phases.run(operation);
+}
+
+function ownField(value: unknown, name: string): unknown {
+  if (value === null || typeof value !== "object") return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, name);
+  return field && "value" in field ? field.value : undefined;
+}
+
+function releaseStatementTimeout(error: unknown): boolean {
+  return error instanceof ProviderPrisma.PrismaClientKnownRequestError
+    && ownField(error, "code") === "P2010"
+    && ownField(ownField(error, "meta"), "code") === "57014";
+}
+
+function boundedReleaseLeaseCleanupFailure(error: unknown): boolean {
+  if (
+    error instanceof ProviderReleaseAssemblyError
+    && error.code === "PROVIDER_RELEASE_DEADLINE"
+  ) return true;
+  if (!(error instanceof ProviderPrisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+  const code = ownField(error, "code");
+  return code === "P2024" || code === "P2028"
+    || releaseStatementTimeout(error);
+}
+
+function releaseLeaseControl(
+  control: ProviderReleaseAssemblyControl,
+  lease: ProviderReleaseLease,
+): ProviderReleaseAssemblyControl {
+  return {
+    ...control,
+    signal: undefined,
+    deadlineAt: Math.min(
+      lease.leaseExpiresAt.getTime(),
+      Date.now() + RELEASE_LEASE_CLEANUP_WINDOW_MILLISECONDS,
+    ),
+    completionReserveMilliseconds: 0,
+  };
 }
 
 export interface StoredProviderRelease {
@@ -233,41 +458,59 @@ export interface ProviderReleasePublicationSource {
 async function requireProviderPinPreflight(input: {
   readonly provider: ProviderPrismaClient;
   readonly pin: PinnedProviderReleaseInputs;
+  readonly control: ProviderReleaseAssemblyControl;
 }): Promise<void> {
-  const [identity, runtime, rows] = await Promise.all([
-    input.provider.database_identity.findUniqueOrThrow({
-      where: { singleton_key: true },
-    }),
-    input.provider.provider_runtime.findUniqueOrThrow({
-      where: { singleton_key: true },
-    }),
-    input.provider.$queryRaw<{ readonly database_now: Date }[]>(
-      ProviderPrisma.sql`SELECT CURRENT_TIMESTAMP AS database_now`,
-    ),
-  ]);
-  if (
-    identity.database_role !== "provider"
-    || identity.provider_id !== input.pin.providerId
-    || identity.provider_key !== input.pin.providerKey
-    || runtime.central_provider_id !== input.pin.providerId
-    || runtime.provider_key !== input.pin.providerKey
-  ) {
-    throw new ProviderReleaseAssemblyError("PROVIDER_IDENTITY_MISMATCH");
-  }
-  if (identity.schema_version !== PROVIDER_SCHEMA_VERSION) {
-    throw new ProviderReleaseAssemblyError("PROVIDER_SCHEMA_MISMATCH");
-  }
-  const databaseNow = rows[0]?.database_now;
-  if (
-    runtime.cached_config_version_id !== input.pin.providerConfigVersionId
-    || runtime.config_expires_at?.getTime() !== input.pin.providerConfigExpiresAt?.getTime()
-    || databaseNow === undefined
-    || !Number.isFinite(databaseNow.getTime())
-    || (runtime.config_expires_at !== null
-      && runtime.config_expires_at.getTime() <= databaseNow.getTime())
-  ) {
-    throw new ProviderReleaseAssemblyError("PROVIDER_CONFIG_MISMATCH");
-  }
+  const transactionOptions = boundedReleaseTransactionOptions(
+    PREFLIGHT_TRANSACTION,
+    input.control,
+  );
+  await input.provider.$transaction(async (transaction) => {
+    const phases = releaseTransactionPhases({
+      transaction,
+      transactionTimeoutMilliseconds: transactionOptions.timeout,
+      control: input.control,
+    });
+    requireReleaseAssemblyActive(input.control);
+    const identity = await phases.run(() =>
+      transaction.database_identity.findUniqueOrThrow({
+        where: { singleton_key: true },
+      })
+    );
+    const runtime = await phases.run(() =>
+      transaction.provider_runtime.findUniqueOrThrow({
+        where: { singleton_key: true },
+      })
+    );
+    const rows = await phases.run(() =>
+      transaction.$queryRaw<{ readonly database_now: Date }[]>(
+        ProviderPrisma.sql`SELECT CURRENT_TIMESTAMP AS database_now`,
+      )
+    );
+    requireReleaseAssemblyActive(input.control);
+    if (
+      identity.database_role !== "provider"
+      || identity.provider_id !== input.pin.providerId
+      || identity.provider_key !== input.pin.providerKey
+      || runtime.central_provider_id !== input.pin.providerId
+      || runtime.provider_key !== input.pin.providerKey
+    ) {
+      throw new ProviderReleaseAssemblyError("PROVIDER_IDENTITY_MISMATCH");
+    }
+    if (identity.schema_version !== PROVIDER_SCHEMA_VERSION) {
+      throw new ProviderReleaseAssemblyError("PROVIDER_SCHEMA_MISMATCH");
+    }
+    const databaseNow = rows[0]?.database_now;
+    if (
+      runtime.cached_config_version_id !== input.pin.providerConfigVersionId
+      || runtime.config_expires_at?.getTime() !== input.pin.providerConfigExpiresAt?.getTime()
+      || databaseNow === undefined
+      || !Number.isFinite(databaseNow.getTime())
+      || (runtime.config_expires_at !== null
+        && runtime.config_expires_at.getTime() <= databaseNow.getTime())
+    ) {
+      throw new ProviderReleaseAssemblyError("PROVIDER_CONFIG_MISMATCH");
+    }
+  }, transactionOptions);
 }
 
 interface LockedReleaseCheckpoint {
@@ -286,14 +529,17 @@ function requireSnapshotLimit(name: keyof typeof SNAPSHOT_LIMITS, count: number)
 async function requireFence(
   transaction: ProviderTransactionClient,
   lease: ProviderReleaseLease,
+  phases: ProviderReleaseTransactionPhases,
 ): Promise<void> {
-  const rows = await transaction.$queryRaw<LockedReleaseCheckpoint[]>(ProviderPrisma.sql`
-    SELECT lease_owner, lease_fence, lease_expires_at,
-           clock_timestamp() AS database_now
-    FROM provider_change_consumers
-    WHERE consumer_key = 'provider_release'
-    FOR SHARE
-  `);
+  const rows = await phases.run(() =>
+    transaction.$queryRaw<LockedReleaseCheckpoint[]>(ProviderPrisma.sql`
+      SELECT lease_owner, lease_fence, lease_expires_at,
+             clock_timestamp() AS database_now
+      FROM provider_change_consumers
+      WHERE consumer_key = 'provider_release'
+      FOR SHARE
+    `)
+  );
   const row = rows[0];
   if (
     !row
@@ -306,11 +552,18 @@ async function requireFence(
 
 async function loadSnapshot(
   transaction: ProviderTransactionClient,
+  phases: ProviderReleaseTransactionPhases,
 ): Promise<ProviderReleaseSnapshot> {
-  const [identity, runtime, ledger, categories, collectibles, aliases, packs, contents] = await Promise.all([
-    transaction.database_identity.findUniqueOrThrow({ where: { singleton_key: true } }),
-    transaction.provider_runtime.findUniqueOrThrow({ where: { singleton_key: true } }),
-    transaction.promotion_ledger.findUniqueOrThrow({ where: { singleton_key: true } }),
+  const identity = await phases.run(() =>
+    transaction.database_identity.findUniqueOrThrow({ where: { singleton_key: true } })
+  );
+  const runtime = await phases.run(() =>
+    transaction.provider_runtime.findUniqueOrThrow({ where: { singleton_key: true } })
+  );
+  const ledger = await phases.run(() =>
+    transaction.promotion_ledger.findUniqueOrThrow({ where: { singleton_key: true } })
+  );
+  const categories = await phases.run(() =>
     transaction.categories.findMany({
       take: SNAPSHOT_LIMITS.categories + 1,
       orderBy: { id: "asc" },
@@ -318,26 +571,34 @@ async function loadSnapshot(
         id: true, parent_category_id: true, category_key: true,
         display_name: true, lifecycle: true, row_version: true,
       },
-    }),
+    })
+  );
+  const collectibles = await phases.run(() =>
     transaction.collectibles.findMany({
       take: SNAPSHOT_LIMITS.collectibles + 1,
       orderBy: { id: "asc" },
       select: { id: true, collectible_type: true, lifecycle: true, row_version: true },
-    }),
+    })
+  );
+  const aliases = await phases.run(() =>
     transaction.collectible_name_aliases.findMany({
       take: SNAPSHOT_LIMITS.aliases + 1,
       orderBy: [{ collectible_id: "asc" }, { normalized_name: "asc" }, { id: "asc" }],
       select: { id: true, collectible_id: true, normalized_name: true, lifecycle: true },
-    }),
+    })
+  );
+  const packs = await phases.run(() =>
     transaction.packs.findMany({
       take: SNAPSHOT_LIMITS.packs + 1,
       orderBy: { id: "asc" },
-    }),
+    })
+  );
+  const contents = await phases.run(() =>
     transaction.pack_contents.findMany({
       take: SNAPSHOT_LIMITS.contents + 1,
       orderBy: [{ pack_id: "asc" }, { display_order: "asc" }, { id: "asc" }],
-    }),
-  ]);
+    })
+  );
   requireSnapshotLimit("categories", categories.length);
   requireSnapshotLimit("collectibles", collectibles.length);
   requireSnapshotLimit("aliases", aliases.length);
@@ -349,7 +610,8 @@ async function loadSnapshot(
     || runtime.provider_key !== identity.provider_key
     || runtime.last_head_reached_at === null
   ) throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_SNAPSHOT_INVALID");
-  return {
+  phases.check();
+  const snapshot: ProviderReleaseSnapshot = {
     providerId: identity.provider_id,
     providerKey: identity.provider_key,
     providerSchemaVersion: identity.schema_version,
@@ -428,6 +690,8 @@ async function loadSnapshot(
     scheduleSeconds: runtime.schedule_seconds,
     freshnessState: runtime.freshness_state,
   };
+  phases.check();
+  return snapshot;
 }
 
 function descriptorFromRow(row: {
@@ -522,11 +786,14 @@ const RELEASE_BATCH_KIND_ORDER = new Map<ProviderReleaseBatchKind, number>([
 async function loadStoredBatches(
   transaction: ProviderTransactionClient,
   providerReleaseId: string,
+  phases?: ProviderReleaseTransactionPhases,
 ): Promise<readonly ProviderReleaseBatch[]> {
-  const rows = await transaction.provider_release_batches.findMany({
-    where: { provider_release_id: providerReleaseId },
-    orderBy: [{ batch_kind: "asc" }, { batch_index: "asc" }],
-  });
+  const rows = await releasePhase(phases, () =>
+    transaction.provider_release_batches.findMany({
+      where: { provider_release_id: providerReleaseId },
+      orderBy: [{ batch_kind: "asc" }, { batch_index: "asc" }],
+    })
+  );
   const ordered = rows.sort((left, right) => {
     const leftOrder = RELEASE_BATCH_KIND_ORDER.get(left.batch_kind as ProviderReleaseBatchKind);
     const rightOrder = RELEASE_BATCH_KIND_ORDER.get(right.batch_kind as ProviderReleaseBatchKind);
@@ -549,13 +816,17 @@ async function loadStoredBatches(
 async function requireStoredIntegrity(
   transaction: ProviderTransactionClient,
   row: Parameters<typeof storedRelease>[0],
+  phases?: ProviderReleaseTransactionPhases,
 ): Promise<{ readonly release: StoredProviderRelease; readonly publicEquivalenceHash: string; readonly batches: readonly ProviderReleaseBatch[] }> {
   const release = storedRelease(row);
-  const batches = await loadStoredBatches(transaction, row.id);
+  const batches = await loadStoredBatches(transaction, row.id, phases);
+  phases?.check();
   const publicEquivalenceHash = await assertProviderReleaseIntegrity({
     descriptor: release.descriptor,
     batches,
+    ...(phases === undefined ? {} : { checkpoint: phases.check }),
   });
+  phases?.check();
   return { release, publicEquivalenceHash, batches };
 }
 
@@ -563,11 +834,13 @@ async function requireExactStoredRelease(
   transaction: ProviderTransactionClient,
   row: Parameters<typeof storedRelease>[0],
   built: BuiltProviderRelease,
+  phases: ProviderReleaseTransactionPhases,
 ): Promise<StoredProviderRelease> {
   if (row.lifecycle !== "assembled" && row.lifecycle !== "complete") {
     throw new ProviderReleaseIntegrityError("A deterministic provider release ID has a terminal conflict.");
   }
-  const stored = await requireStoredIntegrity(transaction, row);
+  const stored = await requireStoredIntegrity(transaction, row, phases);
+  phases.check();
   if (
     canonicalJson(stored.release.descriptor) !== canonicalJson(built.descriptor)
     || canonicalJson(stored.batches) !== canonicalJson(built.batches)
@@ -575,24 +848,33 @@ async function requireExactStoredRelease(
   ) {
     throw new ProviderReleaseIntegrityError("A deterministic provider release ID has conflicting immutable content.");
   }
+  phases.check();
   return stored.release;
 }
 
 async function persistBuilt(
   transaction: ProviderTransactionClient,
   built: BuiltProviderRelease,
+  phases: ProviderReleaseTransactionPhases,
 ): Promise<{ readonly release: StoredProviderRelease; readonly resumed: boolean }> {
   const descriptor = built.descriptor;
-  const priorById = await transaction.provider_releases.findUnique({
-    where: { id: descriptor.providerReleaseId },
-  });
+  const priorById = await phases.run(() =>
+    transaction.provider_releases.findUnique({
+      where: { id: descriptor.providerReleaseId },
+    })
+  );
   if (priorById) {
     return {
-      release: await requireExactStoredRelease(transaction, priorById, built),
+      release: await requireExactStoredRelease(
+        transaction,
+        priorById,
+        built,
+        phases,
+      ),
       resumed: true,
     };
   }
-  await transaction.provider_releases.create({
+  await phases.run(() => transaction.provider_releases.create({
     data: {
       id: descriptor.providerReleaseId,
       predecessor_id: descriptor.predecessorCompleteReleaseId,
@@ -623,9 +905,10 @@ async function persistBuilt(
       stale_at: new Date(descriptor.staleAt),
       freshness: descriptor.freshness,
     },
-  });
+  }));
   for (const batch of built.batches) {
-    await transaction.provider_release_batches.create({
+    phases.check();
+    await phases.run(() => transaction.provider_release_batches.create({
       data: {
         provider_release_id: descriptor.providerReleaseId,
         batch_kind: batch.batchKind,
@@ -635,16 +918,20 @@ async function persistBuilt(
         byte_count: batch.byteCount,
         body_hash: batch.bodyHash,
       },
-    });
+    }));
   }
-  const [{ database_now: assembledAt }] = await transaction.$queryRaw<
-    { database_now: Date }[]
-  >`SELECT clock_timestamp() AS database_now`;
+  const [{ database_now: assembledAt }] = await phases.run(() =>
+    transaction.$queryRaw<{ database_now: Date }[]>(
+      ProviderPrisma.sql`SELECT clock_timestamp() AS database_now`,
+    )
+  );
   if (!assembledAt) throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_SNAPSHOT_INVALID");
-  const assembled = await transaction.provider_releases.update({
-    where: { id: descriptor.providerReleaseId },
-    data: { lifecycle: "assembled", assembled_at: assembledAt },
-  });
+  const assembled = await phases.run(() =>
+    transaction.provider_releases.update({
+      where: { id: descriptor.providerReleaseId },
+      data: { lifecycle: "assembled", assembled_at: assembledAt },
+    })
+  );
   return { release: storedRelease(assembled), resumed: false };
 }
 
@@ -652,20 +939,26 @@ async function assembleInSnapshot(input: {
   readonly transaction: ProviderTransactionClient;
   readonly pin: PinnedProviderReleaseInputs;
   readonly lease: ProviderReleaseLease;
+  readonly phases: ProviderReleaseTransactionPhases;
 }): Promise<ProviderReleaseAssemblyResult> {
-  await requireFence(input.transaction, input.lease);
-  const snapshot = await loadSnapshot(input.transaction);
-  const predecessor = await input.transaction.provider_releases.findFirst({
-    where: { lifecycle: "complete" },
-    orderBy: [{ completed_at: "desc" }, { id: "asc" }],
-  });
+  await requireFence(input.transaction, input.lease, input.phases);
+  const snapshot = await loadSnapshot(input.transaction, input.phases);
+  const predecessor = await input.phases.run(() =>
+    input.transaction.provider_releases.findFirst({
+      where: { lifecycle: "complete" },
+      orderBy: [{ completed_at: "desc" }, { id: "asc" }],
+    })
+  );
   let built: BuiltProviderRelease;
   try {
+    input.phases.check();
     built = await buildProviderRelease({
       snapshot,
       pin: input.pin,
       predecessorCompleteReleaseId: predecessor?.id ?? null,
+      checkpoint: input.phases.check,
     });
+    input.phases.check();
   } catch (error) {
     if (error instanceof ProviderReleaseValidationError) {
       throw new ProviderReleaseAssemblyError(
@@ -675,43 +968,51 @@ async function assembleInSnapshot(input: {
     }
     throw error;
   }
-  await requireFence(input.transaction, input.lease);
+  await requireFence(input.transaction, input.lease, input.phases);
   try {
     let cursorId: string | undefined;
     for (;;) {
-      const candidates = await input.transaction.provider_releases.findMany({
-        where: {
-          lifecycle: "complete",
-          provider_id: input.pin.providerId,
-          provider_key: input.pin.providerKey,
-          public_provider_id: input.pin.publicProvider.publicVendorId,
-          catalog_version_id: input.pin.catalogVersionId,
-          catalog_content_hash: input.pin.catalogContentHash,
-          central_schema_version: input.pin.centralSchemaVersion,
-          correlation_event_sequence: input.pin.correlationEventSequence,
-          correlation_snapshot_hash: input.pin.correlationSnapshotHash,
-          public_profile_version_id: input.pin.publicProfileVersionId,
-          public_profile_hash: input.pin.publicProfileHash,
-          provider_schema_version: snapshot.providerSchemaVersion,
-          public_schema_version: built.descriptor.publicSchemaVersion,
-          category_count: built.descriptor.categoryCount,
-          repack_count: built.descriptor.repackCount,
-          collectible_reference_count: built.descriptor.collectibleReferenceCount,
-          chase_count: built.descriptor.chaseCount,
-          retired_repack_count: built.descriptor.retiredRepackCount,
-          batch_count: built.descriptor.batchCount,
-          index_hash: built.descriptor.indexHash,
-          data_as_of: new Date(built.descriptor.dataAsOf),
-          last_successful_observation_at: new Date(built.descriptor.lastSuccessfulObservationAt),
-          stale_at: new Date(built.descriptor.staleAt),
-          freshness: built.descriptor.freshness,
-        },
-        orderBy: [{ completed_at: "desc" }, { id: "asc" }],
-        take: 50,
-        ...(cursorId === undefined ? {} : { cursor: { id: cursorId }, skip: 1 }),
-      });
+      input.phases.check();
+      const candidates = await input.phases.run(() =>
+        input.transaction.provider_releases.findMany({
+          where: {
+            lifecycle: "complete",
+            provider_id: input.pin.providerId,
+            provider_key: input.pin.providerKey,
+            public_provider_id: input.pin.publicProvider.publicVendorId,
+            catalog_version_id: input.pin.catalogVersionId,
+            catalog_content_hash: input.pin.catalogContentHash,
+            central_schema_version: input.pin.centralSchemaVersion,
+            correlation_event_sequence: input.pin.correlationEventSequence,
+            correlation_snapshot_hash: input.pin.correlationSnapshotHash,
+            public_profile_version_id: input.pin.publicProfileVersionId,
+            public_profile_hash: input.pin.publicProfileHash,
+            provider_schema_version: snapshot.providerSchemaVersion,
+            public_schema_version: built.descriptor.publicSchemaVersion,
+            category_count: built.descriptor.categoryCount,
+            repack_count: built.descriptor.repackCount,
+            collectible_reference_count: built.descriptor.collectibleReferenceCount,
+            chase_count: built.descriptor.chaseCount,
+            retired_repack_count: built.descriptor.retiredRepackCount,
+            batch_count: built.descriptor.batchCount,
+            index_hash: built.descriptor.indexHash,
+            data_as_of: new Date(built.descriptor.dataAsOf),
+            last_successful_observation_at: new Date(built.descriptor.lastSuccessfulObservationAt),
+            stale_at: new Date(built.descriptor.staleAt),
+            freshness: built.descriptor.freshness,
+          },
+          orderBy: [{ completed_at: "desc" }, { id: "asc" }],
+          take: 50,
+          ...(cursorId === undefined ? {} : { cursor: { id: cursorId }, skip: 1 }),
+        })
+      );
       for (const candidate of candidates) {
-        const stored = await requireStoredIntegrity(input.transaction, candidate);
+        input.phases.check();
+        const stored = await requireStoredIntegrity(
+          input.transaction,
+          candidate,
+          input.phases,
+        );
         if (stored.publicEquivalenceHash !== built.publicEquivalenceHash) continue;
         return {
           release: stored.release,
@@ -723,7 +1024,7 @@ async function assembleInSnapshot(input: {
       }
       if (candidates.length < 50) break;
       cursorId = candidates.at(-1)!.id;
-      await requireFence(input.transaction, input.lease);
+      await requireFence(input.transaction, input.lease, input.phases);
     }
   } catch (error) {
     if (error instanceof ProviderReleaseIntegrityError) {
@@ -734,9 +1035,13 @@ async function assembleInSnapshot(input: {
     }
     throw error;
   }
-  await requireFence(input.transaction, input.lease);
+  await requireFence(input.transaction, input.lease, input.phases);
   try {
-    const persisted = await persistBuilt(input.transaction, built);
+    const persisted = await persistBuilt(
+      input.transaction,
+      built,
+      input.phases,
+    );
     return {
       release: persisted.release,
       selectedThroughChangeSequence: snapshot.throughChangeSequence,
@@ -760,6 +1065,50 @@ const PUBLICATION_SOURCE_TRANSACTION = Object.freeze({
   timeout: 15_000,
   isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
 });
+
+export interface ProviderReleaseSourceTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function publicationSourceTransactionOptions(
+  deadline?: ProviderReleaseSourceTransactionDeadline,
+) {
+  if (deadline === undefined) return PUBLICATION_SOURCE_TRANSACTION;
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(
+    PUBLICATION_SOURCE_TRANSACTION.maxWait,
+    Math.max(1, Math.floor(available / 5)),
+  );
+  const timeout = Math.min(
+    PUBLICATION_SOURCE_TRANSACTION.timeout,
+    available - maxWait,
+  );
+  if (timeout < 1) {
+    throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+  }
+  return { ...PUBLICATION_SOURCE_TRANSACTION, maxWait, timeout };
+}
+
+function publicationSourceTransactionExpired(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && (error.code === "P2024" || error.code === "P2028");
+}
+
+async function withPublicationSourceDeadline<T>(
+  deadline: ProviderReleaseSourceTransactionDeadline | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (deadline !== undefined && publicationSourceTransactionExpired(error)) {
+      throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+    }
+    throw error;
+  }
+}
 
 function requireProviderReleaseId(providerReleaseId: string): string {
   if (!UUID_PATTERN.test(providerReleaseId)) {
@@ -829,36 +1178,98 @@ export class ProviderReleaseRepository {
     readonly workerId: string;
     readonly leaseMilliseconds: number;
     readonly pin: PinnedProviderReleaseInputs;
+    readonly deadlineAt?: number;
+    readonly signal?: AbortSignal;
   }): Promise<ProviderReleaseAssemblyResult> {
     requireLeaseInput(input.workerId, input.leaseMilliseconds);
-    await requireProviderPinPreflight({ provider: this.provider, pin: input.pin });
-    const lease = await acquireReleaseLease({
-      provider: this.provider,
-      workerId: input.workerId,
-      leaseMilliseconds: input.leaseMilliseconds,
-    });
-    if (lease === null) {
-      throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_LEASE_HELD");
-    }
+    const control = releaseAssemblyControl(input);
     try {
-      return await this.provider.$transaction(
-        (transaction) => assembleInSnapshot({
-          transaction,
-          pin: input.pin,
+      await requireProviderPinPreflight({
+        provider: this.provider,
+        pin: input.pin,
+        control,
+      });
+      const lease = await acquireReleaseLease({
+        provider: this.provider,
+        workerId: input.workerId,
+        leaseMilliseconds: input.leaseMilliseconds,
+        control,
+      });
+      if (lease === null) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_LEASE_HELD");
+      }
+      const leasedControl = control.deadlineAt === null
+        ? control
+        : {
+            ...control,
+            deadlineAt: Math.min(
+              control.deadlineAt,
+              lease.leaseExpiresAt.getTime(),
+            ),
+          };
+      try {
+        const transactionOptions = boundedReleaseTransactionOptions(
+          ASSEMBLY_TRANSACTION,
+          leasedControl,
+        );
+        const assembled = await this.provider.$transaction(
+          (transaction) => {
+            const phases = releaseTransactionPhases({
+              transaction,
+              transactionTimeoutMilliseconds: transactionOptions.timeout,
+              control: leasedControl,
+            });
+            return assembleInSnapshot({
+              transaction,
+              pin: input.pin,
+              lease,
+              phases,
+            });
+          },
+          transactionOptions,
+        );
+        requireReleaseAssemblyActive(leasedControl);
+        return assembled;
+      } finally {
+        // The bounded transaction has settled. A lease that cannot be released
+        // inside the remaining window is safe to expire by fence.
+        await releaseReleaseLeaseBeforeDeadline({
+          provider: this.provider,
           lease,
-        }),
-        ASSEMBLY_TRANSACTION,
-      );
-    } finally {
-      await releaseReleaseLease({ provider: this.provider, lease });
+          control: releaseLeaseControl(leasedControl, lease),
+        });
+      }
+    } catch (error) {
+      if (control.signal?.aborted === true) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_CANCELLED");
+      }
+      if (control.deadlineAt !== null && Date.now() >= control.deadlineAt) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+      }
+      if (
+        control.deadlineAt !== null
+        && (
+          providerPageQueryExpiration(error) !== null
+          || releaseStatementTimeout(error)
+        )
+      ) {
+        throw new ProviderReleaseAssemblyError("PROVIDER_RELEASE_DEADLINE");
+      }
+      throw error;
     }
   }
 
-  publicationSource(providerReleaseId: string): Promise<ProviderReleasePublicationSource> {
+  publicationSource(
+    providerReleaseId: string,
+    deadline?: ProviderReleaseSourceTransactionDeadline,
+  ): Promise<ProviderReleasePublicationSource> {
     const id = requireProviderReleaseId(providerReleaseId);
-    return this.provider.$transaction(
-      (transaction) => loadProviderReleasePublicationSource(transaction, id),
-      PUBLICATION_SOURCE_TRANSACTION,
+    return withPublicationSourceDeadline(
+      deadline,
+      () => this.provider.$transaction(
+        (transaction) => loadProviderReleasePublicationSource(transaction, id),
+        publicationSourceTransactionOptions(deadline),
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import {
   PrismaManifestReconciliationJobRepository,
+  PrismaProviderPromotionInvocationProjectionRepository,
   promotionJobSha256,
   type CentralPrismaClient,
 } from "@packscout/database";
@@ -18,6 +19,8 @@ import { createManifestReconciliationOneShot } from
   "./manifest-reconciliation-worker-composition.ts";
 import type { PromotionJobImmediateDeliveryPort } from
   "./provider-activity-relay.ts";
+import { PromotionJobRetentionCoordinator } from
+  "./promotion-job-retention.ts";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -62,12 +65,13 @@ export function createManifestReconciliationJobRuntime(input: Readonly<{
       timeoutMilliseconds: input.authority.requestTimeoutMilliseconds,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
+  const ledger = new PrismaManifestReconciliationJobRepository(input.central);
   const runtime = new DistributedPromotionJobRuntime({
     authority: "manifest_reconciliation",
     scopeIdentitySha256: promotionJobSha256(
       `manifest:${input.authority.deploymentKey}`,
     ),
-    ledger: new PrismaManifestReconciliationJobRepository(input.central),
+    ledger,
     oneShot: createManifestReconciliationOneShot({
       central: input.central,
       workerId: input.workerId,
@@ -89,6 +93,14 @@ export function createManifestReconciliationJobRuntime(input: Readonly<{
       ...(input.clearTimer === undefined
         ? {}
         : { clearTimer: input.clearTimer }),
+    }),
+    retention: new PromotionJobRetentionCoordinator({
+      invocations: ledger,
+      protectionRelease: ledger,
+      projections:
+        new PrismaProviderPromotionInvocationProjectionRepository(
+          input.central,
+        ),
     }),
     manualCommands: input.manualCommands,
     logger: input.logger,

@@ -193,6 +193,58 @@ test("resident provider publication continues from its verified pin during a cen
   assert.equal(result.failureCode, "CACHED_PIN_REACHED");
 });
 
+test("resident provider bootstrap and publication share one absolute runtime budget", async () => {
+  const initialPin = {
+    providerId,
+    providerKey: "alpha",
+    providerConfigVersionId: "00000000-0000-4000-8000-000000000502",
+  } as PinnedProviderReleaseInputs;
+  let wallClock = Date.now();
+  const timerDelays: number[] = [];
+  const setTimer = ((callback: () => void, delay?: number) => {
+    const boundedDelay = delay ?? 0;
+    timerDelays.push(boundedDelay);
+    if (timerDelays.length === 1) {
+      queueMicrotask(() => {
+        wallClock += boundedDelay;
+        callback();
+      });
+    }
+    return timerDelays.length as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  const clearTimer = (() => undefined) as typeof clearTimeout;
+  const composed = createProviderPromotionJobRuntime({
+    authority: providerAuthority(),
+    provider: {
+      $transaction() {
+        throw Object.assign(new Error("provider boundary reached"), {
+          code: "CACHED_PIN_REACHED",
+        });
+      },
+    } as unknown as ProviderPrismaClient,
+    pin: initialPin,
+    loadPin: () => new Promise<PinnedProviderReleaseInputs>(() => undefined),
+    workerId: "provider-promotion:alpha",
+    logger,
+    manualCommands,
+    transport: {
+      async sendExact() { throw new Error("unexpected transport"); },
+      async status() { throw new Error("unexpected transport"); },
+    } as DistributedProviderReleasePublicationTransport,
+    now: () => base,
+    nowMilliseconds: () => wallClock,
+    maximumMilliseconds: 100,
+    setTimer,
+    clearTimer,
+  });
+
+  const result = await composed.runtime.runManual("command:bootstrap-deadline");
+
+  assert.equal(result.state, "failed");
+  assert.equal(result.failureCode, "CACHED_PIN_REACHED");
+  assert.deepEqual(timerDelays, [60, 20]);
+});
+
 test("resident provider refuses an authoritative malformed bootstrap response", async () => {
   const initialPin = {
     providerId,
@@ -233,7 +285,14 @@ test("resident provider refuses an authoritative malformed bootstrap response", 
 });
 
 test("split production compositions have no legacy composite or cross-role client", async () => {
-  const [providerSource, manifestSource, providerMain, manifestMain, workerPackage]
+  const [
+    providerSource,
+    manifestSource,
+    providerMain,
+    manifestMain,
+    canonicalSource,
+    workerPackage,
+  ]
     = await Promise.all([
     readFile(new URL(
       "./provider-promotion-job-runtime-composition.ts",
@@ -246,6 +305,8 @@ test("split production compositions have no legacy composite or cross-role clien
     readFile(new URL("./provider-promotion-job-main.ts", import.meta.url),
       "utf8"),
     readFile(new URL("./manifest-reconciliation-job-main.ts", import.meta.url),
+      "utf8"),
+    readFile(new URL("./provider-manual-import-executor.ts", import.meta.url),
       "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -261,6 +322,19 @@ test("split production compositions have no legacy composite or cross-role clien
     /createCentralDatabaseLifecycle|VerifiedManifestGateProof/u);
   assert.doesNotMatch(manifestMain,
     /createProviderDatabaseLifecycle|ProviderPromotionBootstrap/u);
+  for (const source of [providerMain, manifestMain]) {
+    assert.match(source, /PostgresPromotionImmediateDeliverySubscriber/u);
+    assert.match(source, /delivery: composed\.immediateDelivery/u);
+    assert.match(source, /databaseUrl: configuration\.listenDatabaseUrl/u);
+    assert.match(source, /configuration\.listenDatabaseUrl === null/u);
+    assert.match(source, /logPromotionImmediateDeliveryDisabled/u);
+  }
+  assert.match(canonicalSource,
+    /createProviderCanonicalPromotionImmediateDelivery/u);
+  assert.match(canonicalSource,
+    /createProviderCanonicalPromotionImmediateDelivery\(\s*dependencies\.database,\s*dependencies\.immediateDelivery,?\s*\)/u);
+  assert.match(canonicalSource,
+    /committed\.counts\.materialChanges > 0[\s\S]*?immediateDelivery\.request/u);
   const scripts = (JSON.parse(workerPackage) as {
     scripts: Record<string, string>;
   }).scripts;

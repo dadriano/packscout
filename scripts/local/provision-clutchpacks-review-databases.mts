@@ -107,6 +107,7 @@ const CENTRAL_RUNTIME_TABLES = Object.freeze([
   "manifest_reconciliation_invocation_details",
   "manifest_gate_intents",
   "provider_promotion_invocation_projections",
+  "provider_promotion_projection_retention_state",
 ]);
 const CENTRAL_DELETE_TABLES = Object.freeze([
   "auth_rate_limits",
@@ -153,10 +154,12 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "provider_promotion_job_wake",
   "provider_promotion_job_schedule",
   "provider_promotion_job_invocations",
+  "provider_promotion_projection_outbox",
   "provider_promotion_job_delivery_tombstones",
   "provider_promotion_invocation_details",
 ]);
 const PROVIDER_DELETE_TABLES = Object.freeze([
+  "provider_activity_outbox",
   "provider_promotion_job_invocations",
   "provider_promotion_job_delivery_tombstones",
 ]);

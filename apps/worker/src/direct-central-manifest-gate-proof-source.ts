@@ -63,6 +63,7 @@ export interface CentralApprovedManifestConfigurationSource {
     providerId: string;
     providerKey: string;
     catalogVersionId: string;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<CentralApprovedManifestConfigurationRecord | null>;
 }
@@ -170,6 +171,7 @@ async function verifiedInitialConfidencePolicy(input: Readonly<{
   source: CentralApprovedManifestConfigurationSource;
   claim: ManifestGateClaim;
   target: CachedProviderCompletionPublishPlan;
+  deadlineAt?: number;
   signal?: AbortSignal;
 }>): Promise<
   | Readonly<{ state: "ready"; confidencePolicyVersion: string }>
@@ -182,6 +184,9 @@ async function verifiedInitialConfidencePolicy(input: Readonly<{
       providerId: input.claim.providerId,
       providerKey: input.claim.providerKey,
       catalogVersionId: input.target.catalogVersionId,
+      ...(input.deadlineAt === undefined
+        ? {}
+        : { deadlineAt: input.deadlineAt }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch {
@@ -278,16 +283,21 @@ implements VerifiedManifestGateProofSource {
     claim: ManifestGateClaim;
     currentManifest: GlobalCatalogManifestV1 | null;
     currentActiveState: ActiveCatalogManifestStateV1;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<VerifiedManifestGateTargetResolution> {
     if (input.signal?.aborted === true) {
       return resolution("deferred", "MANIFEST_GATE_PROOF_CANCELLED");
     }
+    const deadline = input.deadlineAt === undefined
+      ? undefined
+      : { deadlineAt: input.deadlineAt };
     let claim: ManifestGateClaim;
     try {
       claim = await this.dependencies.claims.verifyActiveClaim(
         input.claim,
         this.#now(),
+        deadline,
       );
     } catch (error) {
       return error instanceof PromotionJobPersistenceError
@@ -334,12 +344,12 @@ implements VerifiedManifestGateProofSource {
           ? await this.dependencies.plans.loadByEvidence({
               providerId: claim.providerId,
               evidenceDigest: claim.latestEvidenceDigest!,
-            })
+            }, deadline)
           : await this.dependencies.plans.loadExplicitTarget({
               providerId: claim.providerId,
               providerReleaseId: claim.targetProviderReleaseId!,
               catalogVersionId: claim.targetCatalogVersionId!,
-            });
+            }, deadline);
       } catch {
         return resolution(
           "deferred",
@@ -396,6 +406,7 @@ implements VerifiedManifestGateProofSource {
             publicProviderReleaseId: reference.publicProviderReleaseId,
             providerReleaseFingerprint: reference.providerReleaseFingerprint,
           })),
+          deadline,
         );
         if (loaded === null) return resolution(
           "deferred",
@@ -424,6 +435,9 @@ implements VerifiedManifestGateProofSource {
         source: this.dependencies.initialConfiguration,
         claim,
         target,
+        ...(input.deadlineAt === undefined
+          ? {}
+          : { deadlineAt: input.deadlineAt }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (configuration.state !== "ready") {
@@ -500,12 +514,16 @@ implements VerifiedManifestGateProofSource {
   async resolveSignedState(input: Readonly<{
     reason: "bootstrap" | "cas_reconciliation";
     activeState: ActiveCatalogManifestStateV1;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<VerifiedManifestStateResolution> {
     if (input.signal?.aborted === true) return {
       state: "deferred",
       failureCode: "MANIFEST_SIGNED_STATE_CANCELLED",
     };
+    const deadline = input.deadlineAt === undefined
+      ? undefined
+      : { deadlineAt: input.deadlineAt };
     const parsed = activeCatalogManifestStateV1Schema.safeParse(
       input.activeState,
     );
@@ -515,7 +533,7 @@ implements VerifiedManifestGateProofSource {
     };
     let mirror: ManifestActivationMirror;
     try {
-      mirror = await this.dependencies.activations.loadMirror();
+      mirror = await this.dependencies.activations.loadMirror(deadline);
     } catch {
       return {
         state: "deferred",

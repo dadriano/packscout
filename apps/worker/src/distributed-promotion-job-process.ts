@@ -12,6 +12,27 @@ type ProcessRuntime = Pick<
   "start" | "stop" | "runCycle" | "runManual" | "runContinuation"
 >;
 
+interface ProcessImmediateDeliveryLifecycle {
+  start(): Promise<void>;
+  stop(): Promise<void> | void;
+}
+
+type ProcessRuntimeComposition = Readonly<{
+  runtime: ProcessRuntime;
+  immediateDelivery: ProcessImmediateDeliveryLifecycle;
+}>;
+
+function runtimeComposition(
+  value: ProcessRuntime | ProcessRuntimeComposition,
+): Readonly<{
+  runtime: ProcessRuntime;
+  immediateDelivery: ProcessImmediateDeliveryLifecycle | null;
+}> {
+  return "runtime" in value
+    ? value
+    : { runtime: value, immediateDelivery: null };
+}
+
 export interface DistributedPromotionJobProcessLifecycle<TClient> {
   readonly client: TClient;
   start(): Promise<void>;
@@ -42,6 +63,7 @@ function assertInvocation(
 
 function assertCycle(result: DistributedPromotionRuntimeCycleResult): void {
   if (
+    result.reconciliationFailures > 0 ||
     result.stateReadFailures > 0 ||
     result.invocations.some(({ state }) => state === "failed")
   ) throw new DistributedPromotionJobProcessInvocationError();
@@ -52,20 +74,39 @@ export async function runDistributedPromotionJobProcess<TClient>(
   input: Readonly<{
     configuration: DistributedPromotionJobProcessConfiguration;
     database: DistributedPromotionJobProcessLifecycle<TClient>;
-    createRuntime: (client: TClient) => ProcessRuntime;
+    createRuntime: (
+      client: TClient,
+    ) => ProcessRuntime | ProcessRuntimeComposition;
     signals?: DistributedPromotionJobProcessSignalPort;
   }>,
 ): Promise<void> {
   let runtime: ProcessRuntime | null = null;
+  let immediateDelivery: ProcessImmediateDeliveryLifecycle | null = null;
+  let immediateDeliveryStopPromise: Promise<void> | null = null;
   const signals = input.signals ?? process;
-  const requestStop = () => runtime?.stop();
+  const stopImmediateDelivery = (): Promise<void> => {
+    immediateDeliveryStopPromise ??=
+      Promise.resolve(immediateDelivery?.stop()).catch(() => undefined);
+    return immediateDeliveryStopPromise;
+  };
+  const requestStop = () => {
+    runtime?.stop();
+    void stopImmediateDelivery();
+  };
   try {
     await input.database.start();
-    runtime = input.createRuntime(input.database.client);
+    const composed = runtimeComposition(
+      input.createRuntime(input.database.client),
+    );
+    runtime = composed.runtime;
+    immediateDelivery = composed.immediateDelivery;
     if (input.configuration.mode === "daemon") {
       signals.once("SIGINT", requestStop);
       signals.once("SIGTERM", requestStop);
       try {
+        // LISTEN/notification delivery is only a latency optimization. A
+        // failed subscription cannot disable the durable polling schedule.
+        await immediateDelivery?.start().catch(() => undefined);
         await runtime.start();
       } finally {
         signals.removeListener("SIGINT", requestStop);
@@ -88,6 +129,7 @@ export async function runDistributedPromotionJobProcess<TClient>(
     ));
   } finally {
     runtime?.stop();
+    await stopImmediateDelivery();
     await input.database.close();
   }
 }

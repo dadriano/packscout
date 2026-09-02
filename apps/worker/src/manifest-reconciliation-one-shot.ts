@@ -21,22 +21,27 @@ import type {
 
 export const MANIFEST_RECONCILIATION_ONE_SHOT_MAXIMUM_MILLISECONDS = 50_000;
 export const MANIFEST_RECONCILIATION_ONE_SHOT_MAXIMUM_ATTEMPTS = 25;
+const MANIFEST_RECONCILIATION_COMPLETION_RESERVE_MILLISECONDS = 10_000;
 
 const SAFE_CODE_PATTERN = /^[A-Z0-9_]{1,128}$/u;
 
 export interface ManifestReconciliationJobLedgerPort {
   beginOrRecoverInvocation(
     input: BeginPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobAdmission>;
   loadWakeIntent(): Promise<PromotionWakeIntent>;
   recordProgress(
     input: RecordPromotionJobProgressInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
   terminalize(
     input: TerminalizePromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
   reconcileInterrupted(
     input: ReconcileInterruptedPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<PromotionJobInvocation>;
 }
 
@@ -45,13 +50,13 @@ export interface ManifestGateQueuePort {
     owner: string;
     now: Date;
     claimMilliseconds: number;
-  }>): Promise<ManifestGateClaim | null>;
+  }>, deadline?: Readonly<{ deadlineAt: number }>): Promise<ManifestGateClaim | null>;
   acknowledgeClaim(input: Readonly<{
     providerId: string;
     claimToken: string;
     observedGeneration: bigint;
     acknowledgedAt: Date;
-  }>): Promise<ManifestGateIntent>;
+  }>, deadline?: Readonly<{ deadlineAt: number }>): Promise<ManifestGateIntent>;
   deferClaim(input: Readonly<{
     providerId: string;
     claimToken: string;
@@ -59,14 +64,15 @@ export interface ManifestGateQueuePort {
     failureCode: string;
     observedAt: Date;
     retryAt: Date;
-  }>): Promise<ManifestGateIntent>;
-  hasPending(): Promise<boolean>;
+  }>, deadline?: Readonly<{ deadlineAt: number }>): Promise<ManifestGateIntent>;
+  hasPending(deadline?: Readonly<{ deadlineAt: number }>): Promise<boolean>;
 }
 
 export interface IndependentManifestReconciliationWorkPort {
   reconcile(input: Readonly<{
     claim: ManifestGateClaim;
     attemptId: string;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<IndependentManifestReconciliationResult>;
 }
@@ -91,7 +97,9 @@ export interface ManifestReconciliationOneShotRequest {
 
 interface DeadlineResources {
   readonly signal: AbortSignal;
+  readonly deadlineAt: number;
   readonly deadlineExpired: () => boolean;
+  readonly remainingMilliseconds: () => number;
   readonly dispose: () => void;
 }
 
@@ -105,23 +113,37 @@ function safeFailureCode(error: unknown, fallback: string): string {
 
 function deadlineResources(input: Readonly<{
   durationMilliseconds: number;
+  completionReserveMilliseconds: number;
   externalSignal?: AbortSignal;
   setTimer: typeof setTimeout;
   clearTimer: typeof clearTimeout;
+  nowMilliseconds: () => number;
 }>): DeadlineResources {
   const controller = new AbortController();
+  const deadlineAt = input.nowMilliseconds() + input.durationMilliseconds;
   let expired = false;
   const expire = () => {
+    if (controller.signal.aborted) return;
     expired = true;
     controller.abort(new Error("manifest reconciliation deadline reached"));
   };
   const cancel = () => controller.abort(input.externalSignal?.reason);
-  const timer = input.setTimer(expire, input.durationMilliseconds);
+  const timer = input.setTimer(
+    expire,
+    Math.max(
+      0,
+      input.durationMilliseconds - input.completionReserveMilliseconds,
+    ),
+  );
   if (input.externalSignal?.aborted === true) cancel();
   else input.externalSignal?.addEventListener("abort", cancel, { once: true });
   return {
     signal: controller.signal,
+    deadlineAt,
     deadlineExpired: () => expired,
+    remainingMilliseconds: () => controller.signal.aborted
+      ? 0
+      : Math.max(0, deadlineAt - input.nowMilliseconds()),
     dispose() {
       input.clearTimer(timer);
       input.externalSignal?.removeEventListener("abort", cancel);
@@ -206,6 +228,8 @@ export class ManifestReconciliationOneShot {
   readonly #randomUuid: () => string;
   readonly #setTimer: typeof setTimeout;
   readonly #clearTimer: typeof clearTimeout;
+  readonly #nowMilliseconds: () => number;
+  readonly #completionReserveMilliseconds: number;
 
   constructor(private readonly dependencies: Readonly<{
     workerId: string;
@@ -218,6 +242,7 @@ export class ManifestReconciliationOneShot {
     randomUuid?: () => string;
     setTimer?: typeof setTimeout;
     clearTimer?: typeof clearTimeout;
+    nowMilliseconds?: () => number;
   }>) {
     this.#maximumMilliseconds = dependencies.maximumMilliseconds ??
       MANIFEST_RECONCILIATION_ONE_SHOT_MAXIMUM_MILLISECONDS;
@@ -227,6 +252,11 @@ export class ManifestReconciliationOneShot {
     this.#randomUuid = dependencies.randomUuid ?? randomUUID;
     this.#setTimer = dependencies.setTimer ?? setTimeout;
     this.#clearTimer = dependencies.clearTimer ?? clearTimeout;
+    this.#nowMilliseconds = dependencies.nowMilliseconds ?? Date.now;
+    this.#completionReserveMilliseconds = Math.min(
+      MANIFEST_RECONCILIATION_COMPLETION_RESERVE_MILLISECONDS,
+      Math.max(1, Math.floor(this.#maximumMilliseconds / 5)),
+    );
     if (
       dependencies.workerId.length === 0 ||
       !Number.isSafeInteger(this.#maximumMilliseconds) ||
@@ -244,9 +274,11 @@ export class ManifestReconciliationOneShot {
   ): Promise<ManifestReconciliationOneShotResult> {
     const deadline = deadlineResources({
       durationMilliseconds: this.#maximumMilliseconds,
+      completionReserveMilliseconds: this.#completionReserveMilliseconds,
       externalSignal: request.signal,
       setTimer: this.#setTimer,
       clearTimer: this.#clearTimer,
+      nowMilliseconds: this.#nowMilliseconds,
     });
     const startedAt = this.#now();
     const ownershipToken = this.#randomUuid();
@@ -262,9 +294,11 @@ export class ManifestReconciliationOneShot {
         ownershipExpiresAt: new Date(
           startedAt.getTime() + this.#maximumMilliseconds + 10_000,
         ),
+      }, {
+        deadlineAt: deadline.deadlineAt - this.#completionReserveMilliseconds,
       });
       if (admission.disposition !== "started") {
-        return this.handleExisting(admission, startedAt);
+        return this.handleExisting(admission, startedAt, deadline);
       }
       if (admission.invocation === null) {
         throw new Error("Started manifest invocation is missing.");
@@ -282,6 +316,7 @@ export class ManifestReconciliationOneShot {
   private async handleExisting(
     admission: PromotionJobAdmission,
     now: Date,
+    deadline: DeadlineResources,
   ): Promise<ManifestReconciliationOneShotResult> {
     const invocation = admission.invocation;
     if (
@@ -300,7 +335,7 @@ export class ManifestReconciliationOneShot {
           requestedAt: now,
         },
         retentionProtected: true,
-      });
+      }, { deadlineAt: deadline.deadlineAt });
       return { state: "reconciled_interruption", invocation: reconciled };
     }
     return {
@@ -324,12 +359,17 @@ export class ManifestReconciliationOneShot {
     let manifestFingerprint: string | null = null;
 
     while (attempts.length < this.#maximumAttempts) {
-      if (input.deadline.signal.aborted) {
+      if (
+        input.deadline.signal.aborted ||
+        input.deadline.remainingMilliseconds() <=
+          this.#completionReserveMilliseconds
+      ) {
         return this.continueInvocation(
           input,
-          input.deadline.deadlineExpired()
-            ? "MANIFEST_RECONCILIATION_DEADLINE"
-            : "MANIFEST_RECONCILIATION_CANCELLED",
+          input.deadline.signal.aborted &&
+              !input.deadline.deadlineExpired()
+            ? "MANIFEST_RECONCILIATION_CANCELLED"
+            : "MANIFEST_RECONCILIATION_DEADLINE",
           { activeGeneration, publicReleaseId, manifestFingerprint },
         );
       }
@@ -339,6 +379,9 @@ export class ManifestReconciliationOneShot {
           owner: `${this.dependencies.workerId}:${input.invocation.runId}`,
           now: this.#now(),
           claimMilliseconds: this.#maximumMilliseconds + 10_000,
+        }, {
+          deadlineAt: input.deadline.deadlineAt -
+            this.#completionReserveMilliseconds,
         });
       } catch (error) {
         return this.continueInvocation(
@@ -348,7 +391,10 @@ export class ManifestReconciliationOneShot {
         );
       }
       if (claim === null) {
-        const pending = await this.dependencies.gates.hasPending().catch(
+        const pending = await this.dependencies.gates.hasPending({
+          deadlineAt: input.deadline.deadlineAt -
+            this.#completionReserveMilliseconds,
+        }).catch(
           () => true,
         );
         if (pending) {
@@ -376,6 +422,8 @@ export class ManifestReconciliationOneShot {
         observation = await this.dependencies.work.reconcile({
           claim,
           attemptId,
+          deadlineAt: input.deadline.deadlineAt -
+            this.#completionReserveMilliseconds,
           signal: input.deadline.signal,
         });
       } catch (error) {
@@ -419,6 +467,25 @@ export class ManifestReconciliationOneShot {
         observedAt,
       }));
 
+      if (
+        input.deadline.signal.aborted ||
+        input.deadline.remainingMilliseconds() <=
+          this.#completionReserveMilliseconds
+      ) {
+        const progressFailure = await this.recordProgress(input, attempts, {
+          publicationCount,
+          operationCount,
+        });
+        return this.continueInvocation(
+          input,
+          progressFailure ?? (input.deadline.signal.aborted &&
+                !input.deadline.deadlineExpired()
+            ? "MANIFEST_RECONCILIATION_CANCELLED"
+            : "MANIFEST_RECONCILIATION_DEADLINE"),
+          { activeGeneration, publicReleaseId, manifestFingerprint },
+        );
+      }
+
       let gateFailure: string | null = null;
       try {
         if (
@@ -431,7 +498,7 @@ export class ManifestReconciliationOneShot {
             claimToken: claim.claimToken,
             observedGeneration: claim.observedGeneration,
             acknowledgedAt: observedAt,
-          });
+          }, this.gateDeadline(input.deadline));
         } else {
           const failureCode = observation.failureCode ??
             (observation.disposition === "cas_lost"
@@ -447,31 +514,19 @@ export class ManifestReconciliationOneShot {
             observedAt,
             retryAt: new Date(observedAt.getTime() +
               (observation.disposition === "blocked" ? 60_000 : 1_000)),
-          });
+          }, this.gateDeadline(input.deadline));
         }
       } catch (error) {
         gateFailure = safeFailureCode(error, "MANIFEST_GATE_CLAIM_STALE");
       }
 
-      await this.dependencies.ledger.recordProgress({
-        runId: input.invocation.runId,
-        ownershipToken: input.ownershipToken,
-        now: observedAt,
-        progress: {
-          beforeLanePosition: null,
-          afterLanePosition: null,
-          beforeSettledPosition: null,
-          afterSettledPosition: null,
-          cycleCount: attempts.length,
-          promotionAttemptCount: attempts.length,
-          publicationCount,
-          operationCount,
-        },
-        attempts,
-        retentionProtected: true,
+      const progressFailure = await this.recordProgress(input, attempts, {
+        publicationCount,
+        operationCount,
       });
-      if (gateFailure !== null) {
-        return this.continueInvocation(input, gateFailure, {
+      const persistenceFailure = gateFailure ?? progressFailure;
+      if (persistenceFailure !== null) {
+        return this.continueInvocation(input, persistenceFailure, {
           activeGeneration,
           publicReleaseId,
           manifestFingerprint,
@@ -489,6 +544,7 @@ export class ManifestReconciliationOneShot {
     input: Readonly<{
       invocation: PromotionJobInvocation;
       ownershipToken: string;
+      deadline: DeadlineResources;
     }>,
     failureCode: string,
     state: Readonly<{
@@ -498,12 +554,8 @@ export class ManifestReconciliationOneShot {
     }>,
   ): Promise<ManifestReconciliationOneShotResult> {
     const finishedAt = this.#now();
-    const wake = await this.dependencies.ledger.loadWakeIntent();
     const observed = input.invocation.trigger.observedWakeGeneration ?? 0n;
-    const requestedGeneration =
-      (wake.requestedGeneration > observed
-        ? wake.requestedGeneration
-        : observed) + 1n;
+    const requestedGeneration = observed + 1n;
     const invocation = await this.dependencies.ledger.terminalize({
       runId: input.invocation.runId,
       ownershipToken: input.ownershipToken,
@@ -516,7 +568,7 @@ export class ManifestReconciliationOneShot {
       resultPublicReleaseId: state.publicReleaseId,
       resultReleaseFingerprint: state.manifestFingerprint,
       retentionProtected: true,
-    });
+    }, { deadlineAt: input.deadline.deadlineAt });
     return { state: "terminal", invocation };
   }
 
@@ -524,6 +576,7 @@ export class ManifestReconciliationOneShot {
     input: Readonly<{
       invocation: PromotionJobInvocation;
       ownershipToken: string;
+      deadline: DeadlineResources;
     }>,
     options: Readonly<{
       outcome: "caught_up" | "no_change";
@@ -545,7 +598,49 @@ export class ManifestReconciliationOneShot {
       resultPublicReleaseId: options.publicReleaseId,
       resultReleaseFingerprint: options.manifestFingerprint,
       retentionProtected: options.activeGeneration !== null,
-    });
+    }, { deadlineAt: input.deadline.deadlineAt });
     return { state: "terminal", invocation };
+  }
+
+  private gateDeadline(deadline: DeadlineResources): Readonly<{
+    deadlineAt: number;
+  }> {
+    return {
+      deadlineAt: deadline.deadlineAt -
+        Math.floor(this.#completionReserveMilliseconds / 2),
+    };
+  }
+
+  private async recordProgress(
+    input: Readonly<{
+      invocation: PromotionJobInvocation;
+      ownershipToken: string;
+      deadline: DeadlineResources;
+    }>,
+    attempts: readonly PromotionInvocationAttemptEvidence[],
+    counts: Readonly<{ publicationCount: number; operationCount: number }>,
+  ): Promise<string | null> {
+    try {
+      await this.dependencies.ledger.recordProgress({
+        runId: input.invocation.runId,
+        ownershipToken: input.ownershipToken,
+        now: this.#now(),
+        progress: {
+          beforeLanePosition: null,
+          afterLanePosition: null,
+          beforeSettledPosition: null,
+          afterSettledPosition: null,
+          cycleCount: attempts.length,
+          promotionAttemptCount: attempts.length,
+          publicationCount: counts.publicationCount,
+          operationCount: counts.operationCount,
+        },
+        attempts,
+        retentionProtected: true,
+      }, this.gateDeadline(input.deadline));
+      return null;
+    } catch (error) {
+      return safeFailureCode(error, "MANIFEST_RECONCILIATION_PROGRESS_FAILED");
+    }
   }
 }

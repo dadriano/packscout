@@ -38,14 +38,6 @@ import { runPromotionObservabilityFanout } from "./promotion-observability-fanou
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
 import { createProviderSourceSupervisorRuntime } from
   "./provider-source-supervisor-composition.ts";
-import {
-  assertPromotionV2CredentialRoleIsolation,
-  type PromotionV2WorkerConfiguration,
-} from "./promotion-v2-worker-config.ts";
-import { createPromotionV2WorkerRuntime } from
-  "./promotion-v2-worker-composition.ts";
-import type { PromotionV2WorkerLogger } from
-  "./promotion-v2-worker-runtime.ts";
 import { createCatalogRetentionWorkerRuntime } from
   "./catalog-retention-worker-composition.ts";
 import {
@@ -59,28 +51,21 @@ import { createSourceRelationshipConfirmationBackfillRunner } from
 
 export interface ProductionWorkerCompositionInput {
   readonly provider: ProviderWorkerConfiguration;
-  readonly promotion: PromotionV2WorkerConfiguration;
   readonly heat: HeatPromotionWorkerConfiguration;
   readonly retention: CatalogRetentionWorkerConfiguration;
   readonly database: PackscoutPrismaClient;
   readonly providerLogger: ProviderWorkerLogger;
-  readonly promotionLogger: PromotionV2WorkerLogger;
   readonly heatLogger: HeatPromotionWorkerLogger;
   readonly retentionLogger: CatalogRetentionWorkerLogger;
   readonly observability: OperationalObservability;
   readonly fetch?: typeof fetch;
 }
 
-/** Wires provider+manifest promotion and Heat as independent worker loops. */
+/** Wires the provider base worker, Heat, and catalog retention loops. */
 export function createProductionWorkerRuntime(
   input: ProductionWorkerCompositionInput,
 ) {
-  assertPromotionV2CredentialRoleIsolation(input.promotion, [
-    input.heat.keyId,
-    input.retention.keyId,
-  ]);
   assertCatalogRetentionCredentialRoleIsolation({
-    promotion: input.promotion,
     heat: input.heat,
     retention: input.retention,
   });
@@ -94,15 +79,6 @@ export function createProductionWorkerRuntime(
     { id: randomUUID },
     clock,
   );
-  const promotion = createPromotionV2WorkerRuntime({
-    configuration: input.promotion,
-    organizationId: input.provider.publicOrganizationId,
-    workerId: input.provider.workerId,
-    database: input.database,
-    logger: input.promotionLogger,
-    operationalEvents,
-    fetch: input.fetch,
-  });
   const heatProofs = new PrismaHeatPromotionManifestRepository(input.database, {
     organizationId: input.provider.publicOrganizationId,
     deploymentKey: input.heat.deploymentKey,
@@ -190,7 +166,6 @@ export function createProductionWorkerRuntime(
     database: input.database,
     logger: input.providerLogger,
     observability: input.observability,
-    promotion,
     heatPromotion,
     catalogRetention,
     sourceSupervisor,

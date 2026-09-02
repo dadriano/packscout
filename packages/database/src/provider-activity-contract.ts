@@ -70,6 +70,8 @@ const activityEvidenceKeys = new Set([
   "providerReleaseContentHash",
   "providerReleaseFingerprint",
   "providerReleaseId",
+  "providerInvocationIdDigest",
+  "providerInvocationProjectionDigest",
   "publicProviderReleaseId",
   "quarantineState",
   "retentionState",
@@ -89,6 +91,11 @@ export interface ProviderReleaseCompletedActivityEvidence {
   readonly providerReleaseFingerprint: string;
   readonly completedThroughChangeSequence: string;
   readonly terminalReceiptSha256: string;
+}
+
+export interface ProviderPromotionInvocationTerminalActivityEvidence {
+  readonly providerInvocationIdDigest: string;
+  readonly providerInvocationProjectionDigest: string;
 }
 
 const maximumPostgresBigint = 9_223_372_036_854_775_807n;
@@ -228,6 +235,47 @@ export function assertProviderReleaseCompletedActivity(
     throw new TypeError("Provider release completion envelope is invalid.");
   }
   return evidence;
+}
+
+const providerPromotionInvocationTerminalEvidenceKeys = [
+  "providerInvocationIdDigest",
+  "providerInvocationProjectionDigest",
+] as const;
+
+/** Strict opaque evidence used to fetch one provider-local terminal record. */
+export function assertProviderPromotionInvocationTerminalActivity(
+  event: ProviderActivityEvent,
+): ProviderPromotionInvocationTerminalActivityEvidence {
+  const validated = assertProviderActivityEvent(event);
+  const evidence = sanitizeProviderActivityEvidence(validated.evidence);
+  if (
+    validated.eventType !== "provider_promotion_invocation_terminal"
+    || Object.keys(evidence).sort().join("\0") !==
+      [...providerPromotionInvocationTerminalEvidenceKeys].sort().join("\0")
+    || typeof evidence.providerInvocationIdDigest !== "string"
+    || !digestPattern.test(evidence.providerInvocationIdDigest)
+    || typeof evidence.providerInvocationProjectionDigest !== "string"
+    || !digestPattern.test(evidence.providerInvocationProjectionDigest)
+    || validated.severity !== "info"
+    || validated.localRunId !== null
+    || validated.localQuarantineId !== null
+    || validated.dedupeKey !==
+      `provider-promotion-invocation:${evidence.providerInvocationIdDigest}`
+    || validated.recoveryKey !==
+      `provider-promotion-invocation:${evidence.providerInvocationIdDigest}`
+    || validated.title !== "Provider promotion job finished"
+    || validated.summary !==
+      "A provider promotion invocation reached a terminal state."
+  ) {
+    throw new TypeError(
+      "Provider promotion invocation terminal envelope is invalid.",
+    );
+  }
+  return Object.freeze({
+    providerInvocationIdDigest: evidence.providerInvocationIdDigest,
+    providerInvocationProjectionDigest:
+      evidence.providerInvocationProjectionDigest,
+  });
 }
 
 function safeSentence(value: string, maximum: number): boolean {

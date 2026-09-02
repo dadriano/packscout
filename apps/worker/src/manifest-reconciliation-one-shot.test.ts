@@ -78,9 +78,14 @@ function invocationFrom(
 }
 
 class MemoryLedger implements ManifestReconciliationJobLedgerPort {
+  readonly begins: BeginPromotionJobInvocationInput[] = [];
+  readonly beginDeadlines: number[] = [];
   readonly progress: RecordPromotionJobProgressInput[] = [];
+  readonly progressDeadlines: number[] = [];
   readonly terminals: TerminalizePromotionJobInvocationInput[] = [];
+  readonly terminalDeadlines: number[] = [];
   readonly reconciliations: ReconcileInterruptedPromotionJobInvocationInput[] = [];
+  readonly reconciliationDeadlines: number[] = [];
   admissionDisposition: PromotionJobAdmission["disposition"] = "started";
   forceExpiredOwnership = false;
   wake: PromotionWakeIntent = {
@@ -97,7 +102,12 @@ class MemoryLedger implements ManifestReconciliationJobLedgerPort {
   };
   #invocation: PromotionJobInvocation | null = null;
 
-  beginOrRecoverInvocation(input: BeginPromotionJobInvocationInput) {
+  beginOrRecoverInvocation(
+    input: BeginPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
+    this.begins.push(input);
+    if (deadline !== undefined) this.beginDeadlines.push(deadline.deadlineAt);
     this.#invocation ??= invocationFrom(input);
     if (this.forceExpiredOwnership) {
       this.#invocation = {
@@ -118,8 +128,12 @@ class MemoryLedger implements ManifestReconciliationJobLedgerPort {
     return Promise.resolve(this.wake);
   }
 
-  recordProgress(input: RecordPromotionJobProgressInput) {
+  recordProgress(
+    input: RecordPromotionJobProgressInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.progress.push(input);
+    if (deadline !== undefined) this.progressDeadlines.push(deadline.deadlineAt);
     this.#invocation = {
       ...this.#invocation!,
       progress: input.progress,
@@ -128,8 +142,12 @@ class MemoryLedger implements ManifestReconciliationJobLedgerPort {
     return Promise.resolve(this.#invocation);
   }
 
-  terminalize(input: TerminalizePromotionJobInvocationInput) {
+  terminalize(
+    input: TerminalizePromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.terminals.push(input);
+    if (deadline !== undefined) this.terminalDeadlines.push(deadline.deadlineAt);
     this.#invocation = {
       ...this.#invocation!,
       lifecycleState: "terminal",
@@ -145,8 +163,14 @@ class MemoryLedger implements ManifestReconciliationJobLedgerPort {
     return Promise.resolve(this.#invocation);
   }
 
-  reconcileInterrupted(input: ReconcileInterruptedPromotionJobInvocationInput) {
+  reconcileInterrupted(
+    input: ReconcileInterruptedPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.reconciliations.push(input);
+    if (deadline !== undefined) {
+      this.reconciliationDeadlines.push(deadline.deadlineAt);
+    }
     this.#invocation = {
       ...this.#invocation!,
       lifecycleState: "terminal",
@@ -196,33 +220,52 @@ function claim(input: Readonly<{
 
 class MemoryGates implements ManifestGateQueuePort {
   readonly acknowledgements: string[] = [];
+  readonly acknowledgementDeadlines: number[] = [];
   readonly deferrals: string[] = [];
+  readonly deferralDeadlines: number[] = [];
+  readonly claimDeadlines: number[] = [];
+  readonly pendingDeadlines: number[] = [];
   pending = false;
   staleAcknowledgement = false;
 
   constructor(readonly claims: ManifestGateClaim[]) {}
 
-  claimNext() {
+  claimNext(
+    _input: Parameters<ManifestGateQueuePort["claimNext"]>[0],
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
+    if (deadline !== undefined) this.claimDeadlines.push(deadline.deadlineAt);
     return Promise.resolve(this.claims.shift() ?? null);
   }
 
-  acknowledgeClaim(input: { providerId: string }) {
+  acknowledgeClaim(
+    input: Parameters<ManifestGateQueuePort["acknowledgeClaim"]>[0],
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     if (this.staleAcknowledgement) {
       throw Object.assign(new Error("stale"), {
         code: "PROMOTION_JOB_GATE_INTENT_INVALID",
       });
     }
     this.acknowledgements.push(input.providerId);
+    if (deadline !== undefined) {
+      this.acknowledgementDeadlines.push(deadline.deadlineAt);
+    }
     return Promise.resolve({} as ManifestGateIntent);
   }
 
-  deferClaim(input: { providerId: string }) {
+  deferClaim(
+    input: Parameters<ManifestGateQueuePort["deferClaim"]>[0],
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.deferrals.push(input.providerId);
+    if (deadline !== undefined) this.deferralDeadlines.push(deadline.deadlineAt);
     this.pending = true;
     return Promise.resolve({} as ManifestGateIntent);
   }
 
-  hasPending() {
+  hasPending(deadline?: Readonly<{ deadlineAt: number }>) {
+    if (deadline !== undefined) this.pendingDeadlines.push(deadline.deadlineAt);
     return Promise.resolve(this.pending || this.claims.length > 0);
   }
 }
@@ -264,6 +307,10 @@ function runner(input: Readonly<{
   gates: MemoryGates;
   work: IndependentManifestReconciliationWorkPort;
   maximumAttempts?: number;
+  maximumMilliseconds?: number;
+  setTimer?: typeof setTimeout;
+  clearTimer?: typeof clearTimeout;
+  nowMilliseconds?: () => number;
 }>) {
   let nextUuid = 1_000;
   return new ManifestReconciliationOneShot({
@@ -276,6 +323,16 @@ function runner(input: Readonly<{
     ...(input.maximumAttempts === undefined
       ? {}
       : { maximumAttempts: input.maximumAttempts }),
+    ...(input.maximumMilliseconds === undefined
+      ? {}
+      : { maximumMilliseconds: input.maximumMilliseconds }),
+    ...(input.setTimer === undefined ? {} : { setTimer: input.setTimer }),
+    ...(input.clearTimer === undefined
+      ? {}
+      : { clearTimer: input.clearTimer }),
+    ...(input.nowMilliseconds === undefined
+      ? {}
+      : { nowMilliseconds: input.nowMilliseconds }),
   });
 }
 
@@ -343,6 +400,73 @@ test("lost gate ownership is persisted as continuation instead of acknowledging 
   assert.equal(
     ledger.terminals[0]?.safeFailureCode,
     "PROMOTION_JOB_GATE_INTENT_INVALID",
+  );
+});
+
+test("the work deadline preserves time to persist evidence and continuation within ownership", async () => {
+  const ledger = new MemoryLedger();
+  const gates = new MemoryGates([
+    claim({ providerOrdinal: 31, providerKey: "alpha" }),
+  ]);
+  let expire: (() => void) | undefined;
+  let timerDelay: number | undefined;
+  let cleared = false;
+  const setTimer = ((callback: () => void, delay?: number) => {
+    expire = callback;
+    timerDelay = delay;
+    return 23 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  const clearTimer = ((timer: ReturnType<typeof setTimeout>) => {
+    assert.equal(timer, 23);
+    cleared = true;
+  }) as typeof clearTimeout;
+  const maximumMilliseconds = 100;
+  const result = await runner({
+    ledger,
+    gates,
+    maximumMilliseconds,
+    setTimer,
+    clearTimer,
+    nowMilliseconds: () => base.getTime(),
+    work: {
+      async reconcile({ deadlineAt, signal }) {
+        assert.equal(deadlineAt, base.getTime() + 80);
+        expire!();
+        assert.equal(signal?.aborted, true);
+        return observation({
+          disposition: "deferred",
+          activeGeneration: 2n,
+          failureCode: "PROVIDER_GATEWAY_UNREACHABLE",
+        });
+      },
+    },
+  }).run({
+    delivery: delivery("deadline-reserve"),
+    trigger: { kind: "change_wake", observedWakeGeneration: 1n },
+    requestedAt: base,
+  });
+
+  assert.equal(result.state, "terminal");
+  assert.equal(timerDelay, 80);
+  assert.equal(cleared, true);
+  assert.deepEqual(gates.claimDeadlines, [base.getTime() + 80]);
+  assert.deepEqual(gates.acknowledgements, []);
+  assert.deepEqual(gates.deferrals, []);
+  assert.equal(ledger.progress.at(-1)?.attempts.length, 1);
+  assert.deepEqual(ledger.beginDeadlines, [base.getTime() + 80]);
+  assert.ok(ledger.progressDeadlines.every(
+    (deadlineAt) => deadlineAt === base.getTime() + 90,
+  ));
+  assert.deepEqual(ledger.terminalDeadlines, [base.getTime() + 100]);
+  assert.equal(ledger.terminals[0]?.outcome, "continuation_required");
+  assert.equal(
+    ledger.terminals[0]?.safeFailureCode,
+    "MANIFEST_RECONCILIATION_DEADLINE",
+  );
+  assert.equal(ledger.terminals[0]?.continuation?.requestedGeneration, 2n);
+  assert.ok(
+    ledger.terminalDeadlines[0]! <
+      ledger.begins[0]!.ownershipExpiresAt.getTime(),
   );
 });
 

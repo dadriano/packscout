@@ -5,7 +5,7 @@ import { createMigratedTestDatabase } from "@packscout/database/test-support";
 import { ProviderWorkerRuntime } from "./provider-worker-runtime.ts";
 import { createProductionWorkerRuntime } from "./production-worker-composition.ts";
 
-test("production composition wires provider and manifest lanes without legacy catalog", async () => {
+test("production composition wires the provider, Heat, and retention lanes", async () => {
   const harness = await createMigratedTestDatabase();
   try {
     const input: Parameters<typeof createProductionWorkerRuntime>[0] = {
@@ -54,25 +54,6 @@ test("production composition wires provider and manifest lanes without legacy ca
         workerId: "production-composition-worker",
         workerVersion: "0.0.0-test",
       },
-      promotion: {
-        convexBaseUrl: "https://convex.example",
-        deploymentKey: "production-us",
-        providerCredentials: [{
-          platformKey: "alpha",
-          keyId: "provider.alpha.v1",
-          secret: new Uint8Array(32).fill(3),
-        }],
-        manifestPublishCredential: {
-          keyId: "manifest.publish.v1",
-          secret: new Uint8Array(32).fill(4),
-        },
-        manifestClearCredential: {
-          keyId: "manifest.clear.v1",
-          secret: new Uint8Array(32).fill(5),
-        },
-        pollIntervalMilliseconds: 5_000,
-        requestTimeoutMilliseconds: 10_000,
-      },
       heat: {
         convexBaseUrl: "https://convex.example",
         deploymentKey: "production-us",
@@ -96,7 +77,6 @@ test("production composition wires provider and manifest lanes without legacy ca
       },
       database: harness.client,
       providerLogger: { write() {} },
-      promotionLogger: { write() {} },
       heatLogger: { write() {} },
       retentionLogger: { write() {} },
       observability: { metric() {}, log() {} },
@@ -123,15 +103,18 @@ test("production composition wires provider and manifest lanes without legacy ca
   }
 });
 
-test("production composition has no legacy global catalog publication path", async () => {
-  const source = await readFile(
-    new URL("./production-worker-composition.ts", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(source, /createPromotionV2WorkerRuntime/);
-  assert.doesNotMatch(source, /createCatalogPromotionWorkerRuntime/);
-  assert.doesNotMatch(source, /SignedConvexCatalogPublicationClient/);
-  assert.doesNotMatch(source, /PrismaCatalogPromotionRepository/);
-  assert.doesNotMatch(source, /CatalogReleaseAssembler/);
+test("default production has no legacy composite publication authority", async () => {
+  for (const file of [
+    "./production-worker-composition.ts",
+    "./index.ts",
+  ]) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /PromotionV2/u);
+    assert.doesNotMatch(source, /promotion-v2-worker/u);
+    assert.doesNotMatch(source, /createPromotionV2WorkerRuntime/u);
+    assert.doesNotMatch(source, /createCatalogPromotionWorkerRuntime/u);
+    assert.doesNotMatch(source, /SignedConvexCatalogPublicationClient/u);
+    assert.doesNotMatch(source, /PrismaCatalogPromotionRepository/u);
+    assert.doesNotMatch(source, /CatalogReleaseAssembler/u);
+  }
 });

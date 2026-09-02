@@ -97,11 +97,13 @@ export interface VerifiedManifestGateProofSource {
     claim: ManifestGateClaim;
     currentManifest: GlobalCatalogManifestV1 | null;
     currentActiveState: ActiveCatalogManifestStateV1;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<VerifiedManifestGateTargetResolution>;
   resolveSignedState(input: Readonly<{
     reason: "bootstrap" | "cas_reconciliation";
     activeState: ActiveCatalogManifestStateV1;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<VerifiedManifestStateResolution>;
 }
@@ -301,22 +303,31 @@ export class IndependentProviderManifestCoordinator {
   async reconcile(input: Readonly<{
     claim: ManifestGateClaim;
     attemptId: string;
+    deadlineAt?: number;
     signal?: AbortSignal;
   }>): Promise<IndependentManifestReconciliationResult> {
+    const deadline = input.deadlineAt === undefined
+      ? undefined
+      : { deadlineAt: input.deadlineAt };
     let lease: ManifestActivationLease;
     try {
       lease = await this.dependencies.activations.claimLease(
         `${this.dependencies.workerId}:${input.attemptId}`,
         this.#leaseMilliseconds,
+        deadline,
       );
     } catch (error) {
-      const mirror = await this.dependencies.activations.loadMirror();
+      const mirror = await this.dependencies.activations.loadMirror(deadline);
       return result("deferred", mirror, {
         failureCode: safeFailure(error, "MANIFEST_ACTIVATION_LEASE_HELD"),
       });
     }
     try {
-      const snapshot = await this.currentSnapshot(lease, input.signal);
+      const snapshot = await this.currentSnapshot(
+        lease,
+        input.signal,
+        deadline,
+      );
       if ("failureCode" in snapshot) {
         return result(snapshot.disposition, snapshot.mirror, {
           failureCode: snapshot.failureCode,
@@ -334,6 +345,9 @@ export class IndependentProviderManifestCoordinator {
           claim: input.claim,
           currentManifest: snapshot.currentManifest,
           currentActiveState: snapshot.activeState,
+          ...(input.deadlineAt === undefined
+            ? {}
+            : { deadlineAt: input.deadlineAt }),
           ...(input.signal === undefined ? {} : { signal: input.signal }),
         });
       } catch (error) {
@@ -393,7 +407,7 @@ export class IndependentProviderManifestCoordinator {
           requestDigest: command.requestDigest,
           requestedByOperatorId: input.claim.requestedByOperatorId,
           requestedAt: this.#now(),
-        });
+        }, deadline);
       } catch (error) {
         return result("blocked", snapshot.mirror, {
           semanticOperation: command.semanticOperation,
@@ -404,7 +418,8 @@ export class IndependentProviderManifestCoordinator {
         });
       }
       if (intent.state === "accepted") {
-        return result("recovered", await this.dependencies.activations.loadMirror(), {
+        const mirror = await this.dependencies.activations.loadMirror(deadline);
+        return result("recovered", mirror, {
           operation: intent,
           receiptDigest: intent.receiptSha256,
           operationCount: 1,
@@ -415,6 +430,7 @@ export class IndependentProviderManifestCoordinator {
           const reconciled = await this.reconcileRemoteState(
             lease,
             input.signal,
+            deadline,
           );
           return result("cas_lost", reconciled.mirror, {
             operation: intent,
@@ -439,14 +455,14 @@ export class IndependentProviderManifestCoordinator {
             operationId: intent.id,
             evidence: statusEvidence,
             observedAt: this.#now(),
-          });
+          }, deadline);
         if (observation.resultKind === "terminal") {
           const accepted = await this.dependencies.activations.accept({
             lease,
             operationId: intent.id,
             evidence: statusEvidence,
             receivedAt: this.#now(),
-          });
+          }, deadline);
           return result("recovered", accepted.mirror, {
             operation: accepted.operation,
             receiptDigest: status.receiptSha256,
@@ -459,7 +475,7 @@ export class IndependentProviderManifestCoordinator {
         lease,
         operationId: intent.id,
         attemptedAt: this.#now(),
-      });
+      }, deadline);
       try {
         const publication = await this.dependencies.transport.sendExact({
           kind: command.convexMutationKind,
@@ -470,7 +486,7 @@ export class IndependentProviderManifestCoordinator {
           operationId: intent.id,
           evidence: exactEvidence(publication),
           receivedAt: this.#now(),
-        });
+        }, deadline);
         return result("activated", accepted.mirror, {
           operation: accepted.operation,
           receiptDigest: publication.receiptSha256,
@@ -484,10 +500,11 @@ export class IndependentProviderManifestCoordinator {
             operationId: intent.id,
             failureCode: "MANIFEST_ACTIVATION_CAS_LOST",
             observedAt: this.#now(),
-          });
+          }, deadline);
           const reconciled = await this.reconcileRemoteState(
             lease,
             input.signal,
+            deadline,
           );
           return result("cas_lost", reconciled.mirror, {
             operation: intent,
@@ -505,7 +522,7 @@ export class IndependentProviderManifestCoordinator {
             operationId: intent.id,
             failureCode,
             observedAt: this.#now(),
-          });
+          }, deadline);
           return result("deferred", snapshot.mirror, {
             operation: intent,
             failureCode,
@@ -516,25 +533,28 @@ export class IndependentProviderManifestCoordinator {
           operationId: intent.id,
           failureCode,
           observedAt: this.#now(),
-        });
+        }, deadline);
         return result("blocked", snapshot.mirror, {
           operation: intent,
           failureCode,
         });
       }
     } catch (error) {
-      const mirror = await this.dependencies.activations.loadMirror();
+      const mirror = await this.dependencies.activations.loadMirror(deadline);
       return result("deferred", mirror, {
         failureCode: safeFailure(error, "MANIFEST_ACTIVATION_UNAVAILABLE"),
       });
     } finally {
-      await this.dependencies.activations.releaseLease(lease).catch(() => false);
+      await this.dependencies.activations.releaseLease(lease, deadline).catch(
+        () => false,
+      );
     }
   }
 
   private async currentSnapshot(
     lease: ManifestActivationLease,
     signal?: AbortSignal,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<
     | Readonly<{
         mirror: ManifestActivationMirror;
@@ -547,7 +567,7 @@ export class IndependentProviderManifestCoordinator {
         failureCode: string;
       }>
   > {
-    const mirror = await this.dependencies.activations.loadMirror();
+    const mirror = await this.dependencies.activations.loadMirror(deadline);
     if (mirror.activeManifest !== null && mirror.activeState !== null) {
       return {
         mirror,
@@ -568,6 +588,7 @@ export class IndependentProviderManifestCoordinator {
       const resolution = await this.dependencies.proofs.resolveSignedState({
         reason: "bootstrap",
         activeState,
+        ...(deadline === undefined ? {} : { deadlineAt: deadline.deadlineAt }),
         ...(signal === undefined ? {} : { signal }),
       });
       if (resolution.state !== "ready") {
@@ -588,7 +609,7 @@ export class IndependentProviderManifestCoordinator {
           observationKind: "bootstrap",
           evidence,
           observedAt: this.#now(),
-        });
+        }, deadline);
       return {
         mirror: adopted,
         currentManifest: resolution.activeManifest,
@@ -606,16 +627,18 @@ export class IndependentProviderManifestCoordinator {
   private async reconcileRemoteState(
     lease: ManifestActivationLease,
     signal?: AbortSignal,
+    deadline?: Readonly<{ deadlineAt: number }>,
   ): Promise<Readonly<{
     mirror: ManifestActivationMirror;
     failureCode: string | null;
   }>> {
-    const fallback = await this.dependencies.activations.loadMirror();
+    const fallback = await this.dependencies.activations.loadMirror(deadline);
     try {
       const observed = await this.dependencies.transport.activeState(signal);
       const resolution = await this.dependencies.proofs.resolveSignedState({
         reason: "cas_reconciliation",
         activeState: observed.receipt.details.activeState,
+        ...(deadline === undefined ? {} : { deadlineAt: deadline.deadlineAt }),
         ...(signal === undefined ? {} : { signal }),
       });
       if (resolution.state !== "ready") {
@@ -631,7 +654,7 @@ export class IndependentProviderManifestCoordinator {
             previousManifest: resolution.previousManifest,
           },
           observedAt: this.#now(),
-        });
+        }, deadline);
       return { mirror, failureCode: null };
     } catch (error) {
       return {

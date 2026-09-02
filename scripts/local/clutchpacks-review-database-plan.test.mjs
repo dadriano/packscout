@@ -453,6 +453,7 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
     providerDeleteList,
     "provider deletes must remain an explicit table allowlist",
   ), [
+    "provider_activity_outbox",
     "provider_promotion_job_delivery_tombstones",
     "provider_promotion_job_invocations",
   ]);

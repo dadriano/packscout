@@ -920,12 +920,27 @@ function projectionLag(
 function evaluatorView(
   evaluator: PromotionJobLivenessEvaluatorStateRecord,
   roster: PromotionJobLivenessRosterSnapshotRecord,
+  now: Date,
 ): PromotionJobMonitoringOverview["evaluator"] {
   const expected = roster.providers.length + 1;
+  const lastSuccessfulAt = evaluator.lastSuccessfulEvaluationAt?.getTime()
+    ?? null;
+  const evaluatorAgeMilliseconds = lastSuccessfulAt === null
+    ? null
+    : now.getTime() - lastSuccessfulAt;
+  // The evaluator runs every minute. Keep one missed window healthy, matching
+  // the liveness contract, but never let a dead active evaluator remain
+  // "current" after the second missed window.
+  const temporallyCurrent = evaluator.lifecycle !== "active" || (
+    evaluatorAgeMilliseconds !== null
+    && evaluatorAgeMilliseconds >= 0
+    && evaluatorAgeMilliseconds <= evaluator.cadenceSeconds * 2_000
+  );
   const current = evaluator.state === "current"
     && evaluator.rosterDigest === roster.rosterDigest
     && evaluator.expectedCount === expected
-    && evaluator.manifestEvaluated === true;
+    && evaluator.manifestEvaluated === true
+    && temporallyCurrent;
   return {
     state: current ? "current" : evaluator.state === "current" ? "stale" : evaluator.state,
     observedAt: iso(evaluator.lastSuccessfulEvaluationAt),
@@ -1072,7 +1087,7 @@ export class PromotionJobMonitoringReadService {
       this.options.repository.listRoster(input.organizationId),
       this.options.repository.readEvaluator(),
     ]);
-    const evaluated = evaluatorView(evaluator, roster);
+    const evaluated = evaluatorView(evaluator, roster, now);
     const evaluatorCurrent = evaluated.state === "current";
     const scope = {
       organizationId: input.organizationId,

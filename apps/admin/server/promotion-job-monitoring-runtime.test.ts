@@ -189,10 +189,11 @@ function manifestEvidence(): CentralManifestPromotionMonitoringEvidence {
 
 function repository(
   history: readonly CentralPromotionJobMonitoringInvocationRecord[] = [],
+  evaluatorState: PromotionJobLivenessEvaluatorStateRecord = evaluator,
 ): PromotionJobMonitoringReadRepository {
   return {
     async captureEligibleRoster() { return roster; },
-    async readEvaluator() { return evaluator; },
+    async readEvaluator() { return evaluatorState; },
     async listRoster(scope) {
       assert.equal(scope, organizationId);
       return providers;
@@ -287,6 +288,39 @@ test("overview isolates a provider outage and retains archived truth without liv
   assert.equal(overview.providers[2]?.lifecycle, "archived");
   assert.equal(overview.providers[2]?.state, "last_known");
   assert.deepEqual(routed, [alphaId, betaId]);
+});
+
+test("overview marks an active evaluator stale after two missed windows", async () => {
+  const staleAt = new Date(
+    observedAt.getTime() + evaluator.cadenceSeconds * 2_000 + 1,
+  );
+  const service = new PromotionJobMonitoringReadService({
+    repository: repository([], evaluator),
+    gateway: {
+      async runWithAdminProviderDatabase(input, operation) {
+        return {
+          state: "reachable" as const,
+          providerId: input.providerId,
+          observedAt: staleAt.toISOString(),
+          value: await operation({} as ProviderPrismaClient),
+        };
+      },
+    },
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => staleAt,
+    readLiveProvider: async () => live("alpha"),
+  });
+
+  const overview = promotionJobMonitoringOverviewSchema.parse(
+    await service.overview({ organizationId }),
+  );
+
+  assert.equal(overview.evaluator.state, "stale");
+  // Publication facts remain visible, but their liveness judgment is marked
+  // stale until a fresh evaluator cycle succeeds.
+  assert.equal(overview.providers[0]?.state, "current");
+  assert.equal(overview.providers[0]?.stale, true);
 });
 
 test("history merges newest-first and detail exposes only bounded safe evidence", async () => {

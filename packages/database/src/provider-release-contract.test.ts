@@ -380,6 +380,36 @@ test("mixed cards, watches, art, provisional identities, unavailable values, ali
   ]) assert.equal(serialized.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden);
 });
 
+test("the cooperative build checkpoint stops large CPU loops at the caller deadline", async () => {
+  const central = await pin();
+  const current = snapshot();
+  const aliases = Array.from({ length: 1_000 }, (_, index) => ({
+    id: packscoutPublicIdentityUuid(`release-deadline-alias:${index}`),
+    collectibleId: local.card,
+    normalizedName: `retired-alias-${index}`,
+    lifecycle: "retired" as const,
+  }));
+  const deadline = Object.assign(new Error("release build deadline"), {
+    code: "PROVIDER_RELEASE_DEADLINE",
+  });
+  let checks = 0;
+
+  await assert.rejects(
+    buildProviderRelease({
+      snapshot: { ...current, aliases },
+      pin: central,
+      predecessorCompleteReleaseId: null,
+      checkpoint() {
+        checks += 1;
+        if (checks === 100) throw deadline;
+      },
+    }),
+    (error: unknown) => error === deadline,
+  );
+  assert.equal(checks, 100);
+  assert.ok(checks < aliases.length);
+});
+
 test("configured stale threshold controls public freshness independently from schedule cadence", async () => {
   const central = await pin();
   const current = snapshot();

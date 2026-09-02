@@ -41,6 +41,8 @@ import {
   type RecordPromotionJobProgressInput,
   type TerminalizePromotionJobInvocationInput,
 } from "./promotion-job-persistence-types.ts";
+import { sweepExpiredPromotionJobInvocations } from
+  "./split-promotion-job-recovery.ts";
 
 export interface PromotionJobSqlClient {
   query<T>(statement: Prisma.Sql): Promise<T[]>;
@@ -626,6 +628,22 @@ export class SplitPromotionJobStore {
     });
   }
 
+  async reconcileExpiredInvocations(
+    client: PromotionJobSqlClient,
+    input: Readonly<{
+      reconciledAt: Date;
+      maximumRows?: number;
+      safeFailureCode: string;
+    }>,
+  ) {
+    return sweepExpiredPromotionJobInvocations(client, {
+      invocationTable: this.#invocations,
+      ...input,
+      reconcile: (reconciliation) =>
+        this.reconcileInterrupted(client, reconciliation),
+    });
+  }
+
   async loadInvocation(
     client: PromotionJobSqlClient,
     runId: string,
@@ -696,18 +714,23 @@ export class SplitPromotionJobStore {
       input.now.getTime() - PROMOTION_JOB_INVOCATION_RETENTION_MS,
     );
     const deletedInvocations = await client.query<{ runId: string }>(Prisma.sql`
+      -- Protection gates deletion, but protected rows still consume the shared
+      -- logical-job cap. Ranking only deletable rows would permit two caps.
       with ranked as (
         select run_id, row_number() over (
           order by finished_at desc, run_id desc
         ) as retained_rank
         from ${this.#invocations}
-        where lifecycle_state = 'terminal' and retention_protected = false
+        where lifecycle_state = 'terminal'
       ), eligible as (
         select invocation.run_id
         from ${this.#invocations} invocation
         join ranked on ranked.run_id = invocation.run_id
-        where invocation.finished_at <= ${cutoff}
-           or ranked.retained_rank > ${PROMOTION_JOB_INVOCATION_LIMIT}
+        where invocation.retention_protected = false
+          and (
+            invocation.finished_at <= ${cutoff}
+            or ranked.retained_rank > ${PROMOTION_JOB_INVOCATION_LIMIT}
+          )
         order by invocation.finished_at, invocation.run_id
         limit ${maximumRows}
       )

@@ -8,15 +8,40 @@ import {
   type ProviderHarness,
 } from "./provider-canonical-integration-support.ts";
 import {
+  providerPromotionInvocationProjectionRecord,
+} from "./central-promotion-job-records.ts";
+import { providerActivityEventDigest } from
+  "./provider-activity-contract.ts";
+import {
   EMPTY_PROMOTION_ATTEMPT_SET_DIGEST,
   PROMOTION_JOB_DELIVERY_RETENTION_MS,
+  PROMOTION_JOB_INVOCATION_RETENTION_MS,
   PromotionJobPersistenceError,
   promotionJobSha256,
 } from "./promotion-job-persistence-types.ts";
+import { PrismaProviderActivityOutboxRepository } from
+  "./provider-activity-outbox-repository.ts";
 import { PrismaProviderPromotionJobRepository } from
   "./provider-promotion-job-repository.ts";
 
 const owner = "provider-promotion-test";
+
+function retainedGenericActivity(eventAt: Date) {
+  const identity = {
+    id: randomUUID(),
+    eventType: "provider.test.retained",
+    severity: "info" as const,
+    dedupeKey: "provider-test-retained",
+    recoveryKey: "provider-test-retained",
+    localRunId: null,
+    localQuarantineId: null,
+    title: "Provider activity remains retained",
+    summary: "Generic provider activity is not projection transport.",
+    evidence: { state: "retained" },
+    eventAt,
+  };
+  return { ...identity, eventDigest: providerActivityEventDigest(identity) };
+}
 
 function delivery(opaqueKey: string, issuedAt: Date) {
   return {
@@ -248,6 +273,20 @@ test("provider-local replay, generation, schedule, detail, and retention converg
       acknowledgeObservedWake: true,
     });
     assert.equal(terminal.retentionProtected, true);
+    await first.terminalize({
+      runId: started.invocation.runId,
+      ownershipToken: firstInput.ownershipToken,
+      finishedAt: new Date(base.getTime() + 4_000),
+      outcome: "caught_up",
+      acknowledgeObservedWake: true,
+    });
+    assert.equal(
+      await pair.first.client.provider_promotion_projection_outbox.count({
+        where: { invocation_run_id: terminal.runId },
+      }),
+      1,
+      "terminal replay keeps one durable projection envelope",
+    );
     assert.deepEqual(
       await first.loadWakeIntent().then((wake) => [
         wake.requestedGeneration,
@@ -263,20 +302,121 @@ test("provider-local replay, generation, schedule, detail, and retention converg
       }),
       "terminal summaries are immutable outside the retention-release path",
     );
-    assert.equal(await first.releaseRetentionProtection({
-      runId: terminal.runId,
-      releasedAt: new Date(base.getTime() + 5_000),
-      expectedRelatedAttemptSetDigest: terminal.relatedAttemptSetDigest,
-      validateRelease: async (_transaction, digest) => {
-        assert.equal(digest, terminal.relatedAttemptSetDigest);
+    const pending = await new PrismaProviderActivityOutboxRepository(
+      pair.first.client,
+    ).readPendingBatch({ providerId: pair.first.providerId, limit: 10 });
+    const projectionEvent = pending.events.find((event) =>
+      event.eventType === "provider_promotion_invocation_terminal"
+    );
+    assert.ok(projectionEvent);
+    assert.equal(projectionEvent.localRunId, null);
+    assert.doesNotMatch(JSON.stringify(projectionEvent), new RegExp(
+      [terminal.runId, attemptId].join("|"),
+      "u",
+    ));
+    const projectionInput = await first.loadProjectionForRelay({
+      providerId: pair.first.providerId,
+      event: projectionEvent,
+      projectedAt: new Date(base.getTime() + 5_000),
+    });
+    const projection = providerPromotionInvocationProjectionRecord(
+      projectionInput,
+    );
+    await assert.rejects(first.acknowledgeProjectionDelivery({
+      providerId: pair.first.providerId,
+      event: projectionEvent,
+      projected: {
+        ...projection,
+        projectionDigest: promotionJobSha256("wrong-central-projection"),
       },
-    }), true);
+      deliveredAt: new Date(base.getTime() + 5_000),
+    }), code("PROMOTION_JOB_PROJECTION_CONFLICT"));
+    assert.equal(
+      (await first.loadInvocation(terminal.runId))?.retentionProtected,
+      true,
+      "an inexact central receipt cannot release provider-local evidence",
+    );
+    assert.deepEqual((await Promise.all([
+      first.acknowledgeProjectionDelivery({
+        providerId: pair.first.providerId,
+        event: projectionEvent,
+        projected: projection,
+        deliveredAt: new Date(base.getTime() + 5_000),
+      }),
+      concurrent.acknowledgeProjectionDelivery({
+        providerId: pair.first.providerId,
+        event: projectionEvent,
+        projected: projection,
+        deliveredAt: new Date(base.getTime() + 5_001),
+      }),
+    ])).sort(), ["already_delivered", "delivered"]);
+    assert.equal(
+      (await first.loadInvocation(terminal.runId))?.retentionProtected,
+      false,
+    );
+    await assert.rejects(
+      pair.first.client.provider_activity_outbox.delete({
+        where: { id: projectionEvent.id },
+      }),
+      /provider_activity_outbox_history_immutable/u,
+      "a delivered projection envelope stays immutable while mapped",
+    );
 
     await pair.first.client.provider_promotion_job_invocations.delete({
       where: { run_id: terminal.runId },
     });
+    assert.equal(
+      await pair.first.client.provider_promotion_projection_outbox.count({
+        where: { activity_event_id: projectionEvent.id },
+      }),
+      0,
+      "invocation pruning cascades the provider-local relay mapping",
+    );
     const prunedReplay = await first.beginOrRecoverInvocation(firstInput);
     assert.equal(prunedReplay.disposition, "existing_pruned");
+    await first.prune({
+      now: new Date(
+        projectionEvent.eventAt.getTime()
+          + PROMOTION_JOB_DELIVERY_RETENTION_MS - 1,
+      ),
+      maximumRows: 1,
+    });
+    assert.ok(await pair.first.client.provider_activity_outbox.findUnique({
+      where: { id: projectionEvent.id },
+    }), "an orphan projection envelope remains before its 30-day boundary");
+
+    const genericActivity = retainedGenericActivity(
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    await pair.first.client.provider_activity_outbox.create({
+      data: {
+        id: genericActivity.id,
+        event_digest: genericActivity.eventDigest,
+        event_type: genericActivity.eventType,
+        severity: genericActivity.severity,
+        dedupe_key: genericActivity.dedupeKey,
+        recovery_key: genericActivity.recoveryKey,
+        local_run_id: null,
+        local_quarantine_id: null,
+        title: genericActivity.title,
+        summary: genericActivity.summary,
+        evidence: genericActivity.evidence,
+        event_at: genericActivity.eventAt,
+        delivery_state: "delivered",
+        delivery_attempt_count: 1,
+        last_delivery_attempt_at: genericActivity.eventAt,
+        delivered_at: genericActivity.eventAt,
+        created_at: genericActivity.eventAt,
+        updated_at: genericActivity.eventAt,
+      },
+    });
+    await assert.rejects(
+      pair.first.client.provider_activity_outbox.delete({
+        where: { id: genericActivity.id },
+      }),
+      /provider_activity_outbox_history_immutable/u,
+      "the narrow guard exception never applies to generic activity",
+    );
 
     const baselineAt = new Date("2026-08-02T12:00:00.000Z");
     await first.activateSchedule({
@@ -395,13 +535,65 @@ test("provider-local replay, generation, schedule, detail, and retention converg
       finishedAt: new Date(old.getTime() + 1_000),
       outcome: "coalesced",
     });
+    const remainingProjectionEvents =
+      await new PrismaProviderActivityOutboxRepository(pair.first.client)
+        .readPendingBatch({ providerId: pair.first.providerId, limit: 100 });
+    for (const event of remainingProjectionEvents.events) {
+      if (event.eventType !== "provider_promotion_invocation_terminal") {
+        continue;
+      }
+      const input = await first.loadProjectionForRelay({
+        providerId: pair.first.providerId,
+        event,
+        projectedAt: new Date("2026-09-01T00:00:00.000Z"),
+      });
+      await first.acknowledgeProjectionDelivery({
+        providerId: pair.first.providerId,
+        event,
+        projected: providerPromotionInvocationProjectionRecord(input),
+        deliveredAt: new Date("2026-09-01T00:00:00.000Z"),
+      });
+    }
+    const eligibleProjectionEventsBefore =
+      await pair.first.client.provider_activity_outbox.count({
+        where: {
+          event_type: "provider_promotion_invocation_terminal",
+          delivery_state: "delivered",
+        },
+      });
     const prune = await first.prune({
+      now: new Date("2026-09-01T00:00:00.000Z"),
+      maximumRows: 1,
+    });
+    const eligibleProjectionEventsAfter =
+      await pair.first.client.provider_activity_outbox.count({
+        where: {
+          event_type: "provider_promotion_invocation_terminal",
+          delivery_state: "delivered",
+        },
+      });
+    assert.equal(prune.invocationSummariesDeleted, 1);
+    assert.equal(prune.tombstonesDeleted, 1);
+    assert.equal(
+      eligibleProjectionEventsBefore - eligibleProjectionEventsAfter,
+      1,
+      "one retention pass deletes at most its bounded event volume",
+    );
+    assert.equal(await first.loadInvocation(oldAdmission.invocation!.runId), null);
+    await first.prune({
       now: new Date("2026-09-01T00:00:00.000Z"),
       maximumRows: 100,
     });
-    assert.ok(prune.invocationSummariesDeleted >= 1);
-    assert.ok(prune.tombstonesDeleted >= 1);
-    assert.equal(await first.loadInvocation(oldAdmission.invocation!.runId), null);
+    assert.equal(
+      await pair.first.client.provider_activity_outbox.findUnique({
+        where: { id: projectionEvent.id },
+      }),
+      null,
+      "an acknowledged orphan projection envelope expires after 30 days",
+    );
+    assert.ok(await pair.first.client.provider_activity_outbox.findUnique({
+      where: { id: genericActivity.id },
+    }), "generic provider activity remains immutable and retained");
 
     const expiredAt = new Date("2026-09-01T12:00:00.000Z");
     const scheduleBefore = await first.loadSchedule();
@@ -417,5 +609,155 @@ test("provider-local replay, generation, schedule, detail, and retention converg
   } finally {
     await independent.$disconnect().catch(() => undefined);
     await pair.close();
+  }
+});
+
+test("provider recovery sweep terminalizes cron and manual orphans before later work", async () => {
+  const harness = await createProviderHarness();
+  try {
+    const repository = new PrismaProviderPromotionJobRepository(harness.client);
+    const baselineAt = new Date("2026-01-01T00:00:00.000Z");
+    await repository.activateSchedule({
+      scheduleEpoch: 1n,
+      baselineAt,
+      activatedAt: baselineAt,
+    });
+    const manualInput = beginInput({
+      opaqueKey: "provider-expired-manual",
+      now: baselineAt,
+    });
+    const manualOrphan = await repository.beginOrRecoverInvocation(manualInput);
+    const firstDueAt = new Date(baselineAt.getTime() + 60_000);
+    const orphanInput = beginInput({
+      opaqueKey: "provider-expired-cron-window-one",
+      now: firstDueAt,
+      trigger: {
+        kind: "reconciliation_cron",
+        scheduleEpoch: 1n,
+        scheduleWindowIndex: 1n,
+        scheduledDueAt: firstDueAt,
+      },
+    });
+    const orphan = await repository.beginOrRecoverInvocation(orphanInput);
+    const reconciledAt = orphanInput.ownershipExpiresAt;
+
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 1, moreEligible: true });
+    const manualTerminal = await repository.loadInvocation(
+      manualOrphan.invocation!.runId,
+    );
+    assert.deepEqual({
+      triggerKind: manualTerminal?.trigger.kind,
+      lifecycleState: manualTerminal?.lifecycleState,
+      outcome: manualTerminal?.outcome,
+      safeFailureCode: manualTerminal?.safeFailureCode,
+      retentionProtected: manualTerminal?.retentionProtected,
+    }, {
+      triggerKind: "manual",
+      lifecycleState: "terminal",
+      outcome: "continuation_required",
+      safeFailureCode: "PROVIDER_PROMOTION_INTERRUPTED",
+      retentionProtected: true,
+    });
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 1, moreEligible: false });
+    const terminal = await repository.loadInvocation(orphan.invocation!.runId);
+    assert.deepEqual({
+      lifecycleState: terminal?.lifecycleState,
+      outcome: terminal?.outcome,
+      safeFailureCode: terminal?.safeFailureCode,
+      retentionProtected: terminal?.retentionProtected,
+    }, {
+      lifecycleState: "terminal",
+      outcome: "continuation_required",
+      safeFailureCode: "PROVIDER_PROMOTION_INTERRUPTED",
+      retentionProtected: true,
+    });
+    assert.equal((await repository.loadWakeIntent()).pending, true);
+    assert.equal(
+      await harness.client.provider_promotion_projection_outbox.count({
+        where: {
+          invocation_run_id: {
+            in: [manualOrphan.invocation!.runId, orphan.invocation!.runId],
+          },
+        },
+      }),
+      2,
+      "each hard-crash reconciliation emits one durable monitoring envelope",
+    );
+    assert.deepEqual(await repository.reconcileExpiredInvocations({
+      reconciledAt,
+      maximumRows: 1,
+    }), { reconciled: 0, moreEligible: false });
+
+    const secondDueAt = new Date(baselineAt.getTime() + 120_000);
+    const laterInput = beginInput({
+      opaqueKey: "provider-cron-window-two-after-recovery",
+      now: secondDueAt,
+      trigger: {
+        kind: "reconciliation_cron",
+        scheduleEpoch: 1n,
+        scheduleWindowIndex: 2n,
+        scheduledDueAt: secondDueAt,
+      },
+    });
+    const later = await repository.beginOrRecoverInvocation(laterInput);
+    assert.equal(later.disposition, "started");
+    await repository.terminalize({
+      runId: later.invocation!.runId,
+      ownershipToken: laterInput.ownershipToken,
+      finishedAt: new Date(secondDueAt.getTime() + 1_000),
+      outcome: "no_change",
+    });
+    assert.equal((await repository.loadSchedule()).lastAdmittedWindowIndex, 2n);
+
+    const pending = await new PrismaProviderActivityOutboxRepository(
+      harness.client,
+    ).readPendingBatch({ providerId: harness.providerId, limit: 10 });
+    for (const recovered of [manualOrphan, orphan]) {
+      const mapping = await harness.client.provider_promotion_projection_outbox
+        .findUniqueOrThrow({
+          where: { invocation_run_id: recovered.invocation!.runId },
+        });
+      const event = pending.events.find(
+        ({ id }) => id === mapping.activity_event_id,
+      );
+      assert.ok(event);
+      const projectionInput = await repository.loadProjectionForRelay({
+        providerId: harness.providerId,
+        event,
+        projectedAt: new Date(reconciledAt.getTime() + 1_000),
+      });
+      await repository.acknowledgeProjectionDelivery({
+        providerId: harness.providerId,
+        event,
+        projected: providerPromotionInvocationProjectionRecord(projectionInput),
+        deliveredAt: new Date(reconciledAt.getTime() + 1_000),
+      });
+      assert.equal(
+        (await repository.loadInvocation(recovered.invocation!.runId))
+          ?.retentionProtected,
+        false,
+      );
+    }
+
+    const pruned = await repository.prune({
+      now: new Date(
+        reconciledAt.getTime() + PROMOTION_JOB_INVOCATION_RETENTION_MS + 1,
+      ),
+      maximumRows: 10,
+    });
+    assert.equal(pruned.invocationSummariesDeleted, 2);
+    assert.equal(
+      await repository.loadInvocation(manualOrphan.invocation!.runId),
+      null,
+    );
+    assert.equal(await repository.loadInvocation(orphan.invocation!.runId), null);
+  } finally {
+    await harness.close();
   }
 });

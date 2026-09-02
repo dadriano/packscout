@@ -32,6 +32,7 @@ import {
   DistributedProviderReleasePublicationService,
   type DistributedProviderReleasePublicationStore,
   type DistributedProviderReleasePublicationTransport,
+  type DistributedProviderPublicationDeadline,
 } from "./distributed-provider-release-publication-service.ts";
 import { buildProviderCatalogReleasePublishPlan } from
   "./provider-catalog-release-artifacts.ts";
@@ -194,7 +195,15 @@ implements DistributedProviderReleasePublicationStore {
     };
   }
 
-  claimLease(owner: string): Promise<DistributedProviderPublisherLease> {
+  claimLease(
+    owner: string,
+    leaseMilliseconds?: number,
+    deadline?: DistributedProviderPublicationDeadline,
+    cleanupDeadline?: DistributedProviderPublicationDeadline,
+  ): Promise<DistributedProviderPublisherLease> {
+    void leaseMilliseconds;
+    void deadline;
+    void cleanupDeadline;
     this.fence += 1n;
     return Promise.resolve({
       owner,
@@ -210,7 +219,12 @@ implements DistributedProviderReleasePublicationStore {
     return Promise.resolve(lease);
   }
 
-  releaseLease(): Promise<void> {
+  releaseLease(
+    lease?: DistributedProviderPublisherLease,
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<void> {
+    void lease;
+    void deadline;
     return Promise.resolve();
   }
 
@@ -308,6 +322,56 @@ implements DistributedProviderReleasePublicationStore {
       receiptSha256: value.evidence?.receiptSha256 ?? null,
       failureCode: value.failureCode,
     };
+  }
+}
+
+class DeadlinePublicationStore extends MemoryPublicationStore {
+  readonly workDeadlines: number[] = [];
+  readonly cleanupDeadlines: number[] = [];
+
+  override claimLease(
+    owner: string,
+    _leaseMilliseconds?: number,
+    deadline?: DistributedProviderPublicationDeadline,
+    cleanupDeadline?: DistributedProviderPublicationDeadline,
+  ): Promise<DistributedProviderPublisherLease> {
+    if (deadline !== undefined) this.workDeadlines.push(deadline.deadlineAt);
+    if (cleanupDeadline !== undefined) {
+      this.cleanupDeadlines.push(cleanupDeadline.deadlineAt);
+    }
+    return super.claimLease(owner);
+  }
+
+  override loadExpectedCompletedHead(
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<ProviderReleaseExpectedCompletedHeadV1> {
+    if (deadline !== undefined) this.workDeadlines.push(deadline.deadlineAt);
+    return super.loadExpectedCompletedHead();
+  }
+
+  override recordIntent(
+    _input: {
+      lease: DistributedProviderPublisherLease;
+      providerReleaseId: string;
+      operation: DistributedProviderPublicationOperation;
+    },
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<DistributedProviderPublicationIntent> {
+    if (deadline !== undefined) this.workDeadlines.push(deadline.deadlineAt);
+    return Promise.reject(Object.assign(
+      new Error("Simulated publication transaction deadline."),
+      { code: "PROVIDER_PUBLICATION_DEADLINE" },
+    ));
+  }
+
+  override releaseLease(
+    _lease?: DistributedProviderPublisherLease,
+    deadline?: DistributedProviderPublicationDeadline,
+  ): Promise<void> {
+    if (deadline !== undefined) {
+      this.cleanupDeadlines.push(deadline.deadlineAt);
+    }
+    return Promise.resolve();
   }
 }
 
@@ -498,6 +562,52 @@ test("lost final response is recovered by signed exact status before checkpoint 
   assert.equal(runtime.store.completed, 1);
   assert.equal(result.confirmedThroughChangeSequence, 20n);
   assert.equal(result.terminalReceiptSha256, finalize.evidence?.receiptSha256);
+});
+
+test("late publication bounds every durable read and releases its lease inside the cleanup reserve", async () => {
+  const input = await fixture();
+  const store = new DeadlinePublicationStore(
+    input.source.descriptor.providerKey,
+  );
+  const sourceDeadlines: number[] = [];
+  const publisher = new DistributedProviderReleasePublicationService({
+    workerId: "provider-publication-deadline-test",
+    releases: {
+      publicationSource(_providerReleaseId, deadline) {
+        if (deadline !== undefined) {
+          sourceDeadlines.push(deadline.deadlineAt);
+        }
+        return Promise.resolve(input.source);
+      },
+    },
+    publications: store,
+    transport: new MemoryTransport(),
+  });
+  const workDeadlineAt = Date.now() + 10_000;
+  const cleanupDeadlineAt = workDeadlineAt + 5_000;
+
+  await assert.rejects(
+    () => publisher.publish(
+      input.assembly,
+      undefined,
+      workDeadlineAt,
+      cleanupDeadlineAt,
+    ),
+    (error: unknown) => error !== null
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "PROVIDER_PUBLICATION_DEADLINE",
+  );
+
+  assert.deepEqual(sourceDeadlines, [workDeadlineAt]);
+  assert.ok(store.workDeadlines.length >= 3);
+  assert.ok(store.workDeadlines.every(
+    (deadlineAt) => deadlineAt === workDeadlineAt,
+  ));
+  assert.deepEqual(store.cleanupDeadlines, [
+    cleanupDeadlineAt,
+    cleanupDeadlineAt,
+  ]);
 });
 
 test("signed status miss authorizes one byte-identical exact resend", async () => {

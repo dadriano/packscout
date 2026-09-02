@@ -18,6 +18,7 @@ import {
   readProviderPublicationJobAuthorityConfiguration,
 } from "./distributed-promotion-authority-config.ts";
 import {
+  PrismaBoundProviderPromotionWork,
   runPinnedProviderPromotionOnce,
   type PinnedProviderPromotionBootstrap,
   type ProviderPromotionPinnedGateway,
@@ -161,6 +162,35 @@ const inertTransport: DistributedProviderReleasePublicationTransport = {
     throw new Error("Composition fixture must not query transport directly.");
   },
 };
+
+test("bounded provider reads normalize Prisma transaction expiry", async () => {
+  const work = new PrismaBoundProviderPromotionWork({
+    provider: {
+      $transaction() {
+        return Promise.reject(Object.assign(
+          new Error("Simulated Prisma transaction timeout."),
+          { code: "P2028" },
+        ));
+      },
+    } as unknown as ProviderPrismaClient,
+    providerId: providerA,
+    pin: pin({
+      providerId: providerA,
+      providerKey: "courtyard",
+      configVersionId: configA,
+    }),
+    workerId: "promotion:deadline-test",
+    transport: inertTransport,
+  });
+
+  await assert.rejects(
+    () => work.readBoundary(undefined, Date.now() + 10_000),
+    (error: unknown) => error !== null
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "PROVIDER_PROMOTION_DEADLINE",
+  );
+});
 
 test("provider A completes from its cached pin while provider B is independently unreachable", async () => {
   const authorityA = authority(providerA, 1);

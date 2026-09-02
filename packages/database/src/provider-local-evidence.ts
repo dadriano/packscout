@@ -52,6 +52,8 @@ const activityEvidenceKeys = new Set([
   "providerReleaseContentHash",
   "providerReleaseFingerprint",
   "providerReleaseId",
+  "providerInvocationIdDigest",
+  "providerInvocationProjectionDigest",
   "publicProviderReleaseId",
   "quarantineState",
   "retentionState",

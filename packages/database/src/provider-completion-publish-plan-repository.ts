@@ -24,6 +24,44 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const TERMINAL_OPERATION_ID_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/u;
 const MAX_MANIFEST_REFERENCES = 64;
+const READ_TRANSACTION = Object.freeze({
+  maxWait: 5_000,
+  timeout: 15_000,
+  isolationLevel: CentralPrisma.TransactionIsolationLevel.ReadCommitted,
+});
+
+export interface ProviderCompletionPlanReadDeadline {
+  readonly deadlineAt: number;
+}
+
+type PlanReadClient = Pick<CentralPrismaClient, "$queryRaw">;
+
+function readTransactionOptions(deadline: ProviderCompletionPlanReadDeadline) {
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(
+    READ_TRANSACTION.maxWait,
+    Math.max(1, Math.floor(available / 5)),
+  );
+  const timeout = Math.min(READ_TRANSACTION.timeout, available - maxWait);
+  if (timeout < 1) {
+    throw Object.assign(new Error("Provider plan read deadline reached."), {
+      code: "PROMOTION_JOB_DEADLINE_EXCEEDED",
+    });
+  }
+  return { ...READ_TRANSACTION, maxWait, timeout };
+}
+
+function boundedRead<T>(
+  central: CentralPrismaClient,
+  read: (client: PlanReadClient) => Promise<T>,
+  deadline?: ProviderCompletionPlanReadDeadline,
+): Promise<T> {
+  if (deadline === undefined) return read(central);
+  return central.$transaction(
+    (transaction) => read(transaction),
+    readTransactionOptions(deadline),
+  );
+}
 
 interface PlanRow {
   eventId: string;
@@ -475,14 +513,20 @@ export class PrismaProviderCompletionPublishPlanRepository {
   async loadByEvidence(input: Readonly<{
     providerId: string;
     evidenceDigest: string;
-  }>): Promise<CachedProviderCompletionPublishPlan | null> {
+  }>, deadline?: ProviderCompletionPlanReadDeadline): Promise<
+    CachedProviderCompletionPublishPlan | null
+  > {
     assertPromotionJobUuid(input.providerId);
     assertPromotionJobSha256(input.evidenceDigest);
-    const [row] = await this.central.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-      select ${planProjection} from ${joinedTables}
-      where cache.provider_id = ${input.providerId}::uuid
-        and cache.evidence_digest = ${input.evidenceDigest}
-    `);
+    const [row] = await boundedRead(
+      this.central,
+      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
+        select ${planProjection} from ${joinedTables}
+        where cache.provider_id = ${input.providerId}::uuid
+          and cache.evidence_digest = ${input.evidenceDigest}
+      `),
+      deadline,
+    );
     return row ? cachedPlan(row) : null;
   }
 
@@ -524,19 +568,25 @@ export class PrismaProviderCompletionPublishPlanRepository {
     providerId: string;
     providerReleaseId: string;
     catalogVersionId: string;
-  }>): Promise<CachedProviderCompletionPublishPlan> {
+  }>, deadline?: ProviderCompletionPlanReadDeadline): Promise<
+    CachedProviderCompletionPublishPlan
+  > {
     assertPromotionJobUuid(input.providerId);
     assertPromotionJobUuid(input.providerReleaseId);
     assertPromotionJobUuid(input.catalogVersionId);
-    const rows = await this.central.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-      select ${planProjection} from ${joinedTables}
-      where cache.provider_id = ${input.providerId}::uuid
-        and cache.provider_release_id = ${input.providerReleaseId}::uuid
-        and cache.catalog_version_id = ${input.catalogVersionId}::uuid
-      order by cache.completed_through_change_sequence desc,
-               event.received_at desc,
-               cache.event_id desc
-    `);
+    const rows = await boundedRead(
+      this.central,
+      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
+        select ${planProjection} from ${joinedTables}
+        where cache.provider_id = ${input.providerId}::uuid
+          and cache.provider_release_id = ${input.providerReleaseId}::uuid
+          and cache.catalog_version_id = ${input.catalogVersionId}::uuid
+        order by cache.completed_through_change_sequence desc,
+                 event.received_at desc,
+                 cache.event_id desc
+      `),
+      deadline,
+    );
     const [newest] = rows;
     if (!newest) repositoryFailure();
     if (rows.some((row) =>
@@ -553,6 +603,7 @@ export class PrismaProviderCompletionPublishPlanRepository {
   /** Loads one newest exact cached plan for every current manifest reference. */
   async loadForManifestReferences(
     references: readonly ProviderManifestPlanReference[],
+    deadline?: ProviderCompletionPlanReadDeadline,
   ): Promise<readonly CachedProviderCompletionPublishPlan[] | null> {
     if (
       references.length < 1 || references.length > MAX_MANIFEST_REFERENCES ||
@@ -574,18 +625,22 @@ export class PrismaProviderCompletionPublishPlanRepository {
       and cache.provider_release_fingerprint =
         ${reference.providerReleaseFingerprint}
     )`);
-    const rows = await this.central.$queryRaw<PlanRow[]>(CentralPrisma.sql`
-      select distinct on (
-        provider.provider_key, cache.public_provider_release_id,
-        cache.provider_release_fingerprint
-      ) ${planProjection}
-      from ${joinedTables}
-      where ${CentralPrisma.join(predicates, " OR ")}
-      order by provider.provider_key, cache.public_provider_release_id,
-               cache.provider_release_fingerprint,
-               cache.completed_through_change_sequence desc,
-               cache.evidence_digest desc
-    `);
+    const rows = await boundedRead(
+      this.central,
+      (client) => client.$queryRaw<PlanRow[]>(CentralPrisma.sql`
+        select distinct on (
+          provider.provider_key, cache.public_provider_release_id,
+          cache.provider_release_fingerprint
+        ) ${planProjection}
+        from ${joinedTables}
+        where ${CentralPrisma.join(predicates, " OR ")}
+        order by provider.provider_key, cache.public_provider_release_id,
+                 cache.provider_release_fingerprint,
+                 cache.completed_through_change_sequence desc,
+                 cache.evidence_digest desc
+      `),
+      deadline,
+    );
     const byKey = new Map(rows.map((row) => [row.providerKey, row]));
     if (references.some((reference) => !byKey.has(reference.providerKey))) {
       return null;

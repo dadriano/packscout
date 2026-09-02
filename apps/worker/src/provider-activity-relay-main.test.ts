@@ -20,7 +20,9 @@ test("production relay executable composes only central roster and bounded provi
     "CipherProviderDatabaseCredentialResolver",
     "ProviderDatabaseDestinationPolicy",
     "createProviderActivityRelayCoordinator",
+    "PrismaManifestPromotionImmediateDeliveryRepository",
     "runProviderActivityRelayProcess",
+    "immediateDelivery",
   ]) assert.match(source, new RegExp(required, "u"), required);
   for (const forbidden of [
     "createProviderDatabaseLifecycle",
@@ -28,7 +30,6 @@ test("production relay executable composes only central roster and bounded provi
     "DistributedPromotionJobRuntime",
     "ProviderPromotionBootstrapGatewayClient",
     "VerifiedManifestGateProofGatewayClient",
-    "immediateDelivery",
     "fixedRoster",
   ]) assert.doesNotMatch(source, new RegExp(forbidden, "u"), forbidden);
 });

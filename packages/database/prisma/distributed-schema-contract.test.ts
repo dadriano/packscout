@@ -64,6 +64,7 @@ const CENTRAL_TABLES = [
   "manifest_reconciliation_invocation_details",
   "manifest_gate_intents",
   "provider_promotion_invocation_projections",
+  "provider_promotion_projection_retention_state",
 ] as const;
 
 const PROVIDER_TABLES = [
@@ -102,6 +103,7 @@ const PROVIDER_TABLES = [
   "provider_promotion_job_wake",
   "provider_promotion_job_schedule",
   "provider_promotion_job_invocations",
+  "provider_promotion_projection_outbox",
   "provider_promotion_job_delivery_tombstones",
   "provider_promotion_invocation_details",
 ] as const;
@@ -257,6 +259,7 @@ const CENTRAL_SOFT_REFERENCES = [
   "manifest_gate_intents.target_catalog_version_id",
   "manifest_gate_intents.requested_by_operator_id",
   "manifest_reconciliation_job_invocations.result_public_release_id",
+  "provider_promotion_projection_retention_state.after_provider_id",
 ] as const;
 
 const PROVIDER_SOFT_REFERENCES = [
@@ -299,6 +302,7 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "manifest_gate_intents.target_provider_release_id",
   "manifest_reconciliation_job_invocations.result_public_release_id",
   "manifest_reconciliation_job_invocations.run_id",
+  "provider_promotion_projection_retention_state.after_provider_id",
   "promotion_job_liveness_conditions.delivery_event_id",
 ] as const;
 
@@ -536,8 +540,8 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
 
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
-  assert.equal(centralModels.size, 55);
-  assert.equal(providerModels.size, 37);
+  assert.equal(centralModels.size, 56);
+  assert.equal(providerModels.size, 38);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 

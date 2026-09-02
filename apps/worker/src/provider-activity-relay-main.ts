@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import {
   BoundedProviderDatabaseGateway,
   createCentralDatabaseLifecycle,
+  PrismaManifestPromotionImmediateDeliveryRepository,
   ProviderDatabaseDestinationPolicy,
 } from "@packscout/database";
 import {
@@ -91,6 +92,10 @@ async function main(): Promise<void> {
             configuration.relay.baseBackoffMilliseconds,
           maximumBackoffMilliseconds:
             configuration.relay.maximumBackoffMilliseconds,
+          immediateDelivery:
+            new PrismaManifestPromotionImmediateDeliveryRepository(
+              centralClient,
+            ),
         }),
         pollMilliseconds: configuration.relay.pollMilliseconds,
         logger,

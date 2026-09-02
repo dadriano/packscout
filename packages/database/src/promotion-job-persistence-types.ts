@@ -266,6 +266,16 @@ export interface ReconcileInterruptedPromotionJobInvocationInput {
   readonly retentionProtected?: boolean;
 }
 
+export interface ReconcileExpiredPromotionJobInvocationsInput {
+  readonly reconciledAt: Date;
+  readonly maximumRows?: number;
+}
+
+export interface ReconcileExpiredPromotionJobInvocationsResult {
+  readonly reconciled: number;
+  readonly moreEligible: boolean;
+}
+
 export interface PromotionJobPruneResult {
   readonly invocationSummariesDeleted: number;
   readonly tombstonesDeleted: number;
@@ -288,6 +298,7 @@ export class PromotionJobPersistenceError extends Error {
     | "PROMOTION_JOB_SCHEDULE_INVALID"
     | "PROMOTION_JOB_RECONCILIATION_REQUIRED"
     | "PROMOTION_JOB_PROJECTION_CONFLICT"
+    | "PROMOTION_JOB_DEADLINE_EXCEEDED"
     | "PROMOTION_JOB_GATE_INTENT_INVALID") {
     super("Promotion job persistence state is invalid or unavailable.");
     this.name = "PromotionJobPersistenceError";

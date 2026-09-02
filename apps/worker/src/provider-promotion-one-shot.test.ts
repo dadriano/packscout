@@ -13,6 +13,7 @@ import { promotionJobSha256 } from "@packscout/database";
 import {
   PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_ATTEMPTS,
   PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS,
+  PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS,
   ProviderPromotionOneShot,
   type ProviderPromotionAttemptObservation,
   type ProviderPromotionBoundary,
@@ -76,9 +77,13 @@ function invocationFrom(
 
 class MemoryLedger implements ProviderPromotionJobLedgerPort {
   readonly begins: BeginPromotionJobInvocationInput[] = [];
+  readonly beginDeadlines: number[] = [];
   readonly progress: RecordPromotionJobProgressInput[] = [];
+  readonly progressDeadlines: number[] = [];
   readonly terminals: TerminalizePromotionJobInvocationInput[] = [];
+  readonly terminalDeadlines: number[] = [];
   readonly reconciliations: ReconcileInterruptedPromotionJobInvocationInput[] = [];
+  readonly reconciliationDeadlines: number[] = [];
   admissionDisposition: PromotionJobAdmission["disposition"] = "started";
   forceExpiredOwnership = false;
   wake: PromotionWakeIntent = {
@@ -95,8 +100,12 @@ class MemoryLedger implements ProviderPromotionJobLedgerPort {
   };
   #invocation: PromotionJobInvocation | null = null;
 
-  beginOrRecoverInvocation(input: BeginPromotionJobInvocationInput) {
+  beginOrRecoverInvocation(
+    input: BeginPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.begins.push(input);
+    if (deadline !== undefined) this.beginDeadlines.push(deadline.deadlineAt);
     this.#invocation ??= invocationFrom(input);
     if (this.forceExpiredOwnership) {
       this.#invocation = {
@@ -117,8 +126,12 @@ class MemoryLedger implements ProviderPromotionJobLedgerPort {
     return Promise.resolve(this.wake);
   }
 
-  recordProgress(input: RecordPromotionJobProgressInput) {
+  recordProgress(
+    input: RecordPromotionJobProgressInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.progress.push(input);
+    if (deadline !== undefined) this.progressDeadlines.push(deadline.deadlineAt);
     this.#invocation = {
       ...this.#invocation!,
       progress: input.progress,
@@ -127,8 +140,12 @@ class MemoryLedger implements ProviderPromotionJobLedgerPort {
     return Promise.resolve(this.#invocation);
   }
 
-  terminalize(input: TerminalizePromotionJobInvocationInput) {
+  terminalize(
+    input: TerminalizePromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.terminals.push(input);
+    if (deadline !== undefined) this.terminalDeadlines.push(deadline.deadlineAt);
     this.#invocation = {
       ...this.#invocation!,
       lifecycleState: "terminal",
@@ -142,8 +159,14 @@ class MemoryLedger implements ProviderPromotionJobLedgerPort {
     return Promise.resolve(this.#invocation);
   }
 
-  reconcileInterrupted(input: ReconcileInterruptedPromotionJobInvocationInput) {
+  reconcileInterrupted(
+    input: ReconcileInterruptedPromotionJobInvocationInput,
+    deadline?: Readonly<{ deadlineAt: number }>,
+  ) {
     this.reconciliations.push(input);
+    if (deadline !== undefined) {
+      this.reconciliationDeadlines.push(deadline.deadlineAt);
+    }
     this.#invocation = {
       ...this.#invocation!,
       lifecycleState: "terminal",
@@ -210,8 +233,10 @@ function runner(input: Readonly<{
   ledger: MemoryLedger;
   work: ProviderPromotionJobWorkPort;
   maximumAttempts?: number;
+  maximumMilliseconds?: number;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
+  nowMilliseconds?: () => number;
 }>) {
   let nextUuid = 1;
   return new ProviderPromotionOneShot({
@@ -224,10 +249,16 @@ function runner(input: Readonly<{
     ...(input.maximumAttempts === undefined
       ? {}
       : { maximumAttempts: input.maximumAttempts }),
+    ...(input.maximumMilliseconds === undefined
+      ? {}
+      : { maximumMilliseconds: input.maximumMilliseconds }),
     ...(input.setTimer === undefined ? {} : { setTimer: input.setTimer }),
     ...(input.clearTimer === undefined
       ? {}
       : { clearTimer: input.clearTimer }),
+    ...(input.nowMilliseconds === undefined
+      ? {}
+      : { nowMilliseconds: input.nowMilliseconds }),
   });
 }
 
@@ -277,28 +308,45 @@ test("all four triggers enter one admission path and no-delta cron mutates no Co
 
 test("drains target drift to the newest provider head and persists every receipt-gated step", async () => {
   const ledger = new MemoryLedger();
+  const wallClock = 1_000;
   const boundaries: ProviderPromotionBoundary[] = [
     { providerId, providerKey: "courtyard", lanePosition: 5n, settledPosition: 0n },
     { providerId, providerKey: "courtyard", lanePosition: 8n, settledPosition: 5n },
     { providerId, providerKey: "courtyard", lanePosition: 8n, settledPosition: 8n },
   ];
   const targets: bigint[] = [];
+  const deadlines: number[] = [];
+  const cleanupDeadlines: number[] = [];
   const work: ProviderPromotionJobWorkPort = {
     async readBoundary() {
       return boundaries.shift()!;
     },
     async attempt(input) {
       targets.push(input.targetPosition);
+      deadlines.push(input.deadlineAt);
+      cleanupDeadlines.push(input.cleanupDeadlineAt);
       return complete(input.targetPosition);
     },
   };
-  const result = await runner({ ledger, work }).run({
+  const result = await runner({
+    ledger,
+    work,
+    nowMilliseconds: () => wallClock,
+  }).run({
     delivery: delivery("target-drift"),
     trigger: { kind: "change_wake", observedWakeGeneration: 1n },
     requestedAt: base,
   });
   assert.equal(result.state, "terminal");
   assert.deepEqual(targets, [5n, 8n]);
+  assert.deepEqual(deadlines, [
+    wallClock + PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS - 10_000,
+    wallClock + PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS - 10_000,
+  ]);
+  assert.deepEqual(cleanupDeadlines, [
+    wallClock + PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS - 5_000,
+    wallClock + PROVIDER_PROMOTION_ONE_SHOT_MAXIMUM_MILLISECONDS - 5_000,
+  ]);
   assert.equal(ledger.terminals[0]?.outcome, "caught_up");
   assert.equal(ledger.terminals[0]?.acknowledgeObservedWake, true);
   assert.deepEqual(ledger.progress.at(-1)?.progress, {
@@ -314,12 +362,60 @@ test("drains target drift to the newest provider head and persists every receipt
   assert.equal(ledger.progress.at(-1)?.attempts.length, 2);
 });
 
-test("a deadline abort persists progress and continuation before disposing resources", async () => {
+test("the wall-clock budget reserves time for durable continuation and ownership", async () => {
+  const ledger = new MemoryLedger();
+  let wallClock = 10_000;
+  let attempts = 0;
+  const maximumMilliseconds = 100;
+  const result = await runner({
+    ledger,
+    maximumMilliseconds,
+    nowMilliseconds: () => wallClock,
+    work: {
+      async readBoundary() {
+        wallClock += 91;
+        return {
+          providerId,
+          providerKey: "courtyard",
+          lanePosition: 1n,
+          settledPosition: 0n,
+        };
+      },
+      async attempt() {
+        attempts += 1;
+        return retryableFailure();
+      },
+    },
+  }).run({
+    delivery: delivery("completion-reserve"),
+    trigger: { kind: "manual" },
+    requestedAt: base,
+  });
+  assert.equal(result.state, "terminal");
+  assert.equal(attempts, 0);
+  assert.equal(ledger.terminals[0]?.outcome, "continuation_required");
+  assert.equal(
+    ledger.terminals[0]?.safeFailureCode,
+    "PROVIDER_PROMOTION_DEADLINE",
+  );
+  assert.equal(
+    ledger.begins[0]?.ownershipExpiresAt.getTime(),
+    base.getTime()
+      + maximumMilliseconds
+      + PROVIDER_PROMOTION_OWNERSHIP_GRACE_MILLISECONDS,
+  );
+});
+
+test("a publication blocked at its work deadline persists continuation before ownership expires", async () => {
   const ledger = new MemoryLedger();
   let expire: (() => void) | undefined;
   let cleared = false;
-  const setTimer = ((callback: () => void) => {
+  let timerDelay: number | undefined;
+  let publicationDeadlineAt: number | undefined;
+  let publicationCleanupDeadlineAt: number | undefined;
+  const setTimer = ((callback: () => void, delay?: number) => {
     expire = callback;
+    timerDelay = delay;
     return 17 as unknown as ReturnType<typeof setTimeout>;
   }) as typeof setTimeout;
   const clearTimer = ((timer: ReturnType<typeof setTimeout>) => {
@@ -335,14 +431,25 @@ test("a deadline abort persists progress and continuation before disposing resou
         settledPosition: 0n,
       };
     },
-    async attempt() {
+    async attempt(input) {
+      publicationDeadlineAt = input.deadlineAt;
+      publicationCleanupDeadlineAt = input.cleanupDeadlineAt;
       expire!();
-      return retryableFailure();
+      return {
+        ...retryableFailure(),
+        safeFailureCode: "PROVIDER_PUBLICATION_DEADLINE",
+      };
     },
   };
-  const result = await runner({ ledger, work, setTimer, clearTimer }).run({
+  const result = await runner({
+    ledger,
+    work,
+    setTimer,
+    clearTimer,
+    nowMilliseconds: () => base.getTime(),
+  }).run({
     delivery: delivery("deadline"),
-    trigger: { kind: "manual" },
+    trigger: { kind: "change_wake", observedWakeGeneration: 1n },
     requestedAt: base,
   });
   assert.equal(result.state, "terminal");
@@ -353,6 +460,18 @@ test("a deadline abort persists progress and continuation before disposing resou
     "PROVIDER_PROMOTION_DEADLINE",
   );
   assert.equal(ledger.terminals[0]?.continuation?.requestedGeneration, 2n);
+  assert.equal(timerDelay, 40_000);
+  assert.equal(publicationDeadlineAt, base.getTime() + 40_000);
+  assert.equal(publicationCleanupDeadlineAt, base.getTime() + 45_000);
+  assert.deepEqual(ledger.beginDeadlines, [base.getTime() + 40_000]);
+  assert.ok(ledger.progressDeadlines.every(
+    (deadlineAt) => deadlineAt === base.getTime() + 45_000,
+  ));
+  assert.deepEqual(ledger.terminalDeadlines, [base.getTime() + 50_000]);
+  assert.ok(
+    ledger.terminalDeadlines[0]! <
+      ledger.begins[0]!.ownershipExpiresAt.getTime(),
+  );
   assert.equal(cleared, true);
 });
 

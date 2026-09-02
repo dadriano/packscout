@@ -1,9 +1,13 @@
 import {
   CentralProviderObservationRepository,
   PrismaProviderActivityOutboxRepository,
+  PrismaProviderPromotionInvocationProjectionRepository,
+  PrismaProviderPromotionJobRepository,
   ProviderReleasePublicationRepository,
   type BoundedProviderDatabaseGateway,
   type CentralPrismaClient,
+  type ProjectProviderPromotionInvocationInput,
+  type ManifestPromotionImmediateDeliveryPort,
   type ProviderActivityBatch,
   type ProviderActivityRelayCursor,
   type ProviderActivityEvent,
@@ -12,9 +16,15 @@ import {
   type ProviderActivityObservationReceipt,
   type ProviderLocalHealthObservation,
   type ProviderCompletedPublishPlanRelayProof,
+  type ProviderPromotionInvocationProjection,
+  type ProviderPromotionProjectionRelayReceipt,
 } from "@packscout/database";
 import { buildProviderCompletedPublishPlanRelayProof } from
   "@packscout/services";
+import {
+  promotionImmediateDeliveryTimeout,
+  waitForPromotionImmediateDelivery,
+} from "./promotion-immediate-delivery-timeout.ts";
 
 export type ProviderActivityRelayAcceptance = Readonly<{
   readonly state: "accepted" | "deduplicated";
@@ -25,16 +35,8 @@ export type ProviderActivityRelayAcceptance = Readonly<{
  * Generic low-latency hint. Durable central gate state remains authoritative,
  * so implementations may drop or duplicate this request safely.
  */
-export interface PromotionJobImmediateDeliveryPort {
-  request(input: Readonly<{
-    readonly authority: "manifest_reconciliation";
-    readonly cause: "provider_completion";
-    readonly scopeId: string;
-    readonly sourceGeneration: bigint;
-    readonly sourceEvidenceDigest: string;
-    readonly requestedAt: Date;
-  }>): Promise<void>;
-}
+export type PromotionJobImmediateDeliveryPort =
+  ManifestPromotionImmediateDeliveryPort;
 
 export interface ProviderActivityRelayDirectory {
   listRelayTargets(input: {
@@ -65,6 +67,12 @@ export interface ProviderActivityRelayDirectory {
   }): Promise<void>;
 }
 
+export interface ProviderPromotionInvocationProjectionRelay {
+  project(
+    input: ProjectProviderPromotionInvocationInput,
+  ): Promise<ProviderPromotionInvocationProjection>;
+}
+
 export interface ProviderActivityLocalStore {
   read(input: ProviderActivityRelayTarget & { readonly limit: number }): Promise<
     | { readonly state: "reachable"; readonly batch: ProviderActivityBatch }
@@ -79,10 +87,16 @@ export interface ProviderActivityLocalStore {
     target: ProviderActivityRelayTarget,
     event: ProviderActivityEvent,
   ): Promise<ProviderCompletedPublishPlanRelayProof>;
+  loadPromotionProjection?(
+    target: ProviderActivityRelayTarget,
+    event: ProviderActivityEvent,
+    projectedAt: Date,
+  ): Promise<ProjectProviderPromotionInvocationInput>;
   markDelivered(
     target: ProviderActivityRelayTarget,
     event: ProviderActivityEvent,
     deliveredAt: Date,
+    projected?: ProviderPromotionProjectionRelayReceipt,
   ): Promise<void>;
   markFailed(
     target: ProviderActivityRelayTarget,
@@ -208,15 +222,29 @@ implements ProviderActivityLocalStore {
     target: ProviderActivityRelayTarget,
     event: ProviderActivityEvent,
     deliveredAt: Date,
+    projected?: ProviderPromotionProjectionRelayReceipt,
   ): Promise<void> {
     const result = await this.gateway.runWithAdminProviderDatabase(
       { organizationId: target.organizationId, providerId: target.providerId },
-      (database) => new PrismaProviderActivityOutboxRepository(database)
-        .markDelivered({
-          eventId: event.id,
-          eventDigest: event.eventDigest,
-          deliveredAt,
-        }),
+      (database) => event.eventType ===
+          "provider_promotion_invocation_terminal"
+        ? projected === undefined
+          ? Promise.reject(new Error(
+              "Provider promotion projection receipt is unavailable.",
+            ))
+          : new PrismaProviderPromotionJobRepository(database)
+              .acknowledgeProjectionDelivery({
+                providerId: target.providerId,
+                event,
+                projected,
+                deliveredAt,
+              })
+        : new PrismaProviderActivityOutboxRepository(database)
+            .markDelivered({
+              eventId: event.id,
+              eventDigest: event.eventDigest,
+              deliveredAt,
+            }),
     );
     if (result.state === "unreachable" || result.value === "not_found") {
       throw new Error("Provider activity delivery acknowledgement failed.");
@@ -236,6 +264,26 @@ implements ProviderActivityLocalStore {
     );
     if (result.state === "unreachable") {
       throw new Error("Provider completion plan proof is unavailable.");
+    }
+    return result.value;
+  }
+
+  async loadPromotionProjection(
+    target: ProviderActivityRelayTarget,
+    event: ProviderActivityEvent,
+    projectedAt: Date,
+  ): Promise<ProjectProviderPromotionInvocationInput> {
+    const result = await this.gateway.runWithAdminProviderDatabase(
+      { organizationId: target.organizationId, providerId: target.providerId },
+      (database) => new PrismaProviderPromotionJobRepository(database)
+        .loadProjectionForRelay({
+          providerId: target.providerId,
+          event,
+          projectedAt,
+        }),
+    );
+    if (result.state === "unreachable") {
+      throw new Error("Provider promotion projection is unavailable.");
     }
     return result.value;
   }
@@ -269,6 +317,7 @@ export class ProviderActivityRelayCoordinator {
   readonly #baseBackoffMs: number;
   readonly #maximumBackoffMs: number;
   readonly #clock: () => Date;
+  readonly #immediateDeliveryTimeoutMilliseconds: number;
   readonly #observability: ProviderActivityRelayObservability;
   readonly #backoff = new Map<string, BackoffState>();
   #cursor: ProviderActivityRelayCursor | null = null;
@@ -285,6 +334,8 @@ export class ProviderActivityRelayCoordinator {
     clock?: () => Date;
     observability?: ProviderActivityRelayObservability;
     immediateDelivery?: PromotionJobImmediateDeliveryPort;
+    immediateDeliveryTimeoutMilliseconds?: number;
+    projections?: ProviderPromotionInvocationProjectionRelay;
     providerId?: string;
   }>) {
     this.#batchSize = boundedInteger(dependencies.batchSize, 25, 1, 100);
@@ -313,6 +364,10 @@ export class ProviderActivityRelayCoordinator {
       3_600_000,
     );
     this.#clock = dependencies.clock ?? (() => new Date());
+    this.#immediateDeliveryTimeoutMilliseconds =
+      promotionImmediateDeliveryTimeout(
+        dependencies.immediateDeliveryTimeoutMilliseconds,
+      );
     this.#observability = dependencies.observability ?? noopObservability;
   }
 
@@ -425,6 +480,22 @@ export class ProviderActivityRelayCoordinator {
     for (const event of read.batch.events) {
       const attemptedAt = this.#clock();
       try {
+        const promotionProjection = event.eventType ===
+            "provider_promotion_invocation_terminal"
+          ? await this.dependencies.local.loadPromotionProjection?.(
+              target,
+              event,
+              attemptedAt,
+            )
+          : undefined;
+        if (
+          event.eventType === "provider_promotion_invocation_terminal"
+          && (promotionProjection === undefined
+            || this.dependencies.projections === undefined)
+        ) throw new Error("Provider promotion projection relay is unavailable.");
+        const projected = promotionProjection === undefined
+          ? undefined
+          : await this.dependencies.projections!.project(promotionProjection);
         const completionProof = event.eventType === "provider_release_completed"
           ? await this.dependencies.local.loadCompletionProof?.(target, event)
           : undefined;
@@ -432,31 +503,43 @@ export class ProviderActivityRelayCoordinator {
           event.eventType === "provider_release_completed" &&
           completionProof === undefined
         ) throw new Error("Provider completion plan proof reader is unavailable.");
-        const accepted = await this.dependencies.directory.acceptProviderActivity({
-          organizationId: target.organizationId,
-          providerId: target.providerId,
-          event,
-          health: read.batch.health,
-          receivedAt: attemptedAt,
-          ...(completionProof === undefined ? {} : { completionProof }),
-        });
-        const completionGate = completionGateFromAcceptance(
+        // Projection envelopes are transport-only. Reachable health already
+        // authenticated the routed provider above, and project() is the
+        // durable central record, so do not create an unbounded duplicate in
+        // the generic central activity history.
+        const accepted = projected === undefined
+          ? await this.dependencies.directory.acceptProviderActivity({
+              organizationId: target.organizationId,
+              providerId: target.providerId,
+              event,
+              health: read.batch.health,
+              receivedAt: attemptedAt,
+              ...(completionProof === undefined ? {} : { completionProof }),
+            })
+          : { state: "accepted" as const };
+        const completionGate = projected === undefined
+          ? completionGateFromAcceptance(target, event, accepted)
+          : null;
+        await this.dependencies.local.markDelivered(
           target,
           event,
-          accepted,
+          attemptedAt,
+          projected,
         );
-        await this.dependencies.local.markDelivered(target, event, attemptedAt);
         if (accepted.state === "accepted") delivered += 1;
         else deduplicated += 1;
         if (completionGate?.pending === true) {
-          await this.dependencies.immediateDelivery?.request({
-            authority: "manifest_reconciliation",
-            cause: "provider_completion",
-            scopeId: completionGate.providerId,
-            sourceGeneration: completionGate.manifestWakeGeneration,
-            sourceEvidenceDigest: completionGate.evidenceDigest,
-            requestedAt: attemptedAt,
-          }).catch(() => {
+          await waitForPromotionImmediateDelivery(
+            () => this.dependencies.immediateDelivery?.request({
+              authority: "manifest_reconciliation",
+              cause: "provider_completion",
+              scopeId: completionGate.providerId,
+              sourceGeneration: completionGate.manifestWakeGeneration,
+              sourceEvidenceDigest: completionGate.evidenceDigest,
+              requestedAt: attemptedAt,
+            }) ?? Promise.resolve(),
+            this.#immediateDeliveryTimeoutMilliseconds,
+          ).catch(() => {
             this.#observability.log({
               level: "warning",
               event: "provider_activity_relay",
@@ -521,11 +604,15 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
   clock?: () => Date;
   observability?: ProviderActivityRelayObservability;
   immediateDelivery?: PromotionJobImmediateDeliveryPort;
+  immediateDeliveryTimeoutMilliseconds?: number;
+  projections?: ProviderPromotionInvocationProjectionRelay;
   providerId?: string;
 }>): ProviderActivityRelayCoordinator {
   return new ProviderActivityRelayCoordinator({
     directory: new CentralProviderObservationRepository(input.central),
     local: new GatewayProviderActivityLocalStore(input.gateway),
+    projections: input.projections ??
+      new PrismaProviderPromotionInvocationProjectionRepository(input.central),
     ...(input.batchSize === undefined ? {} : { batchSize: input.batchSize }),
     ...(input.maximumProviders === undefined
       ? {}
@@ -546,6 +633,12 @@ export function createProviderActivityRelayCoordinator(input: Readonly<{
     ...(input.immediateDelivery === undefined
       ? {}
       : { immediateDelivery: input.immediateDelivery }),
+    ...(input.immediateDeliveryTimeoutMilliseconds === undefined
+      ? {}
+      : {
+          immediateDeliveryTimeoutMilliseconds:
+            input.immediateDeliveryTimeoutMilliseconds,
+        }),
     ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
   });
 }

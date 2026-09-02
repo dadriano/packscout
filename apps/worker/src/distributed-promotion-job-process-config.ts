@@ -6,6 +6,8 @@ import {
   readManifestReconciliationJobAuthorityConfiguration,
   readProviderPublicationJobAuthorityConfiguration,
 } from "./distributed-promotion-authority-config.ts";
+import { promotionImmediateDeliveryListenDatabaseUrl } from
+  "./postgres-promotion-immediate-delivery.ts";
 
 export type DistributedPromotionJobProcessMode =
   | "daemon"
@@ -17,6 +19,7 @@ export type DistributedPromotionJobProcessConfigurationErrorCode =
   | "DISTRIBUTED_PROMOTION_PROCESS_DATABASE_URL_INVALID"
   | "DISTRIBUTED_PROMOTION_PROCESS_GATEWAY_CREDENTIAL_INVALID"
   | "DISTRIBUTED_PROMOTION_PROCESS_GATEWAY_URL_INVALID"
+  | "DISTRIBUTED_PROMOTION_PROCESS_LISTEN_DATABASE_URL_INVALID"
   | "DISTRIBUTED_PROMOTION_PROCESS_MANUAL_PUBLIC_KEY_INVALID"
   | "DISTRIBUTED_PROMOTION_PROCESS_MODE_INVALID"
   | "DISTRIBUTED_PROMOTION_PROCESS_POLL_INVALID"
@@ -38,6 +41,7 @@ interface CommonProcessConfiguration {
   readonly workerId: string;
   readonly pollMilliseconds: number;
   readonly databaseUrl: string;
+  readonly listenDatabaseUrl: string | null;
   readonly manualCommandPublicKeyPem: string;
   readonly manualCommandIdentity: string | null;
   readonly continuationGeneration: bigint | null;
@@ -63,11 +67,13 @@ const CANONICAL_BASE64_PATTERN =
 const WORKER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
 const PROVIDER_ONLY_KEYS = [
   "PACKSCOUT_PROVIDER_DATABASE_URL",
+  "PACKSCOUT_PROVIDER_DATABASE_LISTEN_URL",
   "PACKSCOUT_PROMOTION_PROVIDER_BOOTSTRAP_BASE_URL",
   "PACKSCOUT_PROMOTION_PROVIDER_BOOTSTRAP_TOKEN_BASE64",
 ] as const;
 const MANIFEST_ONLY_KEYS = [
   "PACKSCOUT_CENTRAL_DATABASE_URL",
+  "PACKSCOUT_CENTRAL_DATABASE_LISTEN_URL",
 ] as const;
 const LEGACY_MANIFEST_PROOF_KEYS = [
   "PACKSCOUT_PROMOTION_MANIFEST_PROOF_BASE_URL",
@@ -130,6 +136,29 @@ function databaseUrl(value: string | undefined): string {
     return value;
   } catch {
     return fail("DISTRIBUTED_PROMOTION_PROCESS_DATABASE_URL_INVALID");
+  }
+}
+
+function listenDatabaseUrl(value: string): string {
+  if (!value || value.length > 4_096 || /[\r\n]/u.test(value)) {
+    return fail("DISTRIBUTED_PROMOTION_PROCESS_LISTEN_DATABASE_URL_INVALID");
+  }
+  try {
+    return promotionImmediateDeliveryListenDatabaseUrl(value);
+  } catch {
+    return fail("DISTRIBUTED_PROMOTION_PROCESS_LISTEN_DATABASE_URL_INVALID");
+  }
+}
+
+function optionalListenDatabaseUrl(
+  configured: string | undefined,
+  database: string,
+): string | null {
+  if (configured !== undefined) return listenDatabaseUrl(configured);
+  try {
+    return promotionImmediateDeliveryListenDatabaseUrl(database);
+  } catch {
+    return null;
   }
 }
 
@@ -216,6 +245,7 @@ function common(input: Readonly<{
   environment: NodeJS.ProcessEnv;
   fallbackWorkerId: string;
   databaseUrl: string | undefined;
+  configuredListenDatabaseUrl: string | undefined;
 }>): CommonProcessConfiguration {
   const processMode = mode(input.environment.PACKSCOUT_PROMOTION_RUN_MODE);
   const requestedTrigger = trigger({
@@ -226,6 +256,7 @@ function common(input: Readonly<{
     continuationGeneration:
       input.environment.PACKSCOUT_PROMOTION_CONTINUATION_GENERATION,
   });
+  const resolvedDatabaseUrl = databaseUrl(input.databaseUrl);
   return Object.freeze({
     mode: processMode,
     workerId: workerId(
@@ -235,7 +266,11 @@ function common(input: Readonly<{
     pollMilliseconds: pollMilliseconds(
       input.environment.PACKSCOUT_PROMOTION_POLL_MS,
     ),
-    databaseUrl: databaseUrl(input.databaseUrl),
+    databaseUrl: resolvedDatabaseUrl,
+    listenDatabaseUrl: optionalListenDatabaseUrl(
+      input.configuredListenDatabaseUrl,
+      resolvedDatabaseUrl,
+    ),
     manualCommandPublicKeyPem: manualCommandPublicKeyPem(
       input.environment[MANUAL_COMMAND_PUBLIC_KEY_ENVIRONMENT_NAME],
     ),
@@ -262,6 +297,8 @@ export function readProviderPromotionJobProcessConfiguration(
       environment,
       fallbackWorkerId,
       databaseUrl: environment.PACKSCOUT_PROVIDER_DATABASE_URL,
+      configuredListenDatabaseUrl:
+        environment.PACKSCOUT_PROVIDER_DATABASE_LISTEN_URL,
     }),
     bootstrapGateway: Object.freeze({
       baseUrl: gatewayBaseUrl(
@@ -294,6 +331,8 @@ export function readManifestReconciliationJobProcessConfiguration(
       environment,
       fallbackWorkerId,
       databaseUrl: environment.PACKSCOUT_CENTRAL_DATABASE_URL,
+      configuredListenDatabaseUrl:
+        environment.PACKSCOUT_CENTRAL_DATABASE_LISTEN_URL,
     }),
   });
 }

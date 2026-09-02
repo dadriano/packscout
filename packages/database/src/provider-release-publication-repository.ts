@@ -91,6 +91,7 @@ export interface DistributedProviderPublicationIntent {
 }
 
 export type ProviderReleasePublicationRepositoryFailureCode =
+  | "PROVIDER_PUBLICATION_DEADLINE"
   | "PROVIDER_PUBLICATION_LEASE_HELD"
   | "PROVIDER_PUBLICATION_LEASE_LOST"
   | "PROVIDER_PUBLICATION_SCOPE_INVALID"
@@ -143,6 +144,50 @@ function repositoryFailure(
   code: ProviderReleasePublicationRepositoryFailureCode,
 ): never {
   throw new ProviderReleasePublicationRepositoryError(code);
+}
+
+export interface ProviderReleasePublicationTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function transactionOptions(
+  deadline?: ProviderReleasePublicationTransactionDeadline,
+  isolationLevel: ProviderPrisma.TransactionIsolationLevel =
+    ProviderPrisma.TransactionIsolationLevel.Serializable,
+) {
+  if (deadline === undefined) return { ...TRANSACTION_OPTIONS, isolationLevel };
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(
+    TRANSACTION_OPTIONS.maxWait,
+    Math.max(1, Math.floor(available / 5)),
+  );
+  const timeout = Math.min(
+    TRANSACTION_OPTIONS.timeout,
+    available - maxWait,
+  );
+  if (timeout < 1) repositoryFailure("PROVIDER_PUBLICATION_DEADLINE");
+  return { maxWait, timeout, isolationLevel };
+}
+
+function transactionExpired(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && (error.code === "P2024" || error.code === "P2028");
+}
+
+async function withPublicationDeadline<T>(
+  deadline: ProviderReleasePublicationTransactionDeadline | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (deadline !== undefined && transactionExpired(error)) {
+      repositoryFailure("PROVIDER_PUBLICATION_DEADLINE");
+    }
+    throw error;
+  }
 }
 
 function sha256(value: string): string {
@@ -475,18 +520,21 @@ export class ProviderReleasePublicationRepository {
   async claimLease(
     owner: string,
     leaseMilliseconds: number,
+    deadline?: ProviderReleasePublicationTransactionDeadline,
+    cleanupDeadline?: ProviderReleasePublicationTransactionDeadline,
   ): Promise<DistributedProviderPublisherLease> {
     requireOwner(owner, leaseMilliseconds);
     const worker = await this.#workerLeases.acquire({
       role: "promotion",
       owner,
       leaseMilliseconds,
-    });
+    }, deadline);
     if (worker.kind === "held") {
       repositoryFailure("PROVIDER_PUBLICATION_LEASE_HELD");
     }
     try {
-      const checkpoint = await this.provider.$transaction(async (transaction) => {
+      const checkpoint = await withPublicationDeadline(deadline, () =>
+        this.provider.$transaction(async (transaction) => {
         let row = await lockCheckpoint(transaction);
         const active = row.lease_owner !== null
           && row.lease_expires_at !== null
@@ -516,7 +564,8 @@ export class ProviderReleasePublicationRepository {
         }
         row = await lockCheckpoint(transaction);
         return row;
-      }, TRANSACTION_OPTIONS);
+        }, transactionOptions(deadline))
+      );
       if (
         checkpoint.lease_owner !== owner
         || checkpoint.lease_expires_at === null
@@ -534,7 +583,7 @@ export class ProviderReleasePublicationRepository {
         role: "promotion",
         owner,
         fence: worker.lease.fence,
-      });
+      }, cleanupDeadline ?? deadline).catch(() => undefined);
       throw error;
     }
   }
@@ -542,6 +591,7 @@ export class ProviderReleasePublicationRepository {
   async renewLease(
     lease: DistributedProviderPublisherLease,
     leaseMilliseconds: number,
+    deadline?: ProviderReleasePublicationTransactionDeadline,
   ): Promise<DistributedProviderPublisherLease> {
     requireOwner(lease.owner, leaseMilliseconds);
     const worker = await this.#workerLeases.renew({
@@ -549,9 +599,10 @@ export class ProviderReleasePublicationRepository {
       owner: lease.owner,
       fence: lease.operationFence,
       leaseMilliseconds,
-    });
+    }, deadline);
     if (worker === null) repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
-    const checkpoint = await this.provider.$transaction(async (transaction) => {
+    const checkpoint = await withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       let row = await lockCheckpoint(transaction);
       if (
         row.lease_owner !== lease.owner
@@ -578,7 +629,8 @@ export class ProviderReleasePublicationRepository {
       }
       row = await lockCheckpoint(transaction);
       return row;
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
     if (checkpoint.lease_expires_at === null) {
       repositoryFailure("PROVIDER_PUBLICATION_LEASE_LOST");
     }
@@ -590,40 +642,53 @@ export class ProviderReleasePublicationRepository {
     };
   }
 
-  async releaseLease(lease: DistributedProviderPublisherLease): Promise<void> {
-    await Promise.all([
-      this.#workerLeases.release({
+  async releaseLease(
+    lease: DistributedProviderPublisherLease,
+    deadline?: ProviderReleasePublicationTransactionDeadline,
+  ): Promise<void> {
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => this.#workerLeases.release({
         role: "promotion",
         owner: lease.owner,
         fence: lease.operationFence,
-      }),
-      this.provider.$transaction(async (transaction) => {
-        const row = await lockCheckpoint(transaction);
-        if (row.lease_owner === null) return;
-        if (
-          row.lease_owner !== lease.owner
-          || row.lease_fence !== lease.checkpointFence
-        ) return;
-        await transaction.provider_change_consumers.updateMany({
-          where: {
-            consumer_key: "provider_release",
-            lease_owner: lease.owner,
-            lease_fence: lease.checkpointFence,
-            row_version: row.row_version,
-          },
-          data: {
-            lease_owner: null,
-            lease_expires_at: null,
-            row_version: { increment: 1n },
-            updated_at: row.database_now,
-          },
-        });
-      }, TRANSACTION_OPTIONS),
+      }, deadline)),
+      Promise.resolve().then(() => withPublicationDeadline(
+        deadline,
+        () => this.provider.$transaction(async (transaction) => {
+          const row = await lockCheckpoint(transaction);
+          if (row.lease_owner === null) return;
+          if (
+            row.lease_owner !== lease.owner
+            || row.lease_fence !== lease.checkpointFence
+          ) return;
+          await transaction.provider_change_consumers.updateMany({
+            where: {
+              consumer_key: "provider_release",
+              lease_owner: lease.owner,
+              lease_fence: lease.checkpointFence,
+              row_version: row.row_version,
+            },
+            data: {
+              lease_owner: null,
+              lease_expires_at: null,
+              row_version: { increment: 1n },
+              updated_at: row.database_now,
+            },
+          });
+        }, transactionOptions(deadline)),
+      )),
     ]);
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure !== undefined) throw failure.reason;
   }
 
-  async loadExpectedCompletedHead(): Promise<ProviderReleaseExpectedCompletedHeadV1> {
-    return this.provider.$transaction(async (transaction) => {
+  async loadExpectedCompletedHead(
+    deadline?: ProviderReleasePublicationTransactionDeadline,
+  ): Promise<ProviderReleaseExpectedCompletedHeadV1> {
+    return withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       const identity = await transaction.database_identity.findUniqueOrThrow({
         where: { singleton_key: true },
         select: { provider_key: true },
@@ -685,10 +750,11 @@ export class ProviderReleasePublicationRepository {
         observation: parsed.data.details.observation,
         terminalReceiptSha256: stored.response_digest,
       });
-    }, {
-      ...TRANSACTION_OPTIONS,
-      isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
-    });
+      }, transactionOptions(
+        deadline,
+        ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
+      ))
+    );
   }
 
   /**
@@ -821,12 +887,15 @@ export class ProviderReleasePublicationRepository {
     readonly lease: DistributedProviderPublisherLease;
     readonly providerReleaseId: string;
     readonly operation: DistributedProviderPublicationOperation;
-  }): Promise<DistributedProviderPublicationIntent> {
+  }, deadline?: ProviderReleasePublicationTransactionDeadline): Promise<
+    DistributedProviderPublicationIntent
+  > {
     const request = parseRequest(input.operation);
     if (!("release" in request)) {
       repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
     }
-    return this.provider.$transaction(async (transaction) => {
+    return withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       const { databaseNow } = await requireLease(transaction, input.lease);
       const identity = await transaction.database_identity.findUniqueOrThrow({
         where: { singleton_key: true },
@@ -893,14 +962,16 @@ export class ProviderReleasePublicationRepository {
         include: { receipt: true },
       });
       return intentFrom(created);
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
   }
 
   async recordAttempt(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
-  }): Promise<void> {
-    await this.provider.$transaction(async (transaction) => {
+  }, deadline?: ProviderReleasePublicationTransactionDeadline): Promise<void> {
+    await withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       const { databaseNow } = await requireLease(transaction, input.lease);
       const changed = await transaction.provider_publication_operations.updateMany({
         where: {
@@ -915,14 +986,16 @@ export class ProviderReleasePublicationRepository {
       if (changed.count !== 1) {
         repositoryFailure("PROVIDER_PUBLICATION_RECEIPT_INVALID");
       }
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
   }
 
   async markAmbiguous(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
-  }): Promise<void> {
-    await this.provider.$transaction(async (transaction) => {
+  }, deadline?: ProviderReleasePublicationTransactionDeadline): Promise<void> {
+    await withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       await requireLease(transaction, input.lease);
       const operation = await transaction.provider_publication_operations.findUnique({
         where: { idempotency_key: input.idempotencyKey },
@@ -937,18 +1010,20 @@ export class ProviderReleasePublicationRepository {
           data: { state: "ambiguous" },
         });
       }
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
   }
 
   async fail(input: {
     readonly lease: DistributedProviderPublisherLease;
     readonly idempotencyKey: string;
     readonly failureCode: string;
-  }): Promise<void> {
+  }, deadline?: ProviderReleasePublicationTransactionDeadline): Promise<void> {
     if (!FAILURE_CODE_PATTERN.test(input.failureCode)) {
       throw new TypeError("Provider publication failure code is invalid.");
     }
-    await this.provider.$transaction(async (transaction) => {
+    await withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       const { databaseNow } = await requireLease(transaction, input.lease);
       const row = await transaction.provider_publication_operations.findUnique({
         where: { idempotency_key: input.idempotencyKey },
@@ -982,7 +1057,8 @@ export class ProviderReleasePublicationRepository {
           data: { lifecycle: "blocked" },
         });
       }
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
   }
 
   async accept(input: {
@@ -990,7 +1066,7 @@ export class ProviderReleasePublicationRepository {
     readonly providerReleaseId: string;
     readonly operation: DistributedProviderPublicationOperation;
     readonly evidence: DistributedProviderPublicationReceiptEvidence;
-  }): Promise<Readonly<{
+  }, deadline?: ProviderReleasePublicationTransactionDeadline): Promise<Readonly<{
     receipt: ProviderReleaseReceipt;
     completed: boolean;
   }>> {
@@ -999,7 +1075,8 @@ export class ProviderReleasePublicationRepository {
     if (!("release" in request)) {
       repositoryFailure("PROVIDER_PUBLICATION_REQUEST_INVALID");
     }
-    return this.provider.$transaction(async (transaction) => {
+    return withPublicationDeadline(deadline, () =>
+      this.provider.$transaction(async (transaction) => {
       const { checkpoint, databaseNow } = await requireLease(
         transaction,
         input.lease,
@@ -1170,6 +1247,7 @@ export class ProviderReleasePublicationRepository {
         eventAt: databaseNow,
       });
       return { receipt, completed: true };
-    }, TRANSACTION_OPTIONS);
+      }, transactionOptions(deadline))
+    );
   }
 }

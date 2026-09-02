@@ -3,7 +3,10 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { createProviderDatabaseLifecycle } from "@packscout/database";
+import {
+  createProviderDatabaseLifecycle,
+  type ProviderPromotionImmediateDeliveryRequest,
+} from "@packscout/database";
 import {
   ProviderPromotionBootstrapGatewayClient,
 } from "./distributed-promotion-gateway-clients.ts";
@@ -17,6 +20,10 @@ import { JsonConsoleDistributedPromotionJobRuntimeLogger } from
   "./distributed-promotion-job-runtime.ts";
 import { createProviderPromotionJobRuntime } from
   "./provider-promotion-job-runtime-composition.ts";
+import {
+  logPromotionImmediateDeliveryDisabled,
+  PostgresPromotionImmediateDeliverySubscriber,
+} from "./postgres-promotion-immediate-delivery.ts";
 
 const workspaceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -64,16 +71,34 @@ async function main(): Promise<void> {
     configuration,
     database,
     createRuntime(provider) {
-      return createProviderPromotionJobRuntime({
+      const composed = createProviderPromotionJobRuntime({
         authority: configuration.authority,
         provider,
         pin: initialPin,
-        loadPin: () => bootstrap.load(configuration.authority.providerId),
+        loadPin: (signal) => bootstrap.load(
+          configuration.authority.providerId,
+          signal,
+        ),
         workerId: configuration.workerId,
         logger,
         manualCommands,
         pollMilliseconds: configuration.pollMilliseconds,
-      }).runtime;
+      });
+      if (configuration.listenDatabaseUrl === null) {
+        logPromotionImmediateDeliveryDisabled("provider_publication");
+        return composed.runtime;
+      }
+      return {
+        runtime: composed.runtime,
+        immediateDelivery:
+          new PostgresPromotionImmediateDeliverySubscriber<
+            ProviderPromotionImmediateDeliveryRequest
+          >({
+            databaseUrl: configuration.listenDatabaseUrl,
+            authority: "provider_publication",
+            delivery: composed.immediateDelivery,
+          }),
+      };
     },
   });
 }
