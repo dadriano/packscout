@@ -29,6 +29,9 @@ export {
   createProviderHarness,
   type ProviderHarness,
 } from "./provider-canonical-integration-support.ts";
+export {
+  buildProviderCompletionPlanProofFixture,
+} from "./provider-completion-plan-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));

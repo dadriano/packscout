@@ -375,6 +375,105 @@ test("signed bootstrap adopts the already-active empty state without issuing a m
   assert.equal(adopted[0]?.previousManifest, null);
 });
 
+test("implicit completion cannot add an absent provider even if a proof source proposes it", async () => {
+  const alphaPlan = await providerPlan("alpha", {
+    catalogVersionId: catalogIds.alphaOne,
+    revision: 1,
+    sequence: 10n,
+    configurationHash: "1".repeat(64),
+  });
+  const candidateManifest = await manifest([alphaPlan]);
+  const alpha = targetProof({
+    plan: alphaPlan,
+    providerId,
+    localReleaseId: releaseIds.alphaOne,
+    catalogVersionId: catalogIds.alphaOne,
+    terminalReceiptSha256: "2".repeat(64),
+  });
+  const lease: ManifestActivationLease = {
+    owner: "manifest:test",
+    fence: 1n,
+    expiresAt: new Date(base.getTime() + 60_000),
+  };
+  const activeState = emptyState();
+  let mirror = emptyMirror();
+  let persisted = 0;
+  let mutations = 0;
+  const coordinator = new IndependentProviderManifestCoordinator({
+    workerId: "manifest:test",
+    activations: {
+      async loadMirror() {
+        return mirror;
+      },
+      async claimLease() {
+        return lease;
+      },
+      async releaseLease() {
+        return true;
+      },
+      async reconcileSignedActiveState() {
+        mirror = { ...mirror, activeState, rowVersion: 2n };
+        return mirror;
+      },
+      async persistIntent() {
+        persisted += 1;
+        throw new Error("implicit add must not be persisted");
+      },
+    } as never,
+    proofs: {
+      async resolveSignedState() {
+        return {
+          state: "ready",
+          activeManifest: null,
+          previousManifest: null,
+        };
+      },
+      async resolveTarget() {
+        return {
+          state: "ready",
+          target: {
+            operation: "add",
+            candidateManifest,
+            proof: alpha,
+          },
+        };
+      },
+    },
+    transport: {
+      async activeState() {
+        return {
+          receipt: { details: { activeState } },
+          canonicalReceiptBody: "{\"signed\":\"active-state\"}",
+          receiptSha256: digest,
+          exactResponseBody: "{\"receipt\":{\"signed\":\"active-state\"}}",
+          exactResponseSha256: "b".repeat(64),
+        };
+      },
+      async sendExact() {
+        mutations += 1;
+        throw new Error("implicit add must not mutate");
+      },
+      async status() {
+        throw new Error("implicit add must not query status");
+      },
+    },
+    now: () => base,
+  });
+
+  const result = await coordinator.reconcile({
+    claim: claim(),
+    attemptId: "00000000-0000-4000-8000-000000000212",
+  });
+
+  assert.equal(result.disposition, "blocked");
+  assert.equal(
+    result.failureCode,
+    "PROVIDER_MANIFEST_GATE_ADD_REQUIRES_AUTHORIZATION",
+  );
+  assert.equal(persisted, 0);
+  assert.equal(mutations, 0);
+});
+
 test("status recovery queries retained historical role keys after a current-key miss", async () => {
   const request = {
     schemaVersion: "catalog_manifest_publication_v1",

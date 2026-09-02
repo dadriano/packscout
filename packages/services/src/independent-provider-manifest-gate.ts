@@ -5,13 +5,11 @@ import {
   canonicalJson,
   catalogManifestActivateRequestSchema,
   catalogManifestPublicationRequestDigest,
-  catalogManifestRollbackToManifestRequestSchema,
   globalCatalogProviderActiveObservationV1Schema,
   providerReleaseCompletedHeadV1Schema,
   verifyGlobalCatalogManifestV1,
   type ActiveCatalogManifestStateV1,
   type CatalogManifestActivateRequest,
-  type CatalogManifestRollbackToManifestRequest,
   type GlobalCatalogAggregateObservationV1,
   type GlobalCatalogManifestV1,
   type GlobalCatalogProviderActiveObservationV1,
@@ -84,7 +82,7 @@ export type IndependentProviderManifestGateTarget =
 
 export interface IndependentProviderManifestGateCommand {
   readonly semanticOperation: IndependentProviderManifestGateOperation;
-  readonly convexMutationKind: "activateManifest" | "rollback";
+  readonly convexMutationKind: "activateManifest";
   readonly providerId: string;
   readonly providerKey: string;
   readonly targetProviderReleaseId: string | null;
@@ -97,9 +95,7 @@ export interface IndependentProviderManifestGateCommand {
   readonly requestDigest: string;
 }
 
-type ManifestRequest =
-  | CatalogManifestActivateRequest
-  | CatalogManifestRollbackToManifestRequest;
+type ManifestRequest = CatalogManifestActivateRequest;
 
 function fail(code: IndependentProviderManifestGateFailureCode): never {
   throw new IndependentProviderManifestGateError(code);
@@ -316,30 +312,19 @@ function nextProviderSelections(input: Readonly<{
 }
 
 function buildRequest(input: Readonly<{
-  operation: IndependentProviderManifestGateOperation;
   operationId: string;
   idempotencyKey: string;
   manifest: GlobalCatalogManifestV1;
   observation: GlobalCatalogAggregateObservationV1;
   expectedActiveState: ActiveCatalogManifestStateV1;
 }>): Readonly<{
-  kind: "activateManifest" | "rollback";
+  kind: "activateManifest";
   request: ManifestRequest;
 }> {
-  if (input.operation === "rollback") {
-    return {
-      kind: "rollback",
-      request: catalogManifestRollbackToManifestRequestSchema.parse({
-        schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
-        operationId: input.operationId,
-        idempotencyKey: input.idempotencyKey,
-        rollbackKind: "manifest",
-        targetManifest: manifestPointer(input.manifest),
-        observation: input.observation,
-        expectedActiveState: input.expectedActiveState,
-      }),
-    };
-  }
+  // A per-provider rollback composes a new hybrid manifest from the selected
+  // historical provider release plus every currently retained provider. It is
+  // therefore a forward activation in Convex; `semanticOperation` remains
+  // `rollback` in the central audit ledger.
   return {
     kind: "activateManifest",
     request: catalogManifestActivateRequestSchema.parse({
@@ -430,7 +415,6 @@ export async function composeIndependentProviderManifestGate(
     }),
   });
   const prepared = buildRequest({
-    operation: input.target.operation,
     operationId: input.operationId,
     idempotencyKey: input.idempotencyKey,
     manifest: candidateManifest,

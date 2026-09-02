@@ -768,7 +768,7 @@ function requireProviderReleaseId(providerReleaseId: string): string {
   return providerReleaseId.toLowerCase();
 }
 
-async function loadPublicationSource(
+export async function loadProviderReleasePublicationSource(
   transaction: ProviderTransactionClient,
   providerReleaseId: string,
 ): Promise<ProviderReleasePublicationSource> {
@@ -857,7 +857,7 @@ export class ProviderReleaseRepository {
   publicationSource(providerReleaseId: string): Promise<ProviderReleasePublicationSource> {
     const id = requireProviderReleaseId(providerReleaseId);
     return this.provider.$transaction(
-      (transaction) => loadPublicationSource(transaction, id),
+      (transaction) => loadProviderReleasePublicationSource(transaction, id),
       PUBLICATION_SOURCE_TRANSACTION,
     );
   }

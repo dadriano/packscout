@@ -539,6 +539,41 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
         error.code === "PROMOTION_JOB_GATE_INTENT_INVALID",
       "an active admin from another organization cannot authorize a gate",
     );
+    await harness.client.$executeRawUnsafe(`
+      create function packscout_test_reject_explicit_manifest_wake()
+      returns trigger language plpgsql as $$
+      begin
+        raise exception using errcode = '55000',
+          message = 'test_explicit_manifest_wake_rejected';
+      end;
+      $$
+    `);
+    await harness.client.$executeRawUnsafe(`
+      create trigger packscout_test_reject_explicit_manifest_wake_trigger
+      before update on manifest_reconciliation_job_wake
+      for each row execute function
+        packscout_test_reject_explicit_manifest_wake()
+    `);
+    await assert.rejects(
+      gateRepository.authorizeExplicit({
+        providerId: providerIds.alpha,
+        operation: "remove",
+        targetProviderReleaseId: null,
+        targetCatalogVersionId: null,
+        requestedByOperatorId: operatorId,
+        authorizationDigest,
+        requestedAt: base,
+      }),
+      /test_explicit_manifest_wake_rejected/u,
+    );
+    assert.equal(await gateRepository.load(providerIds.alpha), null);
+    await harness.client.$executeRawUnsafe(`
+      drop trigger packscout_test_reject_explicit_manifest_wake_trigger
+        on manifest_reconciliation_job_wake
+    `);
+    await harness.client.$executeRawUnsafe(`
+      drop function packscout_test_reject_explicit_manifest_wake()
+    `);
     const explicit = await gateRepository.authorizeExplicit({
       providerId: providerIds.alpha,
       operation: "remove",
@@ -549,6 +584,18 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
       requestedAt: base,
     });
     assert.equal(explicit.operationGeneration, 1n);
+    assert.deepEqual(
+      await harness.client.manifest_reconciliation_job_wake
+        .findUniqueOrThrow({
+          where: { singleton_key: true },
+          select: { requested_generation: true, latest_cause: true },
+        }),
+      {
+        requested_generation: 1n,
+        latest_cause: "manifest_eligibility_change",
+      },
+      "a new explicit operation atomically allocates a manifest wake",
+    );
     assert.equal(
       (await gateRepository.authorizeExplicit({
         providerId: providerIds.alpha,
@@ -561,6 +608,13 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
       })).operationGeneration,
       1n,
       "exact explicit authorization replay is idempotent",
+    );
+    assert.equal(
+      (await harness.client.manifest_reconciliation_job_wake
+        .findUniqueOrThrow({ where: { singleton_key: true } }))
+        .requested_generation,
+      1n,
+      "explicit authorization replay does not allocate another wake",
     );
     await gateRepository.coalesce({
       providerId: providerIds.alpha,
@@ -576,6 +630,7 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
     });
     assert.equal(explicitClaim?.observedGeneration, 1n);
     assert.equal(explicitClaim?.requestedOperation, "remove");
+    assert.equal(explicitClaim?.latestEvidenceDigest, authorizationDigest);
     const remaining = await gateRepository.acknowledgeClaim({
       providerId: explicitClaim!.providerId,
       claimToken: explicitClaim!.claimToken,
@@ -590,6 +645,10 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
       claimMilliseconds: 60_000,
     });
     assert.equal(automaticClaim?.observedGeneration, 2n);
+    assert.equal(
+      automaticClaim?.latestEvidenceDigest,
+      hash("newer automatic gate"),
+    );
     await gateRepository.acknowledgeClaim({
       providerId: automaticClaim!.providerId,
       claimToken: automaticClaim!.claimToken,
@@ -914,8 +973,64 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
       advanced.operation.exactResponseSha256,
       advanceEvidence.exactResponseSha256,
     );
+    const rollbackAlphaRequest = activateRequest({
+      operationId: "manifest:alpha:rollback:one",
+      manifest: bothManifest,
+      expected: advanced.mirror.activeState!,
+      selections: [alphaOneSelection, betaSelection],
+    });
+    const rollbackAlpha = await repository.persistIntent(
+      recoveryLease,
+      await intentInput({
+        providerId: providerIds.alpha,
+        operation: "rollback",
+        targetProviderReleaseId: localReleaseIds.alphaOne,
+        targetCatalogVersionId: catalogIds.alphaOne,
+        manifest: bothManifest,
+        request: rollbackAlphaRequest,
+        requestedAt: new Date(base.getTime() + 15_000),
+      }),
+    );
+    assert.equal(rollbackAlpha.operation, "rollback");
+    assert.deepEqual(repository.statusRequest(rollbackAlpha).target, {
+      operationKind: "activateManifest",
+      operationId: rollbackAlphaRequest.operationId,
+      idempotencyKey: rollbackAlphaRequest.idempotencyKey,
+      requestDigest: rollbackAlpha.requestDigest,
+      publicReleaseId: bothManifest.publicReleaseId,
+      manifestFingerprint: bothManifest.manifestFingerprint,
+    });
+    await repository.recordAttempt({
+      lease: recoveryLease,
+      operationId: rollbackAlpha.id,
+      attemptedAt: new Date(base.getTime() + 16_000),
+    });
+    const rolledBack = await repository.accept({
+      lease: recoveryLease,
+      operationId: rollbackAlpha.id,
+      evidence: await receiptEvidence(
+        rollbackAlphaRequest,
+        "2026-09-01T12:00:17.000Z",
+      ),
+      receivedAt: new Date(base.getTime() + 17_000),
+    });
+    assert.equal(rolledBack.operation.operation, "rollback");
+    assert.equal(rolledBack.mirror.generation, 4n);
+    assert.equal(
+      rolledBack.mirror.activeManifest?.publicReleaseId,
+      bothManifest.publicReleaseId,
+    );
+    assert.equal(
+      rolledBack.mirror.previousManifest?.publicReleaseId,
+      advancedManifest.publicReleaseId,
+    );
+    assert.equal(
+      canonicalJson(rolledBack.mirror.activeManifest!.providerReferences[1]),
+      canonicalJson(advancedManifest.providerReferences[1]),
+      "beta survives alpha rollback byte-for-byte",
+    );
     const clearedState = activeCatalogManifestStateV1Schema.parse({
-      generation: 4,
+      generation: 5,
       activeManifest: null,
       previousManifest: null,
       observation: null,
@@ -929,9 +1044,9 @@ test("manifest activation ledger recovers lost acknowledgements and preserves un
           activeState: clearedState,
           activeManifest: null,
           previousManifest: null,
-          serverTime: "2026-09-01T12:00:15.000Z",
+          serverTime: "2026-09-01T12:00:18.000Z",
         }),
-        observedAt: new Date(base.getTime() + 15_000),
+        observedAt: new Date(base.getTime() + 18_000),
       }),
       repositoryCode("MANIFEST_ACTIVATION_CLEAR_FORBIDDEN"),
     );

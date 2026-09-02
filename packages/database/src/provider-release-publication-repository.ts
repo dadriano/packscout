@@ -24,6 +24,16 @@ import type {
 } from "./provider-database.ts";
 import { appendProviderActivityOutbox } from "./provider-local-evidence.ts";
 import {
+  assertProviderActivityEvent,
+  assertProviderReleaseCompletedActivity,
+  sanitizeProviderActivityEvidence,
+  type ProviderActivityEvent,
+} from "./provider-activity-contract.ts";
+import {
+  loadProviderReleasePublicationSource,
+  type ProviderReleasePublicationSource,
+} from "./provider-release-repository.ts";
+import {
   PrismaProviderWorkerLeaseRepository,
   lockProviderWorkerLease,
   providerWorkerLeaseDatabaseNow,
@@ -87,7 +97,31 @@ export type ProviderReleasePublicationRepositoryFailureCode =
   | "PROVIDER_PUBLICATION_IDEMPOTENCY_CONFLICT"
   | "PROVIDER_PUBLICATION_REQUEST_INVALID"
   | "PROVIDER_PUBLICATION_RECEIPT_INVALID"
+  | "PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID"
   | "PROVIDER_PUBLICATION_SEQUENCE_CONFLICT";
+
+type ProviderTerminalReceipt = Extract<ProviderReleaseReceipt, {
+  readonly operationKind: "finalize" | "confirmReuse";
+}>;
+
+export interface ProviderCompletedPublishPlanSource {
+  readonly providerId: string;
+  readonly providerKey: string;
+  readonly providerReleaseId: string;
+  readonly publicProviderReleaseId: string;
+  readonly providerReleaseFingerprint: string;
+  readonly catalogVersionId: string;
+  readonly catalogContentHash: string;
+  readonly providerReleaseContentHash: string;
+  readonly completedThroughChangeSequence: bigint;
+  /** Provider-local durable terminal operation row. */
+  readonly artifactAttemptId: string;
+  readonly terminalOperationKind: "finalize" | "confirmReuse";
+  readonly terminalOperationId: string;
+  readonly terminalReceiptSha256: string;
+  readonly receipt: ProviderTerminalReceipt;
+  readonly publicationSource: ProviderReleasePublicationSource;
+}
 
 export class ProviderReleasePublicationRepositoryError extends Error {
   constructor(readonly code: ProviderReleasePublicationRepositoryFailureCode) {
@@ -396,6 +430,23 @@ function emptyExpectedHead(platformKey: string): ProviderReleaseExpectedComplete
   });
 }
 
+function immutableActivityBody(event: ProviderActivityEvent): string {
+  return canonicalJson({
+    id: event.id,
+    eventDigest: event.eventDigest,
+    eventType: event.eventType,
+    severity: event.severity,
+    dedupeKey: event.dedupeKey,
+    recoveryKey: event.recoveryKey,
+    localRunId: event.localRunId,
+    localQuarantineId: event.localQuarantineId,
+    title: event.title,
+    summary: event.summary,
+    evidence: event.evidence,
+    eventAt: event.eventAt.toISOString(),
+  });
+}
+
 async function setReconciliationContext(
   transaction: ProviderTransactionClient,
   lease: DistributedProviderPublisherLease,
@@ -634,6 +685,132 @@ export class ProviderReleasePublicationRepository {
         observation: parsed.data.details.observation,
         terminalReceiptSha256: stored.response_digest,
       });
+    }, {
+      ...TRANSACTION_OPTIONS,
+      isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  /**
+   * Reads one immutable completion event, its accepted terminal attempt, and
+   * its full immutable release source in one provider snapshot. This never
+   * opens or participates in a central transaction.
+   */
+  async loadCompletedPublishPlanSource(input: Readonly<{
+    event: ProviderActivityEvent;
+  }>): Promise<ProviderCompletedPublishPlanSource> {
+    const event = assertProviderActivityEvent(input.event);
+    const completion = assertProviderReleaseCompletedActivity(event);
+    const expectedKind = completion.state === "complete"
+      ? "finalize"
+      : "confirmReuse";
+    return this.provider.$transaction(async (transaction) => {
+      const storedEvent = await transaction.provider_activity_outbox.findUnique({
+        where: { id: event.id },
+      });
+      if (storedEvent === null) {
+        repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      }
+      let verifiedStoredEvent: ProviderActivityEvent;
+      try {
+        verifiedStoredEvent = assertProviderActivityEvent({
+          id: storedEvent.id,
+          eventDigest: storedEvent.event_digest,
+          eventType: storedEvent.event_type,
+          severity: storedEvent.severity,
+          dedupeKey: storedEvent.dedupe_key,
+          recoveryKey: storedEvent.recovery_key,
+          localRunId: storedEvent.local_run_id,
+          localQuarantineId: storedEvent.local_quarantine_id,
+          title: storedEvent.title,
+          summary: storedEvent.summary,
+          evidence: sanitizeProviderActivityEvidence(storedEvent.evidence),
+          eventAt: storedEvent.event_at,
+          deliveryAttemptCount: storedEvent.delivery_attempt_count,
+          lastFailureCode: storedEvent.last_failure_code,
+        });
+      } catch {
+        repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      }
+      if (immutableActivityBody(verifiedStoredEvent) !== immutableActivityBody(event)) {
+        repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      }
+
+      const source = await loadProviderReleasePublicationSource(
+        transaction,
+        completion.providerReleaseId,
+      );
+      const receiptRows = await transaction.provider_publication_receipts.findMany({
+        where: {
+          provider_release_id: completion.providerReleaseId,
+          response_digest: completion.terminalReceiptSha256,
+        },
+        include: { operation: true },
+        take: 3,
+      });
+      const matches = receiptRows.filter((row) =>
+        row.operation.operation_kind === expectedKind &&
+        row.operation.state === "accepted"
+      );
+      if (matches.length !== 1) {
+        repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      }
+      const stored = matches[0]!;
+      const operation: DistributedProviderPublicationOperation = {
+        operationId: stored.operation.idempotency_key,
+        operationKind: expectedKind,
+        canonicalRequestBody: new TextDecoder().decode(
+          stored.operation.request_bytes,
+        ),
+        requestSha256: stored.operation.request_digest,
+      };
+      const parsed = receiptFrom(operation, {
+        canonicalReceiptBody: new TextDecoder().decode(stored.response_bytes),
+        receiptSha256: stored.response_digest,
+      });
+      if (
+        (parsed.operationKind !== "finalize" &&
+          parsed.operationKind !== "confirmReuse") ||
+        parsed.operationKind !== expectedKind
+      ) repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      const receipt = parsed as ProviderTerminalReceipt;
+      const recordCount = source.batches.reduce(
+        (total, batch) => total + batch.recordCount,
+        0,
+      );
+      if (
+        source.release.lifecycle !== "complete" ||
+        source.descriptor.providerReleaseId !== completion.providerReleaseId ||
+        source.descriptor.catalogVersionId !== completion.catalogVersionId ||
+        source.descriptor.catalogContentHash !== completion.catalogContentHash ||
+        source.descriptor.contentHash !== completion.providerReleaseContentHash ||
+        receipt.publicProviderReleaseId !== completion.publicProviderReleaseId ||
+        receipt.details.release.providerReleaseFingerprint !==
+          completion.providerReleaseFingerprint ||
+        receipt.providerCheckpoint.settledSequence !==
+          completion.completedThroughChangeSequence ||
+        stored.accepted_content_hash !== source.descriptor.contentHash ||
+        stored.accepted_record_count !== recordCount
+      ) repositoryFailure("PROVIDER_PUBLICATION_COMPLETION_PROOF_INVALID");
+      return {
+        providerId: source.descriptor.providerId,
+        providerKey: source.descriptor.providerKey,
+        providerReleaseId: source.descriptor.providerReleaseId,
+        publicProviderReleaseId: receipt.publicProviderReleaseId,
+        providerReleaseFingerprint:
+          receipt.details.release.providerReleaseFingerprint,
+        catalogVersionId: source.descriptor.catalogVersionId,
+        catalogContentHash: source.descriptor.catalogContentHash,
+        providerReleaseContentHash: source.descriptor.contentHash,
+        completedThroughChangeSequence:
+          BigInt(completion.completedThroughChangeSequence),
+        artifactAttemptId: stored.operation.id,
+        terminalOperationKind: receipt.operationKind,
+        terminalOperationId: receipt.operationId,
+        terminalReceiptSha256: stored.response_digest,
+        receipt,
+        publicationSource: source,
+      };
     }, {
       ...TRANSACTION_OPTIONS,
       isolationLevel: ProviderPrisma.TransactionIsolationLevel.RepeatableRead,

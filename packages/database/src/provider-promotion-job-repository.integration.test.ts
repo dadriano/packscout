@@ -170,6 +170,24 @@ test("provider-local replay, generation, schedule, detail, and retention converg
     const replay = await first.beginOrRecoverInvocation(firstInput);
     assert.equal(replay.disposition, "existing");
     assert.equal(replay.invocation?.runId, started.invocation.runId);
+    const reconstructedEnvelopeReplay = await first.beginOrRecoverInvocation({
+      ...firstInput,
+      delivery: delivery(
+        firstInput.delivery.opaqueKey,
+        new Date(firstInput.delivery.issuedAt.getTime() + 500),
+      ),
+      requestedAt: new Date(firstInput.requestedAt.getTime() + 500),
+      startedAt: new Date(firstInput.startedAt.getTime() + 500),
+      now: new Date(firstInput.now.getTime() + 500),
+      ownershipExpiresAt: new Date(
+        firstInput.ownershipExpiresAt.getTime() + 500,
+      ),
+    });
+    assert.equal(reconstructedEnvelopeReplay.disposition, "existing");
+    assert.equal(
+      reconstructedEnvelopeReplay.invocation?.runId,
+      started.invocation.runId,
+    );
     await assert.rejects(first.beginOrRecoverInvocation({
       ...firstInput,
       trigger: { kind: "change_wake", observedWakeGeneration: 2n },

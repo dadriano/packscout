@@ -17,6 +17,15 @@ import {
 } from "./provider-activity-contract.ts";
 import { PrismaManifestGateIntentRepository } from
   "./manifest-gate-intent-repository.ts";
+import { PrismaManifestReconciliationJobRepository } from
+  "./manifest-reconciliation-job-repository.ts";
+import {
+  verifyProviderCompletedPublishPlanRelayProof,
+  type ProviderCompletedPublishPlanRelayProof,
+  type VerifiedProviderCompletedPublishPlanRelayProof,
+} from "./provider-completion-plan-contract.ts";
+import { PrismaProviderCompletionPublishPlanRepository } from
+  "./provider-completion-publish-plan-repository.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -51,6 +60,7 @@ export interface ProviderActivityObservationReceipt {
     readonly observedCompletionGeneration: bigint;
     readonly requestedGeneration: bigint;
     readonly acknowledgedGeneration: bigint;
+    readonly manifestWakeGeneration: bigint;
     readonly evidenceDigest: string;
     readonly pending: boolean;
   }> | null;
@@ -127,6 +137,29 @@ async function assertCompletionGenerationConsistent(
   ) {
     throw new Error("Provider completion generation is inconsistent.");
   }
+}
+
+function completionProofMatchesEvent(input: Readonly<{
+  providerId: string;
+  completion: ReturnType<typeof assertProviderReleaseCompletedActivity>;
+  proof: VerifiedProviderCompletedPublishPlanRelayProof;
+}>): boolean {
+  const { completion, proof } = input;
+  return proof.providerId === input.providerId.toLowerCase() &&
+    proof.providerReleaseId === completion.providerReleaseId.toLowerCase() &&
+    proof.publicProviderReleaseId ===
+      completion.publicProviderReleaseId.toLowerCase() &&
+    proof.providerReleaseFingerprint ===
+      completion.providerReleaseFingerprint &&
+    proof.catalogVersionId === completion.catalogVersionId.toLowerCase() &&
+    proof.catalogContentHash === completion.catalogContentHash &&
+    proof.providerReleaseContentHash ===
+      completion.providerReleaseContentHash &&
+    proof.completedThroughChangeSequence ===
+      BigInt(completion.completedThroughChangeSequence) &&
+    proof.terminalReceiptSha256 === completion.terminalReceiptSha256 &&
+    proof.terminalOperationKind ===
+      (completion.state === "complete" ? "finalize" : "confirmReuse");
 }
 
 async function observeHealth(
@@ -517,6 +550,7 @@ export class CentralProviderObservationRepository {
     event: ProviderActivityEvent;
     health: ProviderLocalHealthObservation;
     receivedAt: Date;
+    completionProof?: ProviderCompletedPublishPlanRelayProof;
   }>): Promise<ProviderActivityObservationReceipt> {
     requireUuid(input.organizationId, "Organization ID");
     requireUuid(input.providerId, "Provider ID");
@@ -531,7 +565,29 @@ export class CentralProviderObservationRepository {
     const completionGeneration = completion === null
       ? null
       : BigInt(completion.completedThroughChangeSequence);
+    if ((completion === null) !== (input.completionProof === undefined)) {
+      throw new Error("Provider completion publish-plan proof is required exactly once.");
+    }
+    const completionProof = input.completionProof === undefined
+      ? null
+      : await verifyProviderCompletedPublishPlanRelayProof(
+          input.completionProof,
+        );
+    if (
+      completion !== null && completionProof !== null &&
+      !completionProofMatchesEvent({
+        providerId: input.providerId,
+        completion,
+        proof: completionProof,
+      })
+    ) throw new Error("Provider completion publish-plan proof is inconsistent.");
     const gateRepository = new PrismaManifestGateIntentRepository(this.central);
+    const manifestJobs = new PrismaManifestReconciliationJobRepository(
+      this.central,
+    );
+    const planRepository = new PrismaProviderCompletionPublishPlanRepository(
+      this.central,
+    );
     return this.central.$transaction(async (transaction) => {
       await assertProviderOwnership(
         transaction,
@@ -585,6 +641,14 @@ export class CentralProviderObservationRepository {
           throw new Error("Provider activity immutable identity conflict.");
         }
       }
+      if (completionProof !== null) {
+        await planRepository.persistAcceptedCompletion({
+          eventId: event.id,
+          evidenceDigest: event.eventDigest,
+          verifiedAt: storedAt,
+          proof: completionProof,
+        }, transaction);
+      }
       await observeHealth(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -592,40 +656,51 @@ export class CentralProviderObservationRepository {
         lastActivityEventId: event.id,
         lastActivityAt: event.eventAt,
       });
-      const gate = completion === null
+      const gateCoalescing = completion === null
         ? null
-        : await gateRepository.coalesce({
+        : await gateRepository.coalesceProviderSource({
             providerId: input.providerId,
-            requestedGeneration: completionGeneration!,
+            sourceGeneration: completionGeneration!,
             cause: "provider_completion",
             evidenceDigest: event.eventDigest,
             requestedAt: event.eventAt,
           }, transaction);
-      if (
-        gate !== null
-        && (
-          gate.latestEvidenceDigest === null
-          || completionGeneration === null
-          || gate.requestedGeneration < completionGeneration
-        )
-      ) {
-        throw new Error("Provider completion gate did not retain its evidence.");
+      const manifestWake = gateCoalescing === null
+        ? null
+        : gateCoalescing.advanced
+          ? await manifestJobs.requestNextWake({
+              cause: "provider_completion",
+              requestedAt: event.eventAt,
+            }, transaction)
+          : await manifestJobs.loadWakeIntent(transaction);
+      let completionGate: ProviderActivityObservationReceipt["completionGate"] =
+        null;
+      if (gateCoalescing !== null) {
+        const retainedGate = gateCoalescing.intent;
+        if (
+          manifestWake === null || completionGeneration === null ||
+          retainedGate.requestedGeneration <
+            gateCoalescing.sourceGateGeneration ||
+          gateCoalescing.sourceEvidenceDigest.length !== 64
+        ) throw new Error(
+          "Provider completion gate did not retain its evidence.",
+        );
+        completionGate = {
+          providerId: retainedGate.providerId,
+          observedCompletionGeneration: completionGeneration,
+          requestedGeneration: retainedGate.requestedGeneration,
+          acknowledgedGeneration: retainedGate.acknowledgedGeneration,
+          manifestWakeGeneration: manifestWake.requestedGeneration,
+          evidenceDigest: gateCoalescing.sourceEvidenceDigest,
+          pending: retainedGate.pending,
+        };
       }
       return {
         state: isNew ? "accepted" : "deduplicated",
         eventId: event.id,
         alertIds: [],
         receivedAt: storedAt,
-        completionGate: gate === null
-          ? null
-          : {
-              providerId: gate.providerId,
-              observedCompletionGeneration: completionGeneration!,
-              requestedGeneration: gate.requestedGeneration,
-              acknowledgedGeneration: gate.acknowledgedGeneration,
-              evidenceDigest: gate.latestEvidenceDigest!,
-              pending: gate.pending,
-            },
+        completionGate,
       };
     }, CENTRAL_TRANSACTION_OPTIONS);
   }

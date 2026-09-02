@@ -10,8 +10,6 @@ import {
   catalogManifestPublicationRequestDigest,
   catalogManifestReceiptDigest,
   catalogManifestReceiptSchema,
-  catalogManifestRollbackReceiptSchema,
-  catalogManifestRollbackToManifestRequestSchema,
   catalogManifestSignedReceiptEnvelopeSchema,
   catalogManifestStatusNotFoundReceiptSchema,
   catalogManifestStatusRequestSchema,
@@ -19,8 +17,6 @@ import {
   type ActiveCatalogManifestStateV1,
   type CatalogManifestActivateRequest,
   type CatalogManifestActivationReceipt,
-  type CatalogManifestRollbackReceipt,
-  type CatalogManifestRollbackToManifestRequest,
   type CatalogManifestStatusRequest,
   type GlobalCatalogManifestV1,
 } from "@packscout/contracts";
@@ -144,12 +140,8 @@ export interface ManifestActivationIntent {
   readonly completedAt: Date | null;
 }
 
-type MutationRequest =
-  | CatalogManifestActivateRequest
-  | CatalogManifestRollbackToManifestRequest;
-type MutationReceipt =
-  | CatalogManifestActivationReceipt
-  | CatalogManifestRollbackReceipt;
+type MutationRequest = CatalogManifestActivateRequest;
+type MutationReceipt = CatalogManifestActivationReceipt;
 
 interface StateRow {
   readonly activeGeneration: bigint;
@@ -387,8 +379,12 @@ function assertLeaseInput(owner: string, leaseMilliseconds: number): void {
   ) failure("MANIFEST_ACTIVATION_INPUT_INVALID");
 }
 
+/**
+ * The persisted `operation` is the central one-provider audit semantic. Every
+ * resulting manifest, including a per-provider rollback hybrid, is a newly
+ * composed full manifest and therefore uses Convex `activateManifest`.
+ */
 function parseRequest(
-  operation: DistributedManifestOperation,
   canonicalRequestBody: string,
 ): MutationRequest {
   let value: unknown;
@@ -397,9 +393,7 @@ function parseRequest(
   } catch {
     failure("MANIFEST_ACTIVATION_REQUEST_INVALID");
   }
-  const parsed = operation === "rollback"
-    ? catalogManifestRollbackToManifestRequestSchema.safeParse(value)
-    : catalogManifestActivateRequestSchema.safeParse(value);
+  const parsed = catalogManifestActivateRequestSchema.safeParse(value);
   if (
     !parsed.success ||
     canonicalJson(parsed.data) !== canonicalRequestBody
@@ -415,9 +409,7 @@ function requestTarget(request: MutationRequest): Readonly<{
   publicReleaseId: string;
   manifestFingerprint: string;
 }> {
-  return "manifest" in request
-    ? request.manifest
-    : request.targetManifest;
+  return request.manifest;
 }
 
 async function parseTargetManifest(
@@ -532,7 +524,7 @@ async function mapOperation(row: OperationRow): Promise<ManifestActivationIntent
     sha256(row.requestBytes) !== row.requestDigest
   ) failure("MANIFEST_ACTIVATION_EVIDENCE_INVALID");
   const canonicalRequestBody = text(row.requestBytes);
-  parseRequest(row.operation, canonicalRequestBody);
+  parseRequest(canonicalRequestBody);
   return {
     id: row.id.toLowerCase(),
     providerId: row.providerId.toLowerCase(),
@@ -730,7 +722,6 @@ async function assertOneProviderTarget(
 }
 
 async function receiptFor(
-  operation: DistributedManifestOperation,
   request: MutationRequest,
   evidence: ExactManifestActivationReceiptEvidence,
 ): Promise<MutationReceipt> {
@@ -748,9 +739,7 @@ async function receiptFor(
   } catch {
     failure("MANIFEST_ACTIVATION_RECEIPT_INVALID");
   }
-  const parsed = operation === "rollback"
-    ? catalogManifestRollbackReceiptSchema.safeParse(receiptValue)
-    : catalogManifestActivationReceiptSchema.safeParse(receiptValue);
+  const parsed = catalogManifestActivationReceiptSchema.safeParse(receiptValue);
   const response = catalogManifestSignedReceiptEnvelopeSchema.safeParse(
     responseValue,
   );
@@ -769,11 +758,7 @@ async function receiptFor(
     parsed.data.manifestFingerprint !== target.manifestFingerprint ||
     canonicalJson(parsed.data.details.expectedActiveState) !==
       canonicalJson(request.expectedActiveState) ||
-    (operation === "rollback" &&
-      (parsed.data.operationKind !== "rollback" ||
-        parsed.data.rollbackKind !== "manifest")) ||
-    (operation !== "rollback" &&
-      parsed.data.operationKind !== "activateManifest")
+    parsed.data.operationKind !== "activateManifest"
   ) failure("MANIFEST_ACTIVATION_RECEIPT_INVALID");
   return parsed.data;
 }
@@ -920,14 +905,13 @@ export class PrismaManifestActivationRepository {
     }
     const targetManifestBody = canonicalJson(targetManifest);
     const targetManifestHash = sha256(targetManifestBody);
-    const request = parseRequest(input.operation, input.canonicalRequestBody);
+    const request = parseRequest(input.canonicalRequestBody);
     const target = requestTarget(request);
     if (
       sha256(input.canonicalRequestBody) !== input.requestDigest ||
       target.publicReleaseId !== targetManifest.publicReleaseId ||
       target.manifestFingerprint !== targetManifest.manifestFingerprint ||
-      ("manifest" in request &&
-        canonicalJson(request.manifest) !== targetManifestBody)
+      canonicalJson(request.manifest) !== targetManifestBody
     ) failure("MANIFEST_ACTIVATION_REQUEST_INVALID");
 
     return this.central.$transaction(async (transaction) => {
@@ -1077,8 +1061,7 @@ export class PrismaManifestActivationRepository {
           failure("MANIFEST_ACTIVATION_STATUS_INVALID");
         }
         await receiptFor(
-          current.operation,
-          parseRequest(current.operation, text(current.requestBytes)),
+          parseRequest(text(current.requestBytes)),
           input.evidence,
         );
         resultKind = "terminal";
@@ -1320,13 +1303,9 @@ export class PrismaManifestActivationRepository {
       if (current.attemptCount < 1) {
         failure("MANIFEST_ACTIVATION_RECEIPT_INVALID");
       }
-      const request = parseRequest(current.operation, text(current.requestBytes));
+      const request = parseRequest(text(current.requestBytes));
       assertRequestMatchesState(request, state);
-      const receipt = await receiptFor(
-        current.operation,
-        request,
-        input.evidence,
-      );
+      const receipt = await receiptFor(request, input.evidence);
       const resultState = receipt.details.activeState;
       const activePointer = resultState.activeManifest;
       if (
@@ -1402,28 +1381,18 @@ export class PrismaManifestActivationRepository {
   }
 
   statusRequest(intent: ManifestActivationIntent): CatalogManifestStatusRequest {
-    const request = parseRequest(intent.operation, intent.canonicalRequestBody);
+    const request = parseRequest(intent.canonicalRequestBody);
     const target = requestTarget(request);
     return catalogManifestStatusRequestSchema.parse({
       schemaVersion: CATALOG_MANIFEST_PUBLICATION_SCHEMA_VERSION,
-      target: intent.operation === "rollback"
-        ? {
-          operationKind: "rollback",
-          rollbackKind: "manifest",
-          operationId: request.operationId,
-          idempotencyKey: request.idempotencyKey,
-          requestDigest: intent.requestDigest,
-          publicReleaseId: target.publicReleaseId,
-          manifestFingerprint: target.manifestFingerprint,
-        }
-        : {
-          operationKind: "activateManifest",
-          operationId: request.operationId,
-          idempotencyKey: request.idempotencyKey,
-          requestDigest: intent.requestDigest,
-          publicReleaseId: target.publicReleaseId,
-          manifestFingerprint: target.manifestFingerprint,
-        },
+      target: {
+        operationKind: "activateManifest",
+        operationId: request.operationId,
+        idempotencyKey: request.idempotencyKey,
+        requestDigest: intent.requestDigest,
+        publicReleaseId: target.publicReleaseId,
+        manifestFingerprint: target.manifestFingerprint,
+      },
     });
   }
 

@@ -5,7 +5,6 @@ import {
   buildGlobalCatalogAggregateObservationV1,
   canonicalJson,
   catalogManifestActivateRequestSchema,
-  catalogManifestRollbackToManifestRequestSchema,
   providerReleaseCompletedHeadV1Schema,
   type ActiveCatalogManifestStateV1,
   type GlobalCatalogManifestV1,
@@ -508,7 +507,7 @@ test("remove is explicit, keeps beta exact, and never emits clear", async () => 
   assert.doesNotMatch(command.canonicalRequestBody, /clear/u);
 });
 
-test("rollback targets a retained one-provider revision and preserves beta", async () => {
+test("rollback activates the newly composed hybrid and preserves beta", async () => {
   const plans = await fixturePlans();
   const [targetManifest, current] = await Promise.all([
     manifest([plans.alphaOne, plans.betaOne]),
@@ -554,15 +553,19 @@ test("rollback targets a retained one-provider revision and preserves beta", asy
       proof: alphaOne,
     },
   });
-  assert.equal(command.convexMutationKind, "rollback");
+  assert.equal(command.semanticOperation, "rollback");
+  assert.equal(command.convexMutationKind, "activateManifest");
   assert.equal(command.unchangedProviderCount, 1);
-  const request = catalogManifestRollbackToManifestRequestSchema.parse(
+  const request = catalogManifestActivateRequestSchema.parse(
     JSON.parse(command.canonicalRequestBody),
   );
-  assert.equal(request.rollbackKind, "manifest");
   assert.equal(
-    request.targetManifest.publicReleaseId,
+    request.manifest.publicReleaseId,
     targetManifest.publicReleaseId,
+  );
+  assert.equal(
+    request.manifest.manifestFingerprint,
+    targetManifest.manifestFingerprint,
   );
   assert.equal(
     canonicalJson(current.providerReferences[1]),

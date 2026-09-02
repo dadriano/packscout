@@ -126,6 +126,7 @@ export * from "./provider-health-service.ts";
 export * from "./provider-projection-service.ts";
 export * from "./provider-release-assembly-service.ts";
 export * from "./distributed-provider-release-v1-adapter.ts";
+export * from "./provider-completion-plan-relay-proof.ts";
 export * from "./distributed-provider-release-publication-service.ts";
 export * from "./independent-provider-manifest-gate.ts";
 export * from "./promotion-job-liveness.ts";

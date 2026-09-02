@@ -425,28 +425,29 @@ model providers {
   created_at                       DateTime           @default(now()) @db.Timestamptz(6)
   updated_at                       DateTime           @default(now()) @db.Timestamptz(6)
 
-  organization                  organizations                       @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "providers_organization_fk")
-  active_config_version         provider_config_versions?           @relation("ProviderActiveConfig", fields: [active_config_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_config_fk")
-  active_public_profile_version provider_public_profile_versions?   @relation("ProviderActiveProfile", fields: [active_public_profile_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_profile_fk")
-  public_profile_versions       provider_public_profile_versions[]  @relation("ProviderProfileVersions")
-  config_versions               provider_config_versions[]          @relation("ProviderConfigVersions")
-  credential_versions           provider_credential_versions[]
-  database_nodes                provider_database_nodes[]           @relation("ProviderDatabaseNodes")
-  connection_tests              provider_connection_tests[]         @relation("ProviderConnectionTests")
-  activity_events               provider_activity_events[]          @relation("ProviderActivityOrganization")
-  health                        provider_health[]                   @relation("ProviderHealthOrganization")
-  alerts                        admin_alerts[]                      @relation("ProviderAlertOrganization")
-  category_correlations         provider_category_correlations[]
-  collectible_correlations      provider_collectible_correlations[]
-  correlation_suggestions       correlation_suggestions[]
-  promotion_changes             catalog_promotion_changes[]
-  release_invalidations         provider_release_invalidations[]
-  invalidation_checkpoint       provider_invalidation_checkpoints?
-  manifest_operations           manifest_activation_operations[]
-  manifest_gate_intent          manifest_gate_intents?
+  organization                     organizations                               @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "providers_organization_fk")
+  active_config_version            provider_config_versions?                   @relation("ProviderActiveConfig", fields: [active_config_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_config_fk")
+  active_public_profile_version    provider_public_profile_versions?           @relation("ProviderActiveProfile", fields: [active_public_profile_version_id, id], references: [id, provider_id], onDelete: Restrict, onUpdate: NoAction, map: "providers_active_profile_fk")
+  public_profile_versions          provider_public_profile_versions[]          @relation("ProviderProfileVersions")
+  config_versions                  provider_config_versions[]                  @relation("ProviderConfigVersions")
+  credential_versions              provider_credential_versions[]
+  database_nodes                   provider_database_nodes[]                   @relation("ProviderDatabaseNodes")
+  connection_tests                 provider_connection_tests[]                 @relation("ProviderConnectionTests")
+  activity_events                  provider_activity_events[]                  @relation("ProviderActivityOrganization")
+  health                           provider_health[]                           @relation("ProviderHealthOrganization")
+  alerts                           admin_alerts[]                              @relation("ProviderAlertOrganization")
+  category_correlations            provider_category_correlations[]
+  collectible_correlations         provider_collectible_correlations[]
+  correlation_suggestions          correlation_suggestions[]
+  promotion_changes                catalog_promotion_changes[]
+  release_invalidations            provider_release_invalidations[]
+  invalidation_checkpoint          provider_invalidation_checkpoints?
+  manifest_operations              manifest_activation_operations[]
+  manifest_gate_intent             manifest_gate_intents?
   promotion_invocation_projections provider_promotion_invocation_projections[]
-  promotion_liveness_observations promotion_job_liveness_observations[]
-  promotion_liveness_conditions  promotion_job_liveness_conditions[]
+  promotion_liveness_observations  promotion_job_liveness_observations[]
+  promotion_liveness_conditions    promotion_job_liveness_conditions[]
+  completion_publish_plans         provider_completion_publish_plans[]
 
   @@unique([provider_key], map: "providers_provider_key_unique")
   @@unique([id, organization_id], map: "providers_id_organization_unique")
@@ -603,14 +604,54 @@ model provider_activity_events {
   received_at         DateTime        @db.Timestamptz(6)
   created_at          DateTime        @default(now()) @db.Timestamptz(6)
 
-  organization organizations     @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_organization_fk")
-  provider     providers         @relation("ProviderActivityOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_provider_organization_fk")
-  health_rows  provider_health[] @relation("HealthLastActivity")
-  alerts       admin_alerts[]    @relation("AlertLatestActivity")
+  organization            organizations                      @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_organization_fk")
+  provider                providers                          @relation("ProviderActivityOrganization", fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "provider_activity_events_provider_organization_fk")
+  health_rows             provider_health[]                  @relation("HealthLastActivity")
+  alerts                  admin_alerts[]                     @relation("AlertLatestActivity")
+  completion_publish_plan provider_completion_publish_plans?
 
   @@unique([provider_id, id], map: "provider_activity_events_provider_id_unique")
   @@index([organization_id, local_run_id], map: "provider_activity_events_org_local_run_idx")
   @@index([organization_id, local_quarantine_id], map: "provider_activity_events_org_local_quarantine_idx")
+}
+
+/// Exact public provider plan and completed-head proof accepted with one
+/// provider completion activity event. The provider database remains the
+/// authority; this central copy is immutable verified relay evidence.
+model provider_completion_publish_plans {
+  event_id                          String   @id @db.Uuid
+  provider_id                       String   @db.Uuid
+  provider_release_id               String   @db.Uuid
+  public_provider_release_id        String   @db.Uuid
+  provider_release_fingerprint      String   @db.Char(64)
+  catalog_version_id                String   @db.Uuid
+  catalog_content_hash              String   @db.Char(64)
+  provider_release_content_hash     String   @db.Char(64)
+  completed_through_change_sequence BigInt
+  artifact_attempt_id               String   @db.Uuid
+  terminal_operation_kind           String
+  terminal_operation_id             String
+  terminal_receipt_sha256           String   @db.Char(64)
+  evidence_digest                   String   @db.Char(64)
+  plan_sha256                       String   @db.Char(64)
+  plan_bytes                        Bytes    @db.ByteA
+  completed_head_sha256             String   @db.Char(64)
+  completed_head_bytes              Bytes    @db.ByteA
+  active_observation_sha256         String   @db.Char(64)
+  active_observation_bytes          Bytes    @db.ByteA
+  verified_at                       DateTime @db.Timestamptz(6)
+  created_at                        DateTime @default(now()) @db.Timestamptz(6)
+
+  provider        providers                @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_completion_publish_plans_provider_fk")
+  catalog_version catalog_versions         @relation(fields: [catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_completion_publish_plans_catalog_version_fk")
+  activity_event  provider_activity_events @relation(fields: [provider_id, event_id], references: [provider_id, id], onDelete: Restrict, onUpdate: NoAction, map: "provider_completion_publish_plans_activity_event_fk")
+
+  @@unique([provider_id, evidence_digest], map: "provider_completion_publish_plans_provider_evidence_key")
+  @@unique([provider_id, artifact_attempt_id], map: "provider_completion_publish_plans_provider_attempt_key")
+  @@unique([provider_id, event_id], map: "provider_completion_plans_provider_event_key")
+  @@unique([provider_id, provider_release_id, completed_through_change_sequence], map: "provider_completion_plans_release_generation_key")
+  @@index([provider_id, public_provider_release_id, provider_release_fingerprint, completed_through_change_sequence(sort: Desc)], map: "provider_completion_publish_plans_manifest_lookup_idx")
+  @@index([verified_at, event_id], map: "provider_completion_publish_plans_retention_idx")
 }
 
 model provider_health {
@@ -955,11 +996,12 @@ model catalog_versions {
   assembled_at            DateTime?          @db.Timestamptz(6)
   completed_at            DateTime?          @db.Timestamptz(6)
 
-  predecessor            catalog_versions?                @relation("CatalogVersionHistory", fields: [predecessor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_versions_predecessor_fk")
-  successors             catalog_versions[]               @relation("CatalogVersionHistory")
-  batches                catalog_version_batches[]
-  publication_operations catalog_publication_operations[]
-  manifest_operations    manifest_activation_operations[]
+  predecessor                       catalog_versions?                   @relation("CatalogVersionHistory", fields: [predecessor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "catalog_versions_predecessor_fk")
+  successors                        catalog_versions[]                  @relation("CatalogVersionHistory")
+  batches                           catalog_version_batches[]
+  publication_operations            catalog_publication_operations[]
+  manifest_operations               manifest_activation_operations[]
+  provider_completion_publish_plans provider_completion_publish_plans[]
 }
 
 model catalog_version_batches {
@@ -1037,7 +1079,7 @@ model manifest_activation_operations {
   lease_fence                BigInt
   state                      publication_operation_state @default(pending)
   attempt_count              Int                         @default(0)
-  last_attempted_at          DateTime?                    @db.Timestamptz(6)
+  last_attempted_at          DateTime?                   @db.Timestamptz(6)
   completion_lease_fence     BigInt?
   convex_receipt_id          String?
   receipt_hash               String?                     @db.Char(64)
@@ -1050,26 +1092,26 @@ model manifest_activation_operations {
   requested_at               DateTime                    @db.Timestamptz(6)
   completed_at               DateTime?                   @db.Timestamptz(6)
 
-  provider               providers         @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_provider_fk")
-  target_catalog_version catalog_versions? @relation(fields: [target_catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_catalog_version_fk")
-  requested_by_operator  operators?        @relation(fields: [requested_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_operator_fk")
+  provider               providers                                 @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_provider_fk")
+  target_catalog_version catalog_versions?                         @relation(fields: [target_catalog_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_catalog_version_fk")
+  requested_by_operator  operators?                                @relation(fields: [requested_by_operator_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_operations_operator_fk")
   status_observations    manifest_activation_status_observations[]
 }
 
 /// Exact signed status probes used to recover an ambiguous manifest mutation.
 model manifest_activation_status_observations {
-  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  operation_id          String   @db.Uuid
-  lease_fence           BigInt
-  result_kind           String
-  request_digest        String   @db.Char(64)
-  request_bytes         Bytes
-  receipt_hash          String   @db.Char(64)
-  receipt_bytes         Bytes
-  response_digest       String   @db.Char(64)
-  response_bytes        Bytes
-  observed_at           DateTime @db.Timestamptz(6)
-  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operation_id    String   @db.Uuid
+  lease_fence     BigInt
+  result_kind     String
+  request_digest  String   @db.Char(64)
+  request_bytes   Bytes
+  receipt_hash    String   @db.Char(64)
+  receipt_bytes   Bytes
+  response_digest String   @db.Char(64)
+  response_bytes  Bytes
+  observed_at     DateTime @db.Timestamptz(6)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
 
   operation manifest_activation_operations @relation(fields: [operation_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_activation_status_observations_operation_fk")
 
@@ -1079,29 +1121,29 @@ model manifest_activation_status_observations {
 
 /// Exact signed active-state proof used only to adopt or reconcile Convex truth.
 model manifest_activation_state_observations {
-  id                               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  observation_kind                 String
-  lease_fence                      BigInt
-  active_generation                BigInt
-  active_manifest_id               String?
-  active_manifest_fingerprint      String?  @db.Char(64)
-  active_manifest_bytes            Bytes?
-  active_manifest_bytes_hash       String?  @db.Char(64)
-  previous_manifest_id             String?
-  previous_manifest_fingerprint    String?  @db.Char(64)
-  previous_manifest_bytes          Bytes?
-  previous_manifest_bytes_hash     String?  @db.Char(64)
-  active_state_bytes               Bytes
-  active_state_hash                String   @db.Char(64)
-  request_digest                   String   @db.Char(64)
-  request_bytes                    Bytes
-  convex_receipt_id                String
-  receipt_hash                     String   @db.Char(64)
-  receipt_bytes                    Bytes
-  response_digest                  String   @db.Char(64)
-  response_bytes                   Bytes
-  observed_at                      DateTime @db.Timestamptz(6)
-  created_at                       DateTime @default(now()) @db.Timestamptz(6)
+  id                            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  observation_kind              String
+  lease_fence                   BigInt
+  active_generation             BigInt
+  active_manifest_id            String?
+  active_manifest_fingerprint   String?  @db.Char(64)
+  active_manifest_bytes         Bytes?
+  active_manifest_bytes_hash    String?  @db.Char(64)
+  previous_manifest_id          String?
+  previous_manifest_fingerprint String?  @db.Char(64)
+  previous_manifest_bytes       Bytes?
+  previous_manifest_bytes_hash  String?  @db.Char(64)
+  active_state_bytes            Bytes
+  active_state_hash             String   @db.Char(64)
+  request_digest                String   @db.Char(64)
+  request_bytes                 Bytes
+  convex_receipt_id             String
+  receipt_hash                  String   @db.Char(64)
+  receipt_bytes                 Bytes
+  response_digest               String   @db.Char(64)
+  response_bytes                Bytes
+  observed_at                   DateTime @db.Timestamptz(6)
+  created_at                    DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([response_digest, lease_fence], map: "manifest_activation_state_observations_response_unique")
   @@index([active_generation, observed_at], map: "manifest_activation_state_observations_generation_idx")
@@ -1140,71 +1182,71 @@ model manifest_reconciliation_job_wake {
 
 /// Trusted deployment schedule state for the central manifest reconciler.
 model manifest_reconciliation_job_schedule {
-  singleton_key                    Boolean   @id @default(true)
-  lifecycle                        String    @default("pending_activation")
-  schedule_epoch                   BigInt    @default(0)
-  cadence_seconds                  Int       @default(60)
-  baseline_at                      DateTime? @db.Timestamptz(6)
-  activated_at                     DateTime? @db.Timestamptz(6)
-  paused_at                        DateTime? @db.Timestamptz(6)
-  last_admitted_window_index       BigInt?
-  last_scheduled_checkin_at        DateTime? @db.Timestamptz(6)
-  next_expected_checkin_at         DateTime? @db.Timestamptz(6)
-  row_version                      BigInt    @default(1)
-  created_at                       DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at                       DateTime  @default(now()) @db.Timestamptz(6)
+  singleton_key              Boolean   @id @default(true)
+  lifecycle                  String    @default("pending_activation")
+  schedule_epoch             BigInt    @default(0)
+  cadence_seconds            Int       @default(60)
+  baseline_at                DateTime? @db.Timestamptz(6)
+  activated_at               DateTime? @db.Timestamptz(6)
+  paused_at                  DateTime? @db.Timestamptz(6)
+  last_admitted_window_index BigInt?
+  last_scheduled_checkin_at  DateTime? @db.Timestamptz(6)
+  next_expected_checkin_at   DateTime? @db.Timestamptz(6)
+  row_version                BigInt    @default(1)
+  created_at                 DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime  @default(now()) @db.Timestamptz(6)
 }
 
 /// Singleton evaluator lifecycle plus the most recent complete roster result.
 model promotion_job_liveness_evaluator_state {
-  singleton_key                  Boolean   @id @default(true)
-  state                          String    @default("pending")
-  lifecycle                      String    @default("pending_activation")
-  evaluator_epoch                BigInt    @default(0)
-  cadence_seconds                Int       @default(60)
-  baseline_at                    DateTime? @db.Timestamptz(6)
-  activated_at                   DateTime? @db.Timestamptz(6)
-  paused_at                      DateTime? @db.Timestamptz(6)
-  last_successful_window_index   BigInt?
-  last_successful_evaluation_at  DateTime? @db.Timestamptz(6)
-  evaluated_through              DateTime? @db.Timestamptz(6)
-  roster_version                 BigInt?
-  roster_high_water              BigInt?
-  roster_digest                  String?   @db.Char(64)
-  expected_count                 Int?
-  reachable_count                Int?
-  unavailable_count              Int?
-  healthy_count                  Int?
-  overdue_count                  Int?
-  alerting_count                 Int?
-  manifest_evaluated             Boolean?
-  last_failure_code              String?
-  row_version                    BigInt    @default(1)
-  created_at                     DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at                     DateTime  @default(now()) @db.Timestamptz(6)
+  singleton_key                 Boolean   @id @default(true)
+  state                         String    @default("pending")
+  lifecycle                     String    @default("pending_activation")
+  evaluator_epoch               BigInt    @default(0)
+  cadence_seconds               Int       @default(60)
+  baseline_at                   DateTime? @db.Timestamptz(6)
+  activated_at                  DateTime? @db.Timestamptz(6)
+  paused_at                     DateTime? @db.Timestamptz(6)
+  last_successful_window_index  BigInt?
+  last_successful_evaluation_at DateTime? @db.Timestamptz(6)
+  evaluated_through             DateTime? @db.Timestamptz(6)
+  roster_version                BigInt?
+  roster_high_water             BigInt?
+  roster_digest                 String?   @db.Char(64)
+  expected_count                Int?
+  reachable_count               Int?
+  unavailable_count             Int?
+  healthy_count                 Int?
+  overdue_count                 Int?
+  alerting_count                Int?
+  manifest_evaluated            Boolean?
+  last_failure_code             String?
+  row_version                   BigInt    @default(1)
+  created_at                    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime  @default(now()) @db.Timestamptz(6)
 }
 
 /// Current central observation; unreachable providers retain trusted columns.
 model promotion_job_liveness_observations {
-  job_key                         String   @id
-  job_kind                        String
-  organization_id                String?  @db.Uuid
-  provider_id                    String?  @db.Uuid
-  evidence_source                 String
-  route_failure_code              String?
-  observed_at                     DateTime @db.Timestamptz(6)
-  evaluated_at                    DateTime @db.Timestamptz(6)
-  trusted_observed_at             DateTime? @db.Timestamptz(6)
-  schedule_lifecycle              String?
-  schedule_epoch                  BigInt?
-  schedule_health                 String?
-  latest_countable_window_index   BigInt?
-  last_admitted_window_index      BigInt?
-  missed_window_count             BigInt?
-  last_scheduled_checkin_at       DateTime? @db.Timestamptz(6)
-  row_version                     BigInt    @default(1)
-  created_at                      DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at                      DateTime  @default(now()) @db.Timestamptz(6)
+  job_key                       String    @id
+  job_kind                      String
+  organization_id               String?   @db.Uuid
+  provider_id                   String?   @db.Uuid
+  evidence_source               String
+  route_failure_code            String?
+  observed_at                   DateTime  @db.Timestamptz(6)
+  evaluated_at                  DateTime  @db.Timestamptz(6)
+  trusted_observed_at           DateTime? @db.Timestamptz(6)
+  schedule_lifecycle            String?
+  schedule_epoch                BigInt?
+  schedule_health               String?
+  latest_countable_window_index BigInt?
+  last_admitted_window_index    BigInt?
+  missed_window_count           BigInt?
+  last_scheduled_checkin_at     DateTime? @db.Timestamptz(6)
+  row_version                   BigInt    @default(1)
+  created_at                    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime  @default(now()) @db.Timestamptz(6)
 
   provider providers? @relation(fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "promotion_job_liveness_observations_provider_organization_fk")
 
@@ -1213,28 +1255,28 @@ model promotion_job_liveness_observations {
 
 /// Provider-scoped or system-scoped condition episode with retryable delivery.
 model promotion_job_liveness_conditions {
-  id                               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   subject_kind                     String
   subject_key                      String
-  organization_id                 String?  @db.Uuid
-  provider_id                     String?  @db.Uuid
+  organization_id                  String?   @db.Uuid
+  provider_id                      String?   @db.Uuid
   schedule_epoch                   BigInt
   condition_state                  String
   anchor_last_scheduled_checkin_at DateTime? @db.Timestamptz(6)
   latest_missed_window_count       BigInt
-  opened_at                        DateTime @db.Timestamptz(6)
-  latest_evaluated_at              DateTime @db.Timestamptz(6)
+  opened_at                        DateTime  @db.Timestamptz(6)
+  latest_evaluated_at              DateTime  @db.Timestamptz(6)
   resolved_at                      DateTime? @db.Timestamptz(6)
   delivery_action                  String?
   delivery_state                   String?
-  delivery_event_id                String?  @db.Uuid
-  delivery_attempt_count           Int      @default(0)
+  delivery_event_id                String?   @db.Uuid
+  delivery_attempt_count           Int       @default(0)
   last_delivery_attempt_at         DateTime? @db.Timestamptz(6)
   next_delivery_attempt_at         DateTime? @db.Timestamptz(6)
   last_delivery_failure_code       String?
-  row_version                      BigInt   @default(1)
-  created_at                       DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                       DateTime @default(now()) @db.Timestamptz(6)
+  row_version                      BigInt    @default(1)
+  created_at                       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime  @default(now()) @db.Timestamptz(6)
 
   provider providers? @relation(fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "promotion_job_liveness_conditions_provider_organization_fk")
 
@@ -1245,43 +1287,43 @@ model promotion_job_liveness_conditions {
 
 /// Bounded operator-safe summary of one central manifest invocation.
 model manifest_reconciliation_job_invocations {
-  run_id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  delivery_key_digest          String    @unique(map: "manifest_reconciliation_job_invocations_delivery_key") @db.Char(64)
-  trigger_evidence_digest      String    @db.Char(64)
-  delivery_issued_at           DateTime  @db.Timestamptz(6)
-  delivery_expires_at          DateTime  @db.Timestamptz(6)
-  trigger_kind                 String
-  lifecycle_state              String    @default("running")
-  outcome                      String?
-  observed_wake_generation     BigInt?
-  schedule_epoch               BigInt?
-  schedule_window_index        BigInt?
-  scheduled_due_at             DateTime? @db.Timestamptz(6)
-  scheduled_checkin_at         DateTime? @db.Timestamptz(6)
-  requested_at                 DateTime  @db.Timestamptz(6)
-  started_at                   DateTime  @db.Timestamptz(6)
-  finished_at                  DateTime? @db.Timestamptz(6)
-  ownership_key                String?
-  ownership_token              String?   @db.Uuid
-  ownership_expires_at         DateTime? @db.Timestamptz(6)
-  before_lane_position         BigInt?
-  after_lane_position          BigInt?
-  before_settled_position      BigInt?
-  after_settled_position       BigInt?
-  cycle_count                  Int       @default(0)
-  promotion_attempt_count      Int       @default(0)
-  publication_count            Int       @default(0)
-  operation_count              Int       @default(0)
-  related_attempt_count        Int       @default(0)
-  related_attempt_set_digest   String    @db.Char(64)
-  safe_failure_code            String?
-  continuation_generation      BigInt?
-  result_active_generation     BigInt?
-  result_public_release_id     String?   @db.Uuid
-  result_release_fingerprint   String?   @db.Char(64)
-  retention_protected          Boolean   @default(false)
-  created_at                   DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at                   DateTime  @default(now()) @db.Timestamptz(6)
+  run_id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  delivery_key_digest        String    @unique(map: "manifest_reconciliation_job_invocations_delivery_key") @db.Char(64)
+  trigger_evidence_digest    String    @db.Char(64)
+  delivery_issued_at         DateTime  @db.Timestamptz(6)
+  delivery_expires_at        DateTime  @db.Timestamptz(6)
+  trigger_kind               String
+  lifecycle_state            String    @default("running")
+  outcome                    String?
+  observed_wake_generation   BigInt?
+  schedule_epoch             BigInt?
+  schedule_window_index      BigInt?
+  scheduled_due_at           DateTime? @db.Timestamptz(6)
+  scheduled_checkin_at       DateTime? @db.Timestamptz(6)
+  requested_at               DateTime  @db.Timestamptz(6)
+  started_at                 DateTime  @db.Timestamptz(6)
+  finished_at                DateTime? @db.Timestamptz(6)
+  ownership_key              String?
+  ownership_token            String?   @db.Uuid
+  ownership_expires_at       DateTime? @db.Timestamptz(6)
+  before_lane_position       BigInt?
+  after_lane_position        BigInt?
+  before_settled_position    BigInt?
+  after_settled_position     BigInt?
+  cycle_count                Int       @default(0)
+  promotion_attempt_count    Int       @default(0)
+  publication_count          Int       @default(0)
+  operation_count            Int       @default(0)
+  related_attempt_count      Int       @default(0)
+  related_attempt_set_digest String    @db.Char(64)
+  safe_failure_code          String?
+  continuation_generation    BigInt?
+  result_active_generation   BigInt?
+  result_public_release_id   String?   @db.Uuid
+  result_release_fingerprint String?   @db.Char(64)
+  retention_protected        Boolean   @default(false)
+  created_at                 DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime  @default(now()) @db.Timestamptz(6)
 
   delivery_tombstone manifest_reconciliation_job_delivery_tombstones?
   detail             manifest_reconciliation_invocation_details?
@@ -1323,29 +1365,41 @@ model manifest_reconciliation_invocation_details {
 
 /// Central-owned pending manifest work. It never commands a provider database.
 model manifest_gate_intents {
-  provider_id             String   @id @db.Uuid
-  requested_generation    BigInt   @default(0)
-  acknowledged_generation BigInt   @default(0)
-  latest_cause            String?
-  latest_evidence_digest  String?  @db.Char(64)
-  latest_requested_at     DateTime? @db.Timestamptz(6)
-  operation_generation    BigInt?
-  requested_operation     manifest_operation?
-  target_provider_release_id String? @db.Uuid
-  target_catalog_version_id  String? @db.Uuid
-  requested_by_operator_id   String? @db.Uuid
-  authorization_digest       String? @db.Char(64)
-  claim_owner             String?
-  claim_token             String?  @db.Uuid
-  claimed_generation      BigInt?
-  claim_expires_at        DateTime? @db.Timestamptz(6)
-  attempt_count           Int      @default(0)
-  last_attempted_at       DateTime? @db.Timestamptz(6)
-  retry_at                DateTime? @db.Timestamptz(6)
-  last_failure_code       String?
-  row_version             BigInt   @default(1)
-  created_at              DateTime @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime @default(now()) @db.Timestamptz(6)
+  provider_id                     String              @id @db.Uuid
+  /// Gate-local serial. Provider completion sequences are stored separately.
+  requested_generation            BigInt              @default(0)
+  acknowledged_generation         BigInt              @default(0)
+  latest_cause                    String?
+  latest_evidence_digest          String?             @db.Char(64)
+  latest_requested_at             DateTime?           @db.Timestamptz(6)
+  provider_source_generation      BigInt?
+  provider_source_gate_generation BigInt?
+  provider_source_cause           String?
+  provider_source_evidence_digest String?             @db.Char(64)
+  provider_source_requested_at    DateTime?           @db.Timestamptz(6)
+  operation_generation            BigInt?
+  operation_requested_at          DateTime?           @db.Timestamptz(6)
+  requested_operation             manifest_operation?
+  target_provider_release_id      String?             @db.Uuid
+  target_catalog_version_id       String?             @db.Uuid
+  requested_by_operator_id        String?             @db.Uuid
+  authorization_digest            String?             @db.Char(64)
+  claim_owner                     String?
+  claim_token                     String?             @db.Uuid
+  claimed_generation              BigInt?
+  claimed_work_kind               String?
+  claimed_source_generation       BigInt?
+  claimed_cause                   String?
+  claimed_evidence_digest         String?             @db.Char(64)
+  claimed_requested_at            DateTime?           @db.Timestamptz(6)
+  claim_expires_at                DateTime?           @db.Timestamptz(6)
+  attempt_count                   Int                 @default(0)
+  last_attempted_at               DateTime?           @db.Timestamptz(6)
+  retry_at                        DateTime?           @db.Timestamptz(6)
+  last_failure_code               String?
+  row_version                     BigInt              @default(1)
+  created_at                      DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime            @default(now()) @db.Timestamptz(6)
 
   provider providers @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "manifest_gate_intents_provider_fkey")
 
@@ -1354,15 +1408,15 @@ model manifest_gate_intents {
 
 /// Idempotent sanitized copy used only for central monitoring/history reads.
 model provider_promotion_invocation_projections {
-  id                            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider_id                   String   @db.Uuid
-  provider_invocation_id_digest String   @db.Char(64)
-  projection_digest             String   @db.Char(64)
+  id                            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_id                   String    @db.Uuid
+  provider_invocation_id_digest String    @db.Char(64)
+  projection_digest             String    @db.Char(64)
   trigger_kind                  String
   outcome                       String
   scheduled_checkin_at          DateTime? @db.Timestamptz(6)
-  started_at                    DateTime @db.Timestamptz(6)
-  finished_at                   DateTime @db.Timestamptz(6)
+  started_at                    DateTime  @db.Timestamptz(6)
+  finished_at                   DateTime  @db.Timestamptz(6)
   before_lane_position          BigInt?
   after_lane_position           BigInt?
   before_settled_position       BigInt?
@@ -1373,9 +1427,9 @@ model provider_promotion_invocation_projections {
   operation_count               Int
   safe_failure_code             String?
   canonical_detail_body         String
-  canonical_detail_digest       String   @db.Char(64)
-  projected_at                  DateTime @db.Timestamptz(6)
-  created_at                    DateTime @default(now()) @db.Timestamptz(6)
+  canonical_detail_digest       String    @db.Char(64)
+  projected_at                  DateTime  @db.Timestamptz(6)
+  created_at                    DateTime  @default(now()) @db.Timestamptz(6)
 
   provider providers @relation(fields: [provider_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_promotion_invocation_projections_provider_fkey")
 

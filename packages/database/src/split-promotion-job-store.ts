@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   EMPTY_PROMOTION_ATTEMPT_SET_DIGEST,
+  PROMOTION_JOB_DELIVERY_RETENTION_MS,
   PROMOTION_JOB_INVOCATION_LIMIT,
   PROMOTION_JOB_INVOCATION_RETENTION_MS,
   PROMOTION_JOB_SCHEDULE_CADENCE_SECONDS,
@@ -266,6 +267,25 @@ export class SplitPromotionJobStore {
       returning ${this.#wakeProjection()}
     `);
     return this.#mapWake(rows[0] ?? await this.#loadWake(client, false));
+  }
+
+  /**
+   * Allocates the next authority-local wake generation while holding the
+   * singleton row lock. Callers may pass a transaction to commit the wake
+   * atomically with the durable work that requires reconciliation.
+   */
+  async requestNextWake(
+    client: PromotionJobSqlClient,
+    input: Readonly<{
+      cause: PromotionWakeCause;
+      requestedAt: Date;
+    }>,
+  ): Promise<PromotionWakeIntent> {
+    const current = await this.#loadWake(client, true);
+    return this.coalesceWake(client, {
+      ...input,
+      requestedGeneration: (current?.requestedGeneration ?? 0n) + 1n,
+    });
   }
 
   async recordWakeDelivery(
@@ -980,9 +1000,19 @@ export class SplitPromotionJobStore {
   ): void {
     if (tombstone.triggerKind !== input.trigger.kind
       || tombstone.triggerEvidenceDigest !== triggerEvidenceDigest
-      || tombstone.issuedAt.getTime() !== input.delivery.issuedAt.getTime()
-      || tombstone.expiresAt.getTime() !== input.delivery.expiresAt.getTime()) {
+      || !validDate(tombstone.issuedAt)
+      || !validDate(tombstone.expiresAt)
+      || tombstone.expiresAt.getTime() - tombstone.issuedAt.getTime()
+        !== PROMOTION_JOB_DELIVERY_RETENTION_MS) {
       throw new PromotionJobPersistenceError("PROMOTION_JOB_DELIVERY_CONFLICT");
+    }
+    // A transport retry may reconstruct a fresh envelope after a process
+    // restart. The durable opaque key and trigger evidence are the identity;
+    // the first accepted envelope still fixes the replay-retention deadline.
+    if (input.now.getTime() >= tombstone.expiresAt.getTime()) {
+      throw new PromotionJobPersistenceError(
+        "PROMOTION_JOB_DELIVERY_KEY_EXPIRED",
+      );
     }
   }
 

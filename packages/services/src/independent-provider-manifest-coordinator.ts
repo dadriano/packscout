@@ -212,9 +212,11 @@ function targetMatchesClaim(
   const currentContainsProvider = currentManifest?.providerReferences.some(
     ({ platformKey }) => platformKey === claim.providerKey,
   ) ?? false;
-  const expectedImplicit = currentContainsProvider ? "advance" : "add";
   if (claim.requestedOperation === null) {
-    if (target.operation !== expectedImplicit) {
+    if (!currentContainsProvider) {
+      return "PROVIDER_MANIFEST_GATE_ADD_REQUIRES_AUTHORIZATION";
+    }
+    if (target.operation !== "advance") {
       return "PROVIDER_MANIFEST_GATE_OPERATION_MISMATCH";
     }
   } else if (target.operation !== claim.requestedOperation) {

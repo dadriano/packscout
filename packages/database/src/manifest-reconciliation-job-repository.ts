@@ -49,8 +49,10 @@ export class PrismaManifestReconciliationJobRepository {
 
   constructor(private readonly central: CentralPrismaClient) {}
 
-  loadWakeIntent(): Promise<PromotionWakeIntent> {
-    return this.#store.loadWakeIntent(sqlClient(this.central));
+  loadWakeIntent(
+    transaction?: CentralTransactionClient,
+  ): Promise<PromotionWakeIntent> {
+    return this.#store.loadWakeIntent(sqlClient(transaction ?? this.central));
   }
 
   coalesceWake(input: Readonly<{
@@ -62,6 +64,18 @@ export class PrismaManifestReconciliationJobRepository {
       sqlClient(transaction ?? this.central),
       input,
     );
+  }
+
+  requestNextWake(input: Readonly<{
+    cause: ManifestReconciliationWakeCause;
+    requestedAt: Date;
+  }>, transaction?: CentralTransactionClient): Promise<PromotionWakeIntent> {
+    if (transaction !== undefined) {
+      return this.#store.requestNextWake(sqlClient(transaction), input);
+    }
+    return this.central.$transaction((centralTransaction) =>
+      this.#store.requestNextWake(sqlClient(centralTransaction), input),
+    TRANSACTION);
   }
 
   recordWakeDelivery(input: Readonly<{
