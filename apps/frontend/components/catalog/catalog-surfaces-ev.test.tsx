@@ -193,31 +193,64 @@ test("server render keeps a current estimate before hydration even past its dead
     assert.equal(markup.includes("Last-known estimate"), false);
   }
   assert.ok(renderInspector(detail).includes("Current estimate"));
+  assert.equal(renderOpportunityTable(detail).includes("View evidence for"), false);
 });
 
 test("last-known EV stays visible and sortable after the former 60-minute boundary", () => {
   const detail = buildV3ViewDetail({
     evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
   });
-  for (const markup of [
-    renderOpportunityTable(detail),
+  const opportunity = renderOpportunityTable(detail);
+  const detailSurfaces = [
     renderAllRepacksTable([detail]),
     renderAllRepacksCards([detail]),
     renderInspector(detail),
-  ]) {
+  ];
+  for (const markup of [opportunity, ...detailSurfaces]) {
     assert.ok(markup.includes("Last-known estimate"));
+    assert.ok(markup.includes("Medium · 50%"));
+    assert.ok(markup.includes("-$15.00"));
+    assert.equal(markup.includes("Expired"), false);
+  }
+  for (const markup of detailSurfaces) {
     assert.ok(
       markup.includes(
         "Source data over 60 minutes old; last known values retained",
       ),
     );
     assert.ok(markup.includes("Source evidence last observed"));
-    assert.ok(markup.includes("Medium · 50%"));
-    assert.ok(markup.includes("-$15.00"));
-    assert.equal(markup.includes("Expired"), false);
   }
+  assert.match(
+    opportunity,
+    /aria-label="View evidence for Last-known estimate: [^"]+"/,
+  );
+  assert.equal(
+    opportunity.includes("Source data over 60 minutes old; last known values retained"),
+    false,
+  );
+  assert.equal(opportunity.includes("Source evidence last observed"), false);
   assert.ok(renderAllRepacksTable([detail]).includes("$85.00"));
   assert.ok(renderInspector(detail).includes("$85.00"));
+});
+
+test("opportunities separate EV confidence and disclose stale evidence on demand", () => {
+  const current = renderOpportunityTable();
+  const evPercentHeader = current.indexOf(">EV %<");
+  const confidenceHeader = current.indexOf(">Confidence<");
+  const buybackHeader = current.indexOf(">Buyback %<");
+
+  assert.ok(evPercentHeader >= 0);
+  assert.ok(confidenceHeader > evPercentHeader);
+  assert.ok(buybackHeader > confidenceHeader);
+  assert.equal(current.includes("View evidence for"), false);
+
+  const staleDetail = buildV3ViewDetail({
+    evEstimates: { ...buildV3ViewDetail().evEstimates, packScout: buildV3LastKnownEv() },
+  });
+  const stale = renderOpportunityTable(staleDetail);
+  assert.match(stale, /aria-label="View evidence for Last-known estimate: [^"]+"/);
+  assert.match(stale, /aria-expanded="false"/);
+  assert.ok(stale.includes("Medium · 50%"));
 });
 
 test("provider delay is informational and last-known EV remains rankable", () => {
@@ -288,20 +321,32 @@ test("all four catalog surfaces retain aged values with delayed feeds, failed up
       latestUnavailableReason: "ODDS_UNAVAILABLE",
     }) },
   });
-  const surfaces = [
-    renderOpportunityTable(detail), renderAllRepacksTable([detail]), renderInspector(detail),
+  const opportunity = renderOpportunityTable(detail);
+  const detailSurfaces = [
+    renderAllRepacksTable([detail]), renderInspector(detail),
     renderStatic(<AllRepacksCards controls={null} onSelect={noop}
       page={buildV3ListPage([detail])} selectedPublicRepackId={null} />),
   ];
-  for (const markup of surfaces) {
+  for (const markup of [opportunity, ...detailSurfaces]) {
     assert.ok(markup.includes("-$15.00"));
     assert.ok(markup.includes("-15.00%"));
     assert.ok(markup.includes("Low · 0%"));
     assert.ok(markup.includes("Last-known estimate"));
-    assert.ok(markup.includes("Fresh calculation unavailable"));
     assert.ok(markup.includes("$200.00"));
-    assert.ok(markup.includes("calculation-time Pack Price of $100.00"));
     assert.equal(markup.includes("excluded from Top Opportunities"), false);
     assert.equal(markup.includes("Expired"), false);
   }
+  for (const markup of detailSurfaces) {
+    assert.ok(markup.includes("Fresh calculation unavailable"));
+    assert.ok(markup.includes("calculation-time Pack Price of $100.00"));
+  }
+  assert.match(
+    opportunity,
+    /aria-label="View evidence for Last-known estimate: [^"]+"/,
+  );
+  assert.equal(opportunity.includes("Fresh calculation unavailable"), false);
+  assert.equal(
+    opportunity.includes("calculation-time Pack Price of $100.00"),
+    false,
+  );
 });
