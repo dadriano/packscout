@@ -3,14 +3,28 @@ import { z } from "zod";
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const instant = z.iso.datetime({ offset: true });
 
+/**
+ * Reasons that can leave every measurement unavailable at once, so they are
+ * the only ones a whole-provider unavailable result may be built from.
+ */
+const sharedUnavailableReasons = [
+  "not_configured", "unsupported", "database_unreachable", "query_failed",
+] as const;
+
 export const providerMeasurementUnavailableSchema = z.object({
   state: z.literal("unavailable"),
-  reason: z.enum([
-    "not_configured", "unsupported", "database_unreachable", "query_failed",
-    // Counting every canonical row would cost more than its measurement
-    // budget, so no count was attempted. The estimate is reported separately.
-    "count_exceeds_budget",
-  ]),
+  reason: z.enum(sharedUnavailableReasons),
+}).strict();
+
+/**
+ * Storage alone can also be left uncounted because counting every canonical
+ * row would cost more than its measurement budget. That reason describes one
+ * measurement and obliges an estimate, so it is not a shared reason and
+ * cannot be used to make every measurement unavailable.
+ */
+const storageUnavailableSchema = z.object({
+  state: z.literal("unavailable"),
+  reason: z.enum([...sharedUnavailableReasons, "count_exceeds_budget"]),
 }).strict();
 
 const canonicalCountsSchema = z.object({
@@ -40,7 +54,7 @@ const storageSchema = z.discriminatedUnion("state", [
     measuredAt: instant,
     counts: canonicalCountsSchema,
   }).strict(),
-  providerMeasurementUnavailableSchema,
+  storageUnavailableSchema,
 ]);
 
 /**
@@ -125,6 +139,10 @@ export type ProviderSourceMeasurements = z.infer<typeof providerSourceMeasuremen
 export type ProviderStorageEstimate = z.infer<typeof storageEstimateSchema>;
 export type ProviderMeasurementUnavailableReason = z.infer<
   typeof providerMeasurementUnavailableSchema
+>["reason"];
+/** Includes the storage-only reason, which obliges a reported estimate. */
+export type ProviderStorageUnavailableReason = z.infer<
+  typeof storageUnavailableSchema
 >["reason"];
 
 export function unavailableProviderSourceMeasurements(

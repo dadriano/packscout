@@ -48,6 +48,22 @@ test("exact provider measurements reconcile totals and preserve safe numeric pre
   }).success, false);
 });
 
+test("a whole-provider unavailable result cannot be built from a storage-only reason", () => {
+  // The storage-only reason obliges an estimate, which this helper does not
+  // report, so accepting it would return a value its own type rejects. The
+  // constraint is in the type: without the directive below this line fails to
+  // compile, and if the argument is ever widened again the directive does.
+  // @ts-expect-error count_exceeds_budget is not a whole-provider reason
+  const invalid = () => unavailableProviderSourceMeasurements("count_exceeds_budget");
+  assert.equal(typeof invalid, "function");
+
+  // Every reason the helper does accept round-trips through the schema.
+  for (const reason of ["not_configured", "unsupported", "database_unreachable", "query_failed"] as const) {
+    const measurements = unavailableProviderSourceMeasurements(reason);
+    assert.deepEqual(providerSourceMeasurementsSchema.parse(measurements), measurements);
+  }
+});
+
 test("an estimate never occupies the field that means an exact count", () => {
   const estimate = { measuredAt, counts: measured.storage.counts };
   const estimated = providerSourceMeasurementsSchema.parse({
