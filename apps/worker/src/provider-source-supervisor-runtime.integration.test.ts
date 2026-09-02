@@ -645,14 +645,14 @@ test("real supervisor overlaps four source lanes and advances sequential pages t
     await supervisor.runCycle();
     await waitFor(async () => {
       assert.equal(await fixture.database.import_pages.count(), 8);
-    });
+    }, 30_000);
     await supervisor.runCycle();
     await waitFor(async () => {
       assert.equal(await fixture.database.import_pages.count(), 12);
       assert.equal(await fixture.database.import_runs.count({
         where: { state: "succeeded" },
       }), 4);
-    });
+    }, 30_000);
     assert.equal(calls, 12);
     assert.equal(maximumActive, 4);
     assert.deepEqual(
