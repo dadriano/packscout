@@ -469,6 +469,76 @@ test("overview separates live lane and settlement while isolating a provider out
   assert.deepEqual(routed, [alphaId, betaId]);
 });
 
+test("last-known observation time stays tied to trusted evidence across failed probes", async () => {
+  const trustedObservedAt = new Date("2026-09-01T11:55:00.000Z");
+  let failedProbeAt = new Date("2026-09-01T12:05:00.000Z");
+  const base = repository();
+  const service = new PromotionJobMonitoringReadService({
+    repository: {
+      ...base,
+      async listRoster() { return [providers[0]!]; },
+      async readProviderEvidence(input) {
+        return {
+          observation: {
+            jobKey: `provider:${input.provider.id}`,
+            jobKind: "provider_publication" as const,
+            organizationId,
+            providerId: input.provider.id,
+            evidenceSource: "last_known" as const,
+            routeFailureCode: "DATABASE_UNREACHABLE",
+            observedAt: new Date(failedProbeAt),
+            evaluatedAt: new Date(failedProbeAt),
+            trustedObservedAt,
+            judgment: {
+              lifecycle: "active" as const,
+              scheduleEpoch: 1n,
+              health: "healthy" as const,
+              latestCountableWindowIndex: 54n,
+              lastAdmittedWindowIndex: 54n,
+              missedWindowCount: 0n,
+              lastScheduledCheckinAt: trustedObservedAt,
+              evaluatedAt: trustedObservedAt,
+            },
+          },
+          latestProjection: null,
+          completedRelease: null,
+          completionObservedAt: null,
+          activeRelease: input.active === null
+            ? null
+            : { ...input.active, position: null },
+          pendingGate: null,
+          projectedAt: null,
+        };
+      },
+    },
+    gateway: {
+      async runWithAdminProviderDatabase(input) {
+        return {
+          state: "unreachable" as const,
+          providerId: input.providerId,
+          observedAt: failedProbeAt.toISOString(),
+          failureCode: "database_unreachable" as const,
+          retryHint: "Retry later.",
+        };
+      },
+    },
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => failedProbeAt,
+  });
+
+  const first = await service.overview({ organizationId });
+  failedProbeAt = new Date("2026-09-01T12:06:00.000Z");
+  const second = await service.overview({ organizationId });
+
+  assert.deepEqual(
+    [first.providers[0]?.observedAt, second.providers[0]?.observedAt],
+    [trustedObservedAt.toISOString(), trustedObservedAt.toISOString()],
+  );
+  assert.equal(second.providers[0]?.evidenceSource, "last_known");
+  assert.equal(second.providers[0]?.stale, true);
+});
+
 test("overview bounds a 64-provider outage with one deadline and preserves every last-known row", {
   timeout: 1_000,
 }, async () => {
@@ -517,6 +587,88 @@ test("overview bounds a 64-provider outage with one deadline and preserves every
       "MONITORING_PROBE_BUDGET_EXHAUSTED",
     );
   }
+});
+
+test("overview deadline stops queued central reads and preserves manifest identity", {
+  timeout: 1_000,
+}, async () => {
+  const providerRows = Array.from({ length: 64 }, (_, index) =>
+    providerAt(index)
+  );
+  const base = capacityRepository(providerRows);
+  let centralReads = 0;
+  let gatewayReads = 0;
+  const service = new PromotionJobMonitoringReadService({
+    repository: {
+      ...base,
+      readProviderEvidence() {
+        centralReads += 1;
+        return new Promise<never>(() => undefined);
+      },
+    },
+    gateway: {
+      async runWithAdminProviderDatabase() {
+        gatewayReads += 1;
+        throw new Error("Gateway must not run without central evidence.");
+      },
+    },
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => observedAt,
+    overviewProviderReadTimeoutMs: 25,
+  });
+
+  const startedAt = performance.now();
+  const overview = promotionJobMonitoringOverviewSchema.parse(
+    await service.overview({ organizationId }),
+  );
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(elapsedMs < 500, `overview took ${elapsedMs}ms`);
+  assert.equal(centralReads, 4);
+  assert.equal(gatewayReads, 0);
+  assert.equal(overview.providers.length, providerRows.length);
+  for (const [index, provider] of overview.providers.entries()) {
+    const selected = releaseAt(index);
+    assert.equal(provider.state, "unavailable");
+    assert.equal(provider.evidenceSource, "unavailable");
+    assert.equal(
+      provider.routeFailureCode,
+      "MONITORING_PROBE_BUDGET_EXHAUSTED",
+    );
+    assert.deepEqual(provider.activeRelease, {
+      publicReleaseId: selected.publicReleaseId,
+      fingerprint: selected.fingerprint,
+      position: null,
+    });
+  }
+});
+
+test("overview preserves central evidence rejection as a request failure", async () => {
+  const failure = new Error("central evidence unavailable");
+  const base = capacityRepository([providers[0]!]);
+  let gatewayReads = 0;
+  const service = new PromotionJobMonitoringReadService({
+    repository: {
+      ...base,
+      async readProviderEvidence() { throw failure; },
+    },
+    gateway: {
+      async runWithAdminProviderDatabase() {
+        gatewayReads += 1;
+        throw new Error("Gateway must not run after central rejection.");
+      },
+    },
+    deployment: "test",
+    secret: new Uint8Array(32).fill(8),
+    now: () => observedAt,
+  });
+
+  await assert.rejects(
+    service.overview({ organizationId }),
+    (error) => error === failure,
+  );
+  assert.equal(gatewayReads, 0);
 });
 
 test("overview isolates a rejected provider route from healthy peers", async () => {

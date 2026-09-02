@@ -397,7 +397,7 @@ async function mapBounded<T, U>(
 
 type DeadlineSettlement<T> =
   | { readonly state: "fulfilled"; readonly value: T }
-  | { readonly state: "rejected" }
+  | { readonly state: "rejected"; readonly reason: unknown }
   | { readonly state: "timed_out" };
 
 interface DeadlineLatch {
@@ -444,8 +444,8 @@ async function settleByDeadline<T>(
   let pending: Promise<T>;
   try {
     pending = Promise.resolve(operation());
-  } catch {
-    return { state: "rejected" };
+  } catch (reason) {
+    return { state: "rejected", reason };
   }
   return new Promise((resolve) => {
     let finished = false;
@@ -460,10 +460,10 @@ async function settleByDeadline<T>(
         finished = true;
         resolve({ state: "fulfilled", value });
       },
-      () => {
+      (reason) => {
         if (finished) return;
         finished = true;
-        resolve({ state: "rejected" });
+        resolve({ state: "rejected", reason });
       },
     );
   });
@@ -987,7 +987,6 @@ function lastKnownFacts(
     central.projectedAt,
     central.completionObservedAt,
     observation?.trustedObservedAt ?? null,
-    observation?.observedAt ?? null,
   ].filter((value): value is Date => value !== null).sort((left, right) =>
     right.getTime() - left.getTime()
   )[0];
@@ -1252,16 +1251,51 @@ export class PromotionJobMonitoringReadService {
     const providerReadDeadlineLatch = createDeadlineLatch(providerReadDeadline);
     let providerViews: PromotionJobMonitoringOverview["providers"];
     try {
-      providerViews = await mapBounded(providers, async (provider) => {
-        const central = await this.options.repository.readProviderEvidence({
-          organizationId: input.organizationId,
-          provider,
-          active: manifest.activeReleases.get(provider.providerKey) ?? null,
-        });
+      // Capture every available central fallback before slow provider gateways
+      // can occupy the bounded mapper lanes for the rest of the shared budget.
+      const centralReads = await mapBounded(providers, async (provider) => {
+        const active = manifest.activeReleases.get(provider.providerKey) ?? null;
+        const centralSettlement = await settleByDeadline(
+          () => this.options.repository.readProviderEvidence({
+            organizationId: input.organizationId,
+            provider,
+            active,
+          }),
+          providerReadDeadlineLatch,
+        );
+        if (centralSettlement.state === "rejected") {
+          throw centralSettlement.reason;
+        }
+        return { provider, active, centralSettlement };
+      });
+      providerViews = await mapBounded(centralReads, async ({
+        provider,
+        active,
+        centralSettlement,
+      }) => {
+        const central: CentralProviderPromotionMonitoringEvidence =
+          centralSettlement.state === "fulfilled"
+            ? centralSettlement.value
+            : {
+                observation: null,
+                latestProjection: null,
+                completedRelease: null,
+                completionObservedAt: null,
+                activeRelease: active === null
+                  ? null
+                  : { ...active, position: null },
+                pendingGate: null,
+                projectedAt: null,
+              };
         let routed: ProviderDatabaseOperationResult<LiveProviderPromotionMonitoringSnapshot>
           | null = null;
-        let probeFailureCode: string | null = null;
-        if (provider.lifecycle === "active") {
+        let probeFailureCode: string | null = centralSettlement.state === "timed_out"
+          ? "MONITORING_PROBE_BUDGET_EXHAUSTED"
+          : null;
+        if (
+          provider.lifecycle === "active"
+          && centralSettlement.state === "fulfilled"
+        ) {
           const settlement = await settleByDeadline(
             () => this.options.gateway.runWithAdminProviderDatabase(
               {
