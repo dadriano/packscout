@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { test } from "node:test";
 import { Pool } from "pg";
-import { endPoolFully } from "./postgres-test-support.ts";
+import {
+  endPoolFully,
+  guardPoolErrors,
+} from "./pool-teardown.test-support.ts";
 
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
   ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
@@ -40,11 +43,28 @@ async function createPreProviderSettlementDatabase(): Promise<{
   if (!/^packscout_provider_settlement_[0-9]+_[0-9]+$/.test(databaseName)) {
     throw new Error("refusing to create an unscoped test database");
   }
-  const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
+  const admin = guardPoolErrors(
+    new Pool({ connectionString: adminUrl.toString(), max: 1 }),
+  );
   await admin.query(`create database "${databaseName}"`);
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
-  const database = new Pool({ connectionString: databaseUrl.toString(), max: 1 });
+  const database = guardPoolErrors(
+    new Pool({ connectionString: databaseUrl.toString(), max: 1 }),
+  );
+
+  // Both teardown paths must fully drain the pool before the FORCE drop, or the
+  // drop terminates a backend node-pg still owns and the resulting error
+  // surfaces as an uncaught exception in an unrelated test.
+  const teardown = async (): Promise<void> => {
+    try {
+      await endPoolFully(database);
+      await admin.query(`drop database if exists "${databaseName}" with (force)`);
+    } finally {
+      await endPoolFully(admin);
+    }
+  };
+
   try {
     for (const migrationName of priorMigrationNames) {
       await applyMigration(database, migrationName);

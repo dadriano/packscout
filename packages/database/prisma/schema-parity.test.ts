@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import {
+  endPoolFully,
+  guardPoolErrors,
+} from "./pool-teardown.test-support.ts";
+import {
   assertSchemaParity,
   inspectSchema,
   loadSchemaParityManifest,
@@ -45,11 +49,15 @@ async function createDisposableDatabase(): Promise<{
   if (!/^packscout_prisma_schema_[0-9]+_[0-9]+$/.test(databaseName)) {
     throw new Error("refusing to create an unscoped test database");
   }
-  const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
+  const admin = guardPoolErrors(
+    new Pool({ connectionString: adminUrl.toString(), max: 1 }),
+  );
   await admin.query(`create database "${databaseName}"`);
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
-  const db = new Pool({ connectionString: databaseUrl.toString(), max: 4 });
+  const db = guardPoolErrors(
+    new Pool({ connectionString: databaseUrl.toString(), max: 4 }),
+  );
   return {
     db,
     databaseUrl: databaseUrl.toString(),
