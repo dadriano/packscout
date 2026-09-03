@@ -192,21 +192,21 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "buybackPercent",
     label: "Buyback %",
     definition:
-      "The share of a card’s value the vendor guarantees to pay when you sell it back. Shown as one number only when the same rate covers every outcome.",
+      "Share of a collectible’s value the vendor guarantees to pay when you sell it back. Shown as one number only when the same rate covers every outcome.",
     enabledByDefault: true,
   },
   {
     key: "topChase",
     label: "Top Chase",
     definition:
-      "The most valuable card PackScout has matched to this repack.",
+      "The most valuable collectible PackScout has matched to this repack.",
     enabledByDefault: true,
   },
   {
     key: "topChaseValue",
     label: "Top Chase Value",
     definition:
-      "PackScout’s reference value for that card.",
+      "PackScout’s reference value for that collectible.",
     enabledByDefault: true,
   },
   {
