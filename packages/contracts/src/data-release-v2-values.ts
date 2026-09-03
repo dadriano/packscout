@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parsedHttpsUrl, publicHttpsUrlSchema } from "./public-url.ts";
+export { parsedHttpsUrl, publicHttpsUrlSchema } from "./public-url.ts";
 
 export const DATA_RELEASE_SCHEMA_VERSION = "data_release_v2" as const;
 export const REPACK_SEARCH_VERSION = "repack_search_v2" as const;
@@ -47,26 +49,6 @@ export function normalizePublicSearchText(value: string): string {
   }
   return tokens.join(" ");
 }
-
-export function parsedHttpsUrl(value: string): URL | null {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" &&
-        parsed.username === "" &&
-        parsed.password === ""
-      ? parsed
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export const publicHttpsUrlSchema = z
-  .string()
-  .max(2_048)
-  .refine((value) => parsedHttpsUrl(value) !== null, {
-    message: "public_url.invalid",
-  });
 
 export const publicHttpsOriginSchema = publicHttpsUrlSchema.refine((value) => {
   const parsed = parsedHttpsUrl(value);

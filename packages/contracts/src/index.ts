@@ -55,3 +55,8 @@ export * from "./provider-pack-membership-snapshot-v1.ts";
 export * from "./clutchpacks-pack-membership-v1.ts";
 export * from "./data-release-v3-retained-ev-witness.ts";
 export * from "./provider-page-record-counts.ts";
+export * from "./pack-catalog-v1.ts";
+export * from "./pack-catalog-domain.ts";
+export * from "./pack-publication.ts";
+export * from "./pack-catalog-query.ts";
+export * from "./pack-catalog-operations.ts";

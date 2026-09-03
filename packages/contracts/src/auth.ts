@@ -44,6 +44,9 @@ export const operatorPermissions = [
   "message_delivery:view",
   "message_delivery:manage",
   "data_inspection:view",
+  "pack_publication:recover",
+  "pack_catalog:launch",
+  "pack_catalog:prune",
 ] as const;
 
 export type OperatorPermission = (typeof operatorPermissions)[number];
@@ -80,6 +83,9 @@ export const operatorRolePermissions: Readonly<
     "message_delivery:view",
     "message_delivery:manage",
     "data_inspection:view",
+    "pack_publication:recover",
+    "pack_catalog:launch",
+    "pack_catalog:prune",
   ] as const),
   data_operator: Object.freeze([
     "providers:view",
