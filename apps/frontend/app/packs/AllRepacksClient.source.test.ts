@@ -28,6 +28,11 @@ test("all-repacks delegates the desired-chase search to the page heading", () =>
   assert.equal(source.includes("<DesiredCollectibleSearch"), false);
 });
 
+test("all-repacks opens the chase inspector from matching chase cells", () => {
+  assert.match(source, /onInspectChase=\{inspectChase\}/);
+  assert.match(source, /chaseInspect\.registerPackOpener/);
+});
+
 test("all-repacks supports persistent result layout and page-size choices", () => {
   assert.match(source, /<CatalogResultsControls/);
   assert.match(source, /<AllRepacksCards/);

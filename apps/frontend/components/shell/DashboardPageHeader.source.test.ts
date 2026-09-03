@@ -12,4 +12,5 @@ test("all-repacks can place desired chase search in the Dashboard page heading",
   assert.match(source, /variant="heading"/);
   assert.match(source, /data-has-desired-chase/);
   assert.match(source, /serializeCatalogViewState\(nextQuery, desiredChase\.layout\)/);
+  assert.match(source, /chaseInspect\.open\(/);
 });

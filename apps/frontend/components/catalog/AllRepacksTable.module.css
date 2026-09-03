@@ -213,9 +213,26 @@
   text-overflow: ellipsis;
 }
 
-.chaseMatch {
+.chaseMatch,
+.chaseSelect {
   display: grid;
   gap: 0.18rem;
+}
+
+.chaseSelect {
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.chaseSelect:hover .chaseName,
+.chaseSelect:focus-visible .chaseName {
+  color: var(--color-action);
+  text-decoration: underline;
 }
 
 .chaseEvidence {

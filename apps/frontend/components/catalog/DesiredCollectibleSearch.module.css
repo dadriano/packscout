@@ -97,7 +97,22 @@
 }
 
 .saveAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
   margin-top: 0.1rem;
+}
+
+.viewChase {
+  background: transparent;
+  border: 0;
+  color: var(--color-action);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0;
 }
 
 .listbox {

@@ -9,6 +9,7 @@ import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client
 import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
+  type CollectibleIdentityInput,
 } from "@/lib/collectible-identity";
 import {
   desiredCollectibleSearchStatusCopy,
@@ -34,6 +35,11 @@ type DesiredCollectibleSearchProps = Readonly<{
   selected: PublicCollectibleDisplay | null;
   pending?: boolean;
   onSelect: (publicCollectibleId: string | null) => void;
+  onInspect?: (
+    publicCollectibleId: string,
+    trigger: HTMLElement | null,
+    identity?: CollectibleIdentityInput,
+  ) => void;
   variant?: "section" | "heading";
 }>;
 
@@ -94,6 +100,7 @@ export function DesiredCollectibleSearch({
   selected,
   pending = false,
   onSelect,
+  onInspect,
   variant = "section",
 }: DesiredCollectibleSearchProps) {
   const id = useId();
@@ -212,10 +219,11 @@ export function DesiredCollectibleSearch({
     return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
   }, [open]);
 
-  function choose(option: CollectibleOption) {
+  function choose(option: CollectibleOption, trigger: HTMLElement | null) {
     closeOptions();
     setSearch(option.name);
     onSelect(option.publicCollectibleId);
+    onInspect?.(option.publicCollectibleId, trigger, option);
   }
 
   const statusCopy = desiredCollectibleSearchStatusCopy({
@@ -257,7 +265,11 @@ export function DesiredCollectibleSearch({
               );
             } else if (event.key === "Enter" && activeIndex >= 0) {
               event.preventDefault();
-              choose(visibleOptions[activeIndex]!);
+              const option = visibleOptions[activeIndex]!;
+              choose(
+                option,
+                document.getElementById(`${id}-option-${activeIndex}`),
+              );
             } else if (event.key === "Escape") {
               closeOptions();
             }
@@ -291,6 +303,22 @@ export function DesiredCollectibleSearch({
       </p>
       {selected ? (
         <div className={styles.saveAction}>
+          {onInspect ? (
+            <button
+              className={styles.viewChase}
+              disabled={pending}
+              onClick={(event) =>
+                onInspect(
+                  selected.publicCollectibleId,
+                  event.currentTarget,
+                  selected,
+                )
+              }
+              type="button"
+            >
+              View chase
+            </button>
+          ) : null}
           <SavedCollectibleButton
             publicCollectibleId={selected.publicCollectibleId}
           />
@@ -307,7 +335,7 @@ export function DesiredCollectibleSearch({
               key={option.publicCollectibleId}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActiveIndex(index)}
-              onClick={() => choose(option)}
+              onClick={(event) => choose(option, event.currentTarget)}
               role="option"
             >
               <strong>{option.name}</strong>

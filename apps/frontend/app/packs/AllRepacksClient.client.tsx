@@ -24,6 +24,7 @@ import {
   RepackInspector,
   type InspectorActionOutcome,
 } from "@/components/catalog/PackInspector.client";
+import { useOptionalChaseInspect } from "@/components/catalog/ChaseCollectibleInspector.client";
 import {
   buildPublishedRepackHref,
   copyPublicPromoCode,
@@ -138,6 +139,7 @@ export function AllRepacksClient({
   const [inspectorOpen, setInspectorOpen] = useState(initialInspectorOpen);
   const actionFeedbackRepackIdRef = useRef<string | null>(null);
   const selectionTriggerRef = useRef<HTMLElement | null>(null);
+  const chaseInspect = useOptionalChaseInspect();
   const detailById = useMemo(
     () => new Map(details.map((detail) => [detail.publicRepackId, detail])),
     [details],
@@ -204,6 +206,32 @@ export function AllRepacksClient({
     page.release.publicReleaseId,
     page.range.total,
   ]);
+
+  useEffect(() => {
+    if (!chaseInspect) return;
+    return chaseInspect.registerPackOpener((publicRepackId, trigger) => {
+      if (trigger) selectionTriggerRef.current = trigger;
+      actionFeedbackRepackIdRef.current = null;
+      setActionFeedback("");
+      setSelectedPublicRepackId(publicRepackId);
+      setInspectorOpen(true);
+      startTransition(() =>
+        router.push(
+          serializeCatalogViewState(
+            selectCatalogRepack(navigationQuery, publicRepackId),
+            initialLayout,
+          ),
+        ),
+      );
+    });
+  }, [chaseInspect, initialLayout, navigationQuery, router]);
+
+  function inspectChase(
+    publicCollectibleId: string,
+    trigger: HTMLButtonElement,
+  ) {
+    chaseInspect?.open({ publicCollectibleId, trigger });
+  }
 
   function reportAction(outcome: InspectorActionOutcome) {
     queueProductTelemetry(
@@ -375,6 +403,7 @@ export function AllRepacksClient({
             <AllRepacksTable
               controls={resultsControls}
               onCopyPromo={copyPromo}
+              onInspectChase={inspectChase}
               onOpenRepack={openRepack}
               onSelect={(publicRepackId, trigger) => {
                 selectionTriggerRef.current = trigger;
@@ -388,6 +417,7 @@ export function AllRepacksClient({
           ) : (
             <AllRepacksCards
               controls={resultsControls}
+              onInspectChase={inspectChase}
               onSelect={(publicRepackId, trigger) => {
                 selectionTriggerRef.current = trigger;
                 selectRepack(publicRepackId);

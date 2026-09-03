@@ -37,3 +37,15 @@ test("horizontal scrolling does not contain the shared fixed hint panel", () => 
   assert.match(styles, /\.scroller \{[\s\S]*?overflow-x: auto;/);
   assert.match(styles, /\.table \{[\s\S]*?min-width: 1760px;/);
 });
+
+test("desired chase matches open the chase inspector instead of the pack sheet", () => {
+  assert.match(source, /onInspectChase\?:/);
+  assert.match(
+    source,
+    /aria-label=\{`View chase \$\{displayedChase\.collectible\.name\}`\}/,
+  );
+  assert.match(
+    source,
+    /onInspectChase\(\s*displayedChase\.collectible\.publicCollectibleId,\s*event\.currentTarget,?\s*\)/,
+  );
+});
