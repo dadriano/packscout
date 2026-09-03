@@ -258,19 +258,8 @@ export function RepackInspector({
   const chaseUnavailableReason =
     chase.reasonCopy ?? METRIC_TRUST_COPY.unavailableExplanation;
   const headingId = `repack-inspector-${placement}-${repack.publicRepackId}`;
-  const estimatedEvHint = [
-    METRIC_TRUST_COPY.longRunExplanation,
-    packScoutEv.freshness.calculatedLabel,
-    packScoutEv.freshness.dataAsOfLabel,
-    packScoutEv.freshness.confidenceEvaluatedLabel,
-    releaseDataAsOf.label,
-  ].join(" ");
-  const vendorReportedEvHint = [
-    METRIC_TRUST_COPY.sourceExplanation,
-    vendorEv.observedLabel,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const vendorObservationDetails =
+    vendorEv.observedLabel === null ? [] : [vendorEv.observedLabel];
 
   useEffect(() => {
     if (placement !== "sheet") return;
@@ -405,11 +394,6 @@ export function RepackInspector({
         <div className={styles.sectionBlock}>
           <PackScoutEvMetrics
             compact
-            headingHint={{
-              label: METRIC_TRUST_COPY.estimateLabel,
-              definition: estimatedEvHint,
-              learnHref: EXPECTED_VALUE_ARTICLE_HREF,
-            }}
             presentation={packScoutEv}
             showProvenance={false}
             showRepackPrice={false}
@@ -434,11 +418,8 @@ export function RepackInspector({
               <h3>
                 Vendor-reported EV
                 <GlossaryHint
-                  content={{
-                    label: "Vendor-reported EV",
-                    definition: vendorReportedEvHint,
-                    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
-                  }}
+                  details={vendorObservationDetails}
+                  detailsHeading="Source"
                   field="vendorReportedEv"
                 />
               </h3>
@@ -467,10 +448,8 @@ export function RepackInspector({
           <div className={styles.buybackMetric}>
             <MetricValue
               compact
-              glossaryContent={{
-                label: buyback.label,
-                definition: coverage,
-              }}
+              glossaryDetails={[coverage]}
+              glossaryDetailsHeading="Evidence coverage"
               metric={buyback}
             />
           </div>

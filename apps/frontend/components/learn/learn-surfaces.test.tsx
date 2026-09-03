@@ -2,7 +2,7 @@ import { renderStatic } from "@/lib/component-render.test-support";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { findLearnGuide, LEARN_GUIDES } from "@/lib/learn-content";
-import { METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
+import { getGlossaryDefinition, METRIC_TRUST_COPY } from "@/lib/metric-vocabulary";
 import {
   CANONICAL_BUYBACK_EQUATION,
   getPackScoutEvWorkedExample,
@@ -76,16 +76,11 @@ test("the Expected Value article renders shared example values and definitions",
   const canonical = getPackScoutEvWorkedExample("canonical_buyback");
   assert.ok(markup.includes(`aria-label="${canonical.title}"`));
 
-  // Canonical glossary definitions render verbatim inside the article.
+  // Canonical glossary definitions render verbatim inside the article, so the
+  // article and the hover hints can never drift apart.
+  assert.ok(markup.includes(getGlossaryDefinition("grossEv").definition));
   assert.ok(
-    markup.includes(
-      "The expected guaranteed buyback payout: each supported outcome’s final guaranteed buyback payout weighted by its probability",
-    ),
-  );
-  assert.ok(
-    markup.includes(
-      "The documented uniform buyback rate when one rate governs every eligible outcome; otherwise a bounded summary such as Varies by outcome",
-    ),
+    markup.includes(getGlossaryDefinition("buybackPercent").definition),
   );
 
   // The shared responsible-play block renders on articles too.

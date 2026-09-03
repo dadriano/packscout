@@ -89,13 +89,19 @@ export type PackScoutEvFreshnessPresentation = Readonly<{
   sourceAgeLabel: string | null;
   delayed: boolean;
   calculatedAt: string;
+  /** Sentence form, "Calculated <time>", for accessible labels and prose. */
   calculatedLabel: string;
+  /** The formatted time alone, for labeled definition lists. */
+  calculatedTimeLabel: string;
   dataAsOf: string | null;
   dataAsOfLabel: string;
+  dataAsOfTimeLabel: string | null;
   confidenceEvaluatedAt: string;
   confidenceEvaluatedLabel: string;
+  confidenceEvaluatedTimeLabel: string;
   soldOutAt: string | null;
   soldOutLabel: string | null;
+  soldOutTimeLabel: string | null;
 }>;
 
 export type PackScoutEvStatusKind =
@@ -484,6 +490,12 @@ function presentFreshness(
     : estimate.status === "last_known" ? estimate.historicalSoldOutAt : null;
   const confidenceEvaluatedAt = estimate.status === "last_known"
     ? estimate.confidenceEvaluatedAt : estimate.calculatedAt;
+  const calculatedTimeLabel = formatPublicTimestamp(estimate.calculatedAt);
+  const dataAsOfTimeLabel =
+    dataAsOf === null ? null : formatPublicTimestamp(dataAsOf);
+  const confidenceEvaluatedTimeLabel = formatPublicTimestamp(confidenceEvaluatedAt);
+  const soldOutTimeLabel =
+    soldOutAt === null ? null : formatPublicTimestamp(soldOutAt);
   return Object.freeze({
     sourceAgeState,
     sourceAgeLabel:
@@ -491,16 +503,20 @@ function presentFreshness(
     delayed:
       sourceAgeState !== null && sourceAgeState !== "fresh_within_15_minutes",
     calculatedAt: estimate.calculatedAt,
-    calculatedLabel: `Calculated ${formatPublicTimestamp(estimate.calculatedAt)}`,
+    calculatedLabel: `Calculated ${calculatedTimeLabel}`,
+    calculatedTimeLabel,
     dataAsOf,
     dataAsOfLabel:
-      dataAsOf === null
+      dataAsOfTimeLabel === null
         ? ESTIMATE_STATUS_COPY.unknownSourceTime
-        : `Source evidence last observed ${formatPublicTimestamp(dataAsOf)}`,
+        : `Source evidence last observed ${dataAsOfTimeLabel}`,
+    dataAsOfTimeLabel,
     confidenceEvaluatedAt,
-    confidenceEvaluatedLabel: `Confidence evaluated ${formatPublicTimestamp(confidenceEvaluatedAt)}`,
+    confidenceEvaluatedLabel: `Confidence evaluated ${confidenceEvaluatedTimeLabel}`,
+    confidenceEvaluatedTimeLabel,
     soldOutAt,
-    soldOutLabel: soldOutAt === null ? null : `Sold out ${formatPublicTimestamp(soldOutAt)}`,
+    soldOutLabel: soldOutTimeLabel === null ? null : `Sold out ${soldOutTimeLabel}`,
+    soldOutTimeLabel,
   });
 }
 

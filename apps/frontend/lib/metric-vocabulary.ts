@@ -26,13 +26,13 @@ export const METRIC_TRUST_COPY = Object.freeze({
   dashboardDisclaimer:
     "PackScout Gross EV — calculated from platform-provided data · Not financial or gambling advice",
   longRunExplanation:
-    "EV is a probability-weighted estimate of the guaranteed buyback payout. It does not predict the contents or outcome of one repack.",
+    "EV estimates the average guaranteed buyback payout across many packs. It does not predict what one pack will contain.",
   sourceExplanation:
-    "Vendor-reported EV and PackScout Gross EV are separate estimates and are never averaged or substituted.",
+    "Vendor-reported EV is the vendor’s own number. PackScout shows it separately and never averages or substitutes it into PackScout Gross EV.",
   confidenceExplanation:
-    "Confidence describes how reliable and fresh PackScout's supporting evidence is, not profit likelihood or whether EV is positive. After 60 minutes, confidence decays while the last-known economics remain visible.",
+    "Confidence measures how solid and recent the evidence behind an estimate is, not how likely a profit is. It drops as source data ages past 60 minutes, while the last-known EV stays visible.",
   unavailableExplanation:
-    "Unavailable means PackScout has no supported prior estimate to display. When a fresh calculation is blocked, the last supported values remain visible with reduced confidence. Age alone does not make an estimate unavailable. PackScout never assumes missing buyback terms.",
+    "Unavailable means a required supported input is missing; PackScout never assumes missing buyback terms. Age alone does not make an estimate unavailable, so the last supported values stay visible with lower confidence.",
 });
 
 export const PUBLIC_REASON_COPY = Object.freeze({
@@ -111,40 +111,40 @@ export const COMPARISON_GLOSSARY = Object.freeze([
   {
     key: "vendor",
     label: "Vendor",
-    definition: "The vendor offering the repack",
+    definition: "The vendor selling this repack.",
     enabledByDefault: true,
   },
   {
     key: "category",
     label: "Category",
-    definition: "A subject branch represented by the repack",
+    definition: "The kind of collectibles inside the repack.",
     enabledByDefault: true,
   },
   {
     key: "repack",
     label: "Repack",
-    definition: "The vendor’s public repack or gacha listing name",
+    definition: "The vendor’s public name for this repack or gacha listing.",
     enabledByDefault: true,
   },
   {
     key: "heat",
     label: "Heat",
     definition:
-      "A timing signal comparing recent activity with this repack’s own baseline. Heat does not mean profit, positive EV, or a predicted outcome.",
+      "How busy this repack is right now compared with its own normal pace. Heat is not profit, EV, or a prediction.",
     enabledByDefault: true,
   },
   {
     key: "repackPrice",
     label: "Pack Price",
     definition:
-      "The current public listed price before personalized, membership, or promo discounts",
+      "The listed price to open one pack, before any discounts or promo codes.",
     enabledByDefault: true,
   },
   {
     key: "grossEv",
     label: "Gross EV $",
     definition:
-      "The expected guaranteed buyback payout: each supported outcome’s final guaranteed buyback payout weighted by its probability",
+      "The average guaranteed buyback payout for one pack, weighting each outcome by its odds.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -152,7 +152,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "grossEvPercent",
     label: "Gross EV %",
     definition:
-      "The expected guaranteed buyback payout divided by the public Pack Price",
+      "Gross EV $ as a share of Pack Price. 100% means the average buyback pays back the full price.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -160,7 +160,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evDollars",
     label: "EV $",
     definition:
-      "PackScout Gross EV $ minus Pack Price, signed above or below the price",
+      "Gross EV $ minus Pack Price. Below $0, the average buyback pays less than the pack costs.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -168,7 +168,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evPercent",
     label: "EV %",
     definition:
-      "PackScout Gross EV % minus 100 percentage points, signed above or below Pack Price",
+      "Gross EV % minus 100%. 0% is break-even; below 0%, the average buyback pays less than the price.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -176,7 +176,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "evConfidence",
     label: "EV Confidence",
     definition:
-      "How reliable and fresh PackScout’s supporting evidence is; after 60 minutes it decays while last-known EV remains visible, and it never describes profit likelihood or a predicted outcome",
+      "How solid and recent the evidence behind this estimate is; it drops as source data ages past 60 minutes. It is not a profit forecast.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -184,7 +184,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "vendorReportedEv",
     label: "Vendor-reported EV",
     definition:
-      "An EV value reported by the vendor, shown separately and never merged with or substituted for PackScout Gross EV",
+      "The vendor’s own EV number, shown for comparison only. PackScout never blends it into PackScout Gross EV.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -192,33 +192,33 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "buybackPercent",
     label: "Buyback %",
     definition:
-      "The documented uniform buyback rate when one rate governs every eligible outcome; otherwise a bounded summary such as Varies by outcome",
+      "The share of a card’s value the vendor guarantees to pay when you sell it back. Shown as one number only when the same rate covers every outcome.",
     enabledByDefault: true,
   },
   {
     key: "topChase",
     label: "Top Chase",
     definition:
-      "The highest-valued eligible related collectible currently identified",
+      "The most valuable card PackScout has matched to this repack.",
     enabledByDefault: true,
   },
   {
     key: "topChaseValue",
     label: "Top Chase Value",
     definition:
-      "The supported canonical representative value attached to that collectible",
+      "PackScout’s reference value for that card.",
     enabledByDefault: true,
   },
   {
     key: "promoCode",
     label: "Promo Code",
-    definition: "A public vendor-approved code available to copy",
+    definition: "A public vendor code you can copy and use at checkout.",
     enabledByDefault: true,
   },
   {
     key: "repackLink",
     label: "Repack Link",
-    definition: "The tracked outbound link to the vendor listing",
+    definition: "Opens the vendor’s listing in a new tab.",
     enabledByDefault: true,
   },
 ] as const satisfies readonly GlossaryDefinition[]);

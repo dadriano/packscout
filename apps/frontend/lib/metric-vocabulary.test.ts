@@ -46,14 +46,14 @@ test("defines all repack comparison fields with buyback-adjusted wording", () =>
   assert.ok(COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault));
 });
 
-test("gross EV is defined as the expected guaranteed buyback payout", () => {
+test("gross EV is defined as the average guaranteed buyback payout in plain words", () => {
   assert.match(
     getGlossaryDefinition("grossEv").definition,
-    /expected guaranteed buyback payout/,
+    /average guaranteed buyback payout/,
   );
   assert.match(
     getGlossaryDefinition("grossEvPercent").definition,
-    /divided by the public Pack Price/,
+    /as a share of Pack Price/,
   );
   assert.match(
     getGlossaryDefinition("evDollars").definition,
@@ -61,19 +61,19 @@ test("gross EV is defined as the expected guaranteed buyback payout", () => {
   );
   assert.match(
     getGlossaryDefinition("evPercent").definition,
-    /minus 100 percentage points/,
+    /minus 100%/,
   );
   assert.match(
     getGlossaryDefinition("evConfidence").definition,
-    /never describes profit likelihood/,
+    /not a profit forecast/,
   );
   assert.match(
     getGlossaryDefinition("vendorReportedEv").definition,
-    /never merged with or substituted/,
+    /never blends it into/,
   );
   assert.match(
     getGlossaryDefinition("buybackPercent").definition,
-    /uniform buyback rate/,
+    /same rate covers every outcome/,
   );
 });
 
@@ -106,6 +106,20 @@ test("glossary entries are unique and enabled by default", () => {
     COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault),
     "every documented field ships enabled",
   );
+});
+
+test("glossary definitions stay short enough to read on hover", () => {
+  for (const { key, definition } of COMPARISON_GLOSSARY) {
+    const sentences = definition.split(/(?<=[.!?])\s+/u).filter(Boolean);
+    assert.ok(
+      sentences.length <= 2,
+      `${key} definition runs ${sentences.length} sentences; hints allow two`,
+    );
+    assert.ok(
+      definition.length <= 150,
+      `${key} definition is ${definition.length} characters; hints allow 150`,
+    );
+  }
 });
 
 test("glossary definitions never expose internal codes to readers", () => {
@@ -203,8 +217,8 @@ test("keeps the required source, advice, and bounded-summary language canonical"
   assert.equal(METRIC_TRUST_COPY.adviceLine, "Not financial or gambling advice");
   assert.equal(METRIC_TRUST_COPY.estimateLabel, "PackScout Gross EV");
   assert.match(METRIC_TRUST_COPY.longRunExplanation, /guaranteed buyback payout/);
-  assert.match(METRIC_TRUST_COPY.sourceExplanation, /never averaged or substituted/);
-  assert.match(METRIC_TRUST_COPY.confidenceExplanation, /not profit likelihood/);
+  assert.match(METRIC_TRUST_COPY.sourceExplanation, /never averages or substitutes/);
+  assert.match(METRIC_TRUST_COPY.confidenceExplanation, /not how likely a profit is/);
   assert.match(
     METRIC_TRUST_COPY.unavailableExplanation,
     /never assumes missing buyback terms/,

@@ -81,18 +81,36 @@ test("does not immediately reopen a keyboard-dismissed hint", () => {
   assert.equal(newlyFocused.open, true);
 });
 
-test("keeps glossary content inside narrow and zoomed viewports", () => {
+test("centers the panel under its trigger and points the caret at it", () => {
   assert.deepEqual(
     positionGlossaryPanel({
-      align: "start",
+      align: "center",
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      trigger: { top: 300, right: 712, bottom: 318, left: 696 },
+      panelWidth: 304,
+      panelHeight: 120,
+    }),
+    { left: 552, top: 328, placement: "below", caretOffset: 152 },
+  );
+});
+
+test("keeps glossary content inside narrow and zoomed viewports while the caret follows the trigger", () => {
+  // A trigger at the right edge of a 390px phone: the panel is pushed left to
+  // respect the margin, and the caret still points at the trigger.
+  assert.deepEqual(
+    positionGlossaryPanel({
+      align: "center",
       viewportWidth: 390,
       viewportHeight: 844,
       trigger: { top: 200, right: 386, bottom: 218, left: 370 },
       panelWidth: 304,
       panelHeight: 190,
     }),
-    { left: 70, top: 226 },
+    { left: 70, top: 228, placement: "below", caretOffset: 290 },
   );
+  // No room below: the panel flips above and reports the flipped placement so
+  // the caret can move to its bottom edge.
   assert.deepEqual(
     positionGlossaryPanel({
       align: "end",
@@ -102,6 +120,20 @@ test("keeps glossary content inside narrow and zoomed viewports", () => {
       panelWidth: 304,
       panelHeight: 190,
     }),
-    { left: 70, top: 62 },
+    { left: 70, top: 60, placement: "above", caretOffset: 290 },
+  );
+});
+
+test("start alignment keeps table-header hints hung from the trigger's leading edge", () => {
+  assert.deepEqual(
+    positionGlossaryPanel({
+      align: "start",
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      trigger: { top: 100, right: 216, bottom: 118, left: 200 },
+      panelWidth: 304,
+      panelHeight: 120,
+    }),
+    { left: 200, top: 128, placement: "below", caretOffset: 14 },
   );
 });

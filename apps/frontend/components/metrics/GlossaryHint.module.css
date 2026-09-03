@@ -34,13 +34,71 @@
   color: var(--color-action-strong);
 }
 
+/*
+ * The panel is a manual popover: it renders in the top layer, so a transformed
+ * or scrolling ancestor (the sheet dialog) cannot offset or clip it. The
+ * outer box is transparent and unbordered; it only positions the caret, the
+ * hover bridge, and the bordered content box. The `inset`, `margin`,
+ * `height`, `border`, `padding`, `overflow`, and `background` resets undo the
+ * browser's default popover styles.
+ */
 .panel {
+  --glossary-gap: 10px;
+  --glossary-caret-x: 50%;
+
   position: fixed;
   z-index: 60;
+  inset: auto;
   inset-block-start: 0;
   inset-inline-start: 0;
-  display: flex;
   width: min(19rem, calc(100vw - 2rem));
+  height: auto;
+  max-height: calc(100vh - 2rem);
+  margin: 0;
+  border: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--color-text);
+  text-align: start;
+  visibility: hidden;
+  white-space: normal;
+}
+
+/* Invisible bridge over the gap so the pointer can travel from the trigger to
+   the panel (and its Learn link) without leaving the hint. */
+.panel::before {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(-1 * var(--glossary-gap));
+  height: var(--glossary-gap);
+  content: "";
+}
+
+.panel[data-placement="above"]::before {
+  inset-block-start: auto;
+  inset-block-end: calc(-1 * var(--glossary-gap));
+}
+
+.caret {
+  position: absolute;
+  inset-block-start: -7px;
+  inset-inline-start: var(--glossary-caret-x);
+  width: 14px;
+  height: 7px;
+  background: var(--color-action);
+  clip-path: polygon(50% 0, 0 100%, 100% 100%);
+  transform: translateX(-50%);
+}
+
+.panel[data-placement="above"] .caret {
+  inset-block-start: auto;
+  inset-block-end: -7px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.content {
+  display: flex;
   max-height: calc(100vh - 2rem);
   flex-direction: column;
   gap: 0.42rem;
@@ -51,12 +109,13 @@
   box-shadow:
     0 18px 45px color-mix(in srgb, var(--color-text) 12%, transparent),
     var(--shadow-control);
-  color: var(--color-text);
   padding: 0.85rem 0.9rem 0.9rem;
   overflow-y: auto;
-  text-align: start;
-  visibility: hidden;
-  white-space: normal;
+}
+
+.panel[data-placement="above"] .content {
+  border-block-start: 1px solid var(--color-border-strong);
+  border-block-end: 2px solid var(--color-action);
 }
 
 .heading {
@@ -107,7 +166,7 @@
   width: 0.28rem;
   height: 0.28rem;
   border-radius: 999px;
-  background: var(--color-warning-strong);
+  background: var(--color-status-neutral);
   content: "";
 }
 
