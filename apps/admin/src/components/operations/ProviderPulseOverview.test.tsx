@@ -220,3 +220,50 @@ test("provider metric and state explanations are available on focus with associa
   await act(async () => action.focus());
   assert.match(rendered.dom.window.document.querySelector('[role="tooltip"]')!.textContent!, /cannot recover automatically/u);
 });
+
+test("estimated stored rows are marked as estimates everywhere they are shown", async (context) => {
+  const overview = operationsOverview();
+  const exact = operationSource(0);
+  const estimated = operationSource(1);
+  if (estimated.measurements.storage.state !== "available") throw new Error("fixture must be measured");
+  estimated.measurements.storageEstimate = {
+    measuredAt: estimated.measurements.storage.measuredAt,
+    counts: estimated.measurements.storage.counts,
+    estimatedEntities: ["pulls", "pullItems"],
+  };
+  estimated.measurements.storage = { state: "unavailable", reason: "count_exceeds_budget" };
+  overview.sources = [exact, estimated];
+  const rendered = await renderPage(<MemoryRouter><ProviderPulseOverview overview={overview} canOperate={false} pendingKey={null} onCommand={() => {}} /></MemoryRouter>);
+  cleanupPage(context, rendered);
+
+  const cardFor = (providerId: string) => rendered.container.querySelector(`[data-provider-id="${providerId}"]`)!;
+  assert.match(cardFor(estimated.providerId).textContent!, /≈/u, "an estimate is marked where it is shown");
+  assert.match(cardFor(estimated.providerId).textContent!, /Estimated/u);
+  assert.doesNotMatch(cardFor(exact.providerId).textContent!, /≈|Estimated/u, "a counted provider is never marked");
+
+  // Only the two entities the server could not count are marked. The other
+  // eight were counted exactly and must not inherit the estimate.
+  const entityRows = [...cardFor(estimated.providerId)
+    .querySelectorAll(".provider-pulse__entity-table tbody tr")]
+    .map((row) => [row.querySelector("th")!.textContent!, row.querySelector("td")!.textContent!] as const);
+  assert.equal(entityRows.length, 10);
+  const marked = entityRows.filter(([, value]) => value.includes("≈")).map(([label]) => label);
+  assert.deepEqual(marked, ["Pulls", "Pull items"], "only the oversized tables are marked");
+  for (const [label, value] of entityRows) {
+    if (marked.includes(label)) continue;
+    assert.doesNotMatch(value, /≈|Estimated/u, `${label} was counted and must not be marked`);
+  }
+
+  // The caption says how many were counted rather than claiming all were.
+  const caption = [...cardFor(estimated.providerId).querySelectorAll(".provider-pulse__subtext")]
+    .map((node) => node.textContent!).join(" ");
+  assert.match(caption, /8 of 10 counted exactly/u);
+  assert.match(caption, /The 2 marked ≈ are the database's live-tuple estimate/u);
+
+  // One estimated contributor makes the overview total an estimate as well.
+  const totals = rendered.container.querySelector(".provider-pulse__summary")!;
+  assert.match(totals.textContent!, /≈/u);
+  assert.match(totals.textContent!, /estimated/u);
+  assert.equal(measurementTotal(overview.sources, "storage").estimated, true);
+  assert.equal(measurementTotal([exact], "storage").estimated, false);
+});

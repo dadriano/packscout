@@ -3,11 +3,28 @@ import { z } from "zod";
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const instant = z.iso.datetime({ offset: true });
 
+/**
+ * Reasons that can leave every measurement unavailable at once, so they are
+ * the only ones a whole-provider unavailable result may be built from.
+ */
+const sharedUnavailableReasons = [
+  "not_configured", "unsupported", "database_unreachable", "query_failed",
+] as const;
+
 export const providerMeasurementUnavailableSchema = z.object({
   state: z.literal("unavailable"),
-  reason: z.enum([
-    "not_configured", "unsupported", "database_unreachable", "query_failed",
-  ]),
+  reason: z.enum(sharedUnavailableReasons),
+}).strict();
+
+/**
+ * Storage alone can also be left uncounted because counting every canonical
+ * row would cost more than its measurement budget. That reason describes one
+ * measurement and obliges an estimate, so it is not a shared reason and
+ * cannot be used to make every measurement unavailable.
+ */
+const storageUnavailableSchema = z.object({
+  state: z.literal("unavailable"),
+  reason: z.enum([...sharedUnavailableReasons, "count_exceeds_budget"]),
 }).strict();
 
 const canonicalCountsSchema = z.object({
@@ -26,14 +43,44 @@ const canonicalCountsSchema = z.object({
   Object.values(kinds).reduce((sum, value) => sum + value, 0) === total,
 { message: "Stored rows must equal the sum of the canonical table counts." });
 
+/**
+ * An available storage measurement is always an exact count of canonical rows.
+ * That meaning is fixed, so a client reading this field without knowing about
+ * estimates can never mistake one for a count.
+ */
 const storageSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("available"),
     measuredAt: instant,
     counts: canonicalCountsSchema,
   }).strict(),
-  providerMeasurementUnavailableSchema,
+  storageUnavailableSchema,
 ]);
+
+export const canonicalEntityKeys = [
+  "categories", "packs", "collectibles", "aliases", "instances",
+  "packContents", "accounts", "pulls", "pullItems", "marketEvents",
+] as const;
+
+/**
+ * Carried beside the exact count rather than inside it so it can never be read
+ * as one. The key is absent unless an estimate was actually taken, never null:
+ * readers enumerate the measurements they know about, and a null would be
+ * enumerated as one of them.
+ *
+ * Counting is decided per table, because table sizes differ by orders of
+ * magnitude within one provider. `counts` therefore mixes counted and
+ * estimated entities, and `estimatedEntities` names exactly which of them are
+ * estimates so each can be presented for what it is. It is never empty: with
+ * nothing estimated the exact measurement above is reported instead.
+ */
+const storageEstimateSchema = z.object({
+  measuredAt: instant,
+  counts: canonicalCountsSchema,
+  estimatedEntities: z.array(z.enum(canonicalEntityKeys)).min(1)
+    .refine((keys) => new Set(keys).size === keys.length,
+      { message: "Estimated entities must not repeat." }),
+}).strict().optional();
 
 const recordsSchema = z.discriminatedUnion("state", [
   z.object({
@@ -73,25 +120,48 @@ const activitySchema = z.discriminatedUnion("state", [
 ]);
 
 /** Exact snapshots are distinct from missing evidence and from live run counters. */
+// Storage counts and retained-run totals are read by separate statements so
+// that the cost of counting stored rows cannot withhold the retained-run
+// totals. They therefore observe separate snapshots and carry separate
+// measurement times, which callers must display rather than conflate.
 export const providerSourceMeasurementsSchema = z.object({
   storage: storageSchema,
+  storageEstimate: storageEstimateSchema,
   records: recordsSchema,
   activity: activitySchema,
 }).strict().superRefine((measurements, context) => {
-  if (measurements.storage.state === "available" &&
-    measurements.records.state === "available" &&
-    measurements.storage.measuredAt !== measurements.records.measuredAt) {
+  // Exactly one storage answer is reported, so no reader has to choose, and an
+  // estimate accompanies precisely the one reason that obliges it. Any other
+  // pairing would let a reader show an estimate over a real failure.
+  const deferredForBudget = measurements.storage.state === "unavailable"
+    && measurements.storage.reason === "count_exceeds_budget";
+  if (deferredForBudget && measurements.storageEstimate === undefined) {
     context.addIssue({
       code: "custom",
-      path: ["records", "measuredAt"],
-      message: "Storage and retained-run totals must share their snapshot time.",
+      path: ["storageEstimate"],
+      message: "Rows left uncounted for budget must report an estimate.",
+    });
+  }
+  if (!deferredForBudget && measurements.storageEstimate !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["storageEstimate"],
+      message: measurements.storage.state === "available"
+        ? "An exact storage count must not be accompanied by an estimate."
+        : "A failed storage measurement must not be accompanied by an estimate.",
     });
   }
 });
 
 export type ProviderSourceMeasurements = z.infer<typeof providerSourceMeasurementsSchema>;
+export type ProviderStorageEstimate = z.infer<typeof storageEstimateSchema>;
+export type ProviderCanonicalEntityKey = (typeof canonicalEntityKeys)[number];
 export type ProviderMeasurementUnavailableReason = z.infer<
   typeof providerMeasurementUnavailableSchema
+>["reason"];
+/** Includes the storage-only reason, which obliges a reported estimate. */
+export type ProviderStorageUnavailableReason = z.infer<
+  typeof storageUnavailableSchema
 >["reason"];
 
 export function unavailableProviderSourceMeasurements(

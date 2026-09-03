@@ -46,9 +46,70 @@ test("exact provider measurements reconcile totals and preserve safe numeric pre
   assert.equal(providerSourceMeasurementsSchema.safeParse({
     ...measured, records: { ...measured.records, accepted: 13 },
   }).success, false);
+});
+
+test("a whole-provider unavailable result cannot be built from a storage-only reason", () => {
+  // The storage-only reason obliges an estimate, which this helper does not
+  // report, so accepting it would return a value its own type rejects. The
+  // constraint is in the type: without the directive below this line fails to
+  // compile, and if the argument is ever widened again the directive does.
+  // @ts-expect-error count_exceeds_budget is not a whole-provider reason
+  const invalid = () => unavailableProviderSourceMeasurements("count_exceeds_budget");
+  assert.equal(typeof invalid, "function");
+
+  // Every reason the helper does accept round-trips through the schema.
+  for (const reason of ["not_configured", "unsupported", "database_unreachable", "query_failed"] as const) {
+    const measurements = unavailableProviderSourceMeasurements(reason);
+    assert.deepEqual(providerSourceMeasurementsSchema.parse(measurements), measurements);
+  }
+});
+
+test("an estimate never occupies the field that means an exact count", () => {
+  const estimate = { measuredAt, counts: measured.storage.counts, estimatedEntities: ["pulls"] };
+  const estimated = providerSourceMeasurementsSchema.parse({
+    ...measured,
+    storage: { state: "unavailable", reason: "count_exceeds_budget" },
+    storageEstimate: estimate,
+  });
+  // A reader that knows only `storage` is told nothing was counted.
+  assert.equal(estimated.storage.state, "unavailable");
+  assert.deepEqual(estimated.storageEstimate, estimate);
+
+  // The two answers are mutually exclusive in both directions.
   assert.equal(providerSourceMeasurementsSchema.safeParse({
-    ...measured, records: { ...measured.records, measuredAt: "2026-08-30T11:00:00.000Z" },
+    ...measured, storageEstimate: estimate,
+  }).success, false, "an exact count must not also carry an estimate");
+  assert.equal(providerSourceMeasurementsSchema.safeParse({
+    ...measured, storage: { state: "unavailable", reason: "count_exceeds_budget" },
+  }).success, false, "rows left uncounted for budget must report an estimate");
+
+  // An estimate is still a full, self-consistent set of counts.
+  assert.equal(providerSourceMeasurementsSchema.safeParse({
+    ...measured,
+    storage: { state: "unavailable", reason: "count_exceeds_budget" },
+    storageEstimate: { ...estimate, counts: { ...estimate.counts, total: 11 } },
   }).success, false);
+
+  // A measurement that actually failed must not carry an estimate either: a
+  // reader preferring the estimate would show it in place of the failure.
+  for (const reason of ["query_failed", "database_unreachable", "not_configured", "unsupported"] as const) {
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, storage: { state: "unavailable", reason }, storageEstimate: estimate,
+    }).success, false, `${reason} must not carry an estimate`);
+    // The same failure without an estimate stays valid.
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, storage: { state: "unavailable", reason },
+    }).success, true);
+  }
+});
+
+test("separate statements may report separate snapshot times", () => {
+  const split = providerSourceMeasurementsSchema.parse({
+    ...measured, records: { ...measured.records, measuredAt: "2026-08-30T11:00:00.000Z" },
+  });
+  assert.equal(split.records.state === "available" && split.records.measuredAt,
+    "2026-08-30T11:00:00.000Z");
+  assert.equal(split.storage.state === "available" && split.storage.measuredAt, measuredAt);
 });
 
 test("lease measurements never expose owners or claim to verify OS process liveness", () => {

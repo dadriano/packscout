@@ -1,4 +1,4 @@
-import type { ProviderSourceOperationsSource } from "@packscout/contracts";
+import type { ProviderCanonicalEntityKey, ProviderSourceOperationsSource } from "@packscout/contracts";
 import type { StatusTone } from "../StatusBadge";
 import { age } from "./OperationStatus";
 import { sourceOperationalLabel } from "./SourceOperationsViews";
@@ -32,8 +32,20 @@ const states: Record<string, PulseState> = {
   Idle: { label: "Idle", description: "The processor is not reporting active work. Check its schedule and last committed page before assuming it is caught up.", tone: "neutral" },
 };
 
+/**
+ * The three measurements an operator is shown. Rows left uncounted because
+ * counting would exceed its budget are still reported, through the estimate,
+ * so that case is evidence rather than missing evidence.
+ */
+function measurementEvidence(source: ProviderSourceOperationsSource) {
+  const { storage, storageEstimate, records, activity } = source.measurements;
+  const measured = storage.state === "unavailable"
+    && storage.reason === "count_exceeds_budget" && storageEstimate !== null;
+  return [measured ? ({ state: "available" } as const) : storage, records, activity];
+}
+
 export function isUnsupportedSource(source: ProviderSourceOperationsSource): boolean {
-  return !source.configured && Object.values(source.measurements).some(
+  return !source.configured && measurementEvidence(source).some(
     (measurement) => measurement.state === "unavailable" && measurement.reason === "unsupported",
   );
 }
@@ -72,7 +84,7 @@ export function pulseNeedsAttention(source: ProviderSourceOperationsSource): boo
     || ["Not configured", "Draft", "No processor state", "Retrying"].includes(status.label)
     || (source.freshness.state === "stale" && source.source?.lifecycle === "active" && !source.source.pauseRequested && source.processor?.activity !== "paused")
     || source.quality.state === "warning" || source.quality.state === "degraded"
-    || Object.values(source.measurements).some((measurement) => measurement.state === "unavailable")
+    || measurementEvidence(source).some((measurement) => measurement.state === "unavailable")
     || (source.measurements.activity.state === "available" && source.measurements.activity.quarantine.open > 0);
 }
 
@@ -90,7 +102,7 @@ export function pulseIssue(source: ProviderSourceOperationsSource): string | nul
   if (status.label === "Not configured") return "Configure this provider to begin importing.";
   if (status.label === "No processor state") return "Processor activity is unavailable.";
   if (source.freshness.state === "stale" && source.source?.lifecycle === "active" && !source.source.pauseRequested && source.processor?.activity !== "paused") return "Source freshness is outside its configured window.";
-  if (Object.values(source.measurements).some((measurement) => measurement.state === "unavailable")) return "Some measurements are unavailable.";
+  if (measurementEvidence(source).some((measurement) => measurement.state === "unavailable")) return "Some measurements are unavailable.";
   if (source.quality.state === "degraded") return "Repeated failures have degraded data quality.";
   if (source.quality.state === "warning") return "Data quality needs review.";
   return null;
@@ -102,20 +114,83 @@ export function sortPulseSources(sources: readonly ProviderSourceOperationsSourc
 }
 
 export function measurementTotal(sources: readonly ProviderSourceOperationsSource[], metric: "storage" | "records") {
-  const values = sources.flatMap((source) => {
-    const measurement = source.measurements[metric];
-    return measurement.state === "available"
-      ? ["counts" in measurement ? measurement.counts.total : measurement.processed]
-      : [];
-  });
+  const readings = sources.map((source) => storedReading(source, metric));
+  const values = readings.flatMap((reading) => reading.value === null ? [] : [reading.value]);
+  // A total that mixes counted and estimated providers is itself an estimate.
+  const estimated = readings.some((reading) => reading.value !== null && reading.estimated);
   const total = values.reduce((sum, value) => sum + value, 0);
   const safeTotal = Number.isSafeInteger(total);
   return {
     value: values.length > 0 && safeTotal ? total : null,
+    estimated: estimated && values.length > 0 && safeTotal,
     coverage: !safeTotal ? "Total exceeds safe numeric range" : values.length === sources.length && sources.length > 0
       ? `All ${sources.length} providers`
       : `${values.length > 0 ? "Partial · " : ""}${values.length}/${sources.length} providers`,
   };
+}
+
+/**
+ * Resolves the one storage answer to show. An exact count is preferred; the
+ * estimate is used only where the server left the count unavailable because
+ * counting would exceed its budget, and is always flagged as an estimate.
+ */
+export function storedReading(
+  source: ProviderSourceOperationsSource,
+  metric: "storage" | "records" = "storage",
+): { value: number | null; estimated: boolean; measuredAt: string | null } {
+  if (metric === "records") {
+    const records = source.measurements.records;
+    return { value: records.state === "available" ? records.processed : null,
+      estimated: false, measuredAt: records.state === "available" ? records.measuredAt : null };
+  }
+  const { storage, storageEstimate } = source.measurements;
+  if (storage.state === "available") {
+    return { value: storage.counts.total, estimated: false, measuredAt: storage.measuredAt };
+  }
+  if (storageEstimate) {
+    return { value: storageEstimate.counts.total, estimated: true, measuredAt: storageEstimate.measuredAt };
+  }
+  return { value: null, estimated: false, measuredAt: null };
+}
+
+export interface EntityReading {
+  readonly state: "measured" | "unavailable";
+  readonly value: number | null;
+  readonly estimated: boolean;
+  readonly measuredAt: string | null;
+}
+
+/**
+ * Resolves one entity's stored-row reading on its own. Entities are decided
+ * separately because table sizes differ by orders of magnitude inside a single
+ * provider: the server counts what it can afford and estimates only the rest,
+ * so an entity that was counted is never shown as an estimate merely because a
+ * larger table beside it could not be.
+ */
+export function storedEntityReading(
+  source: ProviderSourceOperationsSource,
+  entity: ProviderCanonicalEntityKey,
+): EntityReading {
+  const { storage, storageEstimate } = source.measurements;
+  if (storage.state === "available") {
+    return { state: "measured", value: storage.counts[entity], estimated: false,
+      measuredAt: storage.measuredAt };
+  }
+  if (storageEstimate) {
+    return { state: "measured", value: storageEstimate.counts[entity],
+      estimated: storageEstimate.estimatedEntities.includes(entity),
+      measuredAt: storageEstimate.measuredAt };
+  }
+  return { state: "unavailable", value: null, estimated: false, measuredAt: null };
+}
+
+/**
+ * Estimated rows are marked so a reader never mistakes a statistics estimate
+ * for a count. Unavailable stays unavailable; only measured values are marked.
+ */
+export function storedCount(value: number | null, estimated: boolean): string {
+  const rendered = count(value);
+  return value !== null && estimated ? `≈${rendered}` : rendered;
 }
 
 export function count(value: number | null): string {
@@ -127,7 +202,7 @@ export function measuredAge(value: string | null, observedAt: string): string {
 }
 
 export const metricDescriptions = {
-  stored: "Exact rows in canonical entity tables, including child and relationship rows. These are not unique source records. Counts are cached for up to 60 seconds; measurement times are in Details.",
+  stored: "Rows in canonical entity tables, including child and relationship rows. These are not unique source records. Values marked \u2248 are the database's live-tuple estimate, used where an exact count would cost more than its measurement budget; unmarked values are exact. Cached for up to 60 seconds; precision and measurement times are in Details.",
   processed: "Source records processed across all retained runs. Repeat processing is counted again; this is not the number of unique stored entities. Cached for up to 60 seconds.",
   page: "Time since the last durably committed page found by the history check, relative to the displayed status time. History is cached for up to 60 seconds; newer pages may exist. A heartbeat is not committed progress.",
   quarantine: "Open quarantine entries across retained runs, excluding resolved and expired entries. History is cached for up to 60 seconds; newer changes may exist. This is separate from the current run's quarantine count.",
