@@ -18,38 +18,14 @@ import type { Pool } from "pg";
  */
 
 /**
- * Ends a pool and waits until every connection it owned has actually been
- * removed.
- *
- * `pool.end()` resolves once clients are released, which is not the same as the
- * server having torn the backends down. Waiting for the matching `remove`
- * events closes that window, so a subsequent `drop ... with (force)` has nothing
- * left to terminate.
+ * Ending a pool so a later `drop ... with (force)` has nothing left to
+ * terminate is the same problem `postgres-test-support.ts` already solves, and
+ * its wait is bounded so a teardown helper can never hang a test lane. Re-export
+ * it rather than keeping a second copy: two implementations of this drifted
+ * apart once already, and the copy that lost the timeout was the one new tests
+ * picked up.
  */
-export async function endPoolFully(pool: Pool): Promise<void> {
-  const expectedRemovals = pool.totalCount;
-  if (expectedRemovals === 0) {
-    await pool.end();
-    return;
-  }
-
-  let removalCount = 0;
-  let resolveRemovals: (() => void) | undefined;
-  const removals = new Promise<void>((resolve) => {
-    resolveRemovals = resolve;
-  });
-  const onRemove = () => {
-    removalCount += 1;
-    if (removalCount === expectedRemovals) resolveRemovals?.();
-  };
-  pool.on("remove", onRemove);
-  try {
-    await pool.end();
-    await removals;
-  } finally {
-    pool.off("remove", onRemove);
-  }
-}
+export { endPoolFully } from "./postgres-test-support.ts";
 
 /**
  * Makes a pool's connection errors non-fatal to the test process.
