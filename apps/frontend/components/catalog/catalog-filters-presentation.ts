@@ -204,7 +204,14 @@ export function clampPriceFilter(value: number, bound: "min" | "max", other: num
     PRICE_FILTER_MAX_DOLLARS,
     Math.max(PRICE_FILTER_MIN_DOLLARS, rounded),
   );
-  return bound === "min" ? Math.min(clamped, other) : Math.max(clamped, other);
+  const visibleOther = Number.isFinite(other)
+    ? other
+    : bound === "min"
+      ? PRICE_FILTER_MAX_DOLLARS
+      : PRICE_FILTER_MIN_DOLLARS;
+  return bound === "min"
+    ? Math.min(clamped, visibleOther)
+    : Math.max(clamped, visibleOther);
 }
 
 function sortCategoryNodes(nodes: MutableNestedCategory[]) {

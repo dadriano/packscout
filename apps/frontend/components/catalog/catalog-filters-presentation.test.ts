@@ -176,6 +176,13 @@ test("invalid numeric fields recover keyboard sliders from the visible boundary"
   );
 });
 
+test("a finite slider thumb survives an empty peer numeric field", () => {
+  assert.equal(clampPriceFilter(500, "min", Number.NaN), 500);
+  assert.equal(clampPriceFilter(5_000, "max", Number.NaN), 5_000);
+  assert.equal(clampPriceFilter(50_000, "min", Number.NaN), PRICE_FILTER_MAX_DOLLARS);
+  assert.equal(clampPriceFilter(-50, "max", Number.NaN), PRICE_FILTER_MIN_DOLLARS);
+});
+
 test("track selection focuses only the chosen slider thumb without scrolling", () => {
   const focusCalls: Array<readonly ["min" | "max", FocusOptions | undefined]> = [];
   const minimum = {
