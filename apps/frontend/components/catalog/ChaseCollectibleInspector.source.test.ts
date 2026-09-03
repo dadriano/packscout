@@ -17,3 +17,11 @@ test("chase inspector loads packs through the gated collectible-repacks route", 
   assert.match(source, /dialog\.showModal\(\)/);
   assert.match(source, /Packs that include this chase/);
 });
+
+test("changing collectible remounts loading state and cancels the previous request", () => {
+  assert.match(source, /<ChaseCollectibleInspector\s+key=\{request\.publicCollectibleId\}/);
+  assert.match(source, /useState<InspectorLoadState>\(\{ status: "loading" \}\)/);
+  assert.doesNotMatch(source, /setLoad\(\{ status: "loading" \}\)/);
+  assert.match(source, /return \(\) => controller\.abort\(\)/);
+  assert.match(source, /if \(controller\.signal\.aborted\) return/);
+});
