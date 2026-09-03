@@ -108,18 +108,19 @@ export function catalogBridgeRehearsalDatabaseProofDigest(
 }
 
 /**
- * A hash-only observation of one source request. Implementations must collect
- * this at the actual source boundary; raw identities, cursors, and bodies are
- * deliberately not representable.
+ * A hash-only observation joining one source-boundary response to its durable
+ * translated mixed page. Raw identities, cursors, and bodies are deliberately
+ * not representable.
  */
 const sourcePageObservationSchema = z.object({
   pageNumber: z.number().int().positive().safe(),
   requestedCursorHash: sha256.nullable(),
-  nextCursorHash: sha256.nullable(),
+  nextCursorHash: sha256,
   requestedLimit: z.number().int().positive().max(100),
   returnedRecordCount: z.number().int().nonnegative().max(100),
   continuation: z.enum(["more", "head"]),
   responseSha256: sha256,
+  pageResponseDigest: sha256,
   rawCardObservationCount: safeCount,
   rawPackObservationCount: safeCount,
   distinctCardIdentityCount: safeCount,
@@ -607,11 +608,12 @@ function summarizeSourcePages(
       page.distinctCardIdentityCount > page.rawCardObservationCount ||
       page.distinctPackIdentityCount > page.rawPackObservationCount ||
       page.continuation !== (final ? expectedFinal : "more") ||
-      (page.continuation === "more" ? page.nextCursorHash === null : page.nextCursorHash !== null) ||
+      (page.continuation === "more" &&
+        page.nextCursorHash === page.requestedCursorHash) ||
       page.identityChainDigest !== providerCatalogIdentityChainDigest({
         previousChainDigest,
         pageNumber: page.pageNumber,
-        pageResponseDigest: page.responseSha256,
+        pageResponseDigest: page.pageResponseDigest,
         pageIdentityMultisetDigest: page.pageIdentityMultisetDigest,
       }) ||
       (page.continuation === "head") !== (page.identityMultisetDigest !== null)) {
@@ -621,7 +623,7 @@ function summarizeSourcePages(
     previousPacks = page.rawPackObservationCount;
     previousDistinctCards = page.distinctCardIdentityCount;
     previousDistinctPacks = page.distinctPackIdentityCount;
-    previousCursorHash = page.nextCursorHash;
+    if (page.continuation === "more") previousCursorHash = page.nextCursorHash;
     previousChainDigest = page.identityChainDigest;
   }
   const last = pages.at(-1)!;

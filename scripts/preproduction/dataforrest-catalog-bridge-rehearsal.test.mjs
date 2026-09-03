@@ -69,19 +69,31 @@ function sourcePages(cardCount, packCount, reachesHead) {
     packs += packDelta;
     const final = offset + returnedRecordCount === total;
     const continuation = final && reachesHead ? "head" : "more";
-    const responseSha256 = hash({ pageNumber, cards, packs, kind: "response" });
+    const responseSha256 = hash({
+      pageNumber,
+      cards,
+      packs,
+      kind: "raw-source-response",
+    });
+    const pageResponseDigest = hash({
+      pageNumber,
+      cards,
+      packs,
+      kind: "durable-mixed-page-response",
+    });
     const pageIdentityMultisetDigest = hash({ pageNumber, cardDelta, packDelta });
     const identityChainDigest = providerCatalogIdentityChainDigest({
       previousChainDigest,
       pageNumber,
-      pageResponseDigest: responseSha256,
+      pageResponseDigest,
       pageIdentityMultisetDigest,
     });
-    const nextCursorHash = continuation === "more"
-      ? hash({ pageNumber, kind: "next-cursor" })
-      : null;
+    const nextCursorHash = continuation === "head" && requestedCursorHash !== null
+      ? requestedCursorHash
+      : hash({ pageNumber, kind: "next-cursor" });
     pages.push(Object.freeze({ pageNumber, requestedCursorHash, nextCursorHash,
       requestedLimit: 100, returnedRecordCount, continuation, responseSha256,
+      pageResponseDigest,
       rawCardObservationCount: cards, rawPackObservationCount: packs,
       distinctCardIdentityCount: cards, distinctPackIdentityCount: packs,
       pageIdentityMultisetDigest, identityChainDigest,
@@ -91,6 +103,28 @@ function sourcePages(cardCount, packCount, reachesHead) {
     previousChainDigest = identityChainDigest;
   }
   return Object.freeze(pages);
+}
+
+function replaceSourcePage(pages, index, replacement) {
+  return Object.freeze([
+    ...pages.slice(0, index),
+    Object.freeze(replacement),
+    ...pages.slice(index + 1),
+  ]);
+}
+
+function chainSourcePagesFromRawResponse(pages) {
+  let previousChainDigest = null;
+  return Object.freeze(pages.map((page) => {
+    const identityChainDigest = providerCatalogIdentityChainDigest({
+      previousChainDigest,
+      pageNumber: page.pageNumber,
+      pageResponseDigest: page.responseSha256,
+      pageIdentityMultisetDigest: page.pageIdentityMultisetDigest,
+    });
+    previousChainDigest = identityChainDigest;
+    return Object.freeze({ ...page, identityChainDigest });
+  }));
 }
 
 function sourceCensusProof(definition, operationId, timing = "before_interruption") {
@@ -639,12 +673,68 @@ function rebindRecoveryState(fixture, mutate) {
 }
 
 function buildHarness(options = {}) {
-  const interruptedPages = sourcePages(200, 0, false);
+  let interruptedPages = sourcePages(200, 0, false);
+  if (options.nonAdvancingContinuationCursor) {
+    const terminalIndex = interruptedPages.length - 1;
+    interruptedPages = replaceSourcePage(interruptedPages, terminalIndex, {
+      ...interruptedPages[terminalIndex],
+      nextCursorHash: interruptedPages[terminalIndex].requestedCursorHash,
+    });
+  }
   const validCompletePages = sourcePages(191_383, 69, true);
-  const completePages = options.invalidPageLimit
-    ? Object.freeze([{ ...validCompletePages[0], requestedLimit: 101 },
-        ...validCompletePages.slice(1)])
-    : validCompletePages;
+  let completePages = validCompletePages;
+  const firstPage = completePages[0];
+  if (options.invalidPageLimit) {
+    completePages = replaceSourcePage(completePages, 0, {
+      ...firstPage,
+      requestedLimit: 101,
+    });
+  }
+  if (options.chainFromRawResponseDigest) {
+    completePages = chainSourcePagesFromRawResponse(completePages);
+  }
+  if (options.tamperedPageResponseDigest) {
+    completePages = replaceSourcePage(completePages, 0, {
+      ...firstPage,
+      pageResponseDigest: firstPage.responseSha256,
+    });
+  }
+  if (options.missingTerminalCursorHash) {
+    const terminalIndex = completePages.length - 1;
+    completePages = replaceSourcePage(completePages, terminalIndex, {
+      ...completePages[terminalIndex],
+      nextCursorHash: null,
+    });
+  }
+  if (options.requestAfterHead) {
+    const terminal = completePages.at(-1);
+    const pageNumber = terminal.pageNumber + 1;
+    const responseSha256 = hash({ pageNumber, kind: "raw-post-head-response" });
+    const pageResponseDigest = hash({
+      pageNumber,
+      kind: "durable-post-head-response",
+    });
+    const pageIdentityMultisetDigest = hash({
+      pageNumber,
+      kind: "empty-post-head-page",
+    });
+    completePages = Object.freeze([...completePages, Object.freeze({
+      ...terminal,
+      pageNumber,
+      requestedCursorHash: terminal.nextCursorHash,
+      nextCursorHash: hash({ pageNumber, kind: "post-head-next-cursor" }),
+      returnedRecordCount: 0,
+      responseSha256,
+      pageResponseDigest,
+      pageIdentityMultisetDigest,
+      identityChainDigest: providerCatalogIdentityChainDigest({
+        previousChainDigest: terminal.identityChainDigest,
+        pageNumber,
+        pageResponseDigest,
+        pageIdentityMultisetDigest,
+      }),
+    })]);
+  }
   const drain = drainDependencies();
   const interruptedFixture = buildCatalogFixture(INTERRUPTED_OPERATION, interruptedPages,
     options.separateDrain ? {} : { drainFixture: drain.binding });
@@ -726,7 +816,16 @@ function buildHarness(options = {}) {
 }
 
 test("runs the real cores but marks fixture evidence non-certifying and config retry blocked", async () => {
-  const evidence = await rehearsal.rehearseDataforrestCatalogBridge(buildHarness());
+  const harness = buildHarness();
+  const evidence = await rehearsal.rehearseDataforrestCatalogBridge(harness);
+  const recoveryPages = await harness.recovery.readSourcePages();
+  const terminalPage = recoveryPages.at(-1);
+  assert.equal(recoveryPages.every((page) =>
+    page.responseSha256 !== page.pageResponseDigest), true);
+  assert.ok(terminalPage);
+  assert.equal(terminalPage.continuation, "head");
+  assert.notEqual(terminalPage.nextCursorHash, null);
+  assert.equal(terminalPage.nextCursorHash, terminalPage.requestedCursorHash);
   assert.equal(evidence.classification, "non_certifying_hybrid");
   assert.equal(evidence.certificationBoundary,
     "external_attesting_host_binder_required");
@@ -819,6 +918,48 @@ test("reuse must refuse before making another source request", async () => {
 test("every source request is hard bounded to at most 100 records", async () => {
   await assert.rejects(
     rehearsal.rehearseDataforrestCatalogBridge(buildHarness({ invalidPageLimit: true })),
+    { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
+  );
+});
+
+test("source identity chains bind the durable page digest, not the raw response hash", async () => {
+  await assert.rejects(
+    rehearsal.rehearseDataforrestCatalogBridge(
+      buildHarness({ chainFromRawResponseDigest: true }),
+    ),
+    { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
+  );
+  await assert.rejects(
+    rehearsal.rehearseDataforrestCatalogBridge(
+      buildHarness({ tamperedPageResponseDigest: true }),
+    ),
+    { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
+  );
+});
+
+test("source traces require the non-empty cursor returned at DataForrest head", async () => {
+  await assert.rejects(
+    rehearsal.rehearseDataforrestCatalogBridge(
+      buildHarness({ missingTerminalCursorHash: true }),
+    ),
+    { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
+  );
+});
+
+test("source traces reject a non-advancing continuation cursor", async () => {
+  await assert.rejects(
+    rehearsal.rehearseDataforrestCatalogBridge(
+      buildHarness({ nonAdvancingContinuationCursor: true }),
+    ),
+    { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
+  );
+});
+
+test("source traces cannot request the terminal cursor after reaching head", async () => {
+  await assert.rejects(
+    rehearsal.rehearseDataforrestCatalogBridge(
+      buildHarness({ requestAfterHead: true }),
+    ),
     { code: "CATALOG_BRIDGE_REHEARSAL_SOURCE_TRACE_INVALID" },
   );
 });
