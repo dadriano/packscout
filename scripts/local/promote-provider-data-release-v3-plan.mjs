@@ -29,6 +29,14 @@ function refuse(code, detail = null) {
 const PLATFORM_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/u;
 const CONVEX_DEPLOYMENT_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
+/**
+ * The only deployments this `:local` command may write to. Dry runs and
+ * snapshot exports may read any deployment; `--publish` is pinned to the
+ * approved data_release_v3 canary (the same target the ClutchPacks promoter
+ * pins). Adding a deployment here is a reviewed change, never a flag.
+ */
+export const APPROVED_PUBLISH_DEPLOYMENTS = Object.freeze(["shiny-newt-310"]);
+
 export const PROMOTE_PROVIDER_USAGE = `Usage:
   node --import tsx scripts/local/promote-provider-data-release-v3.mts \\
     --platform <provider_key> [--platform <provider_key> ...] \\
@@ -38,9 +46,13 @@ export const PROMOTE_PROVIDER_USAGE = `Usage:
 
 Dry run by default: reads the provider's Neon database plus the active Convex
 release, assembles one whole-catalog data_release_v3 plan, validates it, and
-writes plan.json + summary.json. --publish stages, finalizes, and activates it.`;
+writes plan.json + summary.json. --publish stages, finalizes, and activates it
+on an approved deployment only (${APPROVED_PUBLISH_DEPLOYMENTS.join(", ")}).`;
 
-export function parsePromoteProviderArguments(argv) {
+export function parsePromoteProviderArguments(
+  argv,
+  { approvedPublishDeployments = APPROVED_PUBLISH_DEPLOYMENTS } = {},
+) {
   const options = {
     platformKeys: [],
     convexDeployment: null,
@@ -107,6 +119,17 @@ export function parsePromoteProviderArguments(argv) {
   if (options.platformKeys.length === 0) refuse("PLATFORM_REQUIRED");
   if (options.publish && options.convexDeployment === null) {
     refuse("CONVEX_DEPLOYMENT_REQUIRED", "--publish needs --convex-deployment");
+  }
+  if (
+    options.publish &&
+    !approvedPublishDeployments.includes(options.convexDeployment)
+  ) {
+    refuse(
+      "PUBLISH_TARGET_NOT_APPROVED",
+      `${options.convexDeployment} is not an approved data_release_v3 publish target ` +
+        `(approved: ${approvedPublishDeployments.join(", ")}); extend ` +
+        "APPROVED_PUBLISH_DEPLOYMENTS through review instead of retargeting",
+    );
   }
   if (
     !options.replaceCatalog &&
@@ -564,7 +587,10 @@ export function projectProviderPacks({
       skipped.push({ packKey: pack.pack_key, reason: "not_active" });
       continue;
     }
-    if (!includePriceless && minorUnitsFromDecimal(pack.price_usd_amount) === null) {
+    if (
+      !includePriceless &&
+      publicPriceFromPack(pack).usdComparison.status !== "available"
+    ) {
       skipped.push({ packKey: pack.pack_key, reason: "no_usd_price" });
       continue;
     }
@@ -864,6 +890,71 @@ export async function assembleDataReleaseV3Plan(
     },
     batches,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Activation binding
+// ---------------------------------------------------------------------------
+
+/**
+ * Binds the publisher's server-side activation compare-and-swap to the
+ * predecessor the plan was assembled against (the release whose vendors were
+ * carried forward). The publisher re-reads the active pointer on its own; a
+ * fresh read may prove that predecessor is still active but can never
+ * silently adopt a newer pointer, so a concurrent activation refuses before
+ * `start` (first read) or at `activate`, never after the catalog moved.
+ */
+export function boundDataReleaseV3ActivationPort(
+  publication,
+  plan,
+  expectedActivePublicReleaseId,
+) {
+  let activated = false;
+  const moved = (detail) => refuse("ACTIVE_POINTER_MOVED", detail);
+  return Object.freeze({
+    async activeState() {
+      const state = await publication.activeState();
+      const activeId = state.activeRelease?.publicReleaseId ?? null;
+      const previousId = state.previousRelease?.publicReleaseId ?? null;
+      if (!activated && activeId !== expectedActivePublicReleaseId) {
+        moved(
+          `the deployment serves ${activeId ?? "no release"} but the plan was ` +
+            `assembled against ${expectedActivePublicReleaseId ?? "no release"}; re-run`,
+        );
+      }
+      if (
+        activated &&
+        (activeId !== plan.publicReleaseId || previousId !== expectedActivePublicReleaseId)
+      ) {
+        moved(`activation read-back shows ${activeId ?? "no release"} over ${previousId ?? "none"}`);
+      }
+      return state;
+    },
+    status: (publicReleaseId) => publication.status(publicReleaseId),
+    start: (request) => publication.start(request),
+    applyBatch: (request) => publication.applyBatch(request),
+    finalize: (request) => publication.finalize(request),
+    async activate(request) {
+      if (
+        request.publicReleaseId !== plan.publicReleaseId ||
+        request.releaseFingerprint !== plan.releaseFingerprint ||
+        request.expectedActivePublicReleaseId !== expectedActivePublicReleaseId
+      ) {
+        moved(
+          `activate would replace ${request.expectedActivePublicReleaseId ?? "no release"} ` +
+            `instead of ${expectedActivePublicReleaseId ?? "no release"}`,
+        );
+      }
+      const receipt = await publication.activate(request);
+      activated = true;
+      return receipt;
+    },
+    async rollback() {
+      return moved("rollback is not part of this promotion");
+    },
+    refreshProviderObservation: (request) =>
+      publication.refreshProviderObservation(request),
+  });
 }
 
 function originOf(url) {

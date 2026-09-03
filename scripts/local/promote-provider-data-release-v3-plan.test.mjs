@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
+  APPROVED_PUBLISH_DEPLOYMENTS,
   PromoteProviderDataReleaseV3Error,
   assembleDataReleaseV3Plan,
   basisPointsFromRate,
+  boundDataReleaseV3ActivationPort,
   canonicalTimestamp,
   carryForwardActiveRelease,
   minorUnitsFromDecimal,
@@ -166,6 +168,116 @@ test("argument parsing requires a platform and a carry-forward source", () => {
     parsePromoteProviderArguments(["--platform", "phygitals", "--export-dir", "/tmp/x"]).exportDir,
     "/tmp/x",
   );
+});
+
+test("--publish is pinned to the approved deployments; dry runs may read any", () => {
+  assert.deepEqual([...APPROVED_PUBLISH_DEPLOYMENTS], ["shiny-newt-310"]);
+  assert.throws(
+    () => parsePromoteProviderArguments(["--platform", "phygitals", "--convex-deployment", "abundant-puffin-373", "--publish"]),
+    hasCode("PUBLISH_TARGET_NOT_APPROVED"),
+  );
+  assert.throws(
+    () => parsePromoteProviderArguments(["--platform", "phygitals", "--convex-deployment", "prod-like-name", "--publish", "--replace-catalog"]),
+    hasCode("PUBLISH_TARGET_NOT_APPROVED"),
+  );
+  assert.equal(
+    parsePromoteProviderArguments(["--platform", "phygitals", "--convex-deployment", "abundant-puffin-373"]).publish,
+    false,
+  );
+  assert.equal(
+    parsePromoteProviderArguments(["--platform", "phygitals", "--convex-deployment", "shiny-newt-310", "--publish"]).publish,
+    true,
+  );
+  assert.equal(
+    parsePromoteProviderArguments(
+      ["--platform", "phygitals", "--convex-deployment", "lab-deployment", "--publish"],
+      { approvedPublishDeployments: ["lab-deployment"] },
+    ).convexDeployment,
+    "lab-deployment",
+  );
+});
+
+function fakePublication(states) {
+  const calls = [];
+  let reads = 0;
+  return {
+    calls,
+    port: {
+      async activeState() {
+        calls.push("activeState");
+        return states[Math.min(reads++, states.length - 1)];
+      },
+      async status(id) { calls.push(`status:${id}`); return { publicReleaseId: id }; },
+      async start(request) { calls.push("start"); return { operationId: request.operationId }; },
+      async applyBatch(request) { calls.push(`batch:${request.batchIndex}`); return {}; },
+      async finalize() { calls.push("finalize"); return {}; },
+      async activate(request) { calls.push(`activate:${request.expectedActivePublicReleaseId}`); return { ok: true }; },
+      async rollback() { calls.push("rollback"); return {}; },
+      async refreshProviderObservation(request) { calls.push(`observe:${request.vendorKey}`); return {}; },
+    },
+  };
+}
+
+test("the bound activation port refuses a moved pointer and admits the expected one", async () => {
+  const plan = { publicReleaseId: "11111111-1111-8111-8111-111111111111", releaseFingerprint: "a".repeat(64) };
+  const predecessor = "76777a70-73db-86ec-873c-5eef784d0d83";
+  const state = (active, previous = null) => ({
+    activeRelease: active === null ? null : { publicReleaseId: active },
+    previousRelease: previous === null ? null : { publicReleaseId: previous },
+  });
+
+  // Happy path: predecessor still active before start, plan active with the
+  // predecessor retained after activation.
+  const happy = fakePublication([state(predecessor), state(plan.publicReleaseId, predecessor)]);
+  const bound = boundDataReleaseV3ActivationPort(happy.port, plan, predecessor);
+  assert.equal((await bound.activeState()).activeRelease.publicReleaseId, predecessor);
+  await bound.start({ operationId: "s" });
+  await bound.applyBatch({ batchIndex: 0 });
+  await bound.finalize({});
+  await bound.status(plan.publicReleaseId);
+  await bound.activate({ ...plan, expectedActivePublicReleaseId: predecessor });
+  assert.equal((await bound.activeState()).activeRelease.publicReleaseId, plan.publicReleaseId);
+  await bound.refreshProviderObservation({ vendorKey: "phygitals" });
+  assert.deepEqual(happy.calls, [
+    "activeState", "start", "batch:0", "finalize", `status:${plan.publicReleaseId}`,
+    `activate:${predecessor}`, "activeState", "observe:phygitals",
+  ]);
+
+  // Someone activated another release before the publisher's first read.
+  const moved = fakePublication([state("22222222-2222-8222-8222-222222222222", predecessor)]);
+  await assert.rejects(
+    boundDataReleaseV3ActivationPort(moved.port, plan, predecessor).activeState(),
+    hasCode("ACTIVE_POINTER_MOVED"),
+  );
+
+  // The publisher discovered a newer pointer and built its activate request
+  // against it: refused before any request is sent.
+  const drifted = fakePublication([state(predecessor)]);
+  const driftedPort = boundDataReleaseV3ActivationPort(drifted.port, plan, predecessor);
+  await assert.rejects(
+    driftedPort.activate({ ...plan, expectedActivePublicReleaseId: "22222222-2222-8222-8222-222222222222" }),
+    hasCode("ACTIVE_POINTER_MOVED"),
+  );
+  await assert.rejects(
+    driftedPort.activate({ publicReleaseId: plan.publicReleaseId, releaseFingerprint: "b".repeat(64), expectedActivePublicReleaseId: predecessor }),
+    hasCode("ACTIVE_POINTER_MOVED"),
+  );
+  assert.deepEqual(drifted.calls, []);
+
+  // A genesis catalog binds to "no release" the same way.
+  const genesis = fakePublication([state(null), state(plan.publicReleaseId, null)]);
+  const genesisPort = boundDataReleaseV3ActivationPort(genesis.port, plan, null);
+  assert.equal((await genesisPort.activeState()).activeRelease, null);
+  await genesisPort.activate({ ...plan, expectedActivePublicReleaseId: null });
+  assert.equal((await genesisPort.activeState()).activeRelease.publicReleaseId, plan.publicReleaseId);
+
+  // Read-back after activation must show the plan over the bound predecessor.
+  const readBack = fakePublication([state(predecessor), state(plan.publicReleaseId, "33333333-3333-8333-8333-333333333333")]);
+  const readBackPort = boundDataReleaseV3ActivationPort(readBack.port, plan, predecessor);
+  await readBackPort.activeState();
+  await readBackPort.activate({ ...plan, expectedActivePublicReleaseId: predecessor });
+  await assert.rejects(readBackPort.activeState(), hasCode("ACTIVE_POINTER_MOVED"));
+  await assert.rejects(readBackPort.rollback(), hasCode("ACTIVE_POINTER_MOVED"));
 });
 
 test("decimal text becomes exact minor units and basis points", () => {
@@ -343,24 +455,33 @@ test("packs without a USD price are skipped unless asked for", () => {
     neonPack(),
     neonPack({ pack_key: "pack:thin", display_name: "Thin", category_id: null, price_usd_amount: null, price_amount: null, price_currency: null }),
     neonPack({ pack_key: "pack:retired", lifecycle: "retired" }),
+    // A native USD price with no stored USD normalization is still a USD price.
+    neonPack({ pack_key: "pack:usd-native", display_name: "USD native", price_usd_amount: null, price_amount: "40", price_currency: "USD" }),
+    // A foreign price without a USD normalization is not comparable.
+    neonPack({ pack_key: "pack:eur-only", display_name: "EUR only", price_usd_amount: null, price_amount: "40", price_currency: "EUR" }),
   ];
   const chains = new Map([[packs[0].category_id, [SPORTS, FOOTBALL]]]);
   const strict = projectProviderPacks({
     platform: PLATFORM, packs, chainByProviderCategoryId: chains, collectibleTypes: ["card"],
     readAt: READ_AT, versions: VERSIONS, identity, includePriceless: false,
   });
-  assert.equal(strict.repacks.length, 1);
+  assert.deepEqual(strict.repacks.map(({ name }) => name), ["Black Pack", "USD native"]);
+  assert.deepEqual(strict.repacks[1].price.usdComparison, {
+    status: "available", value: { minorUnits: 4_000, currency: "USD" },
+  });
   assert.deepEqual(strict.skipped, [
     { packKey: "pack:thin", reason: "no_usd_price" },
     { packKey: "pack:retired", reason: "not_active" },
+    { packKey: "pack:eur-only", reason: "no_usd_price" },
   ]);
   const lenient = projectProviderPacks({
     platform: PLATFORM, packs, chainByProviderCategoryId: chains, collectibleTypes: ["card"],
     readAt: READ_AT, versions: VERSIONS, identity, includePriceless: true,
   });
-  assert.equal(lenient.repacks.length, 2);
+  assert.equal(lenient.repacks.length, 4);
   assert.equal(lenient.repacks[1].price.usdComparison.status, "unavailable");
   assert.deepEqual(lenient.repacks[1].categories, []);
+  assert.equal(lenient.repacks[3].price.usdComparison.reason, "CURRENCY_UNSUPPORTED");
   assert.throws(
     () => projectProviderPacks({
       platform: PLATFORM, packs: [neonPack(), neonPack()], chainByProviderCategoryId: chains,

@@ -18,8 +18,10 @@
  * `--publish` the shared publisher drives start / batches / finalize /
  * activate against `https://<deployment>.convex.site` using the operator's
  * `PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_KEY_ID` and
- * `PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_SECRET_BASE64`. No credential or
- * secret value is ever printed.
+ * `PACKSCOUT_DATA_RELEASE_V3_PUBLICATION_SECRET_BASE64`. Publishing is pinned
+ * in-script to the approved deployments (`APPROVED_PUBLISH_DEPLOYMENTS`), and
+ * activation is bound to the exact predecessor the plan was assembled
+ * against. No credential or secret value is ever printed.
  */
 
 import { spawnSync } from "node:child_process";
@@ -51,6 +53,7 @@ import {
   MAX_DATA_RELEASE_V3_REPACKS,
   MAX_ROWS_PER_DATA_RELEASE_V3_SHARD,
   SignedConvexDataReleaseV3PublicationClient,
+  type DataReleaseV3PublicationPort,
   type DataReleaseV3PublishPlan,
 } from "@packscout/services";
 import {
@@ -72,6 +75,7 @@ import {
   PROMOTE_PROVIDER_USAGE,
   PromoteProviderDataReleaseV3Error,
   assembleDataReleaseV3Plan,
+  boundDataReleaseV3ActivationPort,
   boundedText,
   carryForwardActiveRelease,
   parsePromoteProviderArguments,
@@ -213,13 +217,9 @@ async function locateProviderDatabases(
            join provider_database_nodes n
              on n.provider_id = p.id and n.enabled and n.node_role = 'primary'
            join provider_credential_versions c on c.id = n.credential_version_id
-           left join lateral (
-             select v.display_name, v.logo_url
-               from provider_public_profile_versions v
-              where v.provider_id = p.id
-              order by v.version_number desc
-              limit 1
-           ) profile on true
+           left join provider_public_profile_versions profile
+             on profile.id = p.active_public_profile_version_id
+            and profile.provider_id = p.id
           where p.provider_key = $1`,
         [platformKey],
       ).catch((error: unknown) =>
@@ -261,6 +261,8 @@ async function locateProviderDatabases(
       ) {
         refuse("PROVIDER_CREDENTIAL_INVALID", platformKey);
       }
+      // Only the provider's activated public profile may name it publicly; a
+      // provider without one falls back to its control-plane display name.
       const displayName =
         boundedText(row.profile_display_name, 100) ??
         boundedText(row.provider_display_name, 100) ??
@@ -710,11 +712,24 @@ async function main(): Promise<void> {
         `export carried ${carried.activePublicReleaseId}; re-run without --export-dir`,
     );
   }
+  // The activation compare-and-swap is bound to the predecessor this plan was
+  // assembled against, so a release activated by anyone else between here
+  // and `activate` refuses instead of being replaced with carried-stale data.
+  const expectedActivePublicReleaseId =
+    carried?.activePublicReleaseId ?? livePublicReleaseId;
   console.log(
     `Publishing ${plan.publicReleaseId} to ${deployment} ` +
-      `(replacing ${livePublicReleaseId ?? "genesis"}) ...`,
+      `(replacing ${expectedActivePublicReleaseId ?? "genesis"}) ...`,
   );
-  const outcome = await new DataReleaseV3ReleasePublisher(client).publish(plan);
+  const outcome = await new DataReleaseV3ReleasePublisher(
+    // The bound port is plain JavaScript; its refusals are typed as void
+    // rather than never, so the cast goes through unknown.
+    boundDataReleaseV3ActivationPort(
+      client,
+      plan,
+      expectedActivePublicReleaseId,
+    ) as unknown as DataReleaseV3PublicationPort,
+  ).publish(plan);
   await writeFile(
     path.join(outDir, "publish-outcome.json"),
     JSON.stringify(outcome, null, 2),
