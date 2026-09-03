@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packActivationIntentSchema, packBuildRequestSchema,
   packCatalogCanonicalJson, packPublicationEnvelopeSchema, providerPackBuildInputsSchema,
-  packCatalogUuidSchema,
+  packCatalogUuidSchema, preservesPackLifecycleBaseline,
   type PackActivationIntent, type PublicPackSnapshot, type PublicPackSnapshotDescriptor, type PublicPackSnapshotBatch,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -42,7 +42,8 @@ export class ProviderPackSnapshotRepository {
         packInvariant(payload.lifecycleFreeze?.previousSnapshotId === head.active_snapshot_id &&
           payload.lifecycleFreeze?.provenanceIdentity === inputs.lifecycleProvenanceIdentity, "PACK_INPUT_INVALID");
         const baseline = await tx.pack_snapshot_artifacts.findUniqueOrThrow({ where: { public_pack_snapshot_id: head.active_snapshot_id! } });
-        packInvariant(payload.economicsSha256 === (baseline.snapshot_json as unknown as PublicPackSnapshot).payload.economicsSha256, "PACK_INPUT_INVALID");
+        const previous = baseline.snapshot_json as unknown as PublicPackSnapshot;
+        packInvariant(preservesPackLifecycleBaseline(inputs, previous) && payload.economicsSha256 === previous.payload.economicsSha256, "PACK_INPUT_INVALID");
       }
       const createdAt = await this.context.now(tx);
       const expectedHead = { generation: Number(head.generation), publicationEpoch: Number(head.publication_epoch), activeSnapshotId: head.active_snapshot_id };

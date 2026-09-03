@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
-import { publicPackContentSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicProfileSnapshotIdSchema } from "./pack-catalog-domain.ts";
+import { packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
 const payload = publicPackSnapshotPayloadSchema.shape;
@@ -23,7 +23,8 @@ export const providerPackBuildInputsSchema = z.object({
   }).strict()).max(8_000),
   contentsComplete: z.boolean(),
   actions: payload.actions,
-  aliases: z.array(packCatalogTextSchema(200)).max(100),
+  aliases: z.array(publicPackSearchProjectionSchema.shape.aliases.element).max(100)
+    .refine(values => new Set(values).size === values.length, "pack.aliases_must_be_unique"),
   evMethodIdentity: payload.evMethodIdentity,
   evPolicyIdentity: payload.evPolicyIdentity,
   evInputsSha256: packCatalogSha256Schema.nullable(),
@@ -66,3 +67,15 @@ export const packPublicationLimits = Object.freeze({
 export type ProviderPackBuildInputs = z.infer<typeof providerPackBuildInputsSchema>;
 export type ProviderPackReadiness = z.infer<typeof providerPackReadinessSchema>;
 export type PackPublicationScope = z.infer<typeof packPublicationScopeSchema>;
+
+/** Lifecycle revisions may change availability/provenance and action eligibility,
+ * never the baseline's metadata, profiles, display or numeric economics. */
+export function preservesPackLifecycleBaseline(inputs: ProviderPackBuildInputs, previous: PublicPackSnapshot): boolean {
+  const equal = (left: unknown, right: unknown) => packCatalogCanonicalJson(left) === packCatalogCanonicalJson(right);
+  const fields = ["providerId", "publicRepackId", "title", "imageUrl", "category", "price", "contents",
+    "providerProfileSnapshotId", "evMethodIdentity", "evPolicyIdentity", "evInputsSha256", "ev"] as const;
+  const actionDefinitions = (actions: ProviderPackBuildInputs["actions"]) => actions.map(({ actionId, kind, label, url }) => ({ actionId, kind, label, url }));
+  return inputs.lifecycleProvenanceIdentity !== null && fields.every(key => equal(inputs[key], previous.payload[key])) &&
+    equal(inputs.aliases, previous.payload.searchProjection.aliases) &&
+    equal(actionDefinitions(inputs.actions), actionDefinitions(previous.payload.actions));
+}

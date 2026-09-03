@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | blocked |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -250,7 +250,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | done | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |

@@ -52,6 +52,30 @@ test("Provider-local planning and persistence crash matrix: deterministic readin
     assert.deepEqual(result, ready);
     assert.equal((await evaluator.evaluate({ candidate: inputs, evaluatedAt, representedDigest: ready.readiness.desiredStateSha256 })).readiness.outcome, "no_change");
   });
+  await context.test("lifecycle-only freezes metadata, profiles, aliases, policy and action definitions", async () => {
+    const changes: Array<(value: ProviderPackBuildInputs) => void> = [
+      value => { value.title = "Changed"; }, value => { value.imageUrl = "https://example.com/changed.jpg"; },
+      value => { value.category.label = "Changed"; }, value => { value.providerProfileSnapshotId = `ppfs_${"e".repeat(64)}`; },
+      value => { value.contents[0]!.collectibleProfileSnapshotId = `ppfs_${"e".repeat(64)}`; },
+      value => { value.aliases = ["changed"]; }, value => { value.evMethodIdentity = "changed"; },
+      value => { value.evPolicyIdentity = "changed"; }, value => { value.actions[0]!.label = "Changed"; },
+    ];
+    for (const change of changes) {
+      const candidate = structuredClone(inputs); candidate.snapshotKind = "lifecycle_only"; candidate.lifecycleProvenanceIdentity = "lifecycle:3";
+      change(candidate);
+      assert.equal((await evaluator.evaluate({ candidate, evaluatedAt, previousSnapshot: built.snapshot })).readiness.outcome, "blocked");
+    }
+    const candidate = structuredClone(inputs); candidate.snapshotKind = "lifecycle_only"; candidate.lifecycleProvenanceIdentity = "sold-out:3";
+    candidate.lifecycle = { ...candidate.lifecycle, availability: "sold_out", availabilityEvidence: { kind: "explicit_sold_out", sourceIdentity: "sold-out:3" } };
+    candidate.actions = candidate.actions.map(action => ({ ...action, enabled: false, disabledReason: "PACK_UNAVAILABLE" }));
+    assert.equal((await evaluator.evaluate({ candidate, evaluatedAt, previousSnapshot: built.snapshot })).readiness.outcome, "ready");
+  });
+  await context.test("only public-contract-sized unique aliases can become ready", async () => {
+    assert.equal((await evaluate({ ...inputs, aliases: ["a".repeat(120)] })).readiness.outcome, "ready");
+    for (const aliases of [["a".repeat(121)], ["same", "same"], ["same", " same "]]) {
+      await assert.rejects(evaluate({ ...inputs, aliases }));
+    }
+  });
   await context.test("unknown protected fields and credential-bearing URLs cannot be captured", async () => {
     await assert.rejects(evaluate({ ...inputs, authorization: "Bearer secret" } as ProviderPackBuildInputs));
     await assert.rejects(evaluate({ ...inputs, imageUrl: "https://user:password@example.com/a.jpg" }));

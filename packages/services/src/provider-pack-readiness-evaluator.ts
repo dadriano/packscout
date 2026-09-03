@@ -1,7 +1,7 @@
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, assertPublicPackCatalogBytes, compareCanonicalStrings,
   hashPackCatalogValue, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
-  packCatalogTimestampSchema, packPublicationLimits, providerPackBuildInputsSchema,
+  packCatalogTimestampSchema, packPublicationLimits, providerPackBuildInputsSchema, preservesPackLifecycleBaseline,
   publicPackContentSchema, publicPackSnapshotSchema,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackSnapshot,
 } from "@packscout/contracts";
@@ -42,10 +42,7 @@ export class ProviderPackReadinessEvaluator {
     if (inputs.snapshotKind === "lifecycle_only") {
       if (!inputs.lifecycleBaseline) return result("waiting", "INCOMPLETE_CONTENTS");
       const previous = await publicPackSnapshotSchema.parseAsync(inputs.lifecycleBaseline);
-      if (previous.identity.providerId !== inputs.providerId || previous.identity.publicRepackId !== inputs.publicRepackId ||
-        !inputs.lifecycleProvenanceIdentity || packCatalogCanonicalJson(previous.payload.contents) !== packCatalogCanonicalJson(inputs.contents) ||
-        packCatalogCanonicalJson(previous.payload.price) !== packCatalogCanonicalJson(inputs.price) ||
-        packCatalogCanonicalJson(previous.payload.ev) !== packCatalogCanonicalJson(inputs.ev)) {
+      if (!preservesPackLifecycleBaseline(inputs, previous)) {
         return result("blocked", "INVALID_DOMAIN_DATA");
       }
     }

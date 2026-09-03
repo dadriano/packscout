@@ -48,7 +48,8 @@ export class ProviderPackImpactRepository {
       const changes = delivery || pending ? [] : await tx.promotion_changes.findMany({ where: { sequence: { gt: scope.change_sequence } },
         orderBy: { sequence: "asc" }, take: packPublicationLimits.changePage });
       if (!delivery && !pending && changes.length === 0) return null;
-      const boundaryIdentity = packCatalogTextSchema(200).parse(pending?.boundary_identity ?? (delivery ? `shared:${delivery.centralChangeIdentity}`
+      const sharedIdentity = delivery ? await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, { kind: "shared_boundary", identity: delivery.centralChangeIdentity }) : null;
+      const boundaryIdentity = packCatalogTextSchema(200).parse(pending?.boundary_identity ?? (delivery ? `shared:${sharedIdentity}`
         : `provider:${scope.change_sequence}:${changes.at(-1)!.sequence}`));
       const boundary = delivery ? { organizationId: delivery.organizationId, providerId: delivery.providerId,
         centralChangeIdentity: delivery.centralChangeIdentity, providerChangeSequence: delivery.providerChangeSequence,

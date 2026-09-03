@@ -7,7 +7,8 @@ import {
   type PackInputCapture, type ProviderPrismaClient, type ProviderTransactionClient,
 } from "@packscout/database";
 import { createProviderHarness } from "@packscout/database/test-support";
-import { providerPackBuildInputsSchema, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
+import { providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
+import { sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
 
@@ -219,6 +220,29 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: sealed.intent.intentId } })).state, "blocked");
       assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: ids[0] } })).lease_work_id, null);
     });
+    await suite.test("seal rejects a forged ready lifecycle request that changes frozen metadata", async () => {
+      const fixture = fixtures[0]!;
+      const value = await evaluator.evaluate({ candidate: { ...fixture.inputs, title: "Changed metadata" }, evaluatedAt: new Date().toISOString() });
+      value.inputs.snapshotKind = "lifecycle_only";
+      value.inputs.lifecycleBaseline = fixture.built.snapshot;
+      value.inputs.lifecycleProvenanceIdentity = "lifecycle:forged";
+      value.readiness.desiredStateSha256 = await publicationHash(value.inputs);
+      await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: "lifecycle:forged" }));
+      const claim = (await requests.claim(randomUUID(), 25)).find(item => item.publicRepackId === ids[0]);
+      assert.ok(claim);
+      const payload = structuredClone(fixture.built.snapshot.payload);
+      payload.snapshotKind = "lifecycle_only"; payload.title = value.inputs.title;
+      payload.lifecycleFreeze = { previousSnapshotId: fixture.built.snapshot.identity.publicPackSnapshotId,
+        retainedEconomicsSha256: payload.economicsSha256, provenanceIdentity: "lifecycle:forged" };
+      payload.summaryProjection = publicPackSummaryCore(payload);
+      payload.searchProjection.normalizedText = normalizePackCatalogSearchText([payload.title,
+        ...payload.contents.map(item => item.displayName), ...payload.searchProjection.aliases].join(" "));
+      const { snapshot, descriptor, batches } = await sealFixturePack(payload);
+      const before = await client.pack_snapshot_artifacts.count();
+      await assert.rejects(snapshots.sealAndEnqueueActivation(claim, { snapshot, descriptor, batches }), { code: "PACK_INPUT_INVALID" });
+      assert.equal(await client.pack_snapshot_artifacts.count(), before);
+      assert.equal(await snapshots.findActivationForRequest(claim.workId), null);
+    });
   } finally { await Promise.all([first.close(), second.close()]); }
 });
 
@@ -242,7 +266,7 @@ test("Provider-local planning and persistence crash matrix: bounded fan-out and 
       }, evaluate: input => evaluator.evaluate(input),
     };
     const planner = new ProviderPackImpactRepository(context, capture);
-    const delivery: SharedProviderChangeDelivery = { ...scope, centralChangeIdentity: "shared:large", providerChangeSequence: "9",
+    const delivery: SharedProviderChangeDelivery = { ...scope, centralChangeIdentity: "s".repeat(200), providerChangeSequence: "9",
       sharedDependencies: [{ kind: "ev_policy", identity: "policy", contentSha256: "a".repeat(64) }],
       payloadSha256: "b".repeat(64), leaseIdentity: randomUUID(), acknowledgmentIdentity: null };
     const first = await planner.plan({ kind: "shared", delivery });
@@ -255,6 +279,8 @@ test("Provider-local planning and persistence crash matrix: bounded fan-out and 
     assert.equal(last?.outcomes.length, 1); assert.equal(last?.complete, true); assert.ok(last?.acknowledgmentDigest);
     const replay = await planner.plan({ kind: "shared", delivery });
     assert.equal(replay?.acknowledgmentDigest, last?.acknowledgmentDigest);
+    assert.ok(replay!.boundaryIdentity.length <= 200);
+    await assert.rejects(planner.plan({ kind: "shared", delivery: { ...delivery, payloadSha256: "c".repeat(64) } }), { code: "PACK_STATE_CONFLICT" });
     assert.equal(await client.pack_build_requests.count(), 251);
     const rejected = await client.pack_build_requests.findFirstOrThrow({ where: { public_repack_id: ids[0] } });
     assert.equal(rejected.state, "blocked"); assert.equal(rejected.request_json, null);
