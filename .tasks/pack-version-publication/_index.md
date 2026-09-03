@@ -133,10 +133,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Browser-safe contracts and fixtures define the only allowed pack/profile/read behavior; no runtime changes.
 - **Review budget:** one task; 1–2 days; target at most 15 authored files and 1,500 authored lines.
 - **Rollback:** Revert unused contract additions and fixtures.
-- **Size exception:** One-time P01 exception: the phase includes the pre-existing 2,619-line canonical task/spec baseline required by the workflow plus the inseparable executable contract, fixture, and matrix; the total remains below the 5,000-line/40-file hard stop.
+- **Size exception:** One-time P01 exception: the pre-existing 2,619-line canonical task/spec baseline plus the inseparable executable contract, fixture, and matrix; two inherited test-only gate defects are isolated in a separate cleanup commit. The measured total is 4,998 authored changed lines across 29 files, below the 5,000-line/40-file hard stop.
 - **Branch:** `codex/pack-version-publication-p01-contract`.
-- **Verified parent:** `0b470fc7876e3e1c1b86f616bb382f5985c67fe8` (`origin/main`).
-- **Verified implementation:** `b6c64edb`.
+- **Verified parent:** `3c854bba5031b071421e3257edce172836e3f5bd` (`origin/main`, includes merged PR #85).
+- **Verified implementation:** `2ca1c7ba` (review fixes in `20f19a56`).
 - **PR:** https://github.com/dadriano/packscout/pull/88
 
 #### P02 — Provider-local publication state
