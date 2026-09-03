@@ -257,6 +257,8 @@ model packs {
   pulls                     pulls[]
   market_events             market_events[]
   ev_recomputation_requests pack_ev_recomputation_requests[]
+  publication_head         pack_publication_heads?
+  publication_progress    pack_publication_impact_progress[]
 
   @@unique([id, pack_key], map: "packs_id_pack_key_key")
   @@index([category_id, lifecycle], map: "packs_category_lifecycle_idx")
@@ -962,4 +964,163 @@ model provider_publication_state {
 
   completed_release  provider_releases?             @relation(fields: [completed_release_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_release_id_fkey")
   completion_receipt provider_publication_receipts? @relation(fields: [completion_receipt_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "provider_publication_state_receipt_id_fkey")
+}
+
+model pack_publication_scopes {
+  provider_id String @id @db.Uuid
+  organization_id String @db.Uuid
+  change_sequence BigInt @default(0)
+  shared_change_sequence BigInt @default(0)
+  heads pack_publication_heads[]
+  changes pack_publication_change_receipts[]
+  progress pack_publication_impact_progress[]
+  @@unique([organization_id, provider_id])
+}
+
+model pack_publication_heads {
+  public_repack_id String @id @db.Uuid
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  latest_sequence BigInt @default(0)
+  publication_epoch BigInt @default(0)
+  generation BigInt @default(0)
+  held Boolean @default(false)
+  active_snapshot_id String?
+  lease_owner String? @db.Uuid
+  lease_work_id String? @db.Uuid
+  lease_kind String?
+  lease_fence BigInt @default(0)
+  lease_expires_at DateTime? @db.Timestamptz(6)
+  pack packs @relation(fields: [public_repack_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  scope pack_publication_scopes @relation(fields: [organization_id, provider_id], references: [organization_id, provider_id], onDelete: NoAction, onUpdate: NoAction)
+  requests pack_build_requests[]
+  artifacts pack_snapshot_artifacts[]
+  @@unique([organization_id, provider_id, public_repack_id])
+}
+
+model pack_build_requests {
+  id String @id @db.Uuid
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  public_repack_id String @db.Uuid
+  pack_publication_sequence BigInt @default(autoincrement())
+  desired_state_sha256 String @db.VarChar(64)
+  expected_publication_epoch BigInt
+  request_json Json @db.JsonB
+  inputs_json Json @db.JsonB
+  state String
+  reason_code String? @db.VarChar(64)
+  attempts Int @default(0)
+  available_at DateTime @default(now()) @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  head pack_publication_heads @relation(fields: [organization_id, provider_id, public_repack_id], references: [organization_id, provider_id, public_repack_id], onDelete: NoAction, onUpdate: NoAction)
+  activation pack_activation_intents?
+  @@unique([organization_id, provider_id, public_repack_id, id])
+  @@unique([public_repack_id, desired_state_sha256, expected_publication_epoch], map: "pack_build_requests_desired_epoch_key")
+  @@unique([public_repack_id, pack_publication_sequence])
+  @@index([state, available_at, public_repack_id, pack_publication_sequence], map: "pack_build_requests_claim_idx")
+}
+
+model pack_publication_change_receipts {
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  boundary_identity String @db.VarChar(200)
+  boundary_sha256 String @db.VarChar(64)
+  result_sha256 String @db.VarChar(64)
+  outcomes_json Json @db.JsonB
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  scope pack_publication_scopes @relation(fields: [organization_id, provider_id], references: [organization_id, provider_id], onDelete: NoAction, onUpdate: NoAction)
+  @@id([organization_id, provider_id, boundary_identity])
+}
+
+model pack_publication_impact_progress {
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  boundary_identity String @db.VarChar(200)
+  boundary_sha256 String @db.VarChar(64)
+  through_sequence BigInt?
+  shared_sequence BigInt?
+  references_json Json @db.JsonB
+  after_pack_id String? @db.Uuid
+  page_number Int @default(0)
+  result_sha256 String @db.VarChar(64)
+  complete Boolean @default(false)
+  last_pack packs? @relation(fields: [after_pack_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  scope pack_publication_scopes @relation(fields: [organization_id, provider_id], references: [organization_id, provider_id], onDelete: NoAction, onUpdate: NoAction)
+  @@id([organization_id, provider_id, boundary_identity])
+}
+
+model pack_snapshot_artifacts {
+  public_pack_snapshot_id String @id @db.VarChar(68)
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  public_repack_id String @db.Uuid
+  content_sha256 String @db.VarChar(64)
+  snapshot_json Json @db.JsonB
+  descriptor_json Json @db.JsonB
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  head pack_publication_heads @relation(fields: [organization_id, provider_id, public_repack_id], references: [organization_id, provider_id, public_repack_id], onDelete: NoAction, onUpdate: NoAction)
+  batches pack_snapshot_batches[]
+  intents pack_activation_intents[]
+  @@unique([organization_id, provider_id, public_repack_id, public_pack_snapshot_id])
+  @@unique([public_repack_id, content_sha256])
+}
+
+model pack_snapshot_batches {
+  public_pack_snapshot_id String @db.VarChar(68)
+  batch_index Int
+  batch_json Json @db.JsonB
+  artifact pack_snapshot_artifacts @relation(fields: [public_pack_snapshot_id], references: [public_pack_snapshot_id], onDelete: NoAction, onUpdate: NoAction)
+  @@id([public_pack_snapshot_id, batch_index])
+}
+
+model pack_activation_intents {
+  id String @id @db.Uuid
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  public_repack_id String @db.Uuid
+  build_request_id String @unique @db.Uuid
+  public_pack_snapshot_id String @db.VarChar(68)
+  pack_publication_sequence BigInt
+  intent_json Json @db.JsonB
+  state String
+  reason_code String? @db.VarChar(64)
+  attempts Int @default(0)
+  available_at DateTime @default(now()) @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  request pack_build_requests @relation(fields: [organization_id, provider_id, public_repack_id, build_request_id], references: [organization_id, provider_id, public_repack_id, id], onDelete: NoAction, onUpdate: NoAction, map: "pack_activation_request_fkey")
+  artifact pack_snapshot_artifacts @relation(fields: [organization_id, provider_id, public_repack_id, public_pack_snapshot_id], references: [organization_id, provider_id, public_repack_id, public_pack_snapshot_id], onDelete: NoAction, onUpdate: NoAction, map: "pack_activation_artifact_fkey")
+  operations pack_publication_operations[]
+  @@unique([organization_id, provider_id, public_repack_id, id])
+  @@unique([organization_id, provider_id, public_repack_id, build_request_id], map: "pack_activation_request_scope_key")
+  @@index([state, available_at, public_repack_id, pack_publication_sequence], map: "pack_activation_intents_claim_idx")
+}
+
+model pack_publication_operations {
+  id String @id @db.Uuid
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  public_repack_id String @db.Uuid
+  intent_id String @db.Uuid
+  idempotency_key String @db.VarChar(200)
+  request_sha256 String @db.VarChar(64)
+  request_json Json @db.JsonB
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  intent pack_activation_intents @relation(fields: [organization_id, provider_id, public_repack_id, intent_id], references: [organization_id, provider_id, public_repack_id, id], onDelete: NoAction, onUpdate: NoAction)
+  receipt pack_publication_receipts?
+  @@unique([intent_id, idempotency_key])
+  @@unique([organization_id, provider_id, public_repack_id, intent_id, id])
+}
+
+model pack_publication_receipts {
+  operation_id String @id @db.Uuid
+  organization_id String @db.Uuid
+  provider_id String @db.Uuid
+  public_repack_id String @db.Uuid
+  intent_id String @db.Uuid
+  receipt_sha256 String @db.VarChar(64)
+  receipt_json Json @db.JsonB
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  operation pack_publication_operations @relation(fields: [organization_id, provider_id, public_repack_id, intent_id, operation_id], references: [organization_id, provider_id, public_repack_id, intent_id, id], onDelete: NoAction, onUpdate: NoAction)
+  @@unique([organization_id, provider_id, public_repack_id, intent_id, operation_id])
 }

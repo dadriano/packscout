@@ -2,9 +2,9 @@
 
 ## Start Here
 
-Begin P01 with task 001. Write the executable two-pack contract fixture and prove that changing one pack cannot change the other pack's bytes or active head.
+Build P02 with task 002 from merged P01. Prove provider-local planning, per-pack claims, and crash-safe artifact/intent persistence without enabling publication.
 
-**Progress:** 2/10 tasks complete; 1/9 implementation phases merged; P05 built and in review; 0/1 launch operations complete
+**Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; 0/1 launch operations complete
 
 ## Context
 
@@ -115,8 +115,8 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
-| P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | published |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | planned |
+| P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -138,6 +138,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Verified parent:** `3c854bba5031b071421e3257edce172836e3f5bd` (`origin/main`, includes merged PR #85).
 - **Verified implementation:** `2ca1c7ba` (review fixes in `20f19a56`).
 - **PR:** https://github.com/dadriano/packscout/pull/88
+- **Merged:** `c66f8666229455fd95d7dca58d3d85a391c01f21` on 2026-09-03.
 
 #### P02 — Provider-local publication state
 
@@ -145,7 +146,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Leave new state unused and revert the disabled planner.
 - **Size exception:** The provider-local schema, impact plan, readiness decision, sequence allocation, and durable request form one transaction boundary; splitting them would leave an incomplete provider authority. Authored volume remains capped at the default threshold.
-- **Branch:** assigned by builder.
+- **Branch:** `codex/pack-version-publication-p02-state`.
 - **Verified parent:** not recorded.
 - **Verified implementation:** not recorded.
 - **PR:** not opened.
@@ -246,7 +247,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | todo | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
@@ -296,4 +297,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Publish and review P01, then begin P02–P05 as independent sibling phases from the merged V1 contract.
+Complete and publish P02. P03–P05 remain independent sibling phases from merged P01.

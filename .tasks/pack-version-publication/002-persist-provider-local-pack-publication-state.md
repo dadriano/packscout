@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 
@@ -115,3 +115,30 @@ There is no direct user-facing change. The resulting state machine ensures that 
 ## Verification
 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
+
+## Implementation and Spec Compliance
+
+P02 implements provider-local persistence and deterministic readiness only. It adds no scheduler, worker registration, public-store client, deployment command, compatibility adapter, or alternate catalog version. P03 assembles snapshots; P04 produces profile/shared dependencies; P06 binds transaction-local input readers and authenticated public-store transport to these repositories.
+
+Intentional adaptations to `tech-002`, grounded in merged main:
+
+- Separate provider clients, the bounded gateway, and immutable database identity already exist. No PR66 code needs to be ported again.
+- Native canonical writes already have a database-enforced transactional `promotion_changes` ledger. The planner consumes that durable ledger and owns a separate publication checkpoint, rather than adding hooks to the superseded ingestion repository. Canonical source progress is protected by the existing ledger transaction; publication progress moves only after every affected pack has a durable request or exact no-op. There is no notification dependency or second EV queue.
+- `PackInputCapture` is an explicit transaction-bound composition port. P02 persists its complete allowlisted bytes before assembly, validates scope/source/dependency identities, and never performs lazy reads during sealing. P06 must bind the native and P04 readers through the supplied transaction, without network calls or EV recalculation. The port is deliberately not backed by a provider-wide release adapter.
+- Missing prerequisites remain sequenced `waiting`/`blocked` desired-state rows, with no claimable assembly command until complete inputs exist. Invalid input captures retain only a bounded native identity/reason marker, never rejected payloads. Later observations allocate new immutable requests.
+- Large impact boundaries persist keyset page progress and hash-chained page receipts. A result with `complete: false` has no acknowledgment digest; callers resume the same boundary. P04 delivers shared shards in increasing provider sequence, retries the same identity after lost responses, and never acknowledges an incomplete result. Each cycle bounds affected packs and total captured input bytes.
+- Coalescing includes the publication epoch. A hold/resume can prepare a fresh request and activation intent for identical bytes under a new epoch, without reopening terminal work. Source identities include the immutable change-boundary digest so a later return to earlier content still gets a new activation episode.
+- The one per-pack build/activation lease uses a deferred, scoped SQL reference guard for its polymorphic target. Organization/provider authority is bound once against `database_identity`; all downstream records use composite scoped foreign keys. Public head reads remain authoritative; the local head is only a scheduling mirror.
+- Polling durable state is sufficient; no wake table or notification processor is added while this phase is dormant.
+
+### Automated evidence
+
+| Acceptance area | Evidence |
+|---|---|
+| Complete/missing/invalid inputs, EV unavailable/technical/expired/mismatched, lifecycle baseline/freeze, exact no-change, protected fields | `packages/services/src/provider-pack-readiness-evaluator.test.ts` |
+| Exact direct/shared membership, non-top valuation dependency, aliases, contents/odds/snapshot ownership, irrelevant pulls/profile-only changes | `packages/services/src/provider-pack-publication.integration.test.ts` |
+| Enqueue/checkpoint/seal/batch/intent/receipt/complete crash boundaries; immutable replay; artifact reuse; independent claims and providers; simulated unavailability | Same PostgreSQL integration suite |
+| 251-pack paged expansion, poison isolation, scope/source mismatches, stale shared delivery, expired lease, hold/epoch fencing and bounded retries | Same PostgreSQL integration suite |
+| Exact role inventory, scoped local references, immutable episode and progress guards | `packages/database/prisma/distributed-schema-contract.test.ts` plus real migrated provider databases |
+
+Full framework verification and publish metadata are recorded after the final gate completes. No browser acceptance surface exists in P02.

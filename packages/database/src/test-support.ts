@@ -556,3 +556,4 @@ export async function withMigratedTestDatabase<T>(
     await harness.close();
   }
 }
+export { createProviderHarness } from "./provider-canonical-integration-support.ts";
