@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -108,7 +108,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 - [x] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
 - [x] An expired claimant cannot mutate work after a newer fence is issued.
-- [ ] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
+- [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
 - [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
 - [x] Records, logs, and errors stay within declared bounds and contain no protected data.
 
@@ -118,7 +118,7 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
-Review corrections (2026-09-03): lifecycle-only admission and seal now share a complete baseline-preservation rule, captured aliases use the public 120-character/unique constraint, and shared boundary keys hash the full external identity before adding their namespace. The focused matrix passes 32 checks, including direct seal refusal of forged lifecycle metadata and replay of a 200-character shared identity. Full verification is being refreshed on the separate frontend lint-fix prerequisite.
+Review corrections (2026-09-03): lifecycle-only admission and seal now share a complete baseline-preservation rule, captured aliases use the public 120-character/unique constraint, and shared boundary keys hash the full external identity before adding their namespace. The focused matrix passes 32 checks, including direct seal refusal of forged lifecycle metadata and replay of a 200-character shared identity. `npm run verify:framework` passed in full on implementation `994ea17cf91e8248c98da6921cd7e6debe0845ea`, with direct parent `90097845ba0b3078e24ff22e7317a2846c9ea452` (PR96). The earlier upstream lint blocker below is resolved on this stack; no check was weakened.
 
 P02 implements provider-local persistence and deterministic readiness only. It adds no scheduler, worker registration, public-store client, deployment command, compatibility adapter, or alternate catalog version. P03 assembles snapshots; P04 produces profile/shared dependencies; P06 binds transaction-local input readers and authenticated public-store transport to these repositories.
 

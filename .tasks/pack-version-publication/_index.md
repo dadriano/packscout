@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Verify P02's review corrections on the frontend fix from PR96, then build task 003 / P03 as a separate contract-consuming child of PR95. No publication processor is enabled.
+Review PR96 and PR95 in that order. Task 003 / P03 is next, as a separate contract-consuming child of PR95. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | building |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | published |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -149,10 +149,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `codex/fix-chase-inspector-loading`, the separate frontend fix in https://github.com/dadriano/packscout/pull/96. Merge PR96 first, then retarget P02 to main.
 - **Current parent:** `90097845ba0b3078e24ff22e7317a2846c9ea452` (PR96; full framework verifier passed).
-- **Implementation:** `994ea17cf91e8248c98da6921cd7e6debe0845ea`; includes all three review corrections. The focused 32-check matrix, affected lint, and affected typechecks passed; the full framework gate is running on this parent.
-- **Delivery gate:** PR96 fixes main's prior frontend lint failure without a suppression. Keep P02 draft until its refreshed full gate completes.
+- **Verified implementation:** `994ea17cf91e8248c98da6921cd7e6debe0845ea`; includes all three review corrections. The focused 32-check matrix and full `npm run verify:framework` gate passed on this parent.
+- **Delivery gate:** PR96 fixes main's prior frontend lint failure without a suppression. Merge PR96 before P02; both are ready for review, not merged.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
-- **PR:** https://github.com/dadriano/packscout/pull/95 (draft; delivery remains blocked, not published-ready).
+- **PR:** https://github.com/dadriano/packscout/pull/95
 
 #### P03 — Deterministic assembler
 
@@ -250,7 +250,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | done | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
@@ -300,4 +300,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Complete P02's refreshed full framework gate and make PR95 ready on PR96's verified parent. Then build P03 against P02's captured-input contract in a separate child PR; publication stays disabled until P06 and launch authorization.
+Build P03 against P02's captured-input contract in a separate child PR. Merge order starts PR96 then PR95; publication stays disabled until P06 and launch authorization.
