@@ -1,7 +1,8 @@
 # DataForrest catalog bridge operator artifacts
 
 Status: implemented artifact workflow for Collector Crypt, Courtyard, and
-Phygitals; not a live-readiness certificate
+Phygitals; two-pass source-census capture is currently Collector Crypt only;
+not a live-readiness certificate
 
 The catalog bridge is a sequential, fail-closed operation. Each provider uses a
 fresh operation UUID and its own private artifact directory. Finish and verify
@@ -21,11 +22,12 @@ mkdir '<absolute unique artifact directory>'
 chmod 700 '<absolute unique artifact directory>'
 ```
 
-Policy files, preparation inputs, journals, drain receipts, and staged plists
-are mode `0600`. The producer CLIs refuse symlinks, unsafe parent directories,
-conflicting retries, relative paths, and dirty or unexpected executor commits.
-Raw source cursors occur only in the preparation input and private journal.
-Credentials and raw source responses are never written or printed.
+Source-census proofs, policy files, preparation inputs, journals, drain receipts,
+and staged plists are mode `0600`. The producer CLIs refuse symlinks, unsafe
+parent directories, conflicting retries, relative paths, and dirty or unexpected
+executor commits. Raw source cursors occur only in the preparation input and
+private journal. Credentials and raw source responses are never written or
+printed.
 
 ## Fresh capability proof
 
@@ -42,10 +44,57 @@ NODE_ENV=production node --import tsx \
 The proof contains database capabilities and safe estimates. It performs no
 source requests and no database writes.
 
+## Operation identity
+
+Generate one fresh operation UUID before capturing source evidence. Use that
+same UUID for the census, drain policy, preparation, journal, and every derived
+artifact. Do not capture a census first and assign it to an operation later.
+
+## Collector Crypt source census
+
+Before draining Collector Crypt, capture the exact source head from the clean
+checkout that will execute the operation:
+
+```bash
+npm run capture:dataforrest-catalog-census:live -- \
+  --capture \
+  --provider-key collector_crypt \
+  --operation-id '<fresh UUID>' \
+  --executor-checkout '<absolute clean checkout>' \
+  --executor-commit '<exact 40-character commit>' \
+  --output '<absolute source census path>'
+```
+
+This read-only command performs two complete null-origin catalog traversals,
+strictly one after the other. Do not run another manual source tool concurrently.
+Each request is bounded to the immutable Collector Crypt catalog-v2 limit of 100
+records, and the command performs no database writes or process changes.
+
+Both passes must agree exactly on the card and pack counts, page and cursor
+traversal evidence, and identity-multiset digest. The owner-only proof binds the
+clean checkout, commit, census module hashes, source authority and credential
+digest, and request bounds. It contains hashes and counts, not raw source IDs,
+cursors, or response bodies. Agreement proves a reproducible observed head; it
+is not a transactional snapshot of the mutable upstream catalog.
+
+Retain both `sourceCensusFileSha256` and `sourceCensusProofDigest` printed by the
+command. Preparation accepts the raw file SHA-256 as
+`--source-census-sha256` and independently derives and binds the canonical proof
+digest.
+
+The proof is bound to that one operation UUID. Preparation refuses an attempt to
+replay it into a different operation before opening database dependencies or
+making source requests. A failed operation or recovery attempt therefore needs
+both a new operation UUID and a new two-pass census.
+
+The source-census producer currently accepts only `collector_crypt`. Do not use
+the preparation workflow for Courtyard or Phygitals until equivalent census
+capture support and evidence have been reviewed.
+
 ## Per-provider sequence
 
-Generate a fresh operation UUID. Capture the drain policy from the exact clean
-checkout that will execute the operation:
+Using the same operation UUID bound into the census, capture the drain policy
+from the exact clean checkout that will execute the operation:
 
 ```bash
 NODE_ENV=production node --import tsx \
@@ -80,8 +129,7 @@ NODE_ENV=production node --import tsx \
 ```
 
 After the drain receipt exists and the provider is paused and offline, capture
-the preparation input. The two counts are separately reviewed exact source-head
-counts, not database estimates:
+the preparation input using the pre-drain census proof:
 
 ```bash
 NODE_ENV=production node --import tsx \
@@ -89,15 +137,17 @@ NODE_ENV=production node --import tsx \
   --capture \
   --drain-policy-file '<absolute drain policy path>' \
   --drain-policy-sha256 '<canonical drain policySha256>' \
-  --source-head-card-count '<exact count>' \
-  --source-head-pack-count '<exact count>' \
+  --source-census-file '<absolute source census path>' \
+  --source-census-sha256 '<sourceCensusFileSha256>' \
   --output '<absolute preparation input path>'
 ```
 
-This producer verifies the drain receipt, takes a canonical database baseline,
-captures one catalog-origin canary and one saved-event-cursor canary, then
-rechecks the offline paused boundary and credential digest. It performs exactly
-two bounded source requests and no database or launchd mutation.
+This producer verifies the census file and its authority, checkout, commit,
+credential digest, counts, and identity-multiset digest against the drain policy.
+It also verifies the drain receipt, takes a canonical database baseline, captures
+one catalog-origin canary and one saved-event-cursor canary, then rechecks the
+offline paused boundary and credential digest. It performs exactly two bounded
+source requests and no database or launchd mutation.
 
 Prepare the immutable journal:
 
@@ -152,21 +202,24 @@ succeeded head, and no actionable work or import lease remains.
 
 ## Full-census timeout evidence
 
-The one-shot catalog census is bounded from the reviewed source-head counts and
-immutable adapter request profile. The calculation uses the minimum full-census
-page count, every request's 10-second ceiling, 50 percent processing headroom,
-30 minutes for activation/reconciliation/canonical evidence, and rounds up to
-15 minutes. Policies cannot exceed 48 hours.
+The one-shot catalog census is bounded from the source-census proof's exact counts
+and immutable adapter request profile. The calculation uses the minimum
+full-census page count, every request's 10-second ceiling, 50 percent processing
+headroom, 30 minutes for activation/reconciliation/canonical evidence, and rounds
+up to 15 minutes. Policies cannot exceed 48 hours.
 
-| Provider | Reviewed records | Page limit | Minimum pages | Bounded timeout |
+| Provider | Documented catalog floor | Page limit | Pages at floor | Timeout at floor |
 |---|---:|---:|---:|---:|
 | Collector Crypt | 191,452 | 100 | 1,915 | 8 hours 30 minutes |
 | Phygitals | 276,862 | 100 | 2,769 | 12 hours 15 minutes |
 | Courtyard | 1,056,650 | 100 | 10,567 | 44 hours 45 minutes |
 
-These are refusal ceilings, not expected durations. Any request, translation,
-or atomic commit failure remains terminal for the one-shot operation. Preserve
-the failed artifact set and stop rather than reusing an incomplete operation.
+These floor-based values are planning minima, not current source evidence or
+expected durations. The materialized policy derives its refusal ceiling from the
+exact census-pinned counts, so a larger observed head can increase it up to the
+48-hour cap. Any request, translation, or atomic commit failure remains terminal
+for the one-shot operation. Preserve the failed artifact set and stop rather than
+reusing an incomplete operation.
 
 For the bridge-selected Collector Crypt catalog-v2 profile, 100 is the effective
 catalog request ceiling. The one-shot uses the lower of the catalog adapter bound
@@ -184,21 +237,25 @@ for this transition. Remove distributed-v1 execution support after the completed
 bridge proves central/provider v2 authority, the restored successor run at head,
 and no active configuration, run, or saved cursor still references v1.
 
-The census is deliberately non-resumable. An interruption after page 1 cannot
-restart at page K, and an incomplete journal, catalog config, run ID, or cursor
-must not be reused. Keep the resident offline and paused. Recovery requires fresh
-authoritative evidence and counts, a new operation and deterministic descendant
+The bridge one-shot census is deliberately non-resumable. An interruption after
+page 1 cannot restart at page K, and an incomplete journal, catalog config, run
+ID, or cursor must not be reused. Keep the resident offline and paused. Recovery
+requires a new two-pass source proof, a new operation and deterministic descendant
 identities, a strictly higher catalog config, a cleared catalog cursor, and a new
 null-origin admission from page 1.
 
 ## Mandatory non-live rehearsal
 
-Repository tests validate the artifact schemas, fail-closed transitions, database
-adapters, and process boundaries with fixtures. They do not certify the exact
-live operation. Before requesting live authorization, run the exact clean commit
-through the complete operator sequence using disposable, migrated central and
-provider databases plus an isolated process harness. The reviewed rehearsal
-evidence must include:
+The dependency-injected rehearsal core runs the real drain, catalog-stage, and
+event-resume cores against caller-owned adapters. It always emits
+`non_certifying_hybrid`, regardless of the adapter evidence supplied, because it
+cannot attest that its own external dependencies are genuine. It is not a
+standalone certification executable. Only a separate external attesting host
+binder could verify the clean commit, migrated disposable central and provider
+database clones over production-shaped remote-TLS routes, isolated macOS process
+host or VM, and live DataForrest API and then produce certification evidence.
+That binder is not implemented here. The reviewed rehearsal evidence must
+include:
 
 1. Capability, drain-policy, preparation, journal, live-policy, and successor
    plist artifacts bound to one clean commit and their canonical digests.
@@ -215,3 +272,10 @@ evidence must include:
 Archive the sanitized rehearsal evidence for independent review. Until every
 item is reviewed and an operation-specific approval is recorded, do not run a
 live `--apply` command.
+
+The current Collector Crypt recovery policy is fixed to config 3. It cannot
+produce the strictly higher fresh catalog configuration required for the recovery
+operation after an injected mid-census interruption. The rehearsal must report
+`CATALOG_BRIDGE_REHEARSAL_FIXED_CONFIG_3_RETRY_UNSUPPORTED`, remain
+`non_certifying_hybrid`, and leave live apply unauthorized until that blocker is
+removed and the complete production-shaped evidence is reviewed.
