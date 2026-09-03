@@ -13,7 +13,9 @@ test("remote atomic pages have finite nested deadlines within their lease; local
   });
   const remote = providerManualImportExecutionBudget("remote");
   assert.equal(remote.transactionMilliseconds, 480_000);
-  assert.equal(remote.maximumPageRecords, 100);
+  // Bounded by measurement, not preference: collector_crypt catalog pages are
+  // 4.87 MB at 500 and 9.48 MB at 1,000 against an 8 MiB ceiling.
+  assert.equal(remote.maximumPageRecords, 500);
   assert.equal(remote.pageMilliseconds - remote.transactionMilliseconds, 60_000);
   assert.equal(remote.gatewayMilliseconds - remote.pageMilliseconds, 60_000);
   assert.equal(remote.leaseMilliseconds - remote.gatewayMilliseconds, 300_000);
