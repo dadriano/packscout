@@ -15,9 +15,10 @@ import {
   categoryFacetRows,
   clampPriceFilter,
   closerPriceThumb,
+  focusPriceSliderThumb,
   formatFilterPrice,
+  priceSliderIndexForBound,
   priceSliderIndexFromKeyboard,
-  priceSliderIndexFromValue,
   priceSliderPercent,
   priceSliderValueFromIndex,
   roundPriceFilterDollars,
@@ -129,6 +130,8 @@ function CatalogFiltersDraft({
   const [maximum, setMaximum] = useState(dollars(accepted.price.maxMinor));
   const [activeThumb, setActiveThumb] = useState<"min" | "max">("max");
   const draggedThumbRef = useRef<"min" | "max" | null>(null);
+  const minimumRangeRef = useRef<HTMLInputElement>(null);
+  const maximumRangeRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -227,6 +230,7 @@ function CatalogFiltersDraft({
       Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS,
       Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS,
     );
+    focusPriceSliderThumb(thumb, minimumRangeRef.current, maximumRangeRef.current);
     draggedThumbRef.current = thumb;
     setActiveThumb(thumb);
     updateSliderThumb(thumb, event.clientX, track);
@@ -260,7 +264,7 @@ function CatalogFiltersDraft({
     const currentValue = thumb === "min" ? minimum : maximum;
     const nextIndex = priceSliderIndexFromKeyboard(
       event.key,
-      priceSliderIndexFromValue(currentValue),
+      priceSliderIndexForBound(currentValue, thumb),
     );
     if (nextIndex === null) return;
 
@@ -368,6 +372,7 @@ function CatalogFiltersDraft({
                 min={PRICE_FILTER_SLIDER_MIN_INDEX}
                 onKeyDown={(event) => handleSliderKeyDown("min", event)}
                 onPointerDown={() => setActiveThumb("min")}
+                ref={minimumRangeRef}
                 onChange={(event) => {
                   setActiveThumb("min");
                   setMinimum(clampPriceFilter(
@@ -378,7 +383,7 @@ function CatalogFiltersDraft({
                 }}
                 step="1"
                 type="range"
-                value={priceSliderIndexFromValue(minimum)}
+                value={priceSliderIndexForBound(minimum, "min")}
               />
               <input
                 aria-invalid={!valid}
@@ -390,6 +395,7 @@ function CatalogFiltersDraft({
                 min={PRICE_FILTER_SLIDER_MIN_INDEX}
                 onKeyDown={(event) => handleSliderKeyDown("max", event)}
                 onPointerDown={() => setActiveThumb("max")}
+                ref={maximumRangeRef}
                 onChange={(event) => {
                   setActiveThumb("max");
                   setMaximum(clampPriceFilter(
@@ -400,9 +406,7 @@ function CatalogFiltersDraft({
                 }}
                 step="1"
                 type="range"
-                value={priceSliderIndexFromValue(
-                  Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS,
-                )}
+                value={priceSliderIndexForBound(maximum, "max")}
               />
             </div>
             <div className={styles.priceFields}>

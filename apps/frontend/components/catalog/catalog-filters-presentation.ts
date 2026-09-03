@@ -104,6 +104,19 @@ export function closerPriceThumb(
     : "max";
 }
 
+type FocusablePriceRange = Readonly<{
+  focus: (options?: FocusOptions) => void;
+}>;
+
+export function focusPriceSliderThumb(
+  thumb: "min" | "max",
+  minimum: FocusablePriceRange | null,
+  maximum: FocusablePriceRange | null,
+): void {
+  const selectedRange = thumb === "min" ? minimum : maximum;
+  selectedRange?.focus({ preventScroll: true });
+}
+
 export function priceSliderValueFromIndex(index: number): number {
   if (!Number.isFinite(index)) return PRICE_FILTER_MIN_DOLLARS;
   const boundedIndex = Math.min(
@@ -158,6 +171,16 @@ export function priceSliderIndexFromValue(value: number): number {
   const lower = PRICE_FILTER_SLIDER_VALUES[high] ?? PRICE_FILTER_MIN_DOLLARS;
   const upper = PRICE_FILTER_SLIDER_VALUES[low] ?? PRICE_FILTER_MAX_DOLLARS;
   return value - lower <= upper - value ? high : low;
+}
+
+export function priceSliderIndexForBound(
+  value: number,
+  bound: "min" | "max",
+): number {
+  const fallback = bound === "min"
+    ? PRICE_FILTER_MIN_DOLLARS
+    : PRICE_FILTER_MAX_DOLLARS;
+  return priceSliderIndexFromValue(Number.isFinite(value) ? value : fallback);
 }
 
 export function priceSliderPercent(value: number): number {

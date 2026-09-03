@@ -17,13 +17,27 @@ test("both range handles use the shared segmented price ladder", () => {
   assert.equal(source.match(/max=\{PRICE_FILTER_SLIDER_MAX_INDEX\}/g)?.length, 2);
   assert.equal(source.match(/min=\{PRICE_FILTER_SLIDER_MIN_INDEX\}/g)?.length, 2);
   assert.equal(source.match(/priceSliderValueFromIndex\(/g)?.length, 3);
-  assert.equal(source.match(/value=\{priceSliderIndexFromValue\(/g)?.length, 2);
+  assert.equal(source.match(/value=\{priceSliderIndexForBound\(/g)?.length, 2);
   assert.match(source, /const thumb = closerPriceThumb\(/);
   assert.match(source, /updateSliderThumb\(thumb, event\.clientX, track\)/);
   assert.match(source, /onPointerMove=\{handleSliderPointerMove\}/);
   assert.match(source, /onPointerUp=\{handleSliderPointerEnd\}/);
   assert.match(source, /onKeyDown=\{\(event\) => handleSliderKeyDown\("min", event\)\}/);
   assert.match(source, /onKeyDown=\{\(event\) => handleSliderKeyDown\("max", event\)\}/);
+});
+
+test("track selection focuses the chosen thumb and invalid fields recover from visible bounds", () => {
+  assert.match(source, /const minimumRangeRef = useRef<HTMLInputElement>\(null\)/);
+  assert.match(source, /const maximumRangeRef = useRef<HTMLInputElement>\(null\)/);
+  assert.match(
+    source,
+    /focusPriceSliderThumb\(thumb, minimumRangeRef\.current, maximumRangeRef\.current\)/,
+  );
+  assert.match(source, /ref=\{minimumRangeRef\}/);
+  assert.match(source, /ref=\{maximumRangeRef\}/);
+  assert.match(source, /priceSliderIndexForBound\(currentValue, thumb\)/);
+  assert.match(source, /priceSliderIndexForBound\(minimum, "min"\)/);
+  assert.match(source, /priceSliderIndexForBound\(maximum, "max"\)/);
 });
 
 test("numeric fields and Apply behavior remain intact", () => {

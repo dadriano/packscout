@@ -6,12 +6,15 @@ import {
   PRICE_FILTER_MIN_DOLLARS,
   PRICE_FILTER_SEGMENTS,
   PRICE_FILTER_SLIDER_MAX_INDEX,
+  PRICE_FILTER_SLIDER_MIN_INDEX,
   PRICE_FILTER_SLIDER_VALUES,
   categoryFacetRows,
   clampPriceFilter,
   closerPriceThumb,
+  focusPriceSliderThumb,
   formatFilterPrice,
   nestCategoryFacets,
+  priceSliderIndexForBound,
   priceSliderIndexFromValue,
   priceSliderIndexFromKeyboard,
   priceSliderPercent,
@@ -159,6 +162,35 @@ test("slider keyboard controls step the discrete ladder and honor its ends", () 
   assert.equal(priceSliderIndexFromKeyboard("ArrowLeft", 0), 0);
   assert.equal(priceSliderIndexFromKeyboard("ArrowRight", 79), 79);
   assert.equal(priceSliderIndexFromKeyboard("PageUp", 12), null);
+});
+
+test("invalid numeric fields recover keyboard sliders from the visible boundary", () => {
+  const minimumIndex = priceSliderIndexForBound(Number.NaN, "min");
+  const maximumIndex = priceSliderIndexForBound(Number.NaN, "max");
+  assert.equal(minimumIndex, PRICE_FILTER_SLIDER_MIN_INDEX);
+  assert.equal(maximumIndex, PRICE_FILTER_SLIDER_MAX_INDEX);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowRight", minimumIndex), 1);
+  assert.equal(
+    priceSliderIndexFromKeyboard("ArrowLeft", maximumIndex),
+    PRICE_FILTER_SLIDER_MAX_INDEX - 1,
+  );
+});
+
+test("track selection focuses only the chosen slider thumb without scrolling", () => {
+  const focusCalls: Array<readonly ["min" | "max", FocusOptions | undefined]> = [];
+  const minimum = {
+    focus: (options?: FocusOptions) => focusCalls.push(["min", options]),
+  };
+  const maximum = {
+    focus: (options?: FocusOptions) => focusCalls.push(["max", options]),
+  };
+
+  focusPriceSliderThumb("max", minimum, maximum);
+  focusPriceSliderThumb("min", minimum, maximum);
+  assert.deepEqual(focusCalls, [
+    ["max", { preventScroll: true }],
+    ["min", { preventScroll: true }],
+  ]);
 });
 
 test("pointer mapping gives low prices substantial track space", () => {
