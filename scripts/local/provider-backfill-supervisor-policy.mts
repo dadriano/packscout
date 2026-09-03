@@ -60,6 +60,8 @@ export interface BackfillSnapshot {
   readonly configurationMatches: boolean;
   readonly state: string;
   readonly generation: bigint;
+  /** Captured by live reads; required by the optional exact-head handoff. */
+  readonly runtimeRowVersion?: bigint;
   readonly checkpointHash: string | null;
   readonly checkpointValid: boolean;
   readonly activeRunIds: readonly string[];

@@ -1,6 +1,8 @@
+import { normalizeProviderPullWrite, providerPullCreateData, normalizeProviderMarketEventWrite,
+  providerMarketEventCreateData } from "./provider-canonical-fact-write.ts";
 import {
   nullableText, nullableMoney, nullableRate, nullableCurrency, nullableDate, nullableJson,
-  toPrismaJson, requireNonnegativeBigInt, requirePositiveBigInt,
+  toPrismaJson, requireNonnegativeBigInt,
   assertExpectedVersion, hasSameMaterialFields,
 } from "./provider-canonical-mutable-helpers.ts";
 import { normalizeProviderCollectibleWrite, planProviderCollectibleWrite } from "./provider-canonical-collectible-write.ts";
@@ -22,7 +24,6 @@ import {
   ProviderCanonicalWriteConflictError,
   requireAccountKey,
   requireDate,
-  requireDigest,
   requireNonEmptyText,
   requirePairedValues,
   type CanonicalWriteResult,
@@ -673,44 +674,8 @@ export class ProviderCanonicalTransaction {
   }
 
   async insertPull(input: PullWriteInput): Promise<PullWriteResult> {
-    const pullKey = requireNonEmptyText(input.pullKey, "pullKey");
-    const factDigest = requireDigest(input.factDigest);
-    const packKey = nullableText(input.packKey, "packKey");
-    requirePairedValues(input.paidAmount, input.paidCurrency, "paid");
-    if (input.items.length === 0) {
-      throw new ProviderCanonicalInputError("A completed pull must contain at least one item.");
-    }
-    const items = input.items.map((item) => {
-      const collectibleKey = nullableText(item.collectibleKey, "collectibleKey");
-      if (item.collectibleId !== null && collectibleKey === null) {
-        throw new ProviderCanonicalInputError(
-          "A resolved pull item collectible requires its immutable source key.",
-        );
-      }
-      if (item.collectibleInstanceId !== null && item.collectibleId === null) {
-        throw new ProviderCanonicalInputError(
-          "A collectible instance subject requires its collectible.",
-        );
-      }
-      requirePairedValues(item.statedValueAmount, item.statedValueCurrency, "statedValue");
-      return {
-        ...item,
-        collectibleKey,
-        quantity: requirePositiveBigInt(item.quantity, "quantity"),
-        statedValueAmount: nullableMoney(item.statedValueAmount, "statedValueAmount"),
-        statedValueCurrency: nullableCurrency(item.statedValueCurrency, "statedValueCurrency"),
-      };
-    });
-    if (packKey === null && items.every((item) => item.collectibleKey === null)) {
-      throw new ProviderCanonicalInputError(
-        "A completed pull requires at least one source pack or collectible relationship.",
-      );
-    }
-    if (input.packId !== null && packKey === null) {
-      throw new ProviderCanonicalInputError(
-        "A resolved pull pack requires its immutable source key.",
-      );
-    }
+    const normalized = normalizeProviderPullWrite(input);
+    const { pullKey, factDigest } = normalized;
     const current = await this.#client.pulls.findUnique({
       where: { pull_key: pullKey },
       include: { items: { orderBy: { ordinal: "asc" }, select: { id: true } } },
@@ -732,33 +697,9 @@ export class ProviderCanonicalTransaction {
 
     const pullId = randomUUID();
     const itemIds = input.items.map(() => randomUUID());
-    await this.#client.pulls.create({
-      data: {
-        id: pullId,
-        pull_key: pullKey,
-        fact_digest: factDigest,
-        pack_key: packKey,
-        pack_id: input.packId,
-        provider_account_id: input.providerAccountId,
-        item_count: items.length,
-        occurred_at: requireDate(input.occurredAt, "occurredAt"),
-        paid_amount: nullableMoney(input.paidAmount, "paidAmount"),
-        paid_currency: nullableCurrency(input.paidCurrency, "paidCurrency"),
-      },
-    });
-    await this.#client.pull_items.createMany({
-      data: items.map((item, index) => ({
-          id: itemIds[index] ?? randomUUID(),
-          pull_id: pullId,
-          ordinal: index + 1,
-          collectible_key: item.collectibleKey,
-          collectible_id: item.collectibleId,
-          collectible_instance_id: item.collectibleInstanceId,
-          quantity: item.quantity,
-          stated_value_amount: item.statedValueAmount,
-          stated_value_currency: item.statedValueCurrency,
-        })),
-    });
+    const data = providerPullCreateData(input, normalized, pullId, itemIds);
+    await this.#client.pulls.create({ data: data.pull });
+    await this.#client.pull_items.createMany({ data: data.items });
     const range = await appendPromotionRange(this.#client, [
       { entityType: "pull", entityId: pullId, entityVersion: 1n, operation: "upsert" },
       ...itemIds.map((id) => ({
@@ -772,27 +713,8 @@ export class ProviderCanonicalTransaction {
   }
 
   async insertMarketEvent(input: MarketEventWriteInput): Promise<CanonicalFactWriteResult> {
-    const eventKey = requireNonEmptyText(input.eventKey, "eventKey");
-    const factDigest = requireDigest(input.factDigest);
-    const packKey = nullableText(input.packKey, "packKey");
-    const collectibleKey = nullableText(input.collectibleKey, "collectibleKey");
-    requirePairedValues(input.amount, input.currency, "amount");
-    if (packKey === null && collectibleKey === null) {
-      throw new ProviderCanonicalInputError("A market event requires at least one source subject.");
-    }
-    if (input.packId !== null && packKey === null) {
-      throw new ProviderCanonicalInputError(
-        "A resolved market-event pack requires its immutable source key.",
-      );
-    }
-    if (input.collectibleId !== null && collectibleKey === null) {
-      throw new ProviderCanonicalInputError(
-        "A resolved market-event collectible requires its immutable source key.",
-      );
-    }
-    if (input.collectibleInstanceId !== null && input.collectibleId === null) {
-      throw new ProviderCanonicalInputError("A collectible instance subject requires its collectible.");
-    }
+    const normalized = normalizeProviderMarketEventWrite(input);
+    const { eventKey, factDigest } = normalized;
     const current = await this.#client.market_events.findUnique({ where: { event_key: eventKey } });
     if (current) {
       if (current.fact_digest !== factDigest) {
@@ -804,27 +726,7 @@ export class ProviderCanonicalTransaction {
       return { id: current.id, replayed: true, promotionRange: null };
     }
     const id = randomUUID();
-    await this.#client.market_events.create({
-      data: {
-        id,
-        event_key: eventKey,
-        fact_digest: factDigest,
-        event_group_id: input.eventGroupId,
-        event_type: input.eventType,
-        pack_key: packKey,
-        pack_id: input.packId,
-        collectible_key: collectibleKey,
-        collectible_id: input.collectibleId,
-        collectible_instance_id: input.collectibleInstanceId,
-        from_provider_account_id: input.fromProviderAccountId,
-        to_provider_account_id: input.toProviderAccountId,
-        quantity: input.quantity === null ? null : requirePositiveBigInt(input.quantity, "quantity"),
-        occurred_at: requireDate(input.occurredAt, "occurredAt"),
-        amount: nullableMoney(input.amount, "amount"),
-        currency: nullableCurrency(input.currency, "currency"),
-        details: toPrismaJson(normalizeJsonObject(input.details, "details")),
-      },
-    });
+    await this.#client.market_events.create({ data: providerMarketEventCreateData(input, normalized, id) });
     const range = await appendPromotionRange(this.#client, [{
       entityType: "market_event",
       entityId: id,

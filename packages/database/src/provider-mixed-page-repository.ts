@@ -1,3 +1,4 @@
+import { applyProviderFactBatch, isProviderFactRecord, PROVIDER_FACT_BATCH_SIZE, type ProviderFactBatchOutcome } from "./provider-fact-batch-repository.ts";
 import {
   applyProviderCollectibleBatch, isProviderCollectibleUpsert, PROVIDER_COLLECTIBLE_BATCH_SIZE,
 } from "./provider-collectible-batch-repository.ts";
@@ -182,17 +183,19 @@ function knownRecordFailure(error: unknown): {
   return null;
 }
 
-async function applyCollectibleChunk(transaction: ProviderTransactionClient,
-  records: readonly ProviderMixedPageRecord[]): Promise<readonly boolean[] | null> {
-  await transaction.$executeRawUnsafe("SAVEPOINT packscout_collectible_chunk");
+async function applyCanonicalChunk(transaction: ProviderTransactionClient,
+  records: readonly ProviderMixedPageRecord[]): Promise<readonly ProviderFactBatchOutcome[] | null> {
+  await transaction.$executeRawUnsafe("SAVEPOINT packscout_canonical_chunk");
   try {
-    const result = await applyProviderCollectibleBatch(transaction, records);
-    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_collectible_chunk");
+    const result = isProviderFactRecord(records[0]!)
+      ? await applyProviderFactBatch(transaction, records)
+      : await applyProviderCollectibleBatch(transaction, records);
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_canonical_chunk");
     return result;
   } catch (error) {
     if (knownRecordFailure(error) === null && !providerBatchRecordConstraint(error)) throw error;
-    await transaction.$executeRawUnsafe("ROLLBACK TO SAVEPOINT packscout_collectible_chunk");
-    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_collectible_chunk");
+    await transaction.$executeRawUnsafe("ROLLBACK TO SAVEPOINT packscout_canonical_chunk");
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_canonical_chunk");
     return null;
   }
 }
@@ -350,19 +353,32 @@ export class PrismaProviderMixedPageRepository {
       let fallbackThrough = 0;
       for (let recordIndex = 0; recordIndex < page.records.length; recordIndex += 1) {
         const record = page.records[recordIndex]!;
-        if (recordIndex >= fallbackThrough && isProviderCollectibleUpsert(record)) {
+        if (recordIndex >= fallbackThrough && (isProviderCollectibleUpsert(record) || isProviderFactRecord(record))) {
+          const factBatch = isProviderFactRecord(record);
+          const maximum = factBatch ? PROVIDER_FACT_BATCH_SIZE : PROVIDER_COLLECTIBLE_BATCH_SIZE;
           const chunk: ProviderMixedPageRecord[] = [];
-          for (let index = recordIndex; index < page.records.length && chunk.length < PROVIDER_COLLECTIBLE_BATCH_SIZE; index += 1) {
+          for (let index = recordIndex; index < page.records.length && chunk.length < maximum; index += 1) {
             const candidate = page.records[index]!;
-            if (!isProviderCollectibleUpsert(candidate)) break;
+            if (factBatch ? (!isProviderFactRecord(candidate) || candidate.kind !== record.kind)
+              : !isProviderCollectibleUpsert(candidate)) break;
             chunk.push(candidate);
           }
           if (chunk.length > 1) {
-            const batch = await applyCollectibleChunk(transaction, chunk);
+            const batch = await applyCanonicalChunk(transaction, chunk);
             if (batch !== null) {
-              accepted += batch.filter(Boolean).length;
-              duplicate += batch.filter(value => !value).length;
-              materialChanges += batch.filter(Boolean).length;
+              for (const [index, outcome] of batch.entries()) {
+                if (outcome === true) { accepted += 1; materialChanges += 1; }
+                else if (outcome === false) duplicate += 1;
+                else {
+                  const failure = knownRecordFailure(outcome.error);
+                  if (failure === null) throw outcome.error;
+                  quarantines.push({ id: randomUUID(), record: chunk[index]!, ...failure });
+                }
+              }
+              if (quarantines.length > PROVIDER_MIXED_PAGE_MAX_QUARANTINES) {
+                throw new ProviderMixedPageContractError("MIXED_PAGE_OVERSIZED",
+                  "The provider mixed page exceeds the bounded quarantine limit.");
+              }
               recordIndex += chunk.length - 1;
               continue;
             }

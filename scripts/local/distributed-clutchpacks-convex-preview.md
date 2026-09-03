@@ -127,3 +127,48 @@ Review the exact selected-provider result at:
 The command output is sanitized: it reports checkpoint, document counts, and
 immutable public release identifiers, but never database credentials or
 publication key material.
+
+## Neon database with the existing local Convex deployment
+
+The same command may read the centrally routed ClutchPacks database in Neon.
+This does not change the Convex destination: the selected existing deployment
+must still be local, with matching loopback client/site URLs and no cloud deploy
+key. Do not run `convex dev` or replace the existing local deployment as part of
+this database change. The EV retention readiness probe must already pass; the
+publisher does not deploy schema or run that migration.
+
+Remote database access requires `PACKSCOUT_DATABASE_MODE=remote`, the exact
+`PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS` and
+`PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS` allowlists, and the approved central
+URL for logical database `packscout`. Central TLS must verify the certificate;
+the central provider route must use port 5432, `verify-full`, logical database
+`packscout_clutchpacks`, and the matching immutable provider identity. Missing
+mode or allowlists do not enable remote access. Production mode is refused.
+
+Set `PACKSCOUT_LOCAL_CLUTCHPACKS_PUBLICATION_SCOPE_JSON` in the protected process
+environment to canonical JSON with exactly these sorted keys:
+
+```json
+{"configVersionId":"<approved-config-UUID>","configVersionNumber":"<positive-decimal-version>","operatorId":"<active-admin-UUID>","organizationId":"<approved-organization-UUID>","providerId":"<approved-ClutchPacks-UUID>"}
+```
+
+Use the exact active configuration and operator from the reviewed continuation
+handoff. Scope is never inferred from another tenant's row. Before and after
+every provider snapshot, the publisher rechecks the active admin membership,
+organization, configuration, logical database and allowed route. A route change
+also changes the stability fingerprint and refuses the old plan.
+
+First finish the authorized import through a successful source-head checkpoint,
+then drain its sole resident without changing that checkpoint. Publication
+requires idle runtime, no running run, and no live import lease. Run the existing
+`--check-only` command, review its eligibility counts, then run the command
+without that flag. Check-only performs bounded database/Convex reads, no lease
+claim, authority installation or publication. Execution obtains the normal
+exclusive import fence and requires no queued run or actionable command before
+publishing. It never enables another provider or consumes import work.
+
+Retained membership receipts, original EV observation clocks and the signed
+provider, manifest and V3 transition checks remain unchanged. Preserve the
+before/after checkpoint and EV/chase digests, verify both public read models,
+verify temporary signing-authority cleanup, and only then hand import scheduling
+back to the resident owner.

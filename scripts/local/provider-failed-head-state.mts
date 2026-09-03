@@ -4,7 +4,7 @@ import { providerMixedPageDigest, readProviderRunHeadProof, readProviderFailedHe
 import type { BackfillAuthority } from "./provider-backfill-supervisor-authority.mts";
 import { assertBackfillPins, backfillPinsSchema } from "./provider-backfill-supervisor-policy.mts";
 import { readBackfillSnapshot } from "./provider-backfill-supervisor-state.mts";
-import { assertContinuousCycle, continuousCycleSchema } from "./provider-continuous-policy.mts";
+import { assertHistoricalContinuousCycle, historicalContinuousCycleSchema } from "./provider-continuous-policy.mts";
 import { pausedHeadIds, pausedHeadReceiptSchema } from "./provider-paused-head-policy.mts";
 import { assertPausedHeadAuthority } from "./provider-paused-head-state.mts";
 import { failedHeadAuditPins, failedHeadDigest as digest, failedHeadIds, refuseFailedHead as refuse,
@@ -68,10 +68,10 @@ function assertProvenance(s: FailedHeadSnapshot, r: FailedHeadReview) {
   const adoption = pausedHeadReceiptSchema.safeParse(s.provenance.find(row => row.sequence.toString() === r.provenance.adoption.sequence)!.details);
   const op = s.provenance.find(row => row.sequence.toString() === r.provenance.operation.sequence)!.details as { pins?: unknown; authorityDigest?: string };
   const previousPins = backfillPinsSchema.safeParse(op.pins);
-  const cycle = continuousCycleSchema.safeParse(s.provenance.find(row => row.sequence.toString() === r.provenance.cycle.sequence)!.details);
+  const cycle = historicalContinuousCycleSchema.safeParse(s.provenance.find(row => row.sequence.toString() === r.provenance.cycle.sequence)!.details);
   if (!adoption.success || !previousPins.success || !cycle.success) refuse("FAILED_HEAD_PROVENANCE_DRIFT");
   const old = adoption.data.review, expectedPins = { ...pins, operationId: r.priorOperationId, initialRunId: r.priorHeadRunId };
-  assertContinuousCycle(cycle.data, expectedPins, r.authorityDigest);
+  assertHistoricalContinuousCycle(cycle.data, expectedPins, r.authorityDigest);
   const completed = s.provenance.find(row => row.sequence.toString() === r.provenance.adoptionCompleted.sequence)!;
   const resume = s.adoptionResume, command = s.parentCommand, c = cycle.data;
   const commandResult = command?.result as { outcome?: unknown; code?: unknown; generation?: unknown } | null;

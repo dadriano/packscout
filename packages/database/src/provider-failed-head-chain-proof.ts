@@ -4,6 +4,7 @@ import type { ProviderQueryClient } from "./provider-database.ts";
 import type { ProviderRuntimeResumeGuardCommon } from "./provider-runtime-resume-guard.ts";
 import { providerInitialFailedHeadGuardMatches, providerResumeEvidenceDigest as digest,
   type ProviderInitialFailedHeadEntry } from "./provider-runtime-failed-head-guard.ts";
+import { providerFailedHeadLifecycleMatches } from "./provider-failed-head-lifecycle-proof.ts";
 interface AuditPin { readonly sequence: string; readonly digest: string }
 export interface ProviderFailedHeadChainEntry extends Omit<ProviderInitialFailedHeadEntry, "entry"> {
   readonly entry: "failed_zero_commit_chain_from_head";
@@ -57,10 +58,7 @@ export async function readProviderFailedHeadChainProof(db: ProviderQueryClient,
     db.local_audit_events.findMany({ where: { action, target_id: { in: [p.runId, g.latestRunId] } }, take: 4 }),
     db.local_audit_events.findMany({ where: { sequence: { in: g.provenance.map(row => BigInt(row.sequence)) } }, take: 5 }),
   ]);
-  const allowed = new Set([action, `${action}.completed`, `${action}.lease_claimed`, "provider.runtime.resume_guard",
-    "provider.runtime.transition", "provider.command.terminal", "provider.run.requested"]);
   if (!root || !leaf || audits.length > 128 || commands.length !== 2 || runs.length > 1024 || pages !== 0 ||
-    audits.some(row => !allowed.has(row.action) || row.actor_operator_id !== operatorId || row.outcome !== "success") ||
     runs.some(row => row.requested_at >= root.requested_at && ![root.id, leaf.id, g.priorHeadRunId, nextIds.run].includes(row.id)) ||
     continuations.length > 2 || continuations.filter(row => row.correlation_id === p.operationId).length !== 1 ||
     continuations.some(row => ![p.operationId, operationId].includes(row.correlation_id))) return null;
@@ -133,5 +131,7 @@ export async function readProviderFailedHeadChainProof(db: ProviderQueryClient,
   if (object(claim.details).fence !== lastFence.toString() || leaf.worker_fence !== lastFence + 1n ||
     receiptRow.sequence >= claim.sequence || claim.sequence >= completed.sequence || receiptRow.sequence >= resumeGuard.sequence || resumeGuard.sequence >= requested.sequence ||
     requested.sequence >= completed.sequence) return null;
+  if (!providerFailedHeadLifecycleMatches({ audits, providerId: g.providerId, operatorId, operationId: p.operationId,
+    resume, command, leaf, generation: oldGeneration, completed, resumeGuard, requested })) return null;
   return digest({ root, leaf, audits, commands });
 }

@@ -89,6 +89,16 @@ test("process inventory refuses target and orphan writers but leaves independent
     assert.throws(() => policy.assertNoContinuationWriter(text, review, 99));
   }
 });
+test("a production publisher poller cannot be adopted from a provider-key-only process claim", () => {
+  const { review } = fixture();
+  for (const entry of ["/review/scripts/live/run-clutchpacks-production-poller.mts", "/foreign/run-clutchpacks-production-poller.mts",
+    "/review/scripts/live/promote-clutchpacks-production.mts"])
+    for (const flags of ["--run --provider-key courtyard", "--check-only", "--run --provider-key phygitals", "--unknown"]) {
+      assert.throws(() => policy.assertNoContinuationWriter(`10 1 node --import tsx ${entry} ${flags}`, review, 99),
+        /CONTINUATION_UNSCOPED_WRITER_PRESENT/);
+    }
+  assert.doesNotThrow(() => policy.assertNoContinuationWriter("99 1 node /review/scripts/live/run-clutchpacks-production-poller.mts --run", review, 99));
+});
 test("deadline drains an in-flight callback and rejects the following write phase", async () => {
   let done, writes = 0, settled = false;
   const blocker = new Promise(resolve => { done = resolve; });

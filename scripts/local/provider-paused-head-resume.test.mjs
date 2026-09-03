@@ -64,6 +64,14 @@ test("exclusive process guard detects importer, generic worker, source superviso
   assert.doesNotThrow(() => assertNoPausedHeadWriter("123 1 /usr/bin/node scripts/local/provider-paused-head-resume.mts --apply\n124 1 next-server", 123));
   assert.throws(() => assertNoPausedHeadWriter("unparseable process inventory"), /PAUSED_HEAD_PROCESS_INVENTORY_INVALID/);
 });
+test("exclusive process guard refuses production pollers even with foreign provider or check-only claims", () => {
+  for (const entry of ["/review/scripts/live/run-clutchpacks-production-poller.mts", "/foreign/run-clutchpacks-production-poller.mts",
+    "/review/scripts/live/promote-clutchpacks-production.mts"])
+    for (const flags of ["--run --provider-key courtyard", "--check-only", "--unknown"]) {
+      assert.throws(() => assertNoPausedHeadWriter(`123 1 /usr/bin/node --import tsx ${entry} ${flags}`, 999), /PAUSED_HEAD_WRITER_PRESENT/);
+    }
+  assert.doesNotThrow(() => assertNoPausedHeadWriter("123 1 /usr/bin/node /review/scripts/live/run-clutchpacks-production-poller.mts --run", 123));
+});
 test("private approval file reader refuses symlinks, public permissions, oversized and unrecognized content", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "packscout-paused-head-test-"));
   try {
