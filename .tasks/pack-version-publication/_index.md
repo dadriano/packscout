@@ -149,9 +149,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Current parent:** `3db9ba77d84ca7a828e513ff59955041bfb94175` (includes merged P01, PR94, and PR93).
 - **Implementation:** `1dc7fbde8c699cc0523c73c0de190a38e80b285d`; unchanged patches from the passing full framework gate on `a03129f5`. Current-parent full verification is blocked, not green.
+- **Current-base evidence:** Framework/Prisma/ratchet checks, non-frontend lint, all workspace typechecks, the 29-check P02 matrix, the tooling lane, and production builds passed. Only the unrelated frontend lint prevents full-gate completion.
 - **Delivery blocker:** `apps/frontend/components/catalog/ChaseCollectibleInspector.client.tsx:123`, introduced by PR94 and unchanged in P02, fails `react-hooks/set-state-in-effect`. The same failure is present in [main CI](https://github.com/dadriano/packscout/actions/runs/33808683512). Keep the PR draft until an upstream fix and a passing full gate.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
-- **PR:** not opened.
+- **PR:** https://github.com/dadriano/packscout/pull/95 (draft; delivery remains blocked, not published-ready).
 
 #### P03 — Deterministic assembler
 
