@@ -4,6 +4,7 @@ import {
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES,
   dataforrestEventsJsonNodeBudget,
@@ -11,6 +12,7 @@ import {
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestEventRecordV1Schema,
   dataforrestEventsV1SourceAdapterManifests,
   normalizeDataforrestEventRecordForAdapter,
@@ -42,9 +44,22 @@ test("Courtyard response budget stays isolated to v2-derived immutable profiles"
   assert.equal(catalogV2.adapterVersion, DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION);
   assert.deepEqual(catalogV2.requestBounds, manifest.requestBounds);
   assert.equal(dataforrestEventsJsonNodeBudget(catalogV2.adapterVersion), 640_000);
+  // Distributed-v3 is the all-stream pack-reading identity. It copies
+  // distributed-v2's transport admissions exactly, so it is v2-derived too.
+  const distributedV3 = dataforrestCourtyardDistributedV3SourceAdapterManifest;
+  assert.equal(
+    distributedV3.adapterVersion,
+    DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+  );
+  assert.equal(distributedV3.adapterVersion, "dataforrest-courtyard-distributed-adapter-v3");
+  assert.deepEqual(distributedV3.requestBounds, manifest.requestBounds);
+  assert.deepEqual(distributedV3.supportedProviders, manifest.supportedProviders);
+  assert.equal(dataforrestEventsJsonNodeBudget(distributedV3.adapterVersion), 640_000);
+  assert.equal(dataforrestEventsV1SourceAdapterManifests.includes(distributedV3), true);
   for (const historical of dataforrestEventsV1SourceAdapterManifests.filter(
     (candidate) =>
-      candidate !== manifest && candidate !== catalog && candidate !== catalogV2,
+      candidate !== manifest && candidate !== catalog && candidate !== catalogV2
+      && candidate !== distributedV3,
   )) {
     assert.equal(historical.requestBounds.maximumResponseBytes, 8 * 1024 * 1024);
     assert.equal(dataforrestEventsJsonNodeBudget(historical.adapterVersion), 480_000);

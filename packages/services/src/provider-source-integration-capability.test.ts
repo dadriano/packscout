@@ -7,15 +7,18 @@ import {
   dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV3SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   ProviderMappingAdapterRegistry,
@@ -120,14 +123,30 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     `courtyard:${dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion}`,
     `collector_crypt:${dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion}`,
+    // Pack-reading DISTRIBUTED versions. Production runs all-stream sources for
+    // these providers, so these - not the catalog-scoped ones - are the tuples
+    // an activated production source needs admitted.
+    `courtyard:${dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion}`,
+    `phygitals:${dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion}`,
   ].sort());
   for (const [providerKey, adapterVersion] of [
     ["courtyard", dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion],
     ["collector_crypt", dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion],
+    ["courtyard", dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion],
+    ["phygitals", dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion],
   ] as const) {
     assert.equal(installed.has(providerKey, adapterVersion), true,
       `${providerKey} must be admitted on ${adapterVersion}`);
+    for (const crossedProviderKey of [
+      "clutchpacks", "collector_crypt", "courtyard", "phygitals",
+    ]) {
+      if (crossedProviderKey !== providerKey) {
+        assert.equal(installed.has(crossedProviderKey, adapterVersion), false);
+      }
+    }
   }
   assert.equal(installed.has("courtyard", adapterKey), false);
   assert.equal(installed.has("courtyard",

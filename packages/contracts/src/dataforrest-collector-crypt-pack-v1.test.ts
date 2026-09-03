@@ -11,6 +11,7 @@ import {
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
 } from "./index.ts";
 
 /**
@@ -572,13 +573,21 @@ test("Collector Crypt pack v1 keeps the evidenced text and image boundaries usab
   });
 });
 
-test("Collector Crypt catalog v3 is the only identity carrying the pack reader", () => {
+test("only the new Collector Crypt identities carry the pack reader", () => {
   const data = evidencedPackData();
   const packVersion = DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION;
-  assert.deepEqual(
-    readDataforrestProviderFacts(packVersion, "collector_crypt", "pack", data),
-    expectedEvidencedFacts(),
-  );
+  for (
+    const version of [
+      packVersion,
+      DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+    ]
+  ) {
+    assert.deepEqual(
+      readDataforrestProviderFacts(version, "collector_crypt", "pack", data),
+      expectedEvidencedFacts(),
+      version,
+    );
+  }
 
   // Adapter versions are immutable admissions: the pack reader must not
   // appear on any previously admitted Collector Crypt identity.

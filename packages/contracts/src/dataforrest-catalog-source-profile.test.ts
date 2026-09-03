@@ -11,9 +11,11 @@ import {
   dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
   dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestEventsCatalogSourceConfigurationV1Schema,
   dataforrestEventsJsonNodeBudget,
   dataforrestEventsSourceConfigurationSchemaForAdapter,
@@ -22,6 +24,7 @@ import {
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV3SourceAdapterManifest,
   normalizeDataforrestEventRecordForAdapter,
   type DataforrestEventRecordV1,
 } from "./index.ts";
@@ -165,6 +168,39 @@ test("catalog source configuration is exact and selected only by catalog version
     assert.equal(
       dataforrestEventsSourceConfigurationSchemaForAdapter(version),
       dataforrestEventsCatalogSourceConfigurationV1Schema,
+    );
+  }
+  // The pack-reading DISTRIBUTED identities must stay all-stream. Pinning one
+  // to the catalog configuration would make its source catalog-only and stop
+  // pull and trade ingestion, which is why the catalog identities above cannot
+  // carry production's packs.
+  for (
+    const distributed of [
+      dataforrestCourtyardDistributedV3SourceAdapterManifest,
+      dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+      dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+    ]
+  ) {
+    const platform = distributed.supportedProviders[0]!.provider;
+    assert.equal(
+      dataforrestEventsSourceConfigurationSchemaForAdapter(
+        distributed.adapterVersion,
+      ),
+      dataforrestEventsSourceConfigurationV1Schema,
+      distributed.adapterVersion,
+    );
+    assert.equal(
+      dataforrestEventsSourceConfigurationV1Schema.safeParse({ platform })
+        .success,
+      true,
+      distributed.adapterVersion,
+    );
+    assert.equal(
+      dataforrestEventsSourceConfigurationSchemaForAdapter(
+        distributed.adapterVersion,
+      ).safeParse({ platform, stream: "catalog" }).success,
+      false,
+      distributed.adapterVersion,
     );
   }
   const catalogVersions: ReadonlySet<string> = new Set(
