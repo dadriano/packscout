@@ -8,11 +8,47 @@ import { tsImport } from "tsx/esm/api";
 const plan = await tsImport("./dataforrest-catalog-bridge-plan.mts", import.meta.url);
 const journalModule = await tsImport("./dataforrest-catalog-bridge-journal.mts", import.meta.url);
 const stateModule = await tsImport("./dataforrest-catalog-bridge-state.mts", import.meta.url);
+const censusProof = await tsImport("./dataforrest-catalog-bridge-source-census-proof.mts", import.meta.url);
 const cli = await tsImport("./prepare-dataforrest-catalog-bridge.mts", import.meta.url);
 const { providerMixedCursorFingerprint } = await tsImport("@packscout/database", import.meta.url);
 
 const secret = "private-saved-cursor-for-journal-test";
 const hash = (letter) => letter.repeat(64);
+
+function sourceCensus(definition, operationId, checkout, commit) {
+  const counts = definition.documentedCatalogFloor;
+  const sourceRecordCount = counts.card + counts.pack;
+  const pageCount = Math.ceil(sourceRecordCount / definition.catalogManifest.requestBounds.pageLimit);
+  const pass = (passNumber, startedAt, completedAt) => ({ passNumber, startedAt, completedAt,
+    pageCount, sourceRequestCount: pageCount, sourceRecordCount,
+    rawCardObservationCount: counts.card, rawPackObservationCount: counts.pack,
+    distinctCardIdentityCount: counts.card, distinctPackIdentityCount: counts.pack,
+    identityMultisetDigest: hash("e"), traversalChainDigest: hash("d"),
+    finalCursorHash: hash("c"), maximumResponseBytes: 1000,
+    totalResponseBytes: pageCount * 1000 });
+  return censusProof.catalogBridgeSourceCensusSchema.parse({
+    schemaVersion: "dataforrest_catalog_bridge_source_census_v1",
+    authorization: "operator_requested_read_only_catalog_source_census",
+    operationId,
+    providerKey: definition.providerKey, capturedAt: "2026-09-01T02:59:00.000Z",
+    executor: { checkout, commit, runnerModuleSha256: hash("a"),
+      censusModuleSha256: hash("b"), inspectionModuleSha256: hash("c") },
+    source: { providerId: definition.providerId, configId: definition.currentConfigId,
+      configNumber: definition.currentConfigNumber,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
+      catalogAdapterVersion: definition.catalogAdapterVersion, sourceCredentialDigest: hash("f"),
+      pageLimit: definition.catalogManifest.requestBounds.pageLimit,
+      requestTimeoutMilliseconds: definition.catalogManifest.requestBounds.timeoutMilliseconds,
+      maximumResponseBytes: definition.catalogManifest.requestBounds.maximumResponseBytes },
+    passes: [pass(1, "2026-09-01T02:57:00.000Z", "2026-09-01T02:58:00.000Z"),
+      pass(2, "2026-09-01T02:58:01.000Z", "2026-09-01T02:59:00.000Z")],
+    agreement: { sourceRecordCount, cardCount: counts.card, packCount: counts.pack,
+      pageCount, identityMultisetDigest: hash("e"), traversalChainDigest: hash("d"),
+      finalCursorHash: hash("c") },
+    databaseWritesPerformed: false, sourceRequestsPerformed: true,
+    rawResponsesPersisted: false, rawCursorsPersisted: false, sourceRecordIdsPersisted: false,
+  });
+}
 
 function preparationDocument() {
   const definition = plan.catalogBridgeProvider("collector_crypt");
@@ -22,11 +58,19 @@ function preparationDocument() {
     cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
     cursorGeneration: 1, value: secret };
   const sourceCursorHash = providerMixedCursorFingerprint(cursor);
-  const pins = { operationId: "20000000-0000-4000-8000-000000000001", providerKey: definition.providerKey,
-    operatorId: "20000000-0000-4000-8000-000000000002", residentCheckout: "/approved/resident",
-    residentCommit: "a".repeat(40), utilityModuleSha256: hash("b"),
-    sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1",
-    sourceHeadCounts: { ...definition.documentedCatalogFloor } };
+  const residentCheckout = "/approved/resident";
+  const residentCommit = "a".repeat(40);
+  const operationId = "20000000-0000-4000-8000-000000000001";
+  const proof = sourceCensus(definition, operationId, residentCheckout, residentCommit);
+  const sourceHeadCensusFileSha256 = censusProof.catalogBridgeSourceCensusFileSha256(proof);
+  const sourceHeadCensusProofDigest = plan.catalogBridgeDigest(proof);
+  const pins = { operationId, providerKey: definition.providerKey,
+    operatorId: "20000000-0000-4000-8000-000000000002", residentCheckout,
+    residentCommit, utilityModuleSha256: hash("b"),
+    sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1",
+    sourceHeadCounts: { ...definition.documentedCatalogFloor },
+    sourceHeadCensusFileSha256, sourceHeadCensusProofDigest,
+    sourceHeadIdentityMultisetDigest: proof.agreement.identityMultisetDigest };
   const observation = { observedAt: "2026-09-01T03:00:00.000Z",
     repository: { checkout: pins.residentCheckout, expectedCommit: pins.residentCommit,
       observedCommit: pins.residentCommit, clean: true, utilityModuleSha256: pins.utilityModuleSha256 },
@@ -73,6 +117,8 @@ function preparationDocument() {
         responseSha256: hash("4"), checkedAt: "2026-09-01T02:59:45.000Z",
         responseBytes: 1000, durationMilliseconds: 10 },
     },
+    sourceCensus: { proof, fileSha256: sourceHeadCensusFileSha256,
+      proofDigest: sourceHeadCensusProofDigest },
     baseline: { cards: 1, packs: 0, pulls: 2, marketEvents: 3,
       pullsDigest: hash("5"), marketEventsDigest: hash("6") } };
   observation.runtime.pauseProvenance.commandDigest =

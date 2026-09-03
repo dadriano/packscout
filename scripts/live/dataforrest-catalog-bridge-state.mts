@@ -76,6 +76,9 @@ function receiptFromPrepared(receipt: CatalogBridgePublicPreparedReceipt): Catal
       sourceHeadCountProvenance: receipt.sourceHeadCountProvenance,
       sourceHeadCardCount: receipt.sourceHeadCardCount,
       sourceHeadPackCount: receipt.sourceHeadPackCount,
+      sourceHeadCensusFileSha256: receipt.sourceHeadCensusFileSha256,
+      sourceHeadCensusProofDigest: receipt.sourceHeadCensusProofDigest,
+      sourceHeadIdentityMultisetDigest: receipt.sourceHeadIdentityMultisetDigest,
     }),
   });
 }
@@ -94,7 +97,8 @@ const evidenceKeys = Object.freeze({
   prepared: ["authorityDigest", "baselineDigest", "catalogOriginResponseSha256", "gracefulStopReceiptSha256",
     "latestTerminalRunDigest", "latestTerminalRunId", "pauseCommandDigest", "pauseCommandId", "providerRowVersion",
     "runtimeGeneration", "runtimeRowVersion", "savedEventCanaryResponseSha256", "savedEventCursorHash",
-    "savedOpaqueValueHash", "sourceHeadCardCount", "sourceHeadCountProvenance", "sourceHeadPackCount"],
+    "savedOpaqueValueHash", "sourceHeadCardCount", "sourceHeadCensusFileSha256", "sourceHeadCensusProofDigest",
+    "sourceHeadCountProvenance", "sourceHeadIdentityMultisetDigest", "sourceHeadPackCount"],
   catalog_activated: ["canonicalDigest", "catalogConfigId", "catalogConfigNumber", "configurationDigest",
     "providerRowVersion", "runtimeGeneration", "runtimeRowVersion"],
   catalog_run_admitted: ["catalogRunConfigId", "catalogRunConfigNumber", "catalogRunId", "pausedOriginGuardDigest",
@@ -103,7 +107,8 @@ const evidenceKeys = Object.freeze({
   catalog_completed: ["canonicalAfterDigest", "cardRecordCount", "catalogRecordCount", "catalogRunDigest",
     "catalogRunId", "distinctCardIdentityCount", "distinctPackIdentityCount", "identityChainDigest",
     "identityMultisetDigest", "marketEventRecordCount", "packRecordCount", "pullRecordCount",
-    "quarantinedCount", "runtimeState", "sourceHeadCountProvenance", "sourceRecordCount"],
+    "quarantinedCount", "runtimeState", "sourceHeadCensusProofDigest", "sourceHeadCountProvenance",
+    "sourceRecordCount"],
   event_successor_staged: ["activationProofDigest", "centralProviderRowVersion", "eventAdapterVersion",
     "eventSuccessorConfigId", "eventSuccessorConfigNumber", "latestTerminalRunDigest", "latestTerminalRunId",
     "postCatalogPauseCommandDigest", "postCatalogPauseCommandId", "runtimeGeneration", "runtimeRowVersion",
@@ -343,6 +348,7 @@ export function recordCatalogCompleted(input: Readonly<{
       identityMultisetDigest: input.observation.identityMultisetDigest,
       runtimeState: input.observation.runtimeState,
       sourceHeadCountProvenance: input.pins.sourceHeadCountProvenance,
+      sourceHeadCensusProofDigest: input.pins.sourceHeadCensusProofDigest,
       pullRecordCount: 0, marketEventRecordCount: 0, quarantinedCount: 0 } }));
 }
 

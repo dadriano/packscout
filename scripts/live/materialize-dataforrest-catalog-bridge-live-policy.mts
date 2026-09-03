@@ -131,8 +131,18 @@ export function buildCatalogBridgeCatalogLivePolicy(input: Readonly<{
   const sourceHeadCountProvenance = preparedReceipt.evidence.sourceHeadCountProvenance;
   const sourceHeadCardCount = preparedReceipt.evidence.sourceHeadCardCount;
   const sourceHeadPackCount = preparedReceipt.evidence.sourceHeadPackCount;
-  if (sourceHeadCountProvenance !== "manually_reviewed_exact_source_head_counts_v1" ||
-    typeof sourceHeadCardCount !== "number" || typeof sourceHeadPackCount !== "number") {
+  const sourceHeadCensusFileSha256 = preparedReceipt.evidence.sourceHeadCensusFileSha256;
+  const sourceHeadCensusProofDigest = preparedReceipt.evidence.sourceHeadCensusProofDigest;
+  const sourceHeadIdentityMultisetDigest = preparedReceipt.evidence.sourceHeadIdentityMultisetDigest;
+  const sha256 = (value: unknown): value is string =>
+    typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  if (preparedReceipt.operationId !== state.operationId ||
+    preparedReceipt.providerKey !== state.providerKey ||
+    preparedReceipt.planDigest !== state.planDigest ||
+    sourceHeadCountProvenance !== "two_pass_read_only_catalog_census_v1" ||
+    typeof sourceHeadCardCount !== "number" || typeof sourceHeadPackCount !== "number" ||
+    !sha256(sourceHeadCensusFileSha256) || !sha256(sourceHeadCensusProofDigest) ||
+    !sha256(sourceHeadIdentityMultisetDigest)) {
     refuseCatalogBridge("CATALOG_BRIDGE_POLICY_MATERIALIZATION_JOURNAL_INVALID");
   }
   const definition = catalogBridgeProvider(state.providerKey);
@@ -148,7 +158,13 @@ export function buildCatalogBridgeCatalogLivePolicy(input: Readonly<{
     utilityModuleSha256: state.preflight.repository.utilityModuleSha256,
     sourceHeadCountProvenance,
     sourceHeadCounts: Object.freeze({ card: sourceHeadCardCount,
-      pack: sourceHeadPackCount }) });
+      pack: sourceHeadPackCount }),
+    sourceHeadCensusFileSha256,
+    sourceHeadCensusProofDigest,
+    sourceHeadIdentityMultisetDigest });
+  if (catalogBridgeDigest(pins) !== state.planDigest) {
+    refuseCatalogBridge("CATALOG_BRIDGE_POLICY_MATERIALIZATION_JOURNAL_INVALID");
+  }
   const timeout = catalogBridgeCatalogExecutionBudget(pins);
   const preflight = state.preflight;
   const terminal = preflight.runtime.latestTerminalRun;

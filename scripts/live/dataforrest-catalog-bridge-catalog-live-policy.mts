@@ -28,11 +28,14 @@ const operationPinsSchema = z.object({
   residentCheckout: absolutePath,
   residentCommit: z.string().regex(/^[a-f0-9]{40}$/u),
   utilityModuleSha256: sha256,
-  sourceHeadCountProvenance: z.literal("manually_reviewed_exact_source_head_counts_v1"),
+  sourceHeadCountProvenance: z.literal("two_pass_read_only_catalog_census_v1"),
   sourceHeadCounts: z.object({
     card: z.number().int().nonnegative().safe(),
     pack: z.number().int().nonnegative().safe(),
   }).strict(),
+  sourceHeadCensusFileSha256: sha256,
+  sourceHeadCensusProofDigest: sha256,
+  sourceHeadIdentityMultisetDigest: sha256,
 }).strict();
 
 export const catalogBridgeCatalogLivePolicySchema = z.object({

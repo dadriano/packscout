@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,8 +13,6 @@ import {
   AesGcmProviderCredentialCipher,
   captureHardenedProviderResponse,
   CipherProviderDatabaseCredentialResolver,
-  DataforrestEventsSourceAdapter,
-  type HardenedProviderResponseCapture,
 } from "@packscout/services";
 import {
   CentralDataforrestSourceAuthorityResolver,
@@ -60,6 +57,15 @@ import {
   catalogBridgeRepositoryRoot,
   observeCatalogBridgeCheckout,
 } from "./dataforrest-catalog-bridge-operator-files.mts";
+import {
+  catalogBridgeSourceCensusDigest,
+  readCatalogBridgeSourceCensus,
+  type CatalogBridgeSourceCensus,
+} from "./dataforrest-catalog-bridge-source-census.mts";
+import {
+  catalogBridgeSourceCredentialDigest,
+  inspectCatalogBridgeSourcePage,
+} from "./dataforrest-catalog-bridge-source-inspection.mts";
 import { readCatalogBridgeLiveDrainEnvironment } from
   "./run-dataforrest-catalog-bridge-drain.mts";
 
@@ -71,8 +77,8 @@ const planModule = "scripts/live/dataforrest-catalog-bridge-plan.mts";
 export interface CatalogBridgePreparationCaptureArguments {
   readonly drainPolicyPath: string;
   readonly drainPolicySha256: string;
-  readonly sourceHeadCardCount: number;
-  readonly sourceHeadPackCount: number;
+  readonly sourceCensusPath: string;
+  readonly sourceCensusSha256: string;
   readonly outputPath: string;
 }
 
@@ -85,17 +91,6 @@ function safeAbsolutePath(value: string): boolean {
   return path.isAbsolute(value) && path.resolve(value) === value && !/[\r\n\0]/u.test(value);
 }
 
-function safeCount(value: string): number {
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    return refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_ARGUMENTS_INVALID");
-  }
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    return refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_ARGUMENTS_INVALID");
-  }
-  return parsed;
-}
-
 export function parseCatalogBridgePreparationCaptureArguments(
   argv: readonly string[],
 ): CatalogBridgePreparationCaptureArguments {
@@ -103,7 +98,7 @@ export function parseCatalogBridgePreparationCaptureArguments(
     refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_ARGUMENTS_INVALID");
   }
   const allowed = new Set(["--drain-policy-file", "--drain-policy-sha256",
-    "--source-head-card-count", "--source-head-pack-count", "--output"]);
+    "--source-census-file", "--source-census-sha256", "--output"]);
   const values = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -113,69 +108,19 @@ export function parseCatalogBridgePreparationCaptureArguments(
     }
     values.set(flag, value);
   }
+  const paths = [values.get("--drain-policy-file") ?? "",
+    values.get("--source-census-file") ?? "", values.get("--output") ?? ""];
   if (values.size !== allowed.size || argv.length !== 1 + allowed.size * 2 ||
-    !safeAbsolutePath(values.get("--drain-policy-file")!) ||
-    !safeAbsolutePath(values.get("--output")!) ||
-    values.get("--drain-policy-file") === values.get("--output") ||
-    !sha256Pattern.test(values.get("--drain-policy-sha256")!)) {
+    paths.some((value) => !safeAbsolutePath(value)) || new Set(paths).size !== paths.length ||
+    !sha256Pattern.test(values.get("--drain-policy-sha256") ?? "") ||
+    !sha256Pattern.test(values.get("--source-census-sha256") ?? "")) {
     refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_ARGUMENTS_INVALID");
   }
   return Object.freeze({ drainPolicyPath: values.get("--drain-policy-file")!,
     drainPolicySha256: values.get("--drain-policy-sha256")!,
-    sourceHeadCardCount: safeCount(values.get("--source-head-card-count")!),
-    sourceHeadPackCount: safeCount(values.get("--source-head-pack-count")!),
+    sourceCensusPath: values.get("--source-census-file")!,
+    sourceCensusSha256: values.get("--source-census-sha256")!,
     outputPath: values.get("--output")! });
-}
-
-export function catalogBridgeSourceCredentialDigest(
-  authority: ResolvedDataforrestSourceAuthority,
-): string {
-  return catalogBridgeDigest({ sourceCredentialVersionId: authority.sourceCredentialVersionId,
-    sourceCredentialVersionNumber: authority.sourceCredentialVersionNumber,
-    endpoint: authority.connectionConfiguration.endpoint,
-    bearerTokenSha256: createHash("sha256")
-      .update(authority.connectionConfiguration.bearerToken, "utf8").digest("hex") });
-}
-
-function requestUrl(input: Readonly<{ authority: ResolvedDataforrestSourceAuthority;
-  manifest: SourceAdapterManifestV1; stream: "catalog" | "event"; cursor: string | null }>): URL {
-  const url = new URL(input.authority.connectionConfiguration.endpoint);
-  url.searchParams.set("platform", input.authority.providerKey);
-  if (input.stream === "catalog") url.searchParams.set("stream", "catalog");
-  url.searchParams.set("limit", String(input.manifest.requestBounds.pageLimit));
-  if (input.cursor !== null) url.searchParams.set("cursor", input.cursor);
-  return url;
-}
-
-async function sourceCapture(input: Readonly<{
-  authority: ResolvedDataforrestSourceAuthority;
-  manifest: SourceAdapterManifestV1;
-  stream: "catalog" | "event";
-  cursor: string | null;
-  captureResponse: typeof captureHardenedProviderResponse;
-}>): Promise<HardenedProviderResponseCapture> {
-  const url = requestUrl(input);
-  return input.captureResponse({ url, allowedHosts: [url.hostname],
-    headers: { Accept: "application/json",
-      Authorization: `Bearer ${input.authority.connectionConfiguration.bearerToken}` },
-    timeoutMilliseconds: input.manifest.requestBounds.timeoutMilliseconds,
-    maximumResponseBytes: input.manifest.requestBounds.maximumResponseBytes,
-    signal: new AbortController().signal });
-}
-
-function nextCursorValueSha256(body: Uint8Array): string {
-  try {
-    const value = JSON.parse(Buffer.from(body).toString("utf8")) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value) ||
-      !("next_cursor" in value) || typeof value.next_cursor !== "string" ||
-      value.next_cursor.length === 0) {
-      refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_CURSOR_INVALID");
-    }
-    return createHash("sha256").update(value.next_cursor, "utf8").digest("hex");
-  } catch (error) {
-    if (error instanceof CatalogBridgeError) throw error;
-    return refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_CURSOR_INVALID");
-  }
 }
 
 export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
@@ -196,27 +141,13 @@ export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
   const now = input.now ?? (() => new Date());
   const capture = async (manifest: SourceAdapterManifestV1, stream: "catalog" | "event",
     requestedCursor: string | null) => {
-    const response = await sourceCapture({ authority: input.authority, manifest, stream,
-      cursor: requestedCursor, captureResponse });
-    try {
-      const inspection = new DataforrestEventsSourceAdapter({}, manifest).inspectRawResponse({
-        provider: definition.providerKey, sourceTypeKey: manifest.sourceTypeKey,
-        adapterVersion: manifest.adapterVersion, pageLimit: manifest.requestBounds.pageLimit,
-        protectedRawResponse: response.protectedBody });
-      if (response.status !== 200 || !inspection.ok ||
-        inspection.outcomes.some((outcome) => outcome.status !== "valid")) {
-        refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_RESPONSE_INVALID");
-      }
-      const checkedAt = now();
-      if (!(checkedAt instanceof Date) || !Number.isFinite(checkedAt.getTime())) {
-        refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_CLOCK_INVALID");
-      }
-      return Object.freeze({ response, inspection, checkedAt: checkedAt.toISOString(),
-        responseSha256: createHash("sha256").update(response.protectedBody).digest("hex"),
-        nextCursorHash: nextCursorValueSha256(response.protectedBody) });
-    } finally {
-      response.protectedBody.fill(0);
+    const page = await inspectCatalogBridgeSourcePage({ authority: input.authority,
+      manifest, stream, cursor: requestedCursor, captureResponse,
+      signal: new AbortController().signal, now });
+    if (page.inspection.outcomes.some((outcome) => outcome.status !== "valid")) {
+      refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CANARY_RESPONSE_INVALID");
     }
+    return page;
   };
   const catalog = await capture(definition.catalogManifest, "catalog", null);
   const cardCount = catalog.inspection.outcomes.filter((outcome) =>
@@ -236,18 +167,18 @@ export async function captureCatalogBridgeSourceCanaries(input: Readonly<{
   );
   return Object.freeze({
     catalogOrigin: Object.freeze({ adapterVersion: definition.catalogAdapterVersion,
-      requestedCursorHash: null, status: catalog.response.status,
+      requestedCursorHash: null, status: catalog.status,
       recordCount: catalog.inspection.recordCount, cardCount, packCount, pullCount, tradeCount,
       responseSha256: catalog.responseSha256, nextCursorHash: catalog.nextCursorHash,
-      checkedAt: catalog.checkedAt, responseBytes: catalog.response.responseBytes,
-      durationMilliseconds: catalog.response.durationMilliseconds }),
+      checkedAt: catalog.checkedAt, responseBytes: catalog.responseBytes,
+      durationMilliseconds: catalog.durationMilliseconds }),
     savedEventCursor: Object.freeze({
       adapterVersion: definition.eventSuccessorManifest.adapterVersion,
       requestedCursorHash: input.savedEventCursorHash,
-      opaqueValueHash: catalogBridgeDigest(cursor.data.value), status: event.response.status,
+      opaqueValueHash: catalogBridgeDigest(cursor.data.value), status: event.status,
       recordCount: event.inspection.recordCount, responseSha256: event.responseSha256,
-      checkedAt: event.checkedAt, responseBytes: event.response.responseBytes,
-      durationMilliseconds: event.response.durationMilliseconds }),
+      checkedAt: event.checkedAt, responseBytes: event.responseBytes,
+      durationMilliseconds: event.durationMilliseconds }),
   });
 }
 
@@ -260,6 +191,8 @@ export function buildCatalogBridgePreparationInput(input: Readonly<{
   pause: CatalogBridgePauseCommand;
   receipt: NonNullable<Awaited<ReturnType<typeof readCatalogBridgeDrainReceiptIfPresent>>>;
   sourceCanaries: CatalogBridgePreflightObservation["sourceCanaries"];
+  sourceCensus: Readonly<{ proof: CatalogBridgeSourceCensus; fileSha256: string;
+    proofDigest: string }>;
   baseline: CatalogBridgeCanonicalEvidence;
 }>): CatalogBridgePreparationInput {
   const boundary = input.boundary;
@@ -315,6 +248,7 @@ export function buildCatalogBridgePreparationInput(input: Readonly<{
         lastPageContinuation: lastPage.continuation, lastPageDigest: lastPage.lastPageDigest }),
     }),
     sourceCanaries: input.sourceCanaries,
+    sourceCensus: input.sourceCensus,
     baseline: input.baseline,
   });
   const document = Object.freeze({ pins: input.pins, observation });
@@ -342,11 +276,25 @@ export async function captureCatalogBridgePreparation(input: Readonly<{
   if (catalogBridgeLiveDrainPolicyDigest(policy) !== input.args.drainPolicySha256) {
     refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_POLICY_DIGEST_MISMATCH");
   }
+  if (policy.providerKey !== "collector_crypt") {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_PROVIDER_UNSUPPORTED");
+  }
   const checkout = await observeCatalogBridgeCheckout({ checkout: policy.executor.checkout,
     expectedCommit: policy.executor.commit, executingRoot: catalogBridgeRepositoryRoot(import.meta.url),
     modules: { runner: runnerModule, plan: planModule } });
   if (checkout.moduleSha256.runner !== policy.executor.runnerModuleSha256) {
     refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_EXECUTOR_CHANGED");
+  }
+  const sourceCensus = await readCatalogBridgeSourceCensus(
+    input.args.sourceCensusPath,
+    input.args.sourceCensusSha256,
+  );
+  const sourceCensusProofDigest = catalogBridgeSourceCensusDigest(sourceCensus.proof);
+  if (sourceCensus.proof.operationId !== policy.operationId ||
+    sourceCensus.proof.providerKey !== policy.providerKey ||
+    sourceCensus.proof.executor.checkout !== policy.executor.checkout ||
+    sourceCensus.proof.executor.commit !== policy.executor.commit) {
+    refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_CENSUS_INVALID");
   }
   const receipt = await readCatalogBridgeDrainReceiptIfPresent(policy.receiptPath);
   if (receipt === null || receipt.operationId !== policy.operationId ||
@@ -397,6 +345,9 @@ export async function captureCatalogBridgePreparation(input: Readonly<{
       configVersionNumber: BigInt(definition.currentConfigNumber),
       adapterKey: definition.currentEventManifest.adapterVersion });
     const sourceCredentialDigest = catalogBridgeSourceCredentialDigest(sourceAuthority);
+    if (sourceCensus.proof.source.sourceCredentialDigest !== sourceCredentialDigest) {
+      refuseCatalogBridge("CATALOG_BRIDGE_PREPARATION_CAPTURE_CENSUS_INVALID");
+    }
     const canaries = await captureCatalogBridgeSourceCanaries({ authority: sourceAuthority,
       savedEventCursor: before.runtime.sourceCursor,
       savedEventCursorHash: before.runtime.sourceCursorHash });
@@ -417,19 +368,27 @@ export async function captureCatalogBridgePreparation(input: Readonly<{
       providerKey: policy.providerKey, operatorId: policy.operatorId,
       residentCheckout: policy.executor.checkout, residentCommit: policy.executor.commit,
       utilityModuleSha256: checkout.moduleSha256.plan!,
-      sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1",
-      sourceHeadCounts: Object.freeze({ card: input.args.sourceHeadCardCount,
-        pack: input.args.sourceHeadPackCount }) });
+      sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1",
+      sourceHeadCounts: Object.freeze({ card: sourceCensus.proof.agreement.cardCount,
+        pack: sourceCensus.proof.agreement.packCount }),
+      sourceHeadCensusFileSha256: sourceCensus.fileSha256,
+      sourceHeadCensusProofDigest,
+      sourceHeadIdentityMultisetDigest: sourceCensus.proof.agreement.identityMultisetDigest });
     const document = buildCatalogBridgePreparationInput({ pins,
       repository: Object.freeze({ checkout: pins.residentCheckout,
         expectedCommit: pins.residentCommit, observedCommit: checkout.commit,
         clean: true, utilityModuleSha256: pins.utilityModuleSha256 }),
       boundary: after, authority, sourceCredentialDigest, pause, receipt,
-      sourceCanaries: canaries, baseline: canonical.value });
+      sourceCanaries: canaries,
+      sourceCensus: Object.freeze({ proof: sourceCensus.proof,
+        fileSha256: sourceCensus.fileSha256, proofDigest: sourceCensusProofDigest }),
+      baseline: canonical.value });
     const persisted = await persistCatalogBridgePreparationInput(input.args.outputPath, document);
     return Object.freeze({ outcome: persisted.exactRetry ? "already_captured" : "captured",
       operationId: pins.operationId, providerKey: pins.providerKey,
-      preparationInputSha256: persisted.sha256, databaseWritesPerformed: false,
+      preparationInputSha256: persisted.sha256,
+      sourceCensusProofDigest: pins.sourceHeadCensusProofDigest,
+      databaseWritesPerformed: false,
       sourceRequestsPerformed: true, sourceRequestCount: 2,
       launchctlMutationsPerformed: false });
   } finally {
