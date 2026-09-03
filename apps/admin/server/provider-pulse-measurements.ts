@@ -86,6 +86,7 @@ function storageReading(storage: ProviderPulseStorageCounts): StorageReading {
     storage: measured,
     storageEstimate: storageEstimateSchema.parse({
       measuredAt: storage.measuredAt, counts: storage.counts,
+      estimatedEntities: storage.estimatedEntities,
     }),
   };
 }

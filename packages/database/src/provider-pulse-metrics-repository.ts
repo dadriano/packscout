@@ -22,7 +22,10 @@ export type ProviderPulseCountPrecision = "exact" | "estimated";
 
 export interface ProviderPulseStorageCounts {
   readonly measuredAt: string;
+  /** "exact" only when every entity was counted; see estimatedEntities. */
   readonly precision: ProviderPulseCountPrecision;
+  /** The entities whose value is an estimate. Empty exactly when precision is "exact". */
+  readonly estimatedEntities: readonly ProviderPulseCountKey[];
   readonly counts: ProviderPulseCounts;
 }
 
@@ -32,19 +35,33 @@ export interface ProviderPulseRecordTotals {
   readonly accepted: number;
 }
 
-/** The canonical tables a stored-row count reads, in count-key order. */
-const CANONICAL_TABLES = [
-  "categories", "packs", "collectibles", "collectible_name_aliases",
-  "collectible_instances", "pack_contents", "provider_accounts",
-  "pulls", "pull_items", "market_events",
-];
+/** Each stored-row count key and the canonical table it counts. */
+const CANONICAL_ENTITY_TABLES = Object.freeze({
+  categories: "categories",
+  packs: "packs",
+  collectibles: "collectibles",
+  aliases: "collectible_name_aliases",
+  instances: "collectible_instances",
+  packContents: "pack_contents",
+  accounts: "provider_accounts",
+  pulls: "pulls",
+  pullItems: "pull_items",
+  marketEvents: "market_events",
+} as const);
+
+export type ProviderPulseCountKey = keyof typeof CANONICAL_ENTITY_TABLES;
+
+const CANONICAL_ENTITY_KEYS = Object.keys(CANONICAL_ENTITY_TABLES) as ProviderPulseCountKey[];
+const CANONICAL_TABLES = Object.values(CANONICAL_ENTITY_TABLES) as string[];
 
 /**
- * Canonical tables totalling at or below this many bytes are counted exactly;
- * above it their row estimate is reported instead. Counting every row of a
- * 3,388 MB provider was measured at 40 to 57 seconds against a remote
- * database, so this ceiling keeps a scan well inside its six-second budget.
- * Bytes, not rows, because bytes are what a scan actually reads.
+ * The most bytes one exact-count statement may scan. Table sizes differ by
+ * orders of magnitude inside a single provider — on the measured database
+ * seven canonical tables held nothing at all, market_events held 49 MB, and
+ * pulls held 2,220 MB — so the smallest tables are counted exactly and only
+ * the ones that would blow the budget are estimated. Counting was measured at
+ * roughly 56 MB per second against a remote database, which puts this ceiling
+ * near two seconds of scanning, well inside the statement's six-second budget.
  */
 export const EXACT_STORAGE_SCAN_BYTE_CEILING = 128 * 1024 * 1024;
 
@@ -75,7 +92,9 @@ type CountsRow = {
   readonly measured_at: Date;
 } & { readonly [Key in Exclude<keyof ProviderPulseCounts, "total">]: bigint };
 
-type EstimateRow = CountsRow & { readonly scan_bytes: bigint; readonly readable_tables: bigint };
+type EstimateRow = CountsRow
+  & { readonly readable_tables: bigint }
+  & { readonly [Key in Exclude<keyof ProviderPulseCounts, "total"> as `bytes_${Key}`]: bigint };
 
 interface RecordTotalsRow {
   readonly measured_at: Date;
@@ -146,27 +165,36 @@ function rowEstimate(relname: string): ProviderPrisma.Sql {
   ), 0)::bigint`;
 }
 
+/** The size of one canonical table's heap — what an exact count would scan. */
+function relationBytes(relname: string): ProviderPrisma.Sql {
+  return ProviderPrisma.sql`coalesce((
+    select pg_catalog.pg_relation_size(catalog.oid)
+    from pg_catalog.pg_class catalog
+    join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
+    where space.nspname = 'public' and catalog.relkind = 'r'
+      and pg_catalog.has_table_privilege(catalog.oid, 'SELECT')
+      and catalog.relname = ${relname}
+  ), 0)::bigint`;
+}
+
+/**
+ * Builds a measurement from one row, naming which entities were counted. The
+ * total is summed from the named entity columns rather than every column of
+ * the row, so a column added to either statement cannot inflate it.
+ */
 function storageCounts(
   row: CountsRow,
-  precision: ProviderPulseCountPrecision,
+  measuredAt: Date,
+  counted: readonly ProviderPulseCountKey[],
 ): ProviderPulseStorageCounts {
-  // Summed from the named entity columns rather than every column of the row,
-  // so a column added to either statement cannot silently inflate the total.
-  const counts = {
-    categories: safeCount(row.categories),
-    packs: safeCount(row.packs),
-    collectibles: safeCount(row.collectibles),
-    aliases: safeCount(row.aliases),
-    instances: safeCount(row.instances),
-    packContents: safeCount(row.packContents),
-    accounts: safeCount(row.accounts),
-    pulls: safeCount(row.pulls),
-    pullItems: safeCount(row.pullItems),
-    marketEvents: safeCount(row.marketEvents),
-  };
+  const counts = Object.fromEntries(CANONICAL_ENTITY_KEYS.map(
+    (key) => [key, safeCount(row[key])],
+  )) as Record<ProviderPulseCountKey, number>;
+  const estimatedEntities = CANONICAL_ENTITY_KEYS.filter((key) => !counted.includes(key));
   return {
-    measuredAt: row.measured_at.toISOString(),
-    precision,
+    measuredAt: measuredAt.toISOString(),
+    precision: estimatedEntities.length === 0 ? "exact" : "estimated",
+    estimatedEntities,
     counts: {
       total: safeCount(Object.values(counts).reduce((sum, count) => sum + BigInt(count), 0n)),
       ...counts,
@@ -214,19 +242,32 @@ export class PrismaProviderPulseMetricsRepository {
    */
   async readStorageCounts(): Promise<ProviderPulseStorageCounts> {
     const estimated = await this.readEstimatedStorageCounts();
-    if (estimated.scanBytes > EXACT_STORAGE_SCAN_BYTE_CEILING) return estimated.counted;
-    return this.readExactStorageCounts().catch((error: unknown) => {
-      // Only a scan the database cancelled against its budget downgrades to
-      // the estimate. Anything else is a fact about the provider that the
-      // estimate cannot stand in for, so it is reported as a failure.
-      if (!isStatementCancellation(error)) throw error;
-      return estimated.counted;
-    });
+    // Smallest first, taking entities while the statement stays inside its
+    // scan ceiling. One oversized table therefore costs only its own count,
+    // never the counts of the tables beside it.
+    const affordable: ProviderPulseCountKey[] = [];
+    let planned = 0;
+    for (const key of [...CANONICAL_ENTITY_KEYS].sort(
+      (left, right) => estimated.scanBytes[left] - estimated.scanBytes[right],
+    )) {
+      if (planned + estimated.scanBytes[key] > EXACT_STORAGE_SCAN_BYTE_CEILING) break;
+      planned += estimated.scanBytes[key];
+      affordable.push(key);
+    }
+    if (affordable.length === 0) return estimated.counted;
+    return this.readExactStorageCounts(affordable, estimated.counted)
+      .catch((error: unknown) => {
+        // Only a scan the database cancelled against its budget downgrades to
+        // the estimate. Anything else is a fact about the provider that the
+        // estimate cannot stand in for, so it is reported as a failure.
+        if (!isStatementCancellation(error)) throw error;
+        return estimated.counted;
+      });
   }
 
   private async readEstimatedStorageCounts(): Promise<{
     readonly counted: ProviderPulseStorageCounts;
-    readonly scanBytes: number;
+    readonly scanBytes: Readonly<Record<ProviderPulseCountKey, number>>;
   }> {
     return this.readOnly(2_000, async (transaction) => {
       // Row estimates and relation sizes are catalog lookups, not scans. The
@@ -234,24 +275,9 @@ export class PrismaProviderPulseMetricsRepository {
       // as estimates; the sizes are exact and decide only what is affordable.
       const [row] = await transaction.$queryRaw<EstimateRow[]>(ProviderPrisma.sql`
         select statement_timestamp() as measured_at,
-          ${rowEstimate("categories")} as categories,
-          ${rowEstimate("packs")} as packs,
-          ${rowEstimate("collectibles")} as collectibles,
-          ${rowEstimate("collectible_name_aliases")} as aliases,
-          ${rowEstimate("collectible_instances")} as instances,
-          ${rowEstimate("pack_contents")} as "packContents",
-          ${rowEstimate("provider_accounts")} as accounts,
-          ${rowEstimate("pulls")} as pulls,
-          ${rowEstimate("pull_items")} as "pullItems",
-          ${rowEstimate("market_events")} as "marketEvents",
-          coalesce((
-            select sum(pg_catalog.pg_relation_size(catalog.oid))
-            from pg_catalog.pg_class catalog
-            join pg_catalog.pg_namespace space on space.oid = catalog.relnamespace
-            where space.nspname = 'public' and catalog.relkind = 'r'
-              and pg_catalog.has_table_privilege(catalog.oid, 'SELECT')
-              and catalog.relname = any(${CANONICAL_TABLES})
-          ), 0)::bigint as scan_bytes,
+          ${ProviderPrisma.join(CANONICAL_ENTITY_KEYS.map((key) => ProviderPrisma.sql`
+            ${rowEstimate(CANONICAL_ENTITY_TABLES[key])} as ${ProviderPrisma.raw(`"${key}"`)},
+            ${relationBytes(CANONICAL_ENTITY_TABLES[key])} as ${ProviderPrisma.raw(`"bytes_${key}"`)}`), ",")},
           (
             select count(*)
             from pg_catalog.pg_class catalog
@@ -262,37 +288,54 @@ export class PrismaProviderPulseMetricsRepository {
           )::bigint as readable_tables
       `);
       if (row === undefined) throw new Error("Provider pulse storage estimates are unavailable.");
-      const { scan_bytes, readable_tables, ...counts } = row;
       // A canonical table that is absent or unreadable estimates zero rows and
       // contributes no bytes, which would read as a measured empty table. The
       // schema is checked so that is reported as a failure instead.
-      if (safeCount(readable_tables) !== CANONICAL_TABLES.length) {
+      if (safeCount(row.readable_tables) !== CANONICAL_TABLES.length) {
         throw new Error("Provider pulse storage counts are unavailable: canonical tables are missing or unreadable.");
       }
-      return { counted: storageCounts(counts, "estimated"), scanBytes: safeCount(scan_bytes) };
+      const scanBytes = Object.fromEntries(CANONICAL_ENTITY_KEYS.map(
+        (key) => [key, safeCount(row[`bytes_${key}`])],
+      )) as Record<ProviderPulseCountKey, number>;
+      return {
+        counted: storageCounts(row, row.measured_at, []),
+        scanBytes,
+      };
     });
   }
 
-  private async readExactStorageCounts(): Promise<ProviderPulseStorageCounts> {
+  /**
+   * Counts only the entities the caller judged affordable, in one statement,
+   * and takes the remaining values from the estimate already in hand.
+   */
+  private async readExactStorageCounts(
+    affordable: readonly ProviderPulseCountKey[],
+    estimated: ProviderPulseStorageCounts,
+  ): Promise<ProviderPulseStorageCounts> {
     return this.readOnly(6_000, async (transaction) => {
-      // A single statement gives all counts one MVCC snapshot. These are
+      // A single statement gives these counts one MVCC snapshot. They are
       // physical canonical rows, including retired rows and relationships,
       // with no promotion history or overlapping EV projections counted.
-      const [row] = await transaction.$queryRaw<CountsRow[]>(ProviderPrisma.sql`
+      const [row] = await transaction.$queryRaw<Partial<CountsRow>[]>(ProviderPrisma.sql`
         select statement_timestamp() as measured_at,
-          (select count(*) from public.categories) as categories,
-          (select count(*) from public.packs) as packs,
-          (select count(*) from public.collectibles) as collectibles,
-          (select count(*) from public.collectible_name_aliases) as aliases,
-          (select count(*) from public.collectible_instances) as instances,
-          (select count(*) from public.pack_contents) as "packContents",
-          (select count(*) from public.provider_accounts) as accounts,
-          (select count(*) from public.pulls) as pulls,
-          (select count(*) from public.pull_items) as "pullItems",
-          (select count(*) from public.market_events) as "marketEvents"
+          ${ProviderPrisma.join(affordable.map((key) => ProviderPrisma.sql`
+            (select count(*) from ${ProviderPrisma.raw(`public.${CANONICAL_ENTITY_TABLES[key]}`)})
+              as ${ProviderPrisma.raw(`"${key}"`)}`), ",")}
       `);
       if (row === undefined) throw new Error("Provider pulse storage counts are unavailable.");
-      return storageCounts(row, "exact");
+      const measuredAt = row.measured_at;
+      if (!(measuredAt instanceof Date)) {
+        throw new Error("Provider pulse storage counts are unavailable: no measurement time.");
+      }
+      const merged = { ...row } as Record<string, unknown>;
+      for (const key of CANONICAL_ENTITY_KEYS) {
+        if (!affordable.includes(key)) merged[key] = BigInt(estimated.counts[key]);
+      }
+      return storageCounts(
+        merged as CountsRow,
+        measuredAt,
+        affordable,
+      );
     });
   }
 

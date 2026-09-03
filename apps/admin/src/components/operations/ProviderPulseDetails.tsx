@@ -3,13 +3,40 @@ import { Link } from "react-router-dom";
 import { IndicatorTooltip } from "../IndicatorTooltip";
 import { age, dateTime, humanize, interval } from "./OperationStatus";
 import { SourceOperationControls, type SourceOperationControlsProps } from "./SourceOperationControls";
-import { count, isDatabaseUnavailable, isUnsupportedSource, measuredAge, metricDescriptions, storedCount, storedEntityCounts, storedReading } from "./provider-pulse-presentation";
+import { count, isDatabaseUnavailable, isUnsupportedSource, measuredAge, metricDescriptions, storedCount, storedEntityReading, storedReading, type EntityReading } from "./provider-pulse-presentation";
 
 const entityLabels = {
   categories: "Categories", packs: "Packs", collectibles: "Collectibles", aliases: "Aliases",
   instances: "Instances", packContents: "Pack contents", accounts: "Accounts", pulls: "Pulls",
   pullItems: "Pull items", marketEvents: "Market events",
 } as const;
+
+const entityKeys = Object.keys(entityLabels) as Array<keyof typeof entityLabels>;
+
+/**
+ * One stored-row count, resolved on its own. Each entity is measured
+ * separately by the server, so each reports its own value and its own
+ * precision rather than inheriting the slowest table's answer.
+ */
+function StoredEntity({ label, reading }: { label: string; reading: EntityReading }) {
+  if (reading.state === "unavailable") {
+    return (
+      <tr><th scope="row">{label}</th>
+        <td><span className="provider-pulse__entity-value">Unavailable</span></td></tr>
+    );
+  }
+  return (
+    <tr><th scope="row">{label}</th>
+      <td>
+        <span className="provider-pulse__entity-value">
+          {storedCount(reading.value, reading.estimated)}
+        </span>
+        {reading.estimated ? (
+          <span className="provider-pulse__subtext">Estimated</span>
+        ) : null}
+      </td></tr>
+  );
+}
 
 type Activity = Extract<ProviderSourceMeasurements["activity"], { state: "available" }>;
 
@@ -52,8 +79,10 @@ function QualityEvidence({ source }: { source: ProviderSourceOperationsSource })
 export function ProviderPulseDetails(props: SourceOperationControlsProps & { observedAt: string }) {
   const { source, observedAt } = props;
   const { storage, records, activity } = source.measurements;
-  const { counts: storedCounts, estimated: estimatedStorage } = storedEntityCounts(source);
-  const storedMeasuredAt = storedReading(source).measuredAt;
+  const stored = storedReading(source);
+  const entityReadings = entityKeys.map((key) => [key, storedEntityReading(source, key)] as const);
+  const measuredCount = entityReadings.filter(([, reading]) => reading.state === "measured").length;
+  const estimatedCount = entityReadings.filter(([, reading]) => reading.estimated).length;
   const unsupportedSource = isUnsupportedSource(source);
   const databaseUnavailable = isDatabaseUnavailable(source);
   const runtimeUnavailable = unsupportedSource || databaseUnavailable;
@@ -68,19 +97,19 @@ export function ProviderPulseDetails(props: SourceOperationControlsProps & { obs
       <div className="provider-pulse__details-body">
         <QualityEvidence source={source} />
         <section>
-          <h3><IndicatorTooltip label={estimatedStorage ? "Stored entities (estimated)" : "Stored entities"} description={metricDescriptions.stored} /></h3>
+          <h3><IndicatorTooltip label="Stored entities" description={metricDescriptions.stored} /></h3>
           <table className="provider-pulse__entity-table">
             <caption className="admin-visually-hidden">{source.displayName} canonical entity counts</caption>
             <thead><tr><th scope="col">Entity</th><th scope="col">Rows</th></tr></thead>
-            <tbody>{Object.entries(entityLabels).map(([key, label]) => (
-              <tr key={key}><th scope="row">{label}</th><td>{storedCount(storedCounts?.[key as keyof typeof entityLabels] ?? null, estimatedStorage)}</td></tr>
+            <tbody>{entityReadings.map(([key, reading]) => (
+              <StoredEntity key={key} label={entityLabels[key]} reading={reading} />
             ))}</tbody>
           </table>
-          <p className="provider-pulse__subtext">{storedCounts === null || storedMeasuredAt === null
+          <p className="provider-pulse__subtext">{measuredCount === 0 || stored.measuredAt === null
             ? `Counts unavailable: ${storage.state === "unavailable" ? humanize(storage.reason).toLowerCase() : "query failed"}.`
-            : estimatedStorage
-              ? `Estimated ${dateTime(storedMeasuredAt)} · ${measuredAge(storedMeasuredAt, observedAt)}. These are the database's live-tuple estimates, not exact counts; counting every row of this provider would exceed its measurement budget.`
-              : `Counted ${dateTime(storedMeasuredAt)} · ${measuredAge(storedMeasuredAt, observedAt)}`}</p>
+            : estimatedCount === 0
+              ? `Counted ${dateTime(stored.measuredAt)} · ${measuredAge(stored.measuredAt, observedAt)}`
+              : `${measuredCount - estimatedCount} of ${measuredCount} counted exactly ${dateTime(stored.measuredAt)} · ${measuredAge(stored.measuredAt, observedAt)}. The ${estimatedCount} marked ≈ are the database's live-tuple estimate: counting those tables would exceed the measurement budget.`}</p>
         </section>
         <section>
           <h3>Run & schedule</h3>

@@ -57,15 +57,29 @@ const storageSchema = z.discriminatedUnion("state", [
   storageUnavailableSchema,
 ]);
 
+export const canonicalEntityKeys = [
+  "categories", "packs", "collectibles", "aliases", "instances",
+  "packContents", "accounts", "pulls", "pullItems", "marketEvents",
+] as const;
+
 /**
- * The collector's live-tuple estimate, carried beside the exact count rather
- * than inside it so it can never be read as one. The key is absent unless an
- * estimate was actually taken, never null: readers enumerate the measurements
- * they know about, and a null would be enumerated as one of them.
+ * Carried beside the exact count rather than inside it so it can never be read
+ * as one. The key is absent unless an estimate was actually taken, never null:
+ * readers enumerate the measurements they know about, and a null would be
+ * enumerated as one of them.
+ *
+ * Counting is decided per table, because table sizes differ by orders of
+ * magnitude within one provider. `counts` therefore mixes counted and
+ * estimated entities, and `estimatedEntities` names exactly which of them are
+ * estimates so each can be presented for what it is. It is never empty: with
+ * nothing estimated the exact measurement above is reported instead.
  */
 const storageEstimateSchema = z.object({
   measuredAt: instant,
   counts: canonicalCountsSchema,
+  estimatedEntities: z.array(z.enum(canonicalEntityKeys)).min(1)
+    .refine((keys) => new Set(keys).size === keys.length,
+      { message: "Estimated entities must not repeat." }),
 }).strict().optional();
 
 const recordsSchema = z.discriminatedUnion("state", [
@@ -137,6 +151,7 @@ export const providerSourceMeasurementsSchema = z.object({
 
 export type ProviderSourceMeasurements = z.infer<typeof providerSourceMeasurementsSchema>;
 export type ProviderStorageEstimate = z.infer<typeof storageEstimateSchema>;
+export type ProviderCanonicalEntityKey = (typeof canonicalEntityKeys)[number];
 export type ProviderMeasurementUnavailableReason = z.infer<
   typeof providerMeasurementUnavailableSchema
 >["reason"];

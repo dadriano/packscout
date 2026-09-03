@@ -65,7 +65,7 @@ test("a whole-provider unavailable result cannot be built from a storage-only re
 });
 
 test("an estimate never occupies the field that means an exact count", () => {
-  const estimate = { measuredAt, counts: measured.storage.counts };
+  const estimate = { measuredAt, counts: measured.storage.counts, estimatedEntities: ["pulls"] };
   const estimated = providerSourceMeasurementsSchema.parse({
     ...measured,
     storage: { state: "unavailable", reason: "count_exceeds_budget" },

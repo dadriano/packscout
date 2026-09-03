@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Prisma } from "../prisma/generated/provider/index.js";
 import type { ProviderPrismaClient, ProviderTransactionClient } from "./provider-database.ts";
-import { EXACT_STORAGE_SCAN_BYTE_CEILING, PrismaProviderPulseMetricsRepository } from "./provider-pulse-metrics-repository.ts";
+import { EXACT_STORAGE_SCAN_BYTE_CEILING, PrismaProviderPulseMetricsRepository, type ProviderPulseCounts } from "./provider-pulse-metrics-repository.ts";
 
 const measuredAt = new Date("2026-08-30T12:00:00.000Z");
 const countsRow = {
@@ -12,10 +12,26 @@ const countsRow = {
   pullItems: 0n, marketEvents: 0n,
 };
 const recordTotalsRow = { measured_at: measuredAt, processed: 0n, accepted: 0n };
-const estimateRow = { ...countsRow, scan_bytes: 0n, readable_tables: 10n };
-const isEstimate = (sql: string) => sql.includes("scan_bytes");
+const ENTITY_KEYS = Object.keys(countsRow).filter((key) => key !== "measured_at") as Array<Exclude<keyof ProviderPulseCounts, "total">>;
+/** Every canonical table empty and weightless, so nothing is estimated. */
+const estimateRow = {
+  ...countsRow,
+  ...Object.fromEntries(ENTITY_KEYS.map((key) => [`bytes_${key}`, 0n])),
+  readable_tables: 10n,
+};
+/** An estimate row where the named entities are large enough to be estimated. */
+function sized(bytes: Readonly<Record<string, bigint>>, rows: Readonly<Record<string, bigint>> = {}) {
+  return {
+    ...estimateRow,
+    ...Object.fromEntries(Object.entries(bytes).map(([key, value]) => [`bytes_${key}`, value])),
+    ...rows,
+  };
+}
+const isEstimate = (sql: string) => sql.includes("readable_tables");
 // Only the exact scan reads the canonical tables; the estimate reads catalogs.
-const isExactScan = (sql: string) => sql.includes("from public.categories");
+const isExactScan = (sql: string) => sql.includes("count(*) from public.");
+const scannedTables = (sql: string) =>
+  [...sql.matchAll(/count\(\*\) from public\.([a-z_]+)/gu)].map((match) => match[1]!);
 
 function repositoryFor(read: (query: Prisma.Sql) => readonly unknown[]) {
   const database = {
@@ -33,7 +49,7 @@ test("provider pulse refuses lossy numbers and totals that exceed safe JSON inte
     { ...estimateRow, categories: tooLarge },
     { ...estimateRow, categories: BigInt(Number.MAX_SAFE_INTEGER), pulls: 1n },
     { ...estimateRow, categories: -1n },
-    { ...estimateRow, scan_bytes: tooLarge },
+    { ...estimateRow, bytes_pulls: tooLarge },
   ]) {
     await assert.rejects(repositoryFor(() => [row]).readStorageCounts(), RangeError);
   }
@@ -54,22 +70,56 @@ test("stored rows are counted below the byte ceiling and estimated above it", as
   const statements: string[] = [];
   const exact = await repositoryFor((query) => {
     statements.push(query.sql);
-    return [{ ...estimateRow, pulls: 7n, scan_bytes: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) }];
+    return [sized({ pulls: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) }, { pulls: 7n })];
   }).readStorageCounts();
   assert.equal(exact.precision, "exact");
-  // The estimate decides, then the exact scan runs: two separate statements.
+  assert.deepEqual(exact.estimatedEntities, []);
   assert.equal(statements.filter(isEstimate).length, 1);
   assert.equal(statements.filter(isExactScan).length, 1);
 
   const statementsAbove: string[] = [];
   const estimated = await repositoryFor((query) => {
     statementsAbove.push(query.sql);
-    return [{ ...estimateRow, pulls: 9n, scan_bytes: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n }];
+    return [sized(
+      Object.fromEntries(ENTITY_KEYS.map((key) => [key, BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n])),
+      { pulls: 9n },
+    )];
   }).readStorageCounts();
   assert.equal(estimated.precision, "estimated");
   assert.equal(estimated.counts.total, 9);
-  // Above the ceiling no row is ever counted, so nothing scans the tables.
+  assert.deepEqual([...estimated.estimatedEntities].sort(), [...ENTITY_KEYS].sort());
+  // Every table is over the ceiling, so nothing is scanned at all.
   assert.equal(statementsAbove.some(isExactScan), false);
+});
+
+test("one oversized table is estimated without costing the counts of the tables beside it", async () => {
+  // The measured shape of a real provider: seven empty canonical tables, a
+  // 49 MB market_events, and pulls and pull_items in the gigabytes.
+  const statements: string[] = [];
+  const measured = await repositoryFor((query) => {
+    statements.push(query.sql);
+    return [sized(
+      { pulls: 2_220n * 1024n * 1024n, pullItems: 1_132n * 1024n * 1024n, marketEvents: 49n * 1024n * 1024n },
+      { pulls: 8_698_233n, pullItems: 8_697_996n, marketEvents: 180_891n },
+    )];
+  }).readStorageCounts();
+
+  assert.equal(measured.precision, "estimated", "the measurement as a whole is an estimate");
+  assert.deepEqual([...measured.estimatedEntities].sort(), ["pullItems", "pulls"],
+    "only the two oversized tables are estimated");
+
+  const scanned = statements.filter(isExactScan).flatMap(scannedTables);
+  assert.equal(scanned.includes("market_events"), true, "a 49 MB table is still counted exactly");
+  assert.equal(scanned.includes("categories"), true, "an empty table is still counted exactly");
+  assert.equal(scanned.includes("pulls"), false, "the oversized tables are never scanned");
+  assert.equal(scanned.includes("pull_items"), false);
+  assert.equal(scanned.length, 8, "eight of ten entities are counted exactly");
+
+  // The estimated values still reach the caller, and the total reconciles.
+  assert.equal(measured.counts.pulls, 8_698_233);
+  assert.equal(measured.counts.marketEvents, 180_891);
+  const summed = ENTITY_KEYS.reduce((sum, key) => sum + measured.counts[key], 0);
+  assert.equal(measured.counts.total, summed);
 });
 
 test("a reset row estimate cannot route a large provider into a scan it cannot finish", async () => {
@@ -79,10 +129,11 @@ test("a reset row estimate cannot route a large provider into a scan it cannot f
   const statements: string[] = [];
   const measured = await repositoryFor((query) => {
     statements.push(query.sql);
-    return [{ ...estimateRow, scan_bytes: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n }];
+    return [sized({ pulls: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n })];
   }).readStorageCounts();
-  assert.equal(measured.precision, "estimated");
-  assert.equal(statements.some(isExactScan), false, "no scan is attempted on a large provider");
+  assert.deepEqual(measured.estimatedEntities, ["pulls"]);
+  assert.equal(statements.filter(isExactScan).flatMap(scannedTables).includes("pulls"), false,
+    "the oversized table is never scanned");
 });
 
 function rawQueryFailure(sqlState: string, message: string) {
@@ -94,7 +145,7 @@ function rawQueryFailure(sqlState: string, message: string) {
 test("a scan the database cancelled downgrades to the estimate rather than withholding it", async () => {
   let scans = 0;
   const measured = await repositoryFor((query) => {
-    if (!isExactScan(query.sql)) return [{ ...estimateRow, pulls: 12n, scan_bytes: 1_024n }];
+    if (!isExactScan(query.sql)) return [sized({ pulls: 1_024n }, { pulls: 12n })];
     scans += 1;
     throw rawQueryFailure("57014", "ERROR: canceling statement due to statement timeout");
   }).readStorageCounts();
@@ -113,7 +164,7 @@ test("a scan that failed for any other reason is reported, never dressed as an e
     new Error("connection terminated"),
   ]) {
     const repository = repositoryFor((query) => {
-      if (!isExactScan(query.sql)) return [{ ...estimateRow, pulls: 12n, scan_bytes: 1_024n }];
+      if (!isExactScan(query.sql)) return [sized({ pulls: 1_024n }, { pulls: 12n })];
       throw failure;
     });
     await assert.rejects(repository.readStorageCounts(), (error) => error === failure);
@@ -125,7 +176,7 @@ test("a canonical table that is absent or unreadable is reported, not counted as
   // check it would read as a measured empty table on either path.
   for (const scanBytes of [1_024n, BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n]) {
     const repository = repositoryFor(() => [
-      { ...estimateRow, scan_bytes: scanBytes, readable_tables: 9n },
+      { ...sized({ pulls: scanBytes }), readable_tables: 9n },
     ]);
     await assert.rejects(repository.readStorageCounts(), /canonical tables are missing or unreadable/u);
   }
@@ -145,7 +196,7 @@ test("an empty provider database reports a measured zero, not missing evidence",
 test("a total is summed from the entity columns alone, not from every column read", async () => {
   // The estimate statement carries decision columns beside the entity counts.
   const measured = await repositoryFor(() => [
-    { ...estimateRow, pulls: 3n, scan_bytes: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n },
+    sized({ pulls: BigInt(EXACT_STORAGE_SCAN_BYTE_CEILING) + 1n }, { pulls: 3n }),
   ]).readStorageCounts();
   assert.equal(measured.counts.total, 3, "scan_bytes and readable_tables are not entities");
 });

@@ -12,7 +12,7 @@ import { ProviderPulseMeasurementReader } from "./provider-pulse-measurements.ts
 const measuredAt = "2026-08-30T12:00:00.000Z";
 const identity = { organizationId: "org-a", providerId: "provider-a", configurationId: "config-a" };
 const storage: ProviderPulseStorageCounts = {
-  measuredAt, precision: "exact",
+  measuredAt, precision: "exact", estimatedEntities: [],
   counts: { total: 10, categories: 1, packs: 1, collectibles: 1, aliases: 1,
     instances: 1, packContents: 1, accounts: 1, pulls: 1, pullItems: 1, marketEvents: 1 },
 };
@@ -310,7 +310,9 @@ for (const replacementSettled of [false, true]) {
 
 test("an estimate is reported beside the count field, never inside it", async () => {
   const reader = new ProviderPulseMeasurementReader(() => new Date(measuredAt), () => ({
-    async readStorageCounts() { return { ...storage, precision: "estimated" as const }; },
+    async readStorageCounts() {
+      return { ...storage, precision: "estimated" as const, estimatedEntities: ["pulls" as const] };
+    },
     async readRecordTotals() { return records; },
     async readHistory() { return history; },
     async readLeases() { return leases; },
@@ -319,7 +321,7 @@ test("an estimate is reported beside the count field, never inside it", async ()
   // A client that reads only `storage` is told nothing was counted, so it
   // cannot render an estimate under a label that promises an exact count.
   assert.deepEqual(result.storage, { state: "unavailable", reason: "count_exceeds_budget" });
-  assert.deepEqual(result.storageEstimate, { measuredAt, counts: storage.counts });
+  assert.deepEqual(result.storageEstimate, { measuredAt, counts: storage.counts, estimatedEntities: ["pulls"] });
 });
 
 test("an exact count occupies the count field and reports no estimate", async () => {

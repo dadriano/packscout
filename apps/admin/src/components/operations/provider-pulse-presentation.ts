@@ -1,4 +1,4 @@
-import type { ProviderSourceOperationsSource } from "@packscout/contracts";
+import type { ProviderCanonicalEntityKey, ProviderSourceOperationsSource } from "@packscout/contracts";
 import type { StatusTone } from "../StatusBadge";
 import { age } from "./OperationStatus";
 import { sourceOperationalLabel } from "./SourceOperationsViews";
@@ -153,19 +153,36 @@ export function storedReading(
   return { value: null, estimated: false, measuredAt: null };
 }
 
-/** The per-entity rows to show, preferring an exact count over an estimate. */
-export function storedEntityCounts(
-  source: ProviderSourceOperationsSource,
-): { counts: ProviderStorageCounts | null; estimated: boolean } {
-  const { storage, storageEstimate } = source.measurements;
-  if (storage.state === "available") return { counts: storage.counts, estimated: false };
-  if (storageEstimate) return { counts: storageEstimate.counts, estimated: true };
-  return { counts: null, estimated: false };
+export interface EntityReading {
+  readonly state: "measured" | "unavailable";
+  readonly value: number | null;
+  readonly estimated: boolean;
+  readonly measuredAt: string | null;
 }
 
-type ProviderStorageCounts = Extract<
-  ProviderSourceOperationsSource["measurements"]["storage"], { state: "available" }
->["counts"];
+/**
+ * Resolves one entity's stored-row reading on its own. Entities are decided
+ * separately because table sizes differ by orders of magnitude inside a single
+ * provider: the server counts what it can afford and estimates only the rest,
+ * so an entity that was counted is never shown as an estimate merely because a
+ * larger table beside it could not be.
+ */
+export function storedEntityReading(
+  source: ProviderSourceOperationsSource,
+  entity: ProviderCanonicalEntityKey,
+): EntityReading {
+  const { storage, storageEstimate } = source.measurements;
+  if (storage.state === "available") {
+    return { state: "measured", value: storage.counts[entity], estimated: false,
+      measuredAt: storage.measuredAt };
+  }
+  if (storageEstimate) {
+    return { state: "measured", value: storageEstimate.counts[entity],
+      estimated: storageEstimate.estimatedEntities.includes(entity),
+      measuredAt: storageEstimate.measuredAt };
+  }
+  return { state: "unavailable", value: null, estimated: false, measuredAt: null };
+}
 
 /**
  * Estimated rows are marked so a reader never mistakes a statistics estimate
