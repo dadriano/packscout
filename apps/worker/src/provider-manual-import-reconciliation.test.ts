@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FactReferenceReconciliationResult, ProviderFactReferenceScan,
   ValidatedProviderMixedPage } from "@packscout/database";
-import { providerPageFactReferenceTargets, reconcileProviderPageFactReferences } from "./provider-manual-import-reconciliation.ts";
+import { providerPageFactReferenceTargets, reconcileProviderPageFactReferences,
+  reconcileProviderPageFactReferencesOpportunistically } from "./provider-manual-import-reconciliation.ts";
 
 const page = { records: [
   { kind: "catalog", entityType: "pack", candidate: { packKey: "new-pack" } },
@@ -50,4 +51,36 @@ test("lease loss, cancellation and exhausted scan bounds never skip to success",
     }), outcome);
     assert.equal(calls, outcome === "limit_exceeded" ? 2 : 0);
   }
+});
+
+test("the opportunistic pass absorbs a database fault and still surfaces every other outcome", async () => {
+  const databaseFault = Object.assign(new Error("transaction closed"), { code: "P2028" });
+  const isDatabaseFailure = (error: unknown) =>
+    (error as { code?: unknown }).code === "P2028";
+  const base = { page, reachedHead: false, maximumBatches: 2, isDatabaseFailure,
+    signal: new AbortController().signal, renewLease: async () => true };
+
+  // The page is already committed and the checkpoint already advanced, so this
+  // fault must not fail the run; head reconciliation redoes the work.
+  assert.equal(await reconcileProviderPageFactReferencesOpportunistically({
+    ...base, reconcile: async () => { throw databaseFault; },
+  }), "complete");
+
+  // A defect in our own code is not a database fault and must still escape.
+  const defect = new TypeError("mapper is not a function");
+  await assert.rejects(reconcileProviderPageFactReferencesOpportunistically({
+    ...base, reconcile: async () => { throw defect; },
+  }), (error: unknown) => error === defect);
+
+  // Absorbing must not swallow the non-throwing failure outcomes: a lost lease
+  // still has to stop the run rather than read as a completed reconciliation.
+  assert.equal(await reconcileProviderPageFactReferencesOpportunistically({
+    ...base, reachedHead: true, renewLease: async () => false,
+    reconcile: async () => result(null),
+  }), "lease_lost");
+  const aborted = new AbortController(); aborted.abort();
+  assert.equal(await reconcileProviderPageFactReferencesOpportunistically({
+    ...base, reachedHead: true, signal: aborted.signal,
+    reconcile: async () => result(null),
+  }), "aborted");
 });

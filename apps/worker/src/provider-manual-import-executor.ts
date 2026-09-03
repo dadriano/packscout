@@ -29,7 +29,7 @@ import {
 } from "./provider-manual-import-diagnostics.ts";
 
 import { finishProviderImportHead } from "./provider-manual-import-head.ts";
-import { reconcileProviderPageFactReferences } from "./provider-manual-import-reconciliation.ts";
+import { reconcileProviderPageFactReferencesOpportunistically } from "./provider-manual-import-reconciliation.ts";
 import { providerManualImportExecutionBudget, providerManualImportLeaseMilliseconds,
   type ProviderImportExecutionMode } from "./provider-manual-import-execution-budget.ts";
 
@@ -434,7 +434,12 @@ export class ProviderManualImportExecutor {
           retainLeaseForNextPage = result.kind === "progress";
           return result;
         }
-        const reconciled = await reconcileProviderPageFactReferences({
+        // The reachedHead branch above always returns, so this is only ever the
+        // opportunistic non-head pass; see the helper for why a database fault
+        // here must not fail a run whose page is already committed.
+        const reconciled = await reconcileProviderPageFactReferencesOpportunistically({
+          isDatabaseFailure: (error) =>
+            classifyProviderManualImportFailure(error, stage).failureClass === "database",
           page: validatedPage, reachedHead: committed.reachedHead, signal,
           maximumBatches: MAXIMUM_HEAD_RECONCILIATION_BATCHES,
           renewLease: async () => {
