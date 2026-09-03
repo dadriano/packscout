@@ -46,7 +46,7 @@ test("defines all repack comparison fields with buyback-adjusted wording", () =>
   assert.ok(COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault));
 });
 
-test("gross EV is defined as the average guaranteed buyback payout in plain words", () => {
+test("gross EV is defined as the expected guaranteed buyback payout", () => {
   assert.match(
     getGlossaryDefinition("grossEv").definition,
     /average guaranteed buyback payout/,
