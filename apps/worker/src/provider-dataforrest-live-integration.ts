@@ -4,12 +4,15 @@ import {
   dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV3SourceAdapterManifest,
   launchProviderKeySchema,
   sourceAdapterManifestV1Schema,
   type LaunchProviderKey,
@@ -122,6 +125,10 @@ export const providerDataforrestLiveIntegrationRegistry =
       dataforrestCourtyardCatalogV2SourceAdapterManifest,
     ),
     createProviderDataforrestLiveIntegration(
+      "courtyard",
+      dataforrestCourtyardDistributedV3SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
       "collector_crypt",
       dataforrestCollectorCryptDistributedSourceAdapterManifest,
     ),
@@ -138,6 +145,10 @@ export const providerDataforrestLiveIntegrationRegistry =
       dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
     ),
     createProviderDataforrestLiveIntegration(
+      "collector_crypt",
+      dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
       "phygitals",
       dataforrestPhygitalsDistributedV2SourceAdapterManifest,
     ),
@@ -148,5 +159,9 @@ export const providerDataforrestLiveIntegrationRegistry =
     createProviderDataforrestLiveIntegration(
       "phygitals",
       dataforrestPhygitalsCatalogV2SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "phygitals",
+      dataforrestPhygitalsDistributedV3SourceAdapterManifest,
     ),
   ]);

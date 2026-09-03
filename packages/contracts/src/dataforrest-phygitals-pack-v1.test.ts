@@ -7,6 +7,7 @@ import {
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
 } from "./dataforrest-events-v1.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
@@ -356,17 +357,20 @@ test("Phygitals pack V1 fails present-but-wrong-typed facts closed", () => {
   });
 });
 
-test("catalog-v2 is the only phygitals admission carrying the native pack reader", () => {
+test("only the new phygitals admissions carry the native pack reader", () => {
   const data = evidencedPackData();
-  assert.deepEqual(
-    readDataforrestProviderFacts(
+  for (
+    const version of [
       DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
-      "phygitals",
-      "pack",
-      data,
-    ),
-    phygitalsPackProviderFactsV1(data),
-  );
+      DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+    ]
+  ) {
+    assert.deepEqual(
+      readDataforrestProviderFacts(version, "phygitals", "pack", data),
+      phygitalsPackProviderFactsV1(data),
+      version,
+    );
+  }
   // Adapter versions are immutable admissions: the pack reader must not appear
   // on the older phygitals versions that shipped without it.
   for (

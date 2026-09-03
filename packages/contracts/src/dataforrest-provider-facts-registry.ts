@@ -23,10 +23,12 @@ import {
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -35,6 +37,7 @@ import {
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import type { LaunchProviderKey } from "./provider-source-contract-v1.ts";
 import type { NormalizedProviderFacts } from "./provider-source-facts-v1.ts";
@@ -88,6 +91,21 @@ const providerFactsAdapters = Object.freeze([
     kind: "card",
     read: collectorCryptCardProviderFactsV1,
   },
+  // Distributed-v3 is the all-stream identity that carries the native pack
+  // reader. The catalog-scoped v3 identity cannot serve a production source,
+  // which ingests pulls and trades from the same configuration.
+  {
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "collector_crypt",
+    kind: "card",
+    read: collectorCryptCardProviderFactsV1,
+  },
+  {
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "collector_crypt",
+    kind: "pack",
+    read: collectorCryptPackProviderFactsV1,
+  },
   {
     adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
     provider: "collector_crypt",
@@ -119,6 +137,21 @@ const providerFactsAdapters = Object.freeze([
     provider: "courtyard",
     kind: "card",
     read: courtyardCardProviderFactsV1,
+  },
+  // Distributed-v3 carries the distributed-v2 card interpretation forward and
+  // adds the native pack reader, so an all-stream Courtyard source reads both
+  // entities instead of rejecting every pack on the display-name fallback.
+  {
+    adapterVersion: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "courtyard",
+    kind: "card",
+    read: courtyardCardProviderFactsV1,
+  },
+  {
+    adapterVersion: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "courtyard",
+    kind: "pack",
+    read: courtyardPackProviderFactsV1,
   },
   {
     adapterVersion: DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
@@ -153,6 +186,20 @@ const providerFactsAdapters = Object.freeze([
     kind: "card",
     read: phygitalsCardProviderFactsV2,
   },
+  // Distributed-v3 carries the distributed-v2 card interpretation forward and
+  // adds the native pack reader; distributed-v2 stored its packs hollow.
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "phygitals",
+    kind: "card",
+    read: phygitalsCardProviderFactsV2,
+  },
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+    provider: "phygitals",
+    kind: "pack",
+    read: phygitalsPackProviderFactsV1,
+  },
   {
     adapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     provider: "phygitals",
@@ -185,15 +232,18 @@ const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
 ]);
 
 export function readDataforrestProviderFacts(
