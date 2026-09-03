@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Review P02's provider-local persistence PR, then build task 003 / P03, the deterministic snapshot assembler. No publication processor is enabled.
+Resolve main's existing frontend lint failure, rerun P02's full gate, then review its provider-local persistence PR. Task 003 / P03 is the next implementation. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | building |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | blocked |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -147,8 +147,9 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Rollback:** Leave new state unused and revert the disabled planner.
 - **Size exception:** The provider-local schema, impact plan, readiness decision, sequence allocation, and durable request form one transaction boundary; splitting them would leave an incomplete provider authority. Authored volume remains capped at the default threshold.
 - **Branch:** `codex/pack-version-publication-p02-state`.
-- **Verified parent:** `0d73ff3970aa2c8e4dec9dd4905caf6380997567` (includes merged P01 and independent frontend PR94).
-- **Verified implementation:** `0727718d6fde3e0da94382796b11a7d2c81da4de`; unchanged patches from the passing full framework gate, with framework/ratchet/typecheck/frontend/build checks repeated after rebase.
+- **Current parent:** `3db9ba77d84ca7a828e513ff59955041bfb94175` (includes merged P01, PR94, and PR93).
+- **Implementation:** `1dc7fbde8c699cc0523c73c0de190a38e80b285d`; unchanged patches from the passing full framework gate on `a03129f5`. Current-parent full verification is blocked, not green.
+- **Delivery blocker:** `apps/frontend/components/catalog/ChaseCollectibleInspector.client.tsx:123`, introduced by PR94 and unchanged in P02, fails `react-hooks/set-state-in-effect`. The same failure is present in [main CI](https://github.com/dadriano/packscout/actions/runs/33808683512). Keep the PR draft until an upstream fix and a passing full gate.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** not opened.
 
@@ -298,4 +299,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Publish the verified P02 branch for review. Next implementation is task 003 / P03; P03–P05 remain planned foundation phases and publication stays disabled until P06 and launch authorization.
+Resolve the unrelated frontend lint failure on main, refresh P02's base, and rerun `npm run verify:framework` before making its draft PR ready. Next implementation is task 003 / P03; P03–P05 remain planned foundation phases and publication stays disabled until P06 and launch authorization.
