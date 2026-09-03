@@ -115,7 +115,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
-| P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | building |
+| P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | published |
 | P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | planned |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
@@ -137,7 +137,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p01-contract`.
 - **Verified parent:** `0b470fc7876e3e1c1b86f616bb382f5985c67fe8` (`origin/main`).
 - **Verified implementation:** `b6c64edb`.
-- **PR:** not opened.
+- **PR:** https://github.com/dadriano/packscout/pull/88
 
 #### P02 — Provider-local publication state
 
