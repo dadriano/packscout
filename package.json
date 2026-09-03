@@ -131,6 +131,7 @@
     "db:stop:packscout-phygitals:local": "NODE_ENV=development PACKSCOUT_LOCAL_PROVIDER_REVIEW_CLUSTER_ACTION=stop PACKSCOUT_LOCAL_PROVIDER_REVIEW_CLUSTER_TARGET=phygitals node --import tsx scripts/local/provision-provider-review-databases.mts",
     "activate:dataforrest-source:clutchpacks:local": "NODE_ENV=development node --import tsx scripts/local/activate-clutchpacks-dataforrest-source.mts",
     "activate:dataforrest-source:collector-crypt:local": "NODE_ENV=development node --import tsx scripts/local/activate-collector-crypt-dataforrest-source.mts",
+    "capture:dataforrest-catalog-census:live": "NODE_ENV=production node --import tsx scripts/live/capture-dataforrest-catalog-bridge-source-census.mts",
     "prepare:dataforrest-replay:clutchpacks:local": "NODE_ENV=development node --import tsx scripts/local/prepare-clutchpacks-dataforrest-replay.mts",
     "db:prisma:generate:central": "npm run prisma:generate:central --workspace=@packscout/database",
     "db:prisma:generate:provider": "npm run prisma:generate:provider --workspace=@packscout/database",

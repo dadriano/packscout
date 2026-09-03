@@ -11,6 +11,7 @@ const database = await tsImport("@packscout/database", import.meta.url);
 const plan = await tsImport("./dataforrest-catalog-bridge-plan.mts", import.meta.url);
 const operatorFiles = await tsImport("./dataforrest-catalog-bridge-operator-files.mts", import.meta.url);
 const drainCapture = await tsImport("./capture-dataforrest-catalog-bridge-drain-policy.mts", import.meta.url);
+const drainPolicy = await tsImport("./dataforrest-catalog-bridge-drain-live-policy.mts", import.meta.url);
 const preparation = await tsImport("./capture-dataforrest-catalog-bridge-preparation.mts", import.meta.url);
 const materializer = await tsImport("./materialize-dataforrest-catalog-bridge-live-policy.mts", import.meta.url);
 const liveDatabase = await tsImport("./dataforrest-catalog-bridge-drain-live-database.mts", import.meta.url);
@@ -22,8 +23,8 @@ const commit = "a".repeat(40);
 const hash = letter => letter.repeat(64);
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 
-function drainArguments(root = "/private/catalog-bridge") {
-  return ["--capture", "--provider-key", "collector_crypt", "--operation-id", operationId,
+function drainArguments(root = "/private/catalog-bridge", providerKey = "collector_crypt") {
+  return ["--capture", "--provider-key", providerKey, "--operation-id", operationId,
     "--operator-id", operatorId, "--executor-checkout", root, "--executor-commit", commit,
     "--receipt-path", `${root}/drain-receipt.json`, "--output", `${root}/drain-policy.json`];
 }
@@ -36,11 +37,11 @@ test("producer parsers require one explicit mode and exact canonical private pat
     outputPath: "/private/catalog-bridge/drain-policy.json",
   });
   const preparationArguments = ["--capture", "--drain-policy-file", "/private/drain-policy.json",
-    "--drain-policy-sha256", hash("b"), "--source-head-card-count", "190000",
-    "--source-head-pack-count", "1452", "--output", "/private/preparation.json"];
+    "--drain-policy-sha256", hash("b"), "--source-census-file", "/private/source-census.json",
+    "--source-census-sha256", hash("c"), "--output", "/private/preparation.json"];
   assert.deepEqual(preparation.parseCatalogBridgePreparationCaptureArguments(preparationArguments), {
     drainPolicyPath: "/private/drain-policy.json", drainPolicySha256: hash("b"),
-    sourceHeadCardCount: 190000, sourceHeadPackCount: 1452,
+    sourceCensusPath: "/private/source-census.json", sourceCensusSha256: hash("c"),
     outputPath: "/private/preparation.json",
   });
   const materializationArguments = ["--materialize", "--journal-directory", "/private/journal",
@@ -58,9 +59,10 @@ test("producer parsers require one explicit mode and exact canonical private pat
     assert.throws(() => drainCapture.parseCatalogBridgeDrainPolicyCaptureArguments(invalid));
   }
   for (const invalid of [preparationArguments.slice(0, -2),
-    preparationArguments.map(value => value === "190000" ? "1.5" : value),
+    preparationArguments.map(value => value === hash("c") ? "invalid" : value),
     preparationArguments.map(value => value === "/private/preparation.json"
-      ? "/private/drain-policy.json" : value)]) {
+      ? "/private/source-census.json" : value),
+    [...preparationArguments, "--source-head-card-count", "190000"]]) {
     assert.throws(() => preparation.parseCatalogBridgePreparationCaptureArguments(invalid));
   }
   const crossed = [...materializationArguments];
@@ -125,8 +127,8 @@ test("checkout observation pins exact root, commit, clean tree and module bytes"
     readModule: async () => Buffer.from("x") }), { code: "CATALOG_BRIDGE_EXECUTOR_DRIFT" });
 });
 
-function runningBoundary() {
-  const definition = plan.catalogBridgeProvider("collector_crypt");
+function runningBoundary(providerKey = "collector_crypt") {
+  const definition = plan.catalogBridgeProvider(providerKey);
   const cursor = { sourceInstanceId: definition.providerId,
     sourceRevisionId: definition.currentConfigId,
     sourceTypeKey: definition.currentEventManifest.sourceTypeKey,
@@ -153,7 +155,7 @@ function runningBoundary() {
         settings: { platform: definition.providerKey } },
       sourceCursor: cursor, sourceCursorHash: cursorHash, activeRunCount: 1,
       actionableCommandCount: 0, otherOwnedLeaseCount: 0, otherActiveTransactionCount: 0 },
-    importLease: { owner: "provider-import:collector-crypt", fence: "14",
+    importLease: { owner: `provider-import:${providerKey}`, fence: "14",
       expiresAt: "2026-09-01T03:02:00.000Z" },
     run: { id: "40000000-0000-4000-8000-000000000003", state: "running",
       configId: definition.currentConfigId, configNumber: definition.currentConfigNumber,
@@ -186,6 +188,39 @@ test("drain policy captures executor pins without persisting the source cursor",
   await assert.rejects(drainRunner.assertCatalogBridgeLiveDrainExecutor(policy, async input => ({
     checkout: input.checkout, commit, clean: true, moduleSha256: { runner: hash("8") },
   })), { code: "CATALOG_BRIDGE_LIVE_DRAIN_EXECUTOR_CHANGED" });
+});
+
+test("preparation refuses non-Collector policy before checkout or dependency access", async () => {
+  const temporaryBase = await realpath(tmpdir());
+  const root = await mkdtemp(path.join(temporaryBase, "packscout-unsupported-preparation-"));
+  await chmod(root, 0o700);
+  const value = runningBoundary("courtyard");
+  const args = drainCapture.parseCatalogBridgeDrainPolicyCaptureArguments(
+    drainArguments(root, "courtyard"),
+  );
+  const policy = drainCapture.buildCatalogBridgeLiveDrainPolicy({
+    args,
+    boundary: value.boundary,
+    authority: { boundary: value.boundary.central, route: {}, routeDigest: hash("f") },
+    executorRunnerModuleSha256: hash("9"),
+  });
+  const bytes = operatorFiles.catalogBridgePrivateJsonBytes(policy);
+  try {
+    await operatorFiles.persistCatalogBridgePrivateBytes(args.outputPath, bytes);
+    await assert.rejects(preparation.captureCatalogBridgePreparation({
+      args: {
+        drainPolicyPath: args.outputPath,
+        drainPolicySha256: drainPolicy.catalogBridgeLiveDrainPolicyDigest(policy),
+        sourceCensusPath: path.join(root, "missing-source-census.json"),
+        sourceCensusSha256: hash("c"),
+        outputPath: path.join(root, "preparation.json"),
+      },
+      environment: {},
+    }), { code: "CATALOG_BRIDGE_SOURCE_CENSUS_PROVIDER_UNSUPPORTED" });
+  } finally {
+    bytes.fill(0);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("central freshness refuses deterministic descendants and prior operation correlations", async () => {
@@ -301,6 +336,15 @@ test("materializer emits awaited successor arguments and binds policy to raw pli
       baseline: { cards: 1, packs: 1, pulls: 1, marketEvents: 1,
         pullsDigest: hash("b"), marketEventsDigest: hash("c") },
     } };
+  const expectedPins = { operationId, providerKey: definition.providerKey, operatorId,
+    residentCheckout: state.preflight.repository.checkout,
+    residentCommit: state.preflight.repository.expectedCommit,
+    utilityModuleSha256: state.preflight.repository.utilityModuleSha256,
+    sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1",
+    sourceHeadCounts: { ...definition.documentedCatalogFloor },
+    sourceHeadCensusFileSha256: hash("d"), sourceHeadCensusProofDigest: hash("e"),
+    sourceHeadIdentityMultisetDigest: hash("f") };
+  state.planDigest = plan.catalogBridgeDigest(expectedPins);
   const successor = materializer.buildCatalogBridgeSuccessorPlist({ state,
     nodePath: "/private/node/bin/node", logPath: "/private/log/provider.log" });
   assert.equal(successor.arguments.includes("--await-initial-run"), true);
@@ -310,9 +354,11 @@ test("materializer emits awaited successor arguments and binds policy to raw pli
   const receipt = { schemaVersion: "dataforrest_catalog_bridge_receipt_v1", phase: "prepared",
     operationId, providerKey: definition.providerKey, planDigest: state.planDigest,
     observedAt: state.preparedAt, previousReceiptHash: null,
-    evidence: { sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1",
+    evidence: { sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1",
       sourceHeadCardCount: definition.documentedCatalogFloor.card,
-      sourceHeadPackCount: definition.documentedCatalogFloor.pack } };
+      sourceHeadPackCount: definition.documentedCatalogFloor.pack,
+      sourceHeadCensusFileSha256: hash("d"), sourceHeadCensusProofDigest: hash("e"),
+      sourceHeadIdentityMultisetDigest: hash("f") } };
   const journal = { schemaVersion: "dataforrest_catalog_bridge_journal_v1", operationId,
     providerKey: definition.providerKey, planDigest: state.planDigest, phase: "prepared",
     receipts: [receipt], headReceiptHash: hash("d") };
@@ -330,6 +376,8 @@ test("materializer emits awaited successor arguments and binds policy to raw pli
     stagedPlistFileSha256: plistSha256, oneShotModuleSha256: hash("f"),
     residentModuleSha256: hash("0") });
   assert.equal(policy.successorLaunchAgent.fileSha256, plistSha256);
+  assert.equal(policy.pins.sourceHeadIdentityMultisetDigest,
+    expectedPins.sourceHeadIdentityMultisetDigest);
   assert.equal(policy.utility.executionTimeoutMilliseconds,
     8 * 60 * 60_000 + 30 * 60_000);
   assert.notEqual(policy.successorLaunchAgent.fileSha256,

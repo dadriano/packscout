@@ -7,6 +7,7 @@ const stateModule = await tsImport("./dataforrest-catalog-bridge-state.mts", imp
 const catalog = await tsImport("./dataforrest-catalog-bridge-catalog.mts", import.meta.url);
 const eventResume = await tsImport("./dataforrest-catalog-bridge-event-resume.mts", import.meta.url);
 const policyModule = await tsImport("./dataforrest-catalog-bridge-catalog-live-policy.mts", import.meta.url);
+const censusProof = await tsImport("./dataforrest-catalog-bridge-source-census-proof.mts", import.meta.url);
 const liveDatabase = await tsImport("./dataforrest-catalog-bridge-catalog-live-database.mts", import.meta.url);
 const liveRunner = await tsImport("./run-dataforrest-catalog-bridge-catalog.mts", import.meta.url);
 const residentHandoff = await tsImport("../local/provider-resident-handoff.mts", import.meta.url);
@@ -21,6 +22,41 @@ const operationId = "30000000-0000-4000-8000-000000000001";
 const operatorId = "30000000-0000-4000-8000-000000000002";
 const hash = (letter) => letter.repeat(64);
 
+function sourceCensus(definition, checkout, commit) {
+  const counts = definition.documentedCatalogFloor;
+  const sourceRecordCount = counts.card + counts.pack;
+  const pageCount = Math.ceil(sourceRecordCount / definition.catalogManifest.requestBounds.pageLimit);
+  const pass = (passNumber, startedAt, completedAt) => ({ passNumber, startedAt, completedAt,
+    pageCount, sourceRequestCount: pageCount, sourceRecordCount,
+    rawCardObservationCount: counts.card, rawPackObservationCount: counts.pack,
+    distinctCardIdentityCount: counts.card, distinctPackIdentityCount: counts.pack,
+    identityMultisetDigest: hash("7"), traversalChainDigest: hash("8"),
+    finalCursorHash: hash("9"), maximumResponseBytes: 1000,
+    totalResponseBytes: pageCount * 1000 });
+  return censusProof.catalogBridgeSourceCensusSchema.parse({
+    schemaVersion: "dataforrest_catalog_bridge_source_census_v1",
+    authorization: "operator_requested_read_only_catalog_source_census",
+    operationId,
+    providerKey: definition.providerKey, capturedAt: "2026-09-01T03:59:00.000Z",
+    executor: { checkout, commit, runnerModuleSha256: hash("a"),
+      censusModuleSha256: hash("b"), inspectionModuleSha256: hash("c") },
+    source: { providerId: definition.providerId, configId: definition.currentConfigId,
+      configNumber: definition.currentConfigNumber,
+      activeAdapterVersion: definition.currentEventManifest.adapterVersion,
+      catalogAdapterVersion: definition.catalogAdapterVersion, sourceCredentialDigest: hash("2"),
+      pageLimit: definition.catalogManifest.requestBounds.pageLimit,
+      requestTimeoutMilliseconds: definition.catalogManifest.requestBounds.timeoutMilliseconds,
+      maximumResponseBytes: definition.catalogManifest.requestBounds.maximumResponseBytes },
+    passes: [pass(1, "2026-09-01T03:57:00.000Z", "2026-09-01T03:58:00.000Z"),
+      pass(2, "2026-09-01T03:58:01.000Z", "2026-09-01T03:59:00.000Z")],
+    agreement: { sourceRecordCount, cardCount: counts.card, packCount: counts.pack,
+      pageCount, identityMultisetDigest: hash("7"), traversalChainDigest: hash("8"),
+      finalCursorHash: hash("9") },
+    databaseWritesPerformed: false, sourceRequestsPerformed: true,
+    rawResponsesPersisted: false, rawCursorsPersisted: false, sourceRecordIdsPersisted: false,
+  });
+}
+
 function fixture() {
   const definition = plan.catalogBridgeProvider("collector_crypt");
   const cursor = { sourceInstanceId: definition.providerId,
@@ -30,11 +66,17 @@ function fixture() {
     cursorCodecKey: definition.currentEventManifest.cursorCodecKey,
     cursorGeneration: 1, value: "private-catalog-live-test-cursor" };
   const cursorHash = providerMixedCursorFingerprint(cursor);
+  const residentCheckout = "/private/approved/catalog-resident";
+  const residentCommit = "a".repeat(40);
+  const proof = sourceCensus(definition, residentCheckout, residentCommit);
+  const sourceHeadCensusFileSha256 = censusProof.catalogBridgeSourceCensusFileSha256(proof);
+  const sourceHeadCensusProofDigest = plan.catalogBridgeDigest(proof);
   const pins = { operationId, providerKey: definition.providerKey, operatorId,
-    residentCheckout: "/private/approved/catalog-resident",
-    residentCommit: "a".repeat(40), utilityModuleSha256: hash("b"),
-    sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1",
-    sourceHeadCounts: { ...definition.documentedCatalogFloor } };
+    residentCheckout, residentCommit, utilityModuleSha256: hash("b"),
+    sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1",
+    sourceHeadCounts: { ...definition.documentedCatalogFloor },
+    sourceHeadCensusFileSha256, sourceHeadCensusProofDigest,
+    sourceHeadIdentityMultisetDigest: proof.agreement.identityMultisetDigest };
   const pause = { commandId: "30000000-0000-4000-8000-000000000003", commandDigest: hash("0"),
     commandType: "pause", commandState: "completed",
     idempotencyKey: `catalog-bridge/${operationId}/running/pause`, targetRunId: null,
@@ -84,7 +126,8 @@ function fixture() {
         requestedCursorHash: cursorHash, opaqueValueHash: plan.catalogBridgeDigest(cursor.value),
         status: 200, recordCount: 1, responseSha256: hash("6"),
         checkedAt: "2026-09-01T03:59:45.000Z", responseBytes: 1000, durationMilliseconds: 10 },
-    }, baseline };
+    }, sourceCensus: { proof, fileSha256: sourceHeadCensusFileSha256,
+      proofDigest: sourceHeadCensusProofDigest }, baseline };
   observation.worker.gracefulStopReceipt = {
     schemaVersion: "dataforrest_catalog_bridge_drain_receipt_v1", operationId,
     providerKey: definition.providerKey, providerId: definition.providerId, operatorId,
@@ -193,7 +236,7 @@ function fixture() {
     cardRecordCount: pins.sourceHeadCounts.card, packRecordCount: pins.sourceHeadCounts.pack,
     distinctCardIdentityCount: pins.sourceHeadCounts.card,
     distinctPackIdentityCount: pins.sourceHeadCounts.pack,
-    identityChainDigest: hash("6"), identityMultisetDigest: hash("7"),
+    identityChainDigest: hash("6"), identityMultisetDigest: pins.sourceHeadIdentityMultisetDigest,
     pullRecordCount: 0, marketEventRecordCount: 0, quarantinedCount: 0,
     finalCursorHash: hash("5"), runtimeState: "idle", activeRunCount: 0,
     actionableCommandCount: 0, importLeaseOwner: null,
@@ -493,6 +536,7 @@ test("catalog census refuses source drift, event mutation and canonical persiste
   const mutations = [
     (head) => ({ ...head, cardRecordCount: head.cardRecordCount - 1,
       catalogRecordCount: head.catalogRecordCount - 1 }),
+    (head) => ({ ...head, identityMultisetDigest: hash("0") }),
     (head) => ({ ...head, canonicalAfter: { ...head.canonicalAfter, pullsDigest: hash("f") } }),
     (head) => ({ ...head, canonicalAfter: { ...head.canonicalAfter, packs: 0 } }),
   ];

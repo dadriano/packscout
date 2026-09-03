@@ -18,6 +18,11 @@ import {
   catalogBridgeDrainReceiptSchema,
   type CatalogBridgeDrainReceipt,
 } from "./dataforrest-catalog-bridge-drain-receipt.mts";
+import {
+  catalogBridgeSourceCensusFileSha256,
+  catalogBridgeSourceCensusSchema,
+  type CatalogBridgeSourceCensus,
+} from "./dataforrest-catalog-bridge-source-census-proof.mts";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const sha256 = /^[a-f0-9]{64}$/u;
@@ -129,8 +134,11 @@ export interface CatalogBridgeOperationPins {
   readonly residentCheckout: string;
   readonly residentCommit: string;
   readonly utilityModuleSha256: string;
-  readonly sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1";
+  readonly sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1";
   readonly sourceHeadCounts: Readonly<{ card: number; pack: number }>;
+  readonly sourceHeadCensusFileSha256: string;
+  readonly sourceHeadCensusProofDigest: string;
+  readonly sourceHeadIdentityMultisetDigest: string;
 }
 
 export function catalogBridgeOperationIds(pins: Pick<CatalogBridgeOperationPins, "operationId" | "providerKey">) {
@@ -232,6 +240,11 @@ export interface CatalogBridgePreflightObservation {
       responseBytes: number; durationMilliseconds: number;
     }>;
   }>;
+  readonly sourceCensus: Readonly<{
+    proof: CatalogBridgeSourceCensus;
+    fileSha256: string;
+    proofDigest: string;
+  }>;
   readonly baseline: CatalogBridgeCanonicalEvidence;
 }
 
@@ -280,9 +293,12 @@ export interface CatalogBridgePublicPreparedReceipt {
   readonly latestTerminalRunId: string;
   readonly latestTerminalRunDigest: string;
   readonly baselineDigest: string;
-  readonly sourceHeadCountProvenance: "manually_reviewed_exact_source_head_counts_v1";
+  readonly sourceHeadCountProvenance: "two_pass_read_only_catalog_census_v1";
   readonly sourceHeadCardCount: number;
   readonly sourceHeadPackCount: number;
+  readonly sourceHeadCensusFileSha256: string;
+  readonly sourceHeadCensusProofDigest: string;
+  readonly sourceHeadIdentityMultisetDigest: string;
   readonly previousReceiptHash: null;
 }
 
@@ -337,6 +353,56 @@ function assertGracefulStopReceipt(input: Readonly<{
   }
 }
 
+function assertCatalogBridgeSourceCensus(input: Readonly<{
+  pins: CatalogBridgeOperationPins;
+  observation: CatalogBridgePreflightObservation;
+}>): void {
+  if (input.pins.providerKey !== "collector_crypt") {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_PROVIDER_UNSUPPORTED");
+  }
+  const wrapper = (input.observation as Partial<CatalogBridgePreflightObservation>).sourceCensus;
+  if (!wrapper || typeof wrapper !== "object" ||
+    Object.keys(wrapper).sort().join(",") !== "fileSha256,proof,proofDigest") {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_INVALID");
+  }
+  const parsed = catalogBridgeSourceCensusSchema.safeParse(wrapper.proof);
+  if (!parsed.success) refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_INVALID");
+  const proof = parsed.data;
+  const definition = catalogBridgeProvider(input.pins.providerKey);
+  const proofDigest = catalogBridgeDigest(proof);
+  if (!sha256.test(wrapper.fileSha256) || !sha256.test(wrapper.proofDigest) ||
+    wrapper.fileSha256 !== catalogBridgeSourceCensusFileSha256(proof) ||
+    wrapper.fileSha256 !== input.pins.sourceHeadCensusFileSha256 ||
+    wrapper.proofDigest !== proofDigest ||
+    proofDigest !== input.pins.sourceHeadCensusProofDigest ||
+    proof.operationId !== input.pins.operationId ||
+    proof.providerKey !== input.pins.providerKey ||
+    proof.executor.checkout !== input.pins.residentCheckout ||
+    proof.executor.commit !== input.pins.residentCommit ||
+    proof.source.providerId !== definition.providerId ||
+    proof.source.configId !== definition.currentConfigId ||
+    proof.source.configNumber !== definition.currentConfigNumber ||
+    proof.source.activeAdapterVersion !== definition.currentEventManifest.adapterVersion ||
+    proof.source.catalogAdapterVersion !== definition.catalogAdapterVersion ||
+    proof.source.sourceCredentialDigest !== input.observation.central.sourceCredentialDigest ||
+    proof.source.pageLimit !== definition.catalogManifest.requestBounds.pageLimit ||
+    proof.source.requestTimeoutMilliseconds !==
+      definition.catalogManifest.requestBounds.timeoutMilliseconds ||
+    proof.source.maximumResponseBytes !==
+      definition.catalogManifest.requestBounds.maximumResponseBytes ||
+    proof.agreement.cardCount !== input.pins.sourceHeadCounts.card ||
+    proof.agreement.packCount !== input.pins.sourceHeadCounts.pack ||
+    proof.agreement.sourceRecordCount !==
+      input.pins.sourceHeadCounts.card + input.pins.sourceHeadCounts.pack ||
+    proof.agreement.identityMultisetDigest !==
+      input.pins.sourceHeadIdentityMultisetDigest ||
+    proof.agreement.cardCount < definition.documentedCatalogFloor.card ||
+    proof.agreement.packCount < definition.documentedCatalogFloor.pack ||
+    Date.parse(proof.capturedAt) > Date.parse(input.observation.observedAt)) {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_INVALID");
+  }
+}
+
 export function prepareCatalogBridge(input: Readonly<{
   pins: CatalogBridgeOperationPins; observation: CatalogBridgePreflightObservation;
 }>): Readonly<{ privateState: CatalogBridgePrivatePreparedState; publicReceipt: CatalogBridgePublicPreparedReceipt }> {
@@ -345,13 +411,17 @@ export function prepareCatalogBridge(input: Readonly<{
   const { repository, worker, central, runtime, sourceCanaries } = observation;
   if (!uuid.test(pins.operationId) || !uuid.test(pins.operatorId) || !commit.test(pins.residentCommit) ||
     !sha256.test(pins.utilityModuleSha256) || !validInstant(observation.observedAt) ||
-    pins.sourceHeadCountProvenance !== "manually_reviewed_exact_source_head_counts_v1" ||
+    pins.sourceHeadCountProvenance !== "two_pass_read_only_catalog_census_v1" ||
     pins.residentCheckout.length === 0 || /[\r\n\0]/u.test(pins.residentCheckout) ||
+    !sha256.test(pins.sourceHeadCensusFileSha256) ||
+    !sha256.test(pins.sourceHeadCensusProofDigest) ||
+    !sha256.test(pins.sourceHeadIdentityMultisetDigest) ||
     !validCount(pins.sourceHeadCounts.card) || !validCount(pins.sourceHeadCounts.pack) ||
     pins.sourceHeadCounts.card < definition.documentedCatalogFloor.card ||
     pins.sourceHeadCounts.pack < definition.documentedCatalogFloor.pack) {
     refuseCatalogBridge("CATALOG_BRIDGE_PINS_INVALID");
   }
+  assertCatalogBridgeSourceCensus(input);
   if (repository.checkout !== pins.residentCheckout || repository.expectedCommit !== pins.residentCommit ||
     repository.observedCommit !== pins.residentCommit || !repository.clean ||
     repository.utilityModuleSha256 !== pins.utilityModuleSha256) {
@@ -491,6 +561,9 @@ export function prepareCatalogBridge(input: Readonly<{
     sourceHeadCountProvenance: pins.sourceHeadCountProvenance,
     sourceHeadCardCount: pins.sourceHeadCounts.card,
     sourceHeadPackCount: pins.sourceHeadCounts.pack,
+    sourceHeadCensusFileSha256: pins.sourceHeadCensusFileSha256,
+    sourceHeadCensusProofDigest: pins.sourceHeadCensusProofDigest,
+    sourceHeadIdentityMultisetDigest: pins.sourceHeadIdentityMultisetDigest,
     previousReceiptHash: null,
   });
   return { privateState, publicReceipt };
@@ -582,7 +655,7 @@ export function assertCatalogHead(input: Readonly<{
   if (input.state.planDigest !== catalogBridgeDigest(input.pins) || input.observation.runId !== input.state.catalogRunId ||
     input.observation.configId !== plan.catalog.id || input.observation.configNumber !== plan.catalog.versionNumber ||
     input.observation.state !== "succeeded" || !input.observation.reachedHead || input.observation.requestedCursorHash !== null ||
-    input.pins.sourceHeadCountProvenance !== "manually_reviewed_exact_source_head_counts_v1" ||
+    input.pins.sourceHeadCountProvenance !== "two_pass_read_only_catalog_census_v1" ||
     input.observation.cardRecordCount !== input.observation.distinctCardIdentityCount ||
     input.observation.packRecordCount !== input.observation.distinctPackIdentityCount ||
     input.observation.distinctCardIdentityCount !== input.pins.sourceHeadCounts.card ||
@@ -591,6 +664,7 @@ export function assertCatalogHead(input: Readonly<{
     input.observation.catalogRecordCount < input.observation.sourceRecordCount ||
     !sha256.test(input.observation.identityChainDigest) ||
     !sha256.test(input.observation.identityMultisetDigest) ||
+    input.observation.identityMultisetDigest !== input.pins.sourceHeadIdentityMultisetDigest ||
     input.observation.pullRecordCount !== 0 || input.observation.marketEventRecordCount !== 0 ||
     input.observation.quarantinedCount !== 0 ||
     !["idle", "paused"].includes(input.observation.runtimeState) ||
