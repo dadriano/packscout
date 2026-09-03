@@ -1,28 +1,52 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { DashboardDisclaimer } from "@/components/shell/DashboardDisclaimer";
 import { DashboardPageHeader } from "@/components/shell/DashboardPageHeader";
 import { DataReleaseStatusReporter } from "@/components/shell/DataReleaseStatus.client";
-import { CatalogRouteRecovery, EmptyCatalog } from "@/components/catalog-state";
+import { ShellSurfaceReporter } from "@/components/shell/ShellSurface.client";
+import {
+  gatedSurfaceRobots,
+  resolveGatedRoute,
+  resolveVisitorAccess,
+} from "@/lib/access-gate.server";
+import { CatalogResultRecovery, EmptyCatalog } from "@/components/catalog-state";
 import { parseAllRepacksRouteQuery, type NextSearchParams } from "@/lib/catalog-route-state.server";
-import { parseCatalogViewLayout } from "@/lib/catalog-query-state.client";
+import {
+  catalogQueryAfterReadError,
+  parseCatalogViewLayout,
+  serializeCatalogViewState,
+} from "@/lib/catalog-query-state.client";
 import { toUrlSearchParams } from "@/lib/catalog-route-state.server";
-import { readPublicRepacks } from "@/lib/public-repacks.server";
-import { dataReleaseStatusFromMetadata } from "@/lib/public-release-status";
+import {
+  readPublicCatalogRecordUpdateStatus,
+  readPublicRepacks,
+} from "@/lib/public-repacks.server";
+import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
+import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
 
-export const metadata: Metadata = {
-  title: "All Repacks",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: "All Repacks",
+    robots: gatedSurfaceRobots(await resolveVisitorAccess()),
+  };
+}
 
 export default async function AllRepacksPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<NextSearchParams> }>) {
+  // The access decision comes first (closed-beta-access/007): no parsing and
+  // no catalog read happens for a visitor the beta does not admit.
+  const route = resolveGatedRoute(await resolveVisitorAccess());
+  if (route.kind === "redirect") redirect(route.destination);
+
   const resolvedSearchParams = await searchParams;
   const parsed = parseAllRepacksRouteQuery(resolvedSearchParams);
   if (!parsed.ok) {
     return (
       <>
+        <ShellSurfaceReporter mode="product" />
         <DataReleaseStatusReporter status={{ state: "unavailable" }} />
         <DashboardPageHeader activeView="all-repacks" />
         <section className="route-placeholder" aria-labelledby="invalid-catalog-title">
@@ -37,18 +61,6 @@ export default async function AllRepacksPage({
     );
   }
 
-  const result = await readPublicRepacks(parsed.query);
-  if (!result.ok) {
-    return (
-      <>
-        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
-        <DashboardPageHeader activeView="all-repacks" />
-        <CatalogRouteRecovery />
-      </>
-    );
-  }
-
-  const status = dataReleaseStatusFromMetadata(result.data.metadata);
   const layout = parseCatalogViewLayout(
     toUrlSearchParams(resolvedSearchParams).get("view"),
   );
@@ -56,8 +68,32 @@ export default async function AllRepacksPage({
     throw new Error("A validated catalog view must resolve to a layout.");
   }
 
+  const [result, recordUpdateResult] = await Promise.all([
+    readPublicRepacks(parsed.query),
+    readPublicCatalogRecordUpdateStatus(),
+  ]);
+  const status = dataReleaseStatusFromRecordUpdateResult(
+    recordUpdateResult,
+    result.ok ? result.data.release.publicReleaseId : undefined,
+  );
+  if (!result.ok) {
+    const recoveryHref = serializeCatalogViewState(
+      catalogQueryAfterReadError(parsed.query, result.code),
+      layout,
+    );
+    return (
+      <>
+        <ShellSurfaceReporter mode="product" />
+        <DataReleaseStatusReporter status={status} />
+        <DashboardPageHeader activeView="all-repacks" />
+        <CatalogResultRecovery error={result} recoveryHref={recoveryHref} />
+      </>
+    );
+  }
+
   return (
     <>
+      <ShellSurfaceReporter mode="product" />
       <DataReleaseStatusReporter status={status} />
       <DashboardPageHeader
         activeView="all-repacks"
@@ -67,12 +103,12 @@ export default async function AllRepacksPage({
           layout,
         }}
       />
-      {result.data.metadata.repackCount === 0 ? (
+      {allRepacksCatalogIsEmpty(result.data) ? (
         <EmptyCatalog />
       ) : (
         <AllRepacksClient
           details={result.data.details}
-          key={`${result.data.metadata.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
+          key={`${result.data.release.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
           initialLayout={layout}
           page={result.data}
           query={parsed.query}

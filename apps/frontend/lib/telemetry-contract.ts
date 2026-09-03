@@ -44,7 +44,7 @@ export type AnonymousProductEvent =
       name: "filters_applied";
       surface: "overview" | "all_repacks";
       outcome: "results" | "no_matches" | "failed";
-      activeFilterCount: 0 | 1 | 2 | 3 | 4;
+      activeFilterCount: 0 | 1 | 2 | 3 | 4 | 5;
       resultCountBucket: "0" | "1-25" | "26-100" | "101+";
     }>
   | Readonly<{
@@ -234,7 +234,7 @@ export function parseAnonymousProductEvent(
       !isOneOf(input.surface, ["overview", "all_repacks"]) ||
       !isOneOf(input.outcome, ["results", "no_matches", "failed"]) ||
       !isOneOf(input.resultCountBucket, ["0", "1-25", "26-100", "101+"]) ||
-      ![0, 1, 2, 3, 4].includes(input.activeFilterCount as number)
+      ![0, 1, 2, 3, 4, 5].includes(input.activeFilterCount as number)
     ) {
       return { ok: false };
     }

@@ -1,5 +1,4 @@
 .section {
-  container-type: inline-size;
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 0.55rem;
@@ -40,7 +39,7 @@
 
 .scrollRegion {
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: auto;
   border-top: 1px solid var(--color-border);
   scrollbar-color: var(--color-border-strong) transparent;
 }
@@ -51,7 +50,7 @@
 
 .table {
   width: 100%;
-  min-width: 0;
+  min-width: 70rem;
   table-layout: fixed;
   border-spacing: 0;
   font-size: 0.75rem;
@@ -71,12 +70,12 @@
 
 .table th:nth-child(3),
 .table td:nth-child(3) {
-  width: 16%;
+  width: 14%;
 }
 
 .table th:nth-child(4),
 .table td:nth-child(4) {
-  width: 11%;
+  width: 10%;
 }
 
 .table td:nth-child(4) {
@@ -91,16 +90,21 @@
 
 .table th:nth-child(6),
 .table td:nth-child(6) {
-  width: 7.4rem;
+  width: 6.9rem;
 }
 
 .table th:nth-child(7),
 .table td:nth-child(7) {
-  width: 6.1rem;
+  width: 5.7rem;
 }
 
 .table th:nth-child(8),
 .table td:nth-child(8) {
+  width: 6.8rem;
+}
+
+.table th:nth-child(9),
+.table td:nth-child(9) {
   width: 7.1rem;
 }
 
@@ -234,23 +238,34 @@
   white-space: nowrap;
 }
 
-.metric[data-state="positive"] .metricValue,
-.metric[data-state="positive"] .metricState {
+.metric[data-tone="positive"] .metricValue,
+.metric[data-tone="positive"] .metricState {
   color: var(--color-positive);
 }
 
-.metric[data-state="negative"] .metricValue,
-.metric[data-state="negative"] .metricState {
+.metric[data-tone="caution"] .metricValue,
+.metric[data-tone="caution"] .metricState {
+  color: var(--color-caution);
+}
+
+.metric[data-tone="warning"] .metricValue,
+.metric[data-tone="warning"] .metricState {
+  color: var(--color-warning-strong);
+}
+
+.metric[data-tone="negative"] .metricValue,
+.metric[data-tone="negative"] .metricState {
   color: var(--color-negative);
 }
 
-.metric[data-state="unavailable"] .metricValue,
-.metric[data-state="unavailable"] .metricState {
+.metric[data-tone="unavailable"] .metricValue,
+.metric[data-tone="unavailable"] .metricState {
   color: var(--color-status-neutral);
 }
 
 .metricState,
-.unavailableReason {
+.unavailableReason,
+.confidence {
   color: var(--color-text-muted);
   font-size: 0.58rem;
   line-height: 1.35;
@@ -268,7 +283,9 @@
 }
 
 .emptyState {
-  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 0.78rem;
@@ -276,19 +293,20 @@
   text-align: center;
 }
 
+.emptyState p {
+  max-width: 34rem;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.emptyAction {
+  color: var(--color-action-strong);
+  font-weight: 720;
+  text-underline-offset: 0.2em;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .table tbody tr {
     transition: none;
-  }
-}
-
-@container (max-width: 36rem) {
-  .scrollRegion {
-    overflow-x: auto;
-  }
-
-  .table {
-    table-layout: auto;
-    min-width: 40rem;
   }
 }

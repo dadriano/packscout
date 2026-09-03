@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   assertLocalConvexDeployment,
   assertNoCloudDeployKey,
+  localCatalogReadCredential,
   parseEnvironmentFile,
   requireLoopbackConvexUrl,
 } from "./seed-convex-mock-data-release.mjs";
@@ -69,6 +70,37 @@ test("local mock tooling requires an explicit local deployment selection", () =>
     assertLocalConvexDeployment({
       CONVEX_DEPLOYMENT: "local:agent",
       CONVEX_SELF_HOSTED_URL: "http://127.0.0.1:4000",
+    }),
+  );
+});
+
+test("the local catalog-read credential mirrors only bounded values", () => {
+  assert.equal(localCatalogReadCredential({}), null);
+  assert.equal(
+    localCatalogReadCredential({ PACKSCOUT_CATALOG_READ_TOKEN: "" }),
+    null,
+  );
+  assert.equal(
+    localCatalogReadCredential({ PACKSCOUT_CATALOG_READ_TOKEN: "   " }),
+    null,
+  );
+  const bounded = "catalog-read-credential-0123456789abcdef";
+  assert.equal(
+    localCatalogReadCredential({ PACKSCOUT_CATALOG_READ_TOKEN: bounded }),
+    bounded,
+  );
+  assert.equal(
+    localCatalogReadCredential({
+      PACKSCOUT_CATALOG_READ_TOKEN: `  ${bounded}  `,
+    }),
+    bounded,
+  );
+  assert.throws(() =>
+    localCatalogReadCredential({ PACKSCOUT_CATALOG_READ_TOKEN: "too-short" }),
+  );
+  assert.throws(() =>
+    localCatalogReadCredential({
+      PACKSCOUT_CATALOG_READ_TOKEN: "a".repeat(513),
     }),
   );
 });

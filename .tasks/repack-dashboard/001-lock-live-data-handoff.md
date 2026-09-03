@@ -58,7 +58,7 @@ This is a bounded contract task. The provider’s observed API behavior determin
 ### Pipeline Adoption
 
 - Replace the unlaunched aggregate V1 inbound contract, fixtures, and adapter registration with `ProviderStreamContractV2`; do not retain a same-source compatibility path.
-- Maintain an independent durable checkpoint for each of `catalog`, `pulls`, and `trades`, and advance only the stream whose validated page committed successfully.
+- Maintain an independent durable cursor for each of `catalog`, `pulls`, and `trades`, and advance only the stream whose validated page committed successfully.
 - Route catalog records through mutable canonical revision semantics and pulls/trades through immutable event semantics with conflicting repeats quarantined.
 - Update relationship reconciliation, event normalization, currency evidence, counters, and operator-safe diagnostics to use the V2 stream vocabulary.
 - Migrate unlaunched schema and configuration state in one controlled cutover, remove superseded code, and prove backfill plus incremental resume for all three streams.
@@ -101,7 +101,7 @@ The task delivers `ProviderStreamContractV2`, containing:
 
 ### Adoption Evidence
 
-- [ ] The worker stores and resumes three independent durable stream checkpoints.
+- [ ] The worker stores and resumes three independent durable stream cursors.
 - [x] Catalog corrections create canonical revisions while duplicate pulls/trades remain idempotent and conflicting repeats quarantine.
 - [ ] No runtime registration, fixture, documentation, or generic branch reads the launch source through aggregate V1.
 - [ ] V2 backfill, crash recovery, cursor termination, and incremental continuation pass focused integration tests.
@@ -111,11 +111,11 @@ The task delivers `ProviderStreamContractV2`, containing:
 
 - Implemented: evidence-backed V2 record schemas and sanitized record-level fixtures; stream/platform and identity validation; nullable time/money handling; lifecycle and approved-currency normalization; outer relationship precedence; catalog-revision versus immutable-event write policy; canonical lifecycle adoption; launch-scorecard cutover language.
 - Verified: contracts, database, services, and worker focused lint, typecheck, and test suites pass.
-- Blocked: the provider draft supplies real records but no request path, authentication, raw page wrapper, selector/page-size rules, error/rate-limit envelope, cursor scope/termination/order/expiry, full-history start, or correction-page behavior. A decoder, runtime registration, durable three-stream checkpoints, and backfill/incremental evidence cannot be completed without inventing that protocol.
+- Blocked: the provider draft supplies real records but no request path, authentication, raw page wrapper, selector/page-size rules, error/rate-limit envelope, cursor scope/termination/order/expiry, full-history start, or correction-page behavior. A decoder, runtime registration, durable three-stream cursors, and backfill/incremental evidence cannot be completed without inventing that protocol.
 
 ## Spec Compliance
 
 - Related specs reviewed: repack-dashboard/tech-001, repack-dashboard/tech-004, repack-dashboard/ux-005
 - Alignment: implemented the evidence-preserving record contract, nullable-value rules, lifecycle/currency normalization, relationship precedence, and canonical mutable-versus-immutable write policy without inventing missing transport facts.
-- Divergences: the transport decoder, same-source V1 removal, runtime registration, three durable checkpoints, and backfill/incremental proof are intentionally not implemented because the provider has not supplied the raw page/path/auth/cursor evidence required by the specs.
+- Divergences: the transport decoder, same-source V1 removal, runtime registration, three durable cursors, and backfill/incremental proof are intentionally not implemented because the provider has not supplied the raw page/path/auth/cursor evidence required by the specs.
 - Verification: focused contracts, database, services, and worker lint/typecheck/test suites recorded green for the implemented record and write-policy slice.

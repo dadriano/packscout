@@ -14,6 +14,10 @@ const initializedSource = readFileSync(
   new URL("./InitializedPackScoutAuthProvider.client.tsx", import.meta.url),
   "utf8",
 );
+const recorderSource = readFileSync(
+  new URL("./AuthenticatedSignInRecorder.client.tsx", import.meta.url),
+  "utf8",
+);
 const accountSource = readFileSync(
   new URL("./AccountControl.client.tsx", import.meta.url),
   "utf8",
@@ -42,4 +46,95 @@ test("the configured public boundary has no eager Privy or Convex client import"
 test("both account and guest save controls send the same boot intent", () => {
   assert.match(accountSource, /auth\.login\(\)/);
   assert.match(savedButtonSource, /auth\.login\(\)/);
+});
+
+test("an authenticated session establishes its directory record and admission decision", () => {
+  assert.match(
+    initializedSource,
+    /const sessionKey = convexAuthSessionKey\(\{/,
+  );
+  assert.match(
+    initializedSource,
+    /<AuthenticatedSignInRecorder sessionKey=\{sessionKey\}>[\s\S]*<AuthenticatedSavedItemsProvider[\s\S]*<\/AuthenticatedSignInRecorder>/,
+  );
+  // Establishment (closed-beta-access/001) is the directory write plus the
+  // awaiting-review default, so session recording keeps the record the
+  // server-side gate routes on fresh.
+  assert.match(recorderSource, /api\.productUserAccess\.establishAccess/);
+  assert.equal(recorderSource.includes("api.productUsers.recordSignIn"), false);
+});
+
+test("recording stays invisible and cannot break the provider tree", () => {
+  // The write only leaves on a decision, and only through the helper that
+  // absorbs failures, so nothing here can surface an error to the session.
+  assert.match(recorderSource, /if \(!decision\.record\) return;/);
+  assert.match(
+    recorderSource,
+    /void recordSignInBestEffort\(\(\) => establishAccess\(\{\}\)\)/,
+  );
+  assert.equal(recorderSource.match(/establishAccess\(\{\}\)/g)?.length, 1);
+  assert.equal(recorderSource.includes("catch"), false);
+  // Children render unconditionally: the recorder contributes no markup.
+  assert.match(recorderSource, /return <>\{children\}<\/>;/);
+  assert.equal(recorderSource.includes("className"), false);
+  assert.equal(recorderSource.includes("aria-"), false);
+});
+
+test("a failed sign-in record is retried on a timer the effect owns", () => {
+  // The outcome of the write decides what happens next, so a rejection is no
+  // longer indistinguishable from a completed write.
+  assert.match(recorderSource, /settleSignInRecording\(/);
+  // The retry is scheduled, never spun, and both the budget and the wait come
+  // from the logic module rather than from anything hard-coded here.
+  assert.match(recorderSource, /setTimeout\(attempt, settled\.retryDelayMs\)/);
+  assert.equal(/\bwhile\s*\(|\bfor\s*\(/.test(recorderSource), false);
+  assert.equal(/setTimeout\([^)]*\d/.test(recorderSource), false);
+  // An unmount or a changed session drops the pending retry.
+  assert.match(recorderSource, /clearTimeout\(retryTimer\)/);
+  assert.match(recorderSource, /return \(\) => \{/);
+});
+
+test("the identity cookie follows the session and only exists inside the initialized tree", () => {
+  const cookieSyncSource = readFileSync(
+    new URL("./IdentityCookieSync.client.tsx", import.meta.url),
+    "utf8",
+  );
+  // The sync component mounts inside the lazily-booted provider, so a
+  // signed-out visitor who never asks for authentication never runs it.
+  assert.match(initializedSource, /<IdentityAccessCookieSync \/>/);
+  assert.equal(boundarySource.includes("IdentityAccessCookieSync"), false);
+  // The cookie is written from the provider-issued token, refreshed while
+  // the tab lives, and cleared the moment the session ends or sign-out runs.
+  assert.match(cookieSyncSource, /getAccessToken/);
+  assert.match(cookieSyncSource, /buildIdentityCookieValue/);
+  assert.match(cookieSyncSource, /IDENTITY_COOKIE_REFRESH_INTERVAL_MS/);
+  assert.match(cookieSyncSource, /visibilitychange/);
+  assert.match(cookieSyncSource, /clearBrowserIdentityCookie/);
+  assert.match(initializedSource, /clearBrowserIdentityCookie\(\);/);
+  // The credential dies with the sign-out attempt, not with its success: a
+  // provider failure must not leave the gate admitting someone who asked to
+  // leave.
+  assert.match(
+    initializedSource,
+    /\} finally \{[\s\S]*?clearBrowserIdentityCookie\(\);/,
+  );
+  // And not with its answer either. The awaited call bounds the provider at
+  // SIGN_OUT_CEILING_MS (proven in auth-boot.test.ts), which is what makes
+  // that `finally` reachable when the provider never answers — and reachable
+  // before the surface is told anything and leaves. Awaiting the raw provider
+  // logout here instead would put the clear behind a promise that never
+  // settles.
+  assert.match(
+    initializedSource,
+    /await logoutAndClearReturningSessionHint\(\s*privyLogout,/,
+  );
+  // Every assignment is logged, so the sign-in hand-off can tell a credential
+  // this session wrote from the one the gate already refused.
+  assert.match(cookieSyncSource, /recordIdentityCookieWrite\(\{/);
+  // And a sign-out that lands mid-refresh wins: the resolving fetch must not
+  // write a live credential back over the clear.
+  assert.match(cookieSyncSource, /identityWriteSupersededByClear\(\{/);
+  // Transport, not trust: nothing here decides admission client-side.
+  assert.equal(cookieSyncSource.includes("admitted"), false);
+  assert.equal(cookieSyncSource.includes("getMyAccess"), false);
 });

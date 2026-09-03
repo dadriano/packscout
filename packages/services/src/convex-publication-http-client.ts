@@ -258,7 +258,11 @@ export class SignedConvexPublicationHttpClient {
 
   constructor(options: SignedConvexPublicationHttpClientOptions) {
     const baseUrl = new URL(options.baseUrl);
-    if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password ||
+    const isLoopbackHttp = baseUrl.protocol === "http:" &&
+      (baseUrl.hostname === "127.0.0.1" || baseUrl.hostname === "localhost" ||
+        baseUrl.hostname === "[::1]");
+    if ((baseUrl.protocol !== "https:" && !isLoopbackHttp) ||
+        baseUrl.username || baseUrl.password ||
         baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
       throw new RangeError("Convex publication base URL is invalid.");
     }

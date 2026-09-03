@@ -1,13 +1,16 @@
 import { GlossaryHint } from "./GlossaryHint.client";
-import type { MetricValuePresentation } from "@/lib/metric-presentation";
+import type { GlossaryPanelAlign } from "@/lib/glossary-hint.client";
+import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
 import type { GlossaryDefinition } from "@/lib/metric-vocabulary";
 import styles from "./MetricValue.module.css";
 
 type MetricValueProps = Readonly<{
   metric: MetricValuePresentation;
   compact?: boolean;
-  glossaryAlign?: "start" | "end";
+  glossaryAlign?: GlossaryPanelAlign;
   glossaryContent?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
+  glossaryDetails?: readonly string[];
+  glossaryDetailsHeading?: string;
   showGlossary?: boolean;
   showLabel?: boolean;
   showReason?: boolean;
@@ -17,8 +20,10 @@ type MetricValueProps = Readonly<{
 export function MetricValue({
   metric,
   compact = false,
-  glossaryAlign = "start",
+  glossaryAlign = "center",
   glossaryContent,
+  glossaryDetails,
+  glossaryDetailsHeading,
   showGlossary = true,
   showLabel = true,
   showReason = true,
@@ -34,6 +39,7 @@ export function MetricValue({
       className={styles.root}
       data-density={compact ? "compact" : "default"}
       data-state={metric.semanticState ?? "plain"}
+      data-tone={metric.tone ?? "plain"}
     >
       {showLabelRow ? (
         <div className={styles.labelRow}>
@@ -42,6 +48,8 @@ export function MetricValue({
             <GlossaryHint
               align={glossaryAlign}
               content={glossaryContent}
+              details={glossaryDetails}
+              detailsHeading={glossaryDetailsHeading}
               field={metric.glossaryKey}
             />
           ) : null}

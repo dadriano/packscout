@@ -3,14 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type {
-  DashboardBundle,
   PublicRepackFilters,
-  PublicRepackViewDetail,
+  PublicRepackViewDetailV3,
 } from "@packscout/contracts";
+import type { DashboardBundleV3 } from "@/lib/public-repacks-v3";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters.client";
 import { OverviewDashboard } from "@/components/catalog/OverviewDashboard.client";
 import type { InspectorActionOutcome } from "@/components/catalog/PackInspector.client";
 import {
+  NoMatches,
+  type CatalogConstraint,
+} from "@/components/catalog-state";
+import {
+  formatDollarAmount,
   serializeDashboardFilters,
 } from "@/lib/catalog-query-state.client";
 import { useNarrowCatalogInspector } from "@/lib/catalog-viewport.client";
@@ -28,8 +33,8 @@ import {
 import styles from "./DashboardOverviewClient.module.css";
 
 type DashboardOverviewClientProps = Readonly<{
-  bundle: DashboardBundle;
-  details: readonly PublicRepackViewDetail[];
+  bundle: DashboardBundleV3;
+  details: readonly PublicRepackViewDetailV3[];
   provider: DashboardProvider | null;
 }>;
 
@@ -44,11 +49,46 @@ function actionMessage(outcome: InspectorActionOutcome): string {
 
 function activeFilterCount(
   filters: PublicRepackFilters,
-): 0 | 1 | 2 | 3 | 4 {
+): 0 | 1 | 2 | 3 | 4 | 5 {
   return (Number(filters.vendors.length > 0) +
     Number(filters.categories.length > 0) +
     Number(filters.collectibleTypes.length > 0) +
-    Number(filters.price.mode === "narrowed")) as 0 | 1 | 2 | 3 | 4;
+    Number(filters.price.mode === "narrowed") +
+    Number(filters.availability === "all")) as 0 | 1 | 2 | 3 | 4 | 5;
+}
+
+function activeConstraints(
+  filters: PublicRepackFilters,
+): readonly CatalogConstraint[] {
+  const constraints: CatalogConstraint[] = [];
+  if (filters.vendors.length > 0) {
+    constraints.push({ label: "Vendors", value: filters.vendors.join(", ") });
+  }
+  if (filters.categories.length > 0) {
+    constraints.push({
+      label: "Categories",
+      value: filters.categories.join(", "),
+    });
+  }
+  if (filters.collectibleTypes.length > 0) {
+    constraints.push({
+      label: "Collectible types",
+      value: filters.collectibleTypes.join(", "),
+    });
+  }
+  if (filters.availability === "all") {
+    constraints.push({
+      label: "Availability",
+      value: "Including unavailable, unknown, and sold-out packs",
+    });
+  }
+  if (filters.price.mode === "narrowed") {
+    constraints.push({
+      label: "Repack Price",
+      value: `$${formatDollarAmount(filters.price.minMinor)}–$${formatDollarAmount(filters.price.maxMinor)}`,
+    });
+  }
+  return constraints;
 }
 
 export function DashboardOverviewClient({
@@ -87,21 +127,25 @@ export function DashboardOverviewClient({
     );
   }
 
+  function resetFilters() {
+    startTransition(() => router.push(dashboardHrefFor(provider)));
+  }
+
   useEffect(() => {
     queueProductTelemetry(
       createDashboardViewEvent({
-        publicReleaseId: bundle.metadata.publicReleaseId,
+        publicReleaseId: bundle.release.publicReleaseId,
         surface: "overview",
       }),
     );
-  }, [bundle.metadata.publicReleaseId]);
+  }, [bundle.release.publicReleaseId]);
 
   useEffect(() => {
     const count = activeFilterCount(bundle.activeFilters);
     if (count === 0) return;
     queueProductTelemetry(
       createFiltersAppliedEvent({
-        publicReleaseId: bundle.metadata.publicReleaseId,
+        publicReleaseId: bundle.release.publicReleaseId,
         surface: "overview",
         outcome: bundle.kpis.totalRepacks === 0 ? "no_matches" : "results",
         activeFilterCount: count,
@@ -111,7 +155,7 @@ export function DashboardOverviewClient({
   }, [
     bundle.activeFilters,
     bundle.kpis.totalRepacks,
-    bundle.metadata.publicReleaseId,
+    bundle.release.publicReleaseId,
   ]);
 
   function reportInspectorAction(outcome: InspectorActionOutcome) {
@@ -119,13 +163,13 @@ export function DashboardOverviewClient({
     queueProductTelemetry(
       outcome.name === "promo_copied"
         ? createPromoCopiedEvent({
-            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicReleaseId: bundle.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
           })
         : createRepackLinkOpenedEvent({
-            publicReleaseId: bundle.metadata.publicReleaseId,
+            publicReleaseId: bundle.release.publicReleaseId,
             publicRepackId: outcome.publicRepackId,
             vendorKey: outcome.vendorKey,
             outcome: outcome.outcome,
@@ -133,22 +177,34 @@ export function DashboardOverviewClient({
     );
   }
 
+  const filterControls = (
+    <CatalogFilters
+      accepted={bundle.activeFilters}
+      facets={bundle.facets}
+      onApply={navigate}
+      onReset={resetFilters}
+      pending={pending}
+      showAvailabilityToggle={false}
+    />
+  );
+
+  if (bundle.kpis.totalRepacks === 0) {
+    return (
+      <div className={styles.root}>
+        {filterControls}
+        <NoMatches
+          constraints={activeConstraints(bundle.activeFilters)}
+          onClearFilters={resetFilters}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.root}>
       <OverviewDashboard
         bundle={selectedBundle}
-        controls={
-          <CatalogFilters
-            accepted={bundle.activeFilters}
-            facets={bundle.facets}
-            onApply={navigate}
-            onReset={() =>
-              startTransition(() => router.push(dashboardHrefFor(provider)))
-            }
-            pending={pending}
-            showAvailabilityToggle={false}
-          />
-        }
+        controls={filterControls}
         inspectorOpen={narrowInspector ? sheetOpen : !sideInspectorDismissed}
         inspectorPlacement={narrowInspector ? "sheet" : "side"}
         inspectorReturnFocusRef={selectionTriggerRef}

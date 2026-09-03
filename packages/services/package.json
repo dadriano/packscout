@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./repack-heat-calculator": "./src/repack-heat-calculator.ts"
+    "./pinned-provider-http-client": "./src/pinned-provider-http-client.ts",
+    "./repack-heat-calculator": "./src/repack-heat-calculator.ts",
+    "./test-support/alternate-bookmark-source-adapter": "./src/alternate-bookmark-source-adapter.test-support.ts"
   },
   "scripts": {
     "lint": "eslint src",
@@ -15,7 +17,8 @@
     "test:volume": "node --import tsx --test src/catalog-release-volume.test.ts"
   },
   "dependencies": {
-    "@packscout/contracts": "0.0.0"
+    "@packscout/contracts": "0.0.0",
+    "@streamparser/json": "0.0.26"
   },
   "devDependencies": {
     "@packscout/database": "0.0.0",

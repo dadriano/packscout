@@ -109,6 +109,32 @@
   white-space: nowrap;
 }
 
+.availability {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 0.08rem 0.35rem;
+  color: var(--color-text-muted);
+  font-size: 0.58rem;
+  font-weight: 720;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+  white-space: normal;
+}
+
+.availability[data-state="available"] {
+  border-color: color-mix(in srgb, var(--color-positive) 38%, var(--color-border));
+  color: var(--color-positive);
+}
+
+.availability[data-state="unavailable"],
+.availability[data-state="unknown"],
+.availability[data-state="sold_out"] {
+  background: color-mix(in srgb, var(--color-status-neutral) 8%, transparent);
+}
+
 .price {
   color: var(--color-text);
   font-size: 0.78rem;
@@ -182,5 +208,11 @@
 @media (max-width: 560px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cardSelect {
+    scroll-behavior: auto;
   }
 }

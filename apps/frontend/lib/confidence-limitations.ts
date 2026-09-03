@@ -1,29 +1,26 @@
-import type { PackScoutEv } from "@packscout/contracts";
+import type { PackScoutDisplayedEvConfidenceLimitationCodeV3 } from "@packscout/contracts";
 
-export type PackScoutConfidenceLimitationCode = Extract<
-  PackScoutEv,
-  { status: "available" }
->["confidence"]["limitationCodes"][number];
+export type PackScoutConfidenceLimitationCode =
+  PackScoutDisplayedEvConfidenceLimitationCodeV3;
 
+/**
+ * Public copy for the supported displayed-confidence limitation vocabulary. Each
+ * line describes an evidence limitation — never profit likelihood — and no
+ * other limitation may be presented.
+ */
 export const PUBLIC_CONFIDENCE_LIMITATION_COPY = Object.freeze({
-  incomplete_outcome_pool:
-    "The known outcome pool is incomplete.",
-  estimated_value_ranges:
-    "Some collectible values use estimated ranges.",
-  partial_probability_coverage:
-    "Probabilities cover only part of the supported outcomes.",
-  sparse_valuation_data:
-    "Some collectibles have limited valuation evidence.",
-  stale_valuation_data:
-    "Some collectible valuations may be out of date.",
-  unresolved_collectibles:
-    "Some collectibles could not be matched with confidence.",
-  currency_normalization_applied:
-    "Some values were converted to USD for comparison.",
-  vendor_odds_unverified:
-    "Vendor-provided odds have not been independently verified.",
-  vendor_probability_inputs:
-    "This estimate includes probabilities reported by the vendor.",
+  platform_published_odds:
+    "Published odds used because verified current-pool odds are unavailable.",
+  closed_range_midpoint:
+    "Midpoint value ranges used for at least one supported outcome.",
+  source_age_over_15_through_30_minutes:
+    "Source data delayed (15–30 minutes old).",
+  source_age_over_30_through_60_minutes:
+    "Source data delayed (30–60 minutes old).",
+  source_age_over_60_minutes:
+    "Source evidence is over 60 minutes old; confidence continues to decay while the last-known estimate remains visible.",
+  latest_calculation_unavailable:
+    "A fresh supported calculation is unavailable; previous values are retained.",
 } satisfies Readonly<Record<PackScoutConfidenceLimitationCode, string>>);
 
 export function presentConfidenceLimitations(

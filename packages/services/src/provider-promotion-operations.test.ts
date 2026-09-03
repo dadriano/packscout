@@ -29,6 +29,7 @@ async function fixture() {
     configuration,
     platformKey: "alpha",
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   const plan = await buildProviderCatalogReleasePublishPlan({

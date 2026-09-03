@@ -5,7 +5,7 @@ import typescriptEslint from "typescript-eslint";
 
 export default typescriptEslint.config(
   {
-    ignores: ["dist/**"],
+    ignores: ["dist/**", "public/assets/**", "server.bundle.mjs"],
   },
   eslint.configs.recommended,
   ...typescriptEslint.configs.recommended,

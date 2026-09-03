@@ -132,7 +132,7 @@ function rawValidEnvelope(
       ? page.rawPage.catalog[record.recordIndex]
       : record.recordKind === "pull"
         ? page.rawPage.pulls[record.recordIndex]
-        : page.rawPage.sales[record.recordIndex];
+        : page.rawPage.trades[record.recordIndex];
   return typeof raw === "object" && raw !== null
     ? raw as Record<string, unknown>
     : record.envelope;
@@ -150,8 +150,8 @@ function recordIndexes(page: ProviderFeedValidatedPageV1) {
     pulls: valid
       .filter((outcome) => outcome.recordKind === "pull")
       .map((outcome) => outcome.recordIndex),
-    sales: valid
-      .filter((outcome) => outcome.recordKind === "sale")
+    trades: valid
+      .filter((outcome) => outcome.recordKind === "trade")
       .map((outcome) => outcome.recordIndex),
   };
 }

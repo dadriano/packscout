@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { PublicCollectible } from "@packscout/contracts";
+import type {
+  PublicCollectible,
+  PublicCollectibleDisplay,
+} from "@packscout/contracts";
 import { SavedCollectibleButton } from "@/components/auth/SavedItemButton.client";
 import {
   formatCollectibleDescriptor,
   formatCollectibleIdentity,
 } from "@/lib/collectible-identity";
-import { shouldApplyDesiredCollectibleSearchResults } from "@/lib/desired-collectible-search-ui";
+import {
+  desiredCollectibleSearchStatusCopy,
+  shouldApplyDesiredCollectibleSearchResults,
+} from "@/lib/desired-collectible-search-ui";
 import styles from "./DesiredCollectibleSearch.module.css";
 
 type CollectibleOption = Pick<
@@ -25,7 +31,7 @@ type CollectibleOption = Pick<
 >;
 
 type DesiredCollectibleSearchProps = Readonly<{
-  selected: PublicCollectible | null;
+  selected: PublicCollectibleDisplay | null;
   pending?: boolean;
   onSelect: (publicCollectibleId: string | null) => void;
   variant?: "section" | "heading";
@@ -126,10 +132,13 @@ export function DesiredCollectibleSearch({
         return;
       }
       setStatus("loading");
+      // Same-origin credentials carry the identity cookie the gated search
+      // route verifies server-side (closed-beta-access/007); this control is
+      // only reachable by visitors the gate already admitted.
       void fetch(`/api/collectibles/search?q=${encodeURIComponent(normalized)}`, {
         method: "GET",
         cache: "no-store",
-        credentials: "omit",
+        credentials: "same-origin",
         redirect: "error",
         referrerPolicy: "no-referrer",
         signal: controller.signal,
@@ -209,19 +218,13 @@ export function DesiredCollectibleSearch({
     onSelect(option.publicCollectibleId);
   }
 
-  const statusCopy = !searchable && !selected
-    ? "Type at least 2 characters, then choose an exact collectible."
-    : status === "loading"
-    ? "Searching collectibles…"
-    : status === "failed"
-      ? "Collectible search is temporarily unavailable."
-      : status === "ready" && options.length === 0
-        ? "No collectible matches found."
-        : exactSelectedName && selected
-          ? `Selected desired chase: ${selectedIdentity}.`
-          : selected
-            ? `Current desired chase remains ${selectedIdentity} until you choose a replacement or clear it.`
-          : "Choose an exact collectible from the results.";
+  const statusCopy = desiredCollectibleSearchStatusCopy({
+    exactSelectedName,
+    optionCount: options.length,
+    searchable,
+    selectedIdentity,
+    status,
+  });
 
   return (
     <div className={styles.root} data-variant={variant} ref={rootRef}>

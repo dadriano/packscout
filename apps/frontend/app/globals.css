@@ -16,6 +16,7 @@
   --color-action-soft: #eeeaff;
   --color-focus: #7156ff;
   --color-positive: #00a96e;
+  --color-caution: #856700;
   --color-negative: #e53d42;
   --color-warning: #bd7413;
   --color-warning-strong: #8a4d00;
@@ -43,6 +44,7 @@
     --color-action-soft: #1a153d;
     --color-focus: #9d88ff;
     --color-positive: #21d68a;
+    --color-caution: #f2cb52;
     --color-negative: #ff5c61;
     --color-warning: #efa23e;
     --color-warning-strong: #efa23e;
@@ -67,6 +69,7 @@
   --color-action-soft: #1a153d;
   --color-focus: #9d88ff;
   --color-positive: #21d68a;
+  --color-caution: #f2cb52;
   --color-negative: #ff5c61;
   --color-warning: #efa23e;
   --color-warning-strong: #efa23e;
@@ -364,14 +367,6 @@ a {
   height: 8px;
   border-radius: 999px;
   background: var(--color-status-neutral);
-}
-
-.data-release-status[data-state="fresh"] .data-release-status__dot {
-  background: var(--color-positive);
-}
-
-.data-release-status[data-state="delayed"] .data-release-status__dot {
-  background: var(--color-warning);
 }
 
 .data-release-status[data-state="loading"] .data-release-status__dot {
@@ -833,4 +828,15 @@ a {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/*
+ * Gateway shell (closed-beta-access/007): around the landing and holding
+ * surfaces the header renders no navigation, search, or release status, so
+ * the tracks reserved for them collapse to brand-left, controls-right at
+ * every width. Declared last so it wins over the width variants above.
+ */
+.app-header__inner:not(:has(.primary-navigation)) {
+  grid-template-areas: "brand . auth theme";
+  grid-template-columns: 168px minmax(0, 1fr) minmax(0, auto) auto;
 }

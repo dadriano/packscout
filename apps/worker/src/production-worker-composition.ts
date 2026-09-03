@@ -4,6 +4,7 @@ import {
   PrismaHeatPromotionManifestRepository,
   PrismaHeatPromotionRepository,
   PrismaNormalizedHeatObservationRepository,
+  PrismaNormalizedHeatRelationshipBackfillRepository,
   PrismaNormalizedHeatRetentionRepository,
   PrismaPromotionReadinessRepository,
   type PackscoutPrismaClient,
@@ -35,6 +36,8 @@ import { createProviderWorkerPublicSettlementReader } from "./provider-worker-pu
 import type { ProviderWorkerLogger } from "./provider-worker-runtime.ts";
 import { runPromotionObservabilityFanout } from "./promotion-observability-fanout.ts";
 import type { ProviderWorkerConfiguration } from "./runtime-config.ts";
+import { createProviderSourceSupervisorRuntime } from
+  "./provider-source-supervisor-composition.ts";
 import {
   assertPromotionV2CredentialRoleIsolation,
   type PromotionV2WorkerConfiguration,
@@ -51,6 +54,8 @@ import {
 } from "./catalog-retention-worker-config.ts";
 import type { CatalogRetentionWorkerLogger } from
   "./catalog-retention-worker-runtime.ts";
+import { createSourceRelationshipConfirmationBackfillRunner } from
+  "./source-relationship-confirmation-backfill-composition.ts";
 
 export interface ProductionWorkerCompositionInput {
   readonly provider: ProviderWorkerConfiguration;
@@ -172,6 +177,14 @@ export function createProductionWorkerRuntime(
     logger: input.retentionLogger,
     fetch: input.fetch,
   });
+  // The source-supervisor lane only exists when its settings do; the
+  // combined worker's other lanes never depend on it.
+  const sourceSupervisor = input.provider.sourceSupervisor === undefined
+    ? undefined
+    : createProviderSourceSupervisorRuntime({
+      configuration: input.provider.sourceSupervisor,
+      database: input.database,
+    });
   return createProviderWorkerRuntime({
     configuration: input.provider,
     database: input.database,
@@ -180,5 +193,23 @@ export function createProductionWorkerRuntime(
     promotion,
     heatPromotion,
     catalogRetention,
+    sourceSupervisor,
+    startupPrerequisite: {
+      async run(signal) {
+        await createSourceRelationshipConfirmationBackfillRunner({
+          database: input.database,
+          organizationId: input.provider.publicOrganizationId,
+          actorPseudonymKey: input.provider.actorPseudonymKey,
+          clock,
+        }).runToCompletion({ signal });
+        await new PrismaNormalizedHeatRelationshipBackfillRepository(
+          input.database,
+          {
+            organizationId: input.provider.publicOrganizationId,
+            clock,
+          },
+        ).runToCompletion({ signal });
+      },
+    },
   });
 }

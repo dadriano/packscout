@@ -7,19 +7,36 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
+import { PrismaClient as CentralPrismaClientConstructor } from
+  "../prisma/generated/central/index.js";
+import {
+  type CentralDatabaseLifecycle,
+  type CentralPrismaClient,
+  type CentralTransactionClient,
+} from "./central-database.ts";
 import {
   createPrismaClientLifecycle,
   type PackscoutPrismaClient,
   type PrismaClientLifecycle,
 } from "./database.ts";
+import {
+  CENTRAL_SCHEMA_VERSION,
+  centralDatabaseTarget,
+} from "./database-topology.ts";
+import { DISTRIBUTED_TRANSACTION_OPTIONS } from "./role-aware-database.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const schemaPath = fileURLToPath(new URL("../prisma/schema.prisma", import.meta.url));
+const centralSchemaPath = fileURLToPath(
+  new URL("../prisma/central/schema.prisma", import.meta.url),
+);
 const prismaExecutable = fileURLToPath(
   new URL("../../../node_modules/prisma/build/index.js", import.meta.url),
 );
 const DATABASE_NAME_PATTERN = /^packscout_test_[0-9]+_[a-f0-9]{16}$/;
+const CENTRAL_DATABASE_NAME_PATTERN =
+  /^packscout_central_test_[0-9]+_[a-f0-9]{16}$/;
 const TEMPLATE_NAME_PATTERN = /^packscout_test_template_[a-f0-9]{16}$/;
 const INFRASTRUCTURE_ERROR =
   "PostgreSQL 16 test infrastructure is required; set PACKSCOUT_TEST_ADMIN_DATABASE_URL.";
@@ -142,12 +159,24 @@ export interface StatementCounter {
   reset(): void;
 }
 
+export type QueryObserver = (query: string) => void;
+
 export interface MigratedTestDatabase {
   client: PackscoutPrismaClient;
   database: PackscoutPrismaClient;
   statementCounter: StatementCounter;
+  observeQueries(observer: QueryObserver): () => void;
   createIndependentClient(): Promise<PackscoutPrismaClient>;
   createClientLifecycle(): PrismaClientLifecycle;
+  close(): Promise<void>;
+}
+
+export interface MigratedCentralTestDatabase {
+  client: CentralPrismaClient;
+  database: CentralPrismaClient;
+  databaseUrl: string;
+  lifecycle: CentralDatabaseLifecycle;
+  createIndependentLifecycle(): Promise<CentralDatabaseLifecycle>;
   close(): Promise<void>;
 }
 
@@ -168,24 +197,139 @@ function resolveAdminDatabaseUrl(): URL {
 function databaseUrlFor(adminUrl: URL, databaseName: string): string {
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
+  const socketHost = databaseUrl.searchParams.get("host");
   databaseUrl.search = "";
+  if (socketHost?.startsWith("/")) databaseUrl.searchParams.set("host", socketHost);
   databaseUrl.hash = "";
   return databaseUrl.toString();
 }
 
 function createInstrumentedClient(
   databaseUrl: string,
-  onQuery: () => void,
+  onQuery: QueryObserver,
 ): PackscoutPrismaClient {
   const client = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
     log: [{ emit: "event", level: "query" }],
   });
   const eventClient = client as unknown as {
-    $on(event: "query", callback: () => void): void;
+    $on(event: "query", callback: (event: { query: string }) => void): void;
   };
-  eventClient.$on("query", onQuery);
+  eventClient.$on("query", ({ query }) => onQuery(query));
   return client;
+}
+
+/**
+ * Test-only lifecycle for a random disposable database. Production still
+ * enforces the exact `packscout` name; this helper validates only the central
+ * role identity because every test database has a randomized safe name.
+ */
+function createCentralTestLifecycle(
+  databaseUrl: string,
+): CentralDatabaseLifecycle {
+  const client = new CentralPrismaClientConstructor({
+    datasources: { db: { url: databaseUrl } },
+  });
+  const target = centralDatabaseTarget();
+  let startPromise: Promise<void> | undefined;
+  let closePromise: Promise<void> | undefined;
+  let closed = false;
+
+  const readiness: CentralDatabaseLifecycle["readiness"] = async () => {
+    const observedAt = new Date();
+    try {
+      await client.$connect();
+      const identity = await client.database_identity.findUnique({
+        where: { singleton_key: true },
+        select: {
+          database_role: true,
+          schema_version: true,
+          provider_id: true,
+          provider_key: true,
+        },
+      });
+      if (identity === null) {
+        return {
+          state: "unavailable",
+          target,
+          failureCode: "DATABASE_IDENTITY_MISSING",
+          observedAt,
+        };
+      }
+      if (identity.database_role !== "central") {
+        return {
+          state: "unavailable",
+          target,
+          failureCode: "DATABASE_ROLE_MISMATCH",
+          observedAt,
+        };
+      }
+      if (identity.schema_version !== CENTRAL_SCHEMA_VERSION) {
+        return {
+          state: "unavailable",
+          target,
+          failureCode: "DATABASE_SCHEMA_MISMATCH",
+          observedAt,
+        };
+      }
+      if (identity.provider_id !== null || identity.provider_key !== null) {
+        return {
+          state: "unavailable",
+          target,
+          failureCode: "PROVIDER_IDENTITY_MISMATCH",
+          observedAt,
+        };
+      }
+      return {
+        state: "ready",
+        target,
+        observedSchemaVersion: identity.schema_version,
+        observedAt,
+      };
+    } catch {
+      return {
+        state: "unavailable",
+        target,
+        failureCode: "DATABASE_UNREACHABLE",
+        observedAt,
+      };
+    }
+  };
+
+  const start = async (): Promise<void> => {
+    if (closed) throw new Error("Central test database lifecycle is closed.");
+    startPromise ??= (async () => {
+      const result = await readiness();
+      if (result.state === "unavailable") {
+        throw new Error(
+          `Central test database is unavailable (${result.failureCode}).`,
+        );
+      }
+    })().catch((error: unknown) => {
+      startPromise = undefined;
+      throw error;
+    });
+    await startPromise;
+  };
+
+  return {
+    client,
+    target,
+    readiness,
+    start,
+    async transaction<T>(
+      callback: (transaction: CentralTransactionClient) => Promise<T>,
+    ): Promise<T> {
+      await start();
+      return client.$transaction(callback, DISTRIBUTED_TRANSACTION_OPTIONS);
+    },
+    close() {
+      if (closePromise !== undefined) return closePromise;
+      closed = true;
+      closePromise = client.$disconnect();
+      return closePromise;
+    },
+  };
 }
 
 export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase> {
@@ -198,6 +342,7 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
   const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
   const databaseUrl = databaseUrlFor(adminUrl, databaseName);
   const clients = new Set<PackscoutPrismaClient>();
+  const queryObservers = new Set<QueryObserver>();
   let statementCount = 0;
   let closePromise: Promise<void> | undefined;
 
@@ -233,8 +378,9 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
   }
 
   const createClient = (): PackscoutPrismaClient => {
-    const client = createInstrumentedClient(databaseUrl, () => {
+    const client = createInstrumentedClient(databaseUrl, (query) => {
       statementCount += 1;
+      for (const observer of queryObservers) observer(query);
     });
     clients.add(client);
     return client;
@@ -274,6 +420,10 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
     client,
     database: client,
     statementCounter,
+    observeQueries(observer) {
+      queryObservers.add(observer);
+      return () => queryObservers.delete(observer);
+    },
     async createIndependentClient() {
       const independent = createClient();
       try {
@@ -292,6 +442,103 @@ export async function createMigratedTestDatabase(): Promise<MigratedTestDatabase
         databaseUrl,
       });
     },
+    close,
+  };
+}
+
+/** Creates one isolated, migrated central-role database owned by this call. */
+export async function createMigratedCentralTestDatabase(): Promise<
+  MigratedCentralTestDatabase
+> {
+  const adminUrl = resolveAdminDatabaseUrl();
+  const databaseName =
+    `packscout_central_test_${process.pid}_${randomBytes(8).toString("hex")}`;
+  if (!CENTRAL_DATABASE_NAME_PATTERN.test(databaseName)) {
+    throw new Error("Refusing to create an unscoped central test database.");
+  }
+  const admin = new Pool({ connectionString: adminUrl.toString(), max: 1 });
+  const databaseUrl = databaseUrlFor(adminUrl, databaseName);
+  const lifecycles = new Set<CentralDatabaseLifecycle>();
+  let databaseCreated = false;
+  let closePromise: Promise<void> | undefined;
+
+  try {
+    const version = await admin.query<{ server_version_num: string }>(
+      "show server_version_num",
+    );
+    if (Number(version.rows[0]?.server_version_num ?? 0) < 160_000) {
+      throw new Error("PostgreSQL version is below 16");
+    }
+    await admin.query(`create database "${databaseName}"`);
+    databaseCreated = true;
+    await execFileAsync(
+      process.execPath,
+      [prismaExecutable, "migrate", "deploy", "--schema", centralSchemaPath],
+      {
+        cwd: packageDirectory,
+        env: { ...process.env, PACKSCOUT_CENTRAL_DATABASE_URL: databaseUrl },
+      },
+    );
+  } catch {
+    if (databaseCreated) {
+      await admin
+        .query(`drop database "${databaseName}" with (force)`)
+        .catch(() => undefined);
+    }
+    await admin.end().catch(() => undefined);
+    throw new Error(INFRASTRUCTURE_ERROR);
+  }
+
+  const createLifecycle = async (): Promise<CentralDatabaseLifecycle> => {
+    const lifecycle = createCentralTestLifecycle(databaseUrl);
+    lifecycles.add(lifecycle);
+    try {
+      await lifecycle.start();
+      return lifecycle;
+    } catch {
+      lifecycles.delete(lifecycle);
+      await lifecycle.close().catch(() => undefined);
+      throw new Error(INFRASTRUCTURE_ERROR);
+    }
+  };
+
+  let lifecycle: CentralDatabaseLifecycle;
+  try {
+    lifecycle = await createLifecycle();
+  } catch {
+    if (databaseCreated) {
+      await admin
+        .query(`drop database "${databaseName}" with (force)`)
+        .catch(() => undefined);
+      databaseCreated = false;
+    }
+    await admin.end().catch(() => undefined);
+    throw new Error(INFRASTRUCTURE_ERROR);
+  }
+
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      await Promise.allSettled(
+        [...lifecycles].map((tracked) => tracked.close()),
+      );
+      try {
+        if (databaseCreated) {
+          await admin.query(`drop database "${databaseName}" with (force)`);
+          databaseCreated = false;
+        }
+      } finally {
+        await admin.end();
+      }
+    })();
+    return closePromise;
+  };
+
+  return {
+    client: lifecycle.client,
+    database: lifecycle.client,
+    databaseUrl,
+    lifecycle,
+    createIndependentLifecycle: createLifecycle,
     close,
   };
 }

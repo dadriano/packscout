@@ -131,6 +131,43 @@ test("a newly oversized module fails a zero-debt baseline", (t) => {
   assert.match(result.output, /SOLID boundaries require modules/);
 });
 
+test("generated Prisma clients are outside authored-module standards", (t) => {
+  const root = createFixture(t, 20);
+  const generatedDirectory = path.join(
+    root,
+    "packages",
+    "database",
+    "prisma",
+    "generated",
+    "central",
+  );
+  mkdirSync(generatedDirectory, { recursive: true });
+  writeFileSync(
+    path.join(generatedDirectory, "index.d.ts"),
+    `${"export type Generated = string;\n".repeat(3000)}`,
+  );
+
+  const baseline = writeBaseline(root);
+  assert.equal(baseline.findingCount, 0);
+});
+
+for (const directory of ["apps/frontend/generated", "packages/database/src/generated"]) {
+  test(`authored ${directory} modules remain subject to standards`, (t) => {
+    const root = createFixture(t, 20);
+    writeBaseline(root);
+    const authoredDirectory = path.join(root, directory);
+    mkdirSync(authoredDirectory, { recursive: true });
+    writeFileSync(
+      path.join(authoredDirectory, "oversized.ts"),
+      `${"export type Authored = string;\n".repeat(3000)}`,
+    );
+
+    const result = runScanner(root, ratchetArguments);
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /SOLID boundaries require modules/);
+  });
+}
+
 test("a new uncovered API route fails a zero-debt baseline", (t) => {
   const root = createFixture(t, 20);
   writeBaseline(root);

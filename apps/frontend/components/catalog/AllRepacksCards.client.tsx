@@ -2,23 +2,26 @@
 
 import type { ReactNode } from "react";
 import type {
-  ListPublicRepacksPage,
   PublicRepackChase,
-  PublicRepackViewSummary,
+  PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import { CatalogImage } from "@/components/catalog/CatalogImage.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
-  formatMoneyMinorUnits,
-  presentBuyback,
-  presentPackScoutEv,
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentRepackPrice,
   presentTopChaseValue,
-} from "@/lib/metric-presentation";
+} from "@/lib/packscout-ev-presentation";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
+import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
+import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
-  page: ListPublicRepacksPage;
+  page: ListPublicRepacksPageV3;
   selectedPublicRepackId: string | null;
   controls: ReactNode;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
@@ -31,26 +34,27 @@ function RepackCard({
   desiredSearchActive,
   onSelect,
 }: Readonly<{
-  repack: PublicRepackViewSummary;
+  repack: PublicRepackViewSummaryV3;
   selected: boolean;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
 }>) {
-  const estimate = presentPackScoutEv({
-    repackPrice: repack.price.usdComparison,
-    estimate: repack.evEstimates.packScout,
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
+  const estimate = presentPackScoutEvV3({
+    estimate: boundEstimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
   });
-  const buyback = presentBuyback(repack.buyback);
+  const buyback = presentBuybackSummaryV3(repack.buyback);
+  const price = presentRepackPrice(repack.price);
   const displayedChase = desiredSearchActive ? desiredChase : repack.topChase;
   const displayedChaseValue = presentTopChaseValue(
     displayedChase,
     desiredSearchActive ? "Desired Chase Value" : "Top Chase Value",
   );
-  const displayPrice = repack.price.displayMoney ??
-    (repack.price.usdComparison.status === "available"
-      ? repack.price.usdComparison.value
-      : null);
+  const availability = presentPackAvailability(repack.availability);
 
   return (
     <article className={styles.card} data-selected={selected ? "true" : "false"}>
@@ -68,12 +72,20 @@ function RepackCard({
         <span className={styles.identity}>
           <span className={styles.vendor}>{repack.vendorDisplayName}</span>
           <span className={styles.name}>{repack.name}</span>
+          <span
+            className={styles.availability}
+            data-state={repack.availability}
+          >
+            {availability.label}
+            <span className="sr-only">. {availability.description}</span>
+          </span>
           <span className={styles.category}>
             {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
           </span>
         </span>
         <span className={styles.price}>
-          {displayPrice ? formatMoneyMinorUnits(displayPrice) : "Price unavailable"}
+          <span aria-hidden="true">{price.displayValue}</span>
+          <span className="sr-only">{price.accessibleLabel}</span>
         </span>
       </button>
 
@@ -86,7 +98,13 @@ function RepackCard({
       <dl className={styles.details}>
         <div>
           <dt>EV confidence</dt>
-          <dd>{estimate.confidence.displayValue}</dd>
+          <dd>
+            <CatalogConfidenceEvidence
+              estimate={estimate}
+              providerHealth={repack.providerHealth}
+              repackName={repack.name}
+            />
+          </dd>
         </div>
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
@@ -121,7 +139,7 @@ export function AllRepacksCards({
           <p className={styles.eyebrow}>
             {desiredCollectibleIdentity
               ? `Exact chase matches · ${desiredCollectibleIdentity}`
-              : "Current repack data"}
+              : "Published repack data"}
           </p>
           <h2 className={styles.title} id="all-repacks-cards-title">All repacks</h2>
         </div>

@@ -1,4 +1,4 @@
-export const sourceRecordKinds = ["catalog", "pull", "sale"] as const;
+export const sourceRecordKinds = ["catalog", "pull", "trade"] as const;
 export type SourceRecordKind = (typeof sourceRecordKinds)[number];
 
 export const canonicalRecordKinds = [
@@ -7,7 +7,7 @@ export const canonicalRecordKinds = [
   "catalog_asset",
   "ev_input",
   "pull",
-  "sale",
+  "market_event",
   "estimated_ev",
 ] as const;
 export type CanonicalRecordKind = (typeof canonicalRecordKinds)[number];
@@ -25,7 +25,7 @@ export interface RunCounters {
 export interface RecordCounts {
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
 }
 
 export interface CanonicalIdentity {
@@ -113,8 +113,17 @@ export interface ProjectSourceRecordInput {
 export interface ProjectDerivedSourceRecordInput {
   organizationId: string;
   providerId: string;
-  configurationRevisionId: string;
-  sourceRecordId: string;
+  origin:
+    | Readonly<{
+        kind: "legacy_configuration";
+        configurationRevisionId: string;
+      }>
+    | Readonly<{
+        kind: "provider_source_revision";
+        sourceInstanceId: string;
+        sourceRevisionId: string;
+      }>;
+  sourceRecordId: string | null;
   projections: readonly CanonicalProjectionInput[];
   acceptedAt: Date;
   recomputation?: Readonly<{
@@ -159,10 +168,19 @@ export interface CurrentProjection {
 }
 
 export interface CanonicalRevisionRecord extends CurrentProjection {
-  sourceRecordId: string;
+  sourceRecordId: string | null;
+  originSemanticObservationId: string | null;
+  originEvRecomputationRequestId: string | null;
 }
 
+/**
+ * Protected raw evidence is retained for exactly this window. It is a policy
+ * invariant rather than a tunable, so worker instances publish this constant as
+ * their effective retention window instead of a copy that could drift.
+ */
+export const PROTECTED_PAYLOAD_RETENTION_DAYS = 90;
+
 export interface RawEvidencePolicy {
-  retentionDays: 90;
+  retentionDays: typeof PROTECTED_PAYLOAD_RETENTION_DAYS;
   actorPseudonymKey: Uint8Array | string;
 }

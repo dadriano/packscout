@@ -31,7 +31,7 @@ test("accepts only the five strict anonymous product event shapes", () => {
       name: "filters_applied",
       surface: "overview",
       outcome: "no_matches",
-      activeFilterCount: 2,
+      activeFilterCount: 5,
       resultCountBucket: "0",
     },
     {
@@ -52,6 +52,13 @@ test("accepts only the five strict anonymous product event shapes", () => {
   for (const event of events) {
     assert.equal(parseAnonymousProductEvent(event, NOW).ok, true);
   }
+  assert.equal(
+    parseAnonymousProductEvent(
+      { ...events[2], activeFilterCount: 6 },
+      NOW,
+    ).ok,
+    false,
+  );
 });
 
 test("rejects browser identity, raw catalog state, and subject fields on aggregate events", () => {

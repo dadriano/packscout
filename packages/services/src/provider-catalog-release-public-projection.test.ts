@@ -13,6 +13,7 @@ import {
   providerFixtureApprovedConfiguration,
   providerFixtureCheckpoint,
   providerFixtureSnapshot,
+  fixtureIds,
 } from "./provider-catalog-release-fixture.test-support.ts";
 import type { ProviderCatalogReleaseSourceSnapshot } from "./provider-catalog-release-types.ts";
 
@@ -22,6 +23,7 @@ function project(options: Parameters<typeof providerFixtureSnapshot>[0] = {}) {
     configuration: options.configuration ?? providerFixtureApprovedConfiguration(),
     platformKey: "alpha",
     revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
 }
@@ -35,6 +37,316 @@ test("provider projection is stable for shuffled canonical source rows", () => {
   assert.equal(ordered.repacks.length, 1);
   assert.equal(ordered.collectibles.length, 1);
   assert.equal(ordered.repackChases.length, 1);
+});
+
+test("one current-V1 asset can belong to two packs without duplicate collectibles", () => {
+  const snapshot = providerFixtureSnapshot();
+  const baseConfiguration = providerFixtureApprovedConfiguration();
+  const basePack = snapshot.revisions.find(
+    ({ recordKind }) => recordKind === "pack",
+  )!;
+  const secondPackExternalId = "alpha-pack-two";
+  const secondPublicRepackId = "70000000-0000-5000-8000-000000000099";
+  const secondPack = {
+    ...basePack,
+    entityId: "alpha-pack-alpha-pack-two",
+    revisionId: "alpha-pack-two-revision",
+    externalId: secondPackExternalId,
+    content: {
+      ...(basePack.content as Record<string, unknown>),
+      evInputStatus: "unavailable",
+      name: "Alpha Pack Two",
+    },
+  };
+  const configuration = {
+    ...baseConfiguration,
+    repacks: [
+      ...baseConfiguration.repacks,
+      {
+        platformKey: "alpha",
+        packExternalId: secondPackExternalId,
+        publicRepackId: secondPublicRepackId,
+      },
+    ],
+    collectibles: baseConfiguration.collectibles.map((collectible) => ({
+      ...collectible,
+      probabilityBucketId: null,
+    })),
+  };
+  const associations = [
+    ...snapshot.assetPackAssociations,
+    {
+      ...snapshot.assetPackAssociations[0]!,
+      sourceEntityId: "alpha-pull-second-pack",
+      packExternalId: secondPackExternalId,
+    },
+    {
+      ...snapshot.assetPackAssociations[0]!,
+      sourceEntityId: "alpha-pull-duplicate-first-pack",
+    },
+  ];
+
+  const projection = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: [...snapshot.revisions, secondPack],
+    assetPackAssociations: associations,
+    repackIdentities: [
+      ...snapshot.repackIdentities,
+      {
+        ...snapshot.repackIdentities[0]!,
+        packExternalId: secondPackExternalId,
+        publicRepackId: secondPublicRepackId,
+      },
+    ],
+  });
+
+  assert.equal(projection.collectibles.length, 1);
+  assert.equal(projection.repacks.length, 2);
+  assert.equal(projection.repackChases.length, 2);
+  assert.deepEqual(
+    projection.repacks.map(({ contentSummary }) =>
+      contentSummary.knownCollectibleCount),
+    [1, 1],
+  );
+  assert.equal(
+    new Set(projection.repackChases.map(({ publicCollectibleId }) =>
+      publicCollectibleId)).size,
+    1,
+  );
+});
+
+test("later duplicate pull evidence cannot advance an established pair's public data time", () => {
+  const snapshot = providerFixtureSnapshot();
+  const configuration = providerFixtureApprovedConfiguration();
+  const baseline = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
+    repackIdentities: snapshot.repackIdentities,
+  });
+  const established = snapshot.assetPackAssociations[0]!;
+  const duplicate = {
+    ...established,
+    sourceEntityId: `${established.sourceEntityId}-later-proof`,
+    associatedAt: new Date(established.associatedAt.getTime() + 86_400_000),
+    publicChangeSequence: established.publicChangeSequence + 100n,
+  };
+  const repeated = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: [duplicate, ...snapshot.assetPackAssociations],
+    repackIdentities: snapshot.repackIdentities,
+  });
+
+  assert.deepEqual(repeated, baseline);
+  assert.equal(repeated.dataAsOf.toISOString(), baseline.dataAsOf.toISOString());
+});
+
+test("association confirmation time does not become public source data time", () => {
+  const snapshot = providerFixtureSnapshot();
+  const configuration = providerFixtureApprovedConfiguration();
+  const baseline = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
+    repackIdentities: snapshot.repackIdentities,
+  });
+  const confirmedLater = projectProviderCatalogRelease({
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    assetPackAssociations: snapshot.assetPackAssociations.map((association) => ({
+      ...association,
+      associatedAt: new Date(association.associatedAt.getTime() + 60_000),
+    })),
+    repackIdentities: snapshot.repackIdentities,
+  });
+
+  assert.deepEqual(confirmedLater, baseline);
+});
+
+test("current-V1 association scope, pull-pair identity, and targets fail closed", () => {
+  const snapshot = providerFixtureSnapshot();
+  const baseAssociation = snapshot.assetPackAssociations[0]!;
+  const configuration = providerFixtureApprovedConfiguration();
+  const input = {
+    configuration,
+    platformKey: "alpha",
+    revisions: snapshot.revisions,
+    repackIdentities: snapshot.repackIdentities,
+  };
+
+  assert.throws(
+    () => projectProviderCatalogRelease({
+      ...input,
+      assetPackAssociations: [{ ...baseAssociation, platformKey: "beta" }],
+    }),
+    { message: "CANONICAL_PROJECTION_INVALID" },
+  );
+  assert.throws(
+    () => projectProviderCatalogRelease({
+      ...input,
+      assetPackAssociations: [baseAssociation, {
+        ...baseAssociation,
+        assetExternalId: "another-card",
+      }],
+    }),
+    { message: "CANONICAL_PROJECTION_INVALID" },
+  );
+  assert.throws(
+    () => projectProviderCatalogRelease({
+      ...input,
+      assetPackAssociations: [{
+        ...baseAssociation,
+        sourceEntityId: "alpha-pull-missing-card",
+        assetExternalId: "missing-card",
+      }],
+    }),
+    { message: "PUBLIC_REFERENCE_INVALID" },
+  );
+  assert.throws(
+    () => projectProviderCatalogRelease({
+      ...input,
+      revisions: snapshot.revisions.map((revision) =>
+        revision.recordKind === "catalog_asset"
+          ? {
+              ...revision,
+              content: {
+                ...(revision.content as Record<string, unknown>),
+                relatedPackExternalId: baseAssociation.packExternalId,
+              },
+            }
+          : revision),
+      assetPackAssociations: snapshot.assetPackAssociations,
+    }),
+    { message: "CANONICAL_PROJECTION_INVALID" },
+  );
+});
+
+test("provider projection copies four canonical availability states unchanged", () => {
+  for (const availability of [
+    "available",
+    "unavailable",
+    "unknown",
+    "sold_out",
+  ] as const) {
+    const snapshot = providerFixtureSnapshot();
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              availability,
+              availabilityProvenance:
+                availability === "sold_out"
+                  ? {
+                      kind: "explicit_authoritative_sold_out",
+                      authority: "provider_explicit_sold_out",
+                    }
+                  : {
+                      kind: "canonical_provider_observation",
+                      observedAvailability: availability,
+                    },
+            },
+          }
+        : revision,
+    );
+    const projection = projectProviderCatalogRelease({
+      configuration: providerFixtureApprovedConfiguration(),
+      platformKey: "alpha",
+      revisions,
+      assetPackAssociations: snapshot.assetPackAssociations,
+      repackIdentities: snapshot.repackIdentities,
+    });
+
+    assert.equal(projection.repacks[0]?.availability, availability);
+    assert.equal(
+      projection.repacks[0]?.actionAvailability.promo,
+      availability === "available",
+    );
+    assert.equal(
+      projection.repacks[0]?.actions.promo === undefined,
+      availability !== "available",
+    );
+  }
+});
+
+test("provider projection rejects the legacy active and disabled vocabulary", () => {
+  for (const availability of ["active", "disabled"] as const) {
+    const snapshot = providerFixtureSnapshot();
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              availability,
+            },
+          }
+        : revision,
+    );
+    assert.throws(
+      () => projectProviderCatalogRelease({
+        configuration: providerFixtureApprovedConfiguration(),
+        platformKey: "alpha",
+        revisions,
+        assetPackAssociations: snapshot.assetPackAssociations,
+        repackIdentities: snapshot.repackIdentities,
+      }),
+      { message: "CANONICAL_PROJECTION_INVALID" },
+    );
+  }
+});
+
+test("provider projection rejects bare or contradictory sold-out provenance", () => {
+  const snapshot = providerFixtureSnapshot();
+  for (const contentPatch of [
+    {
+      availability: "sold_out",
+      availabilityProvenance: undefined,
+    },
+    {
+      availability: "sold_out",
+      availabilityProvenance: {
+        kind: "canonical_provider_observation",
+        observedAvailability: "unavailable",
+      },
+    },
+    {
+      availability: "unavailable",
+      availabilityProvenance: {
+        kind: "explicit_authoritative_sold_out",
+        authority: "provider_explicit_sold_out",
+      },
+    },
+  ] as const) {
+    const revisions = snapshot.revisions.map((revision) =>
+      revision.recordKind === "pack"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              ...contentPatch,
+            },
+          }
+        : revision,
+    );
+    assert.throws(
+      () => projectProviderCatalogRelease({
+        configuration: providerFixtureApprovedConfiguration(),
+        platformKey: "alpha",
+        revisions,
+        assetPackAssociations: snapshot.assetPackAssociations,
+        repackIdentities: snapshot.repackIdentities,
+      }),
+      { message: "CANONICAL_PROJECTION_INVALID" },
+    );
+  }
 });
 
 test("provider projection excludes unreferenced shared categories", () => {
@@ -60,6 +372,157 @@ test("provider projection excludes unreferenced shared categories", () => {
     projection.categories.some(({ categoryKey }) => categoryKey === "unrelated"),
     false,
   );
+});
+
+test("repack categories use the exact governed union for focused and mixed chases", () => {
+  const focusedSnapshot = providerFixtureSnapshot();
+  const focusedBase = providerFixtureApprovedConfiguration();
+  const focused = projectProviderCatalogRelease({
+    configuration: focusedBase,
+    platformKey: "alpha",
+    revisions: focusedSnapshot.revisions,
+    assetPackAssociations: focusedSnapshot.assetPackAssociations,
+    repackIdentities: focusedSnapshot.repackIdentities,
+  });
+  assert.equal(focused.repacks[0]?.contentMode, "focused");
+  assert.deepEqual(
+    focused.repacks[0]?.categories.map(({ publicCategoryId }) =>
+      publicCategoryId),
+    [fixtureIds.rootCategory, fixtureIds.childCategory],
+  );
+
+  const tradingCardGamesId = "13333333-3333-5333-8333-333333333333";
+  const marvelId = "14444444-4444-5444-8444-444444444444";
+  const allCategoryIds = [
+    fixtureIds.rootCategory,
+    fixtureIds.childCategory,
+    tradingCardGamesId,
+    marvelId,
+  ];
+  const mixedCategories = [
+    {
+      ...focusedBase.categories[0]!,
+      categoryKey: "sports",
+      name: "Sports",
+    },
+    {
+      ...focusedBase.categories[1]!,
+      categoryKey: "multi-sport",
+      name: "Multi-sport",
+      kind: "other" as const,
+    },
+    {
+      publicCategoryId: tradingCardGamesId,
+      parentPublicCategoryId: null,
+      categoryKey: "trading-card-games",
+      name: "Trading card games",
+      kind: "vertical" as const,
+      depth: 0,
+      pathPublicCategoryIds: [tradingCardGamesId],
+      displayOrder: 20,
+    },
+    {
+      publicCategoryId: marvelId,
+      parentPublicCategoryId: tradingCardGamesId,
+      categoryKey: "marvel",
+      name: "Marvel",
+      kind: "franchise" as const,
+      depth: 1,
+      pathPublicCategoryIds: [tradingCardGamesId, marvelId],
+      displayOrder: 21,
+    },
+  ];
+  const marvelExternalId = "liftoff-marvel-card";
+  const marvelPublicId = "45555555-5555-5555-8555-555555555555";
+  const mixedConfiguration = {
+    ...focusedBase,
+    categories: mixedCategories,
+    platforms: focusedBase.platforms.map((platform) => ({
+      ...platform,
+      defaultPublicCategoryIds: [],
+      categoryMappings: [{
+        sourceValue: "Multisport",
+        publicCategoryIds: [
+          fixtureIds.rootCategory,
+          fixtureIds.childCategory,
+        ],
+      }],
+    })),
+    collectibles: [
+      {
+        ...focusedBase.collectibles[0]!,
+        publicCategoryIds: [
+          fixtureIds.rootCategory,
+          fixtureIds.childCategory,
+        ],
+      },
+      {
+        ...focusedBase.collectibles[0]!,
+        externalId: marvelExternalId,
+        publicCollectibleId: marvelPublicId,
+        aliases: [],
+        publicCategoryIds: [tradingCardGamesId, marvelId],
+        probabilityBucketId: null,
+      },
+    ],
+  };
+  const baseAsset = focusedSnapshot.revisions.find(
+    ({ recordKind }) => recordKind === "catalog_asset",
+  )!;
+  const revisions = focusedSnapshot.revisions.map((revision) =>
+    revision.recordKind === "pack"
+      ? {
+          ...revision,
+          content: {
+            ...(revision.content as Record<string, unknown>),
+            name: "Liftoff",
+            category: "Multisport",
+          },
+        }
+      : revision.recordKind === "catalog_asset"
+        ? {
+            ...revision,
+            content: {
+              ...(revision.content as Record<string, unknown>),
+              category: "Multisport",
+            },
+          }
+        : revision
+  );
+  const marvelAsset = {
+    ...baseAsset,
+    entityId: "alpha-catalog-asset-liftoff-marvel-card",
+    revisionId: "alpha-liftoff-marvel-card-revision",
+    externalId: marvelExternalId,
+    content: {
+      ...(baseAsset.content as Record<string, unknown>),
+      name: "Marvel Chase",
+      category: "Marvel",
+    },
+  };
+  const mixedInput = {
+    configuration: mixedConfiguration,
+    platformKey: "alpha",
+    revisions: [...revisions, marvelAsset],
+    assetPackAssociations: [
+      ...focusedSnapshot.assetPackAssociations,
+      {
+        ...focusedSnapshot.assetPackAssociations[0]!,
+        sourceEntityId: "alpha-pull-liftoff-marvel-card",
+        assetExternalId: marvelExternalId,
+      },
+    ],
+    repackIdentities: focusedSnapshot.repackIdentities,
+  };
+  const mixed = projectProviderCatalogRelease(mixedInput);
+  assert.equal(mixed.repacks[0]?.name, "Liftoff");
+  assert.equal(mixed.repacks[0]?.contentMode, "mixed");
+  assert.deepEqual(
+    mixed.repacks[0]?.categories.map(({ publicCategoryId }) =>
+      publicCategoryId),
+    allCategoryIds,
+  );
+  assert.equal(mixed.repackChases.length, 2);
 });
 
 test("provider projection refuses a foreign platform row", () => {
@@ -128,6 +591,7 @@ test("basis points use exact decimal half-up conversion", () => {
     configuration: providerFixtureApprovedConfiguration(),
     platformKey: "alpha",
     revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
 
@@ -222,6 +686,7 @@ test("EV return conversion stays exact at safe-integer extremes", () => {
     configuration: providerFixtureApprovedConfiguration(),
     platformKey: "alpha",
     revisions,
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
 
@@ -257,6 +722,7 @@ test("estimated EV rejects missing USD proof and malformed canonical inputs", ()
         configuration: providerFixtureApprovedConfiguration(),
         platformKey: "alpha",
         revisions,
+        assetPackAssociations: snapshot.assetPackAssociations,
         repackIdentities: snapshot.repackIdentities,
       }),
       { message: "CANONICAL_PROJECTION_INVALID" },
@@ -339,6 +805,7 @@ test("estimated EV accepts only the stablecoins governed by the approved epoch",
     configuration,
     platformKey: "alpha",
     revisions: revisionsFor("USDC", ["USDC"]),
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   assert.equal(
@@ -370,6 +837,7 @@ test("estimated EV accepts only the stablecoins governed by the approved epoch",
             },
           }
         : revision),
+    assetPackAssociations: snapshot.assetPackAssociations,
     repackIdentities: snapshot.repackIdentities,
   });
   const vendorReported = stablecoinGross.repacks[0]!.evEstimates.vendorReported;
@@ -384,6 +852,7 @@ test("estimated EV accepts only the stablecoins governed by the approved epoch",
       configuration,
       platformKey: "alpha",
       revisions: revisionsFor("DOGE", ["DOGE"]),
+      assetPackAssociations: snapshot.assetPackAssociations,
       repackIdentities: snapshot.repackIdentities,
     }),
     { message: "CANONICAL_PROJECTION_INVALID" },
@@ -426,6 +895,7 @@ test("estimated EV must bind the current pack and EV-input revisions", () => {
         configuration: providerFixtureApprovedConfiguration(),
         platformKey: "alpha",
         revisions: snapshot.revisions.map(mutate),
+        assetPackAssociations: snapshot.assetPackAssociations,
         repackIdentities: snapshot.repackIdentities,
       }),
       { message: "CANONICAL_PROJECTION_INVALID" },
@@ -473,6 +943,7 @@ test("estimated EV calculation time cannot exceed its accepted canonical revisio
       configuration: providerFixtureApprovedConfiguration(),
       platformKey: "alpha",
       revisions,
+      assetPackAssociations: snapshot.assetPackAssociations,
       repackIdentities: snapshot.repackIdentities,
     }),
     { message: "CANONICAL_PROJECTION_INVALID" },
@@ -497,6 +968,7 @@ test("present out-of-range buyback evidence fails instead of becoming unavailabl
       configuration: providerFixtureApprovedConfiguration(),
       platformKey: "alpha",
       revisions,
+      assetPackAssociations: snapshot.assetPackAssociations,
       repackIdentities: snapshot.repackIdentities,
     }),
     { message: "EXACT_VALUE_INVALID" },
@@ -533,6 +1005,7 @@ test("probability and coverage above one fail before basis-point rounding", () =
         configuration: providerFixtureApprovedConfiguration(),
         platformKey: "alpha",
         revisions,
+        assetPackAssociations: snapshot.assetPackAssociations,
         repackIdentities: snapshot.repackIdentities,
       }),
       { message: "EXACT_VALUE_INVALID" },
@@ -567,6 +1040,7 @@ test("EV-input coverage, counts, buckets, and readiness must reconcile", () => {
       configuration: providerFixtureApprovedConfiguration(),
       platformKey: "alpha",
       revisions,
+      assetPackAssociations: snapshot.assetPackAssociations,
       repackIdentities: snapshot.repackIdentities,
     }),
     { message: "CANONICAL_PROJECTION_INVALID" },
@@ -589,6 +1063,7 @@ test("a governed probability-bucket reference must resolve", () => {
       configuration: invalidConfiguration,
       platformKey: "alpha",
       revisions: snapshot.revisions,
+      assetPackAssociations: snapshot.assetPackAssociations,
       repackIdentities: snapshot.repackIdentities,
     }),
     { message: "PUBLIC_REFERENCE_INVALID" },
@@ -621,6 +1096,7 @@ test("orphan EV inputs and estimates fail closed", () => {
         configuration: providerFixtureApprovedConfiguration(),
         platformKey: "alpha",
         revisions: [...snapshot.revisions, orphan],
+        assetPackAssociations: snapshot.assetPackAssociations,
         repackIdentities: snapshot.repackIdentities,
       }),
       { message: "PUBLIC_REFERENCE_INVALID" },

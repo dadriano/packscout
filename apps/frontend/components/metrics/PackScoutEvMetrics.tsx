@@ -1,0 +1,184 @@
+import type { PackScoutEvV3Presentation } from "@/lib/packscout-ev-presentation";
+import {
+  EXPECTED_VALUE_ARTICLE_HREF,
+  METRIC_TRUST_COPY,
+  type GlossaryDefinition,
+} from "@/lib/metric-vocabulary";
+import { GlossaryHint } from "./GlossaryHint.client";
+import { MetricValue } from "./MetricValue";
+import styles from "./PackScoutEvMetrics.module.css";
+
+type PackScoutEvMetricsProps = Readonly<{
+  presentation: PackScoutEvV3Presentation;
+  compact?: boolean;
+  showFreshness?: boolean;
+  showRepackPrice?: boolean;
+  showProvenance?: boolean;
+  headingHint?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
+}>;
+
+/**
+ * The shared four-metric PackScout block: Gross EV $, Gross EV %, EV $, and
+ * EV % beside Pack Price, with confidence, status, freshness, and the
+ * required source and advice lines. Every value arrives pre-formatted from
+ * the presentation boundary; this component renders and never calculates.
+ *
+ * EV $ carries no visible "Negative" word: every public PackScout EV is at or
+ * below zero, so the word never distinguishes one pack from another. The
+ * sign is in the value, the tone color says how far from break-even it is,
+ * and the accessible label still names the state for assistive technology.
+ */
+export function PackScoutEvMetrics({
+  presentation,
+  compact = false,
+  showFreshness = true,
+  showRepackPrice = true,
+  showProvenance = true,
+  headingHint = {
+    label: METRIC_TRUST_COPY.estimateLabel,
+    definition: METRIC_TRUST_COPY.longRunExplanation,
+    learnHref: EXPECTED_VALUE_ARTICLE_HREF,
+  },
+}: PackScoutEvMetricsProps) {
+  const { freshness } = presentation;
+  return (
+    <section
+      className={styles.root}
+      data-density={compact ? "compact" : "default"}
+      data-state={presentation.semanticState}
+      data-status={presentation.status}
+    >
+      <div className={styles.header}>
+        <h3 className={styles.heading}>
+          {METRIC_TRUST_COPY.estimateLabel}
+          <GlossaryHint content={headingHint} field="evPercent" />
+        </h3>
+        <span className={styles.statusChip} data-status={presentation.status}>
+          {presentation.statusLabel}
+        </span>
+        {presentation.simulatedLabel ? (
+          <span className={styles.simulatedChip}>
+            {presentation.simulatedLabel}
+          </span>
+        ) : null}
+      </div>
+
+      <div
+        aria-label={presentation.confidence.accessibleLabel}
+        className={styles.confidence}
+        data-tone={presentation.confidence.tone}
+      >
+        <span className={styles.confidenceLabel}>
+          EV confidence
+          <GlossaryHint
+            details={presentation.confidence.limitations}
+            field="evConfidence"
+          />
+        </span>
+        <strong>{presentation.confidence.displayValue}</strong>
+      </div>
+
+      <div className={styles.metrics}>
+        <MetricValue
+          compact={compact}
+          metric={presentation.grossEvDollars}
+          showReason={false}
+          showSemanticState={false}
+        />
+        <MetricValue
+          compact={compact}
+          metric={presentation.grossEvPercent}
+          showReason={false}
+          showSemanticState={false}
+        />
+        <MetricValue
+          compact={compact}
+          metric={presentation.evDollars}
+          showReason={false}
+          showSemanticState={false}
+        />
+        <MetricValue
+          compact={compact}
+          metric={presentation.evPercent}
+          showReason={false}
+          showSemanticState={false}
+        />
+        {showRepackPrice ? (
+          <MetricValue
+            compact={compact}
+            metric={presentation.packPrice}
+            showReason={false}
+            showSemanticState={false}
+          />
+        ) : null}
+      </div>
+
+      {presentation.zeroPayoutNote ? (
+        <p className={styles.note}>{presentation.zeroPayoutNote}</p>
+      ) : null}
+      {presentation.reasonCopy ? (
+        <p className={styles.reason}>{presentation.reasonCopy}</p>
+      ) : null}
+      {presentation.calculationPriceNote ? (
+        <p className={styles.note}>{presentation.calculationPriceNote}</p>
+      ) : null}
+
+      {showFreshness ? (
+        <div className={styles.freshness}>
+          {freshness.sourceAgeLabel ? (
+            <p className={styles.sourceAge} data-delayed={freshness.delayed}>
+              {freshness.sourceAgeLabel}
+            </p>
+          ) : null}
+          <dl className={styles.freshnessList}>
+            <div className={styles.freshnessRow}>
+              <dt>Calculated</dt>
+              <dd>
+                <time dateTime={freshness.calculatedAt}>
+                  {freshness.calculatedTimeLabel}
+                </time>
+              </dd>
+            </div>
+            <div className={styles.freshnessRow}>
+              <dt>Source evidence last observed</dt>
+              <dd>
+                {freshness.dataAsOf && freshness.dataAsOfTimeLabel ? (
+                  <time dateTime={freshness.dataAsOf}>
+                    {freshness.dataAsOfTimeLabel}
+                  </time>
+                ) : (
+                  "Unknown"
+                )}
+              </dd>
+            </div>
+            <div className={styles.freshnessRow}>
+              <dt>Confidence evaluated</dt>
+              <dd>
+                <time dateTime={freshness.confidenceEvaluatedAt}>
+                  {freshness.confidenceEvaluatedTimeLabel}
+                </time>
+              </dd>
+            </div>
+            {freshness.soldOutAt && freshness.soldOutTimeLabel ? (
+              <div className={styles.freshnessRow}>
+                <dt>Sold out</dt>
+                <dd>
+                  <time dateTime={freshness.soldOutAt}>
+                    {freshness.soldOutTimeLabel}
+                  </time>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      ) : null}
+
+      {showProvenance ? (
+        <div className={styles.provenance}>
+          <p>{presentation.sourceLine}</p>
+          <p>{presentation.adviceLine}</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}

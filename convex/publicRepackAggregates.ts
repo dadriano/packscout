@@ -45,6 +45,23 @@ export function matchingRepackRows(
   );
 }
 
+export function availableRepackRows(
+  rows: readonly RepackSearchRow[],
+): RepackSearchRow[] {
+  return rows.filter(({ availability }) => availability === "available");
+}
+
+export function deterministicVisibleSelection<
+  T extends Readonly<{ publicRepackId: string }>,
+>(
+  rows: readonly T[],
+  preferredPublicRepackId: string | null,
+): T | null {
+  return rows.find(
+    ({ publicRepackId }) => publicRepackId === preferredPublicRepackId,
+  ) ?? rows[0] ?? null;
+}
+
 export function medianPackScoutEvPercent(
   rows: readonly RepackSearchRow[],
 ): DashboardKpis["medianPackScoutEvPercent"] {
@@ -73,20 +90,16 @@ export function medianPackScoutEvPercent(
 export function dashboardKpis(
   rows: readonly RepackSearchRow[],
 ): DashboardKpis {
-  const chaseValues = rows.flatMap((row) =>
+  const currentRows = availableRepackRows(rows);
+  const chaseValues = currentRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
   return {
     totalRepacks: rows.length,
-    positiveEvRepacks: rows.filter(
-      (row) =>
-        row.packScoutEvDollarsMinor !== null &&
-        row.packScoutEvDollarsMinor > 0,
-    ).length,
-    medianPackScoutEvPercent: medianPackScoutEvPercent(rows),
+    medianPackScoutEvPercent: medianPackScoutEvPercent(currentRows),
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
-    highConfidenceRepacks: rows.filter(
+    highConfidenceRepacks: currentRows.filter(
       (row) =>
         row.packScoutConfidenceBasisPoints !== null &&
         row.packScoutConfidenceBasisPoints >= 8_000,
@@ -232,7 +245,9 @@ export function repackSummaries(
       key,
       label: value.label,
       repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianPackScoutEvPercent(value.rows),
+      medianPackScoutEvPercent: medianPackScoutEvPercent(
+        availableRepackRows(value.rows),
+      ),
     }))
     .sort(
       (left, right) =>

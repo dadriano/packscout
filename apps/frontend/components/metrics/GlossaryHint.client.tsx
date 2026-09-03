@@ -16,6 +16,7 @@ import {
   GLOSSARY_OPEN_EVENT,
   positionGlossaryPanel,
   reduceGlossaryHintState,
+  type GlossaryPanelAlign,
 } from "@/lib/glossary-hint.client";
 import {
   getGlossaryDefinition,
@@ -26,17 +27,37 @@ import styles from "./GlossaryHint.module.css";
 
 type GlossaryHintProps = Readonly<{
   field: GlossaryFieldKey;
-  align?: "start" | "end";
+  align?: GlossaryPanelAlign;
   content?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
+  details?: readonly string[];
+  detailsHeading?: string;
   trigger?: ReactNode;
   triggerAriaLabel?: string;
   triggerClassName?: string;
 }>;
 
+/**
+ * Promotes the panel into the browser's top layer. Inside a transformed or
+ * scrolling ancestor (the sheet inspector is a centered, transformed
+ * <dialog>), a plain `position: fixed` box is positioned against that
+ * ancestor instead of the viewport and clipped by its overflow; a popover is
+ * neither. Browsers without the Popover API keep the fixed-position fallback.
+ */
+function promotePanelToTopLayer(panel: HTMLElement) {
+  if (typeof panel.showPopover !== "function") return;
+  try {
+    if (!panel.matches(":popover-open")) panel.showPopover();
+  } catch {
+    // A disconnected panel or an unsupported selector keeps the fallback.
+  }
+}
+
 export function GlossaryHint({
   field,
-  align = "start",
+  align = "center",
   content,
+  details = [],
+  detailsHeading = "What lowers it",
   trigger,
   triggerAriaLabel,
   triggerClassName,
@@ -85,6 +106,7 @@ export function GlossaryHint({
       const root = rootRef.current;
       const panel = panelRef.current;
       if (!root || !panel) return;
+      promotePanelToTopLayer(panel);
       const trigger = root.getBoundingClientRect();
       const position = positionGlossaryPanel({
         align,
@@ -96,6 +118,11 @@ export function GlossaryHint({
       });
       panel.style.insetInlineStart = `${position.left}px`;
       panel.style.insetBlockStart = `${position.top}px`;
+      panel.style.setProperty(
+        "--glossary-caret-x",
+        `${position.caretOffset}px`,
+      );
+      panel.dataset.placement = position.placement;
       panel.style.visibility = "visible";
     }
 
@@ -151,17 +178,37 @@ export function GlossaryHint({
         <span
           className={styles.panel}
           id={panelId}
+          popover="manual"
           ref={panelRef}
           role="note"
         >
-          <span className={styles.heading}>{definition.label}</span>
-          <span className={styles.definition}>{definition.definition}</span>
-          {definition.learnHref ? (
-            <Link className={styles.learnLink} href={definition.learnHref}>
-              Learn how EV is estimated
-              <span aria-hidden="true"> →</span>
-            </Link>
-          ) : null}
+          <span aria-hidden="true" className={styles.caret} />
+          <span className={styles.content}>
+            <span className={styles.heading}>{definition.label}</span>
+            <span className={styles.definition}>{definition.definition}</span>
+            {details.length > 0 ? (
+              <span className={styles.details}>
+                <span className={styles.detailsHeading}>{detailsHeading}</span>
+                <span className={styles.detailsList} role="list">
+                  {details.map((detail) => (
+                    <span
+                      className={styles.detail}
+                      key={detail}
+                      role="listitem"
+                    >
+                      {detail}
+                    </span>
+                  ))}
+                </span>
+              </span>
+            ) : null}
+            {definition.learnHref ? (
+              <Link className={styles.learnLink} href={definition.learnHref}>
+                Learn how EV is estimated
+                <span aria-hidden="true"> →</span>
+              </Link>
+            ) : null}
+          </span>
         </span>
       ) : null}
     </span>

@@ -100,6 +100,39 @@ export function assertLocalConvexDeployment(environment) {
   }
 }
 
+/**
+ * Catalog-read credential bounds, mirroring the product backend's acceptance
+ * window (closed-beta-access/005). A configured value outside them is refused
+ * loudly rather than mirrored, so the local deployment never ends up holding
+ * a credential the frontend would silently fail to present.
+ */
+const CATALOG_READ_TOKEN_MINIMUM_LENGTH = 32;
+const CATALOG_READ_TOKEN_MAXIMUM_LENGTH = 512;
+
+/**
+ * The operator-supplied local catalog-read credential from `.env.local`, or
+ * null when none is configured. With the local deployment running the closed
+ * beta (`PACKSCOUT_CLOSED_BETA=1`), configuring `PACKSCOUT_CATALOG_READ_TOKEN`
+ * in `.env.local` keeps the full product locally demoable: the seed lane
+ * mirrors it onto the local deployment and the frontend dev server inherits
+ * the same value from the session environment. Leaving it unset is safe — the
+ * preview then honestly shows the bounded unavailable states an unconfigured
+ * deployment produces.
+ */
+export function localCatalogReadCredential(environment) {
+  const configured = environment.PACKSCOUT_CATALOG_READ_TOKEN?.trim() ?? "";
+  if (configured === "") return null;
+  if (
+    configured.length < CATALOG_READ_TOKEN_MINIMUM_LENGTH ||
+    configured.length > CATALOG_READ_TOKEN_MAXIMUM_LENGTH
+  ) {
+    throw new Error(
+      "PACKSCOUT_CATALOG_READ_TOKEN in .env.local must be 32-512 characters.",
+    );
+  }
+  return configured;
+}
+
 export async function readLocalConvexConfiguration() {
   const fileEnvironment = parseEnvironmentFile(
     await readFile(localEnvironmentPath, "utf8"),
@@ -158,6 +191,21 @@ export async function seedLocalMockDataRelease() {
     "PACKSCOUT_RUNTIME_ENVIRONMENT",
     "local",
   ]);
+  const catalogReadCredential = localCatalogReadCredential(childEnvironment);
+  if (catalogReadCredential !== null) {
+    // The value itself is never printed; it travels only into the asserted
+    // anonymous/local deployment so both ends of the closed-beta catalog
+    // credential match during a local demo.
+    await runNpx([
+      "env",
+      "set",
+      "PACKSCOUT_CATALOG_READ_TOKEN",
+      catalogReadCredential,
+    ]);
+    console.log(
+      "Mirrored the local catalog-read credential onto the local deployment.",
+    );
+  }
   await runNpx([
     "env",
     "set",

@@ -70,10 +70,25 @@ async function createPreProviderSettlementDatabase(): Promise<{
       await applyMigration(database, migrationName);
     }
   } catch (error) {
-    await teardown();
+    try {
+      await endPoolFully(database);
+      await admin.query(`drop database if exists "${databaseName}" with (force)`);
+    } finally {
+      await endPoolFully(admin);
+    }
     throw error;
   }
-  return { database, close: teardown };
+  return {
+    database,
+    close: async () => {
+      try {
+        await endPoolFully(database);
+        await admin.query(`drop database if exists "${databaseName}" with (force)`);
+      } finally {
+        await endPoolFully(admin);
+      }
+    },
+  };
 }
 
 const organizationId = "54000000-0000-4000-8000-000000000001";

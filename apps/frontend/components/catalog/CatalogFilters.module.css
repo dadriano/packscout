@@ -251,7 +251,6 @@
 .minRange[data-active="true"],
 .maxRange[data-active="true"] {
   z-index: 4;
-  pointer-events: auto;
 }
 
 .priceGroup:focus-within,
@@ -329,18 +328,27 @@
 
 .availabilityToggle {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
+  flex: 1 1 20rem;
+  min-width: 0;
+  align-items: flex-start;
   gap: 0.35rem;
   color: var(--color-text-muted);
   font-size: 0.68rem;
   font-weight: 650;
+  line-height: 1.35;
   cursor: pointer;
 }
 
 .availabilityToggle input {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
   accent-color: var(--color-action);
   cursor: pointer;
+}
+
+.availabilityToggle span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .availabilityToggle:hover {

@@ -5,7 +5,6 @@ import styles from "./OverviewKpis.module.css";
 
 const KPI_MARKS = Object.freeze({
   repacks: "#",
-  positiveEv: "+",
   medianEv: "%",
   highestChase: "◇",
 });
@@ -54,6 +53,7 @@ export function OverviewKpis({ kpis, repacksHref }: OverviewKpisProps) {
             className: styles.card,
             "data-kind": kpi.id,
             "data-state": kpi.state,
+            "data-tone": kpi.tone ?? "plain",
           } as const;
 
           if (kpi.id === "repacks" && repacksHref) {

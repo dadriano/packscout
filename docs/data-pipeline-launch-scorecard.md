@@ -1,44 +1,79 @@
 # Data Pipeline Launch Scorecard
 
-**Evidence date:** 2026-08-11
+**Evidence date:** 2026-08-28
 
-**ProviderStreamContractV2 record gate:** PARTIAL PASS — real record envelopes only
+**DataForrest Events V1 transport gate:** PASS WITH A 500-RECORD LIVE BASELINE, CONFIGURABLE 1–5,000 PIN, AND 8 MIB CAP
+
+**DataForrest V1 record gate:** PASS — current catalog, pull, and trade envelopes
 
 **Aggregate V1 fixture and controllable-mock gate:** HISTORICAL ONLY — not a launch input
 
-**Repository `npm run verify:framework` gate:** NOT RUN FOR V2
+**Repository `npm run verify:framework` gate:** NOT YET RUN FOR THE CLEAN-SLATE V1 CUTOVER
 
-**Real-provider deployment gate:** BLOCKED — transport/page evidence is not supplied
+**Real-provider deployment gate:** PARTIAL — live transport is proven; implementation, capacity preflight, and full backfill remain
+
+## Current DataForrest Events V1 evidence
+
+The authenticated read-only evidence package in
+[`dataforest-events-v1-live-evidence.md`](./dataforest-events-v1-live-evidence.md)
+supersedes the transport unknowns recorded below. It proves one profile-only
+probe, four filtered initial/continuation/restart paths, cursor/filter isolation,
+the `records` / `next_cursor` / `poll_after_seconds` wrapper, `payment_method`,
+tri-state `available`, and two successful overlapping cross-platform requests.
+That historical capture did not establish an aggregate connection-profile cap.
+DataForrest's authoritative limit is two concurrent requests per platform.
+The dedicated Task 010 safety fixture now pins four execution slots beneath one
+singleton supervisor, and the database-backed in-process runtime fixture
+exercises four independent platform permit lanes operated at one request each,
+beneath DataForrest's hard maximum of two per platform. Because
+each source owns one sequential page cursor, useful page-read concurrency is at
+most four: one page for each provider. Connection tests use a separate lane. A
+live four-lane soak is pending; this is not live throughput or memory proof.
+
+A bounded live probe on 2026-08-26 established a 500-record initial page target:
+all four platforms completed under the unchanged 8 MiB and 10-second guards.
+Phygitals exceeded 8 MiB at both 1,000 and 2,500 records, so 500 is the largest
+shared baseline. Each source pins a maximum from 1 through 5,000, defaulting to
+500 for new sources. Queued and running work keeps that exact pin across every
+retry; the runtime never silently downshifts it. A response above 8 MiB or above
+the pinned record count fails that page without advancing its checkpoint. The
+current Task 010 capacity result reserves a full 5,000-record page for every
+ongoing poll as a maximum-throughput stress ceiling, not an operational local
+estimate. The regenerated model projects 158,428,176,709,145 bytes and requires
+211,237,568,945,527 available bytes with headroom; the measured host had only
+175,989,243,904 bytes available, so admission remains rejected. Current local
+operation uses measured whole-database growth plus an explicit free-space floor; see
+[`provider-source-live-capacity-observation-2026-08-24.md`](./provider-source-live-capacity-observation-2026-08-24.md).
 
 ## Current launch boundary
 
-`ProviderStreamContractV2` replaces the unlaunched aggregate
-`ProviderFeedPageV1` boundary for the dashboard launch source. The provider draft
-supplies real record-level examples for `catalog`, `pulls`, and `trades`; those
-examples support the V2 discriminated record contract, required outer
-relationships, nullable event time and money, catalog mutability, event
-immutability, lifecycle vocabulary, and currency-reference evidence.
+DataForrest has one launch identity: source type `dataforrest-events-v1`, source
+adapter `dataforrest-events-adapter-v3`, normalized observation
+`packscout.provider-observation.v1`, and provider mapper revision `1`. The live
+evidence supplies the request path, authentication shape, platform selector,
+raw page wrapper, page-size behavior, opaque cursor, reached-head signal, and
+record envelopes for catalog, pulls, and trades.
 
-The draft does **not** supply request paths, authentication, stream selector,
-raw page wrappers, page-size behavior, cursor fields, termination, ordering,
-expiry, error envelopes, or rate-limit signals. No provider-local decoder,
-runtime registration, durable checkpoint migration, backfill, or incremental
-launch claim may be approved until sanitized real evidence locks those facts.
+The current pull contract accepts authoritative pack-only and card-only records,
+rejects a pull when both relationships are absent, and never fabricates the
+missing edge. Provider-local display-name extraction is exact and has no
+cross-field fallback. No compatibility adapter, dual read/write, adapter
+upgrade, or source replacement is registered.
 
-| V2 launch evidence | Current state | Verdict |
+| Current launch evidence | Current state | Verdict |
 | --- | --- | --- |
-| Real sanitized record envelope: catalog pack/card | Committed record-level fixture and contract test | PARTIAL PASS |
-| Real sanitized record envelope: pull | Committed record-level fixture and contract test | PARTIAL PASS |
-| Real sanitized record envelope: trade | Committed record-level fixture and contract test | PARTIAL PASS |
-| Request path/auth/selector and raw page wrapper | Not supplied | BLOCKED |
-| Independent cursor scope, termination, ordering, expiry, and full-history start | Not supplied | BLOCKED |
-| Provider error and rate-limit behavior | Not supplied | BLOCKED |
-| Per-stream durable checkpoint/restart and real reconciliation | Cannot run before transport evidence | BLOCKED |
+| Live request, wrapper, cursor isolation, 500-record baseline, and configurable 1–5,000 durable request pin | Reviewed authenticated capture, sanitized 2026-08-26 all-platform page-limit probe, and pinned-bound tests | PASS |
+| Catalog, partial pull, and trade normalization under the exact V1 tuple | Contract and mapper tests | PASS |
+| Sole adapter/observation/mapper runtime registration | Production registries and Task 010 fail-closed topology gate | PASS |
+| Four Task 010 source lanes, singleton ownership, one operating request per platform, and provider maximum of two | Safety tooling fixture plus database-backed in-process supervisor integration; live four-lane soak pending | PARTIAL |
+| Historical database-pin handling | Guarded full local reset and reimport; no in-place upgrade path | REQUIRED |
+| Four concurrent 8 MiB / 5,000-record maximum-page bounded-memory proof | Committed authentic 100-page measurement passed the 256 MiB peak-delta and 32 MiB retained-growth aggregate gates | PASS |
+| Full-history provider-head reconciliation | Requires the controlled local backfill | PENDING |
 
 Everything below under the aggregate V1 fixture scorecard is retained as
 historical PR #1 evidence for canonical history, quarantine, projections, and EV
 behavior only. It is not permission to register `http-cursor-v1` for the launch
-source, infer a V2 page wrapper, or run V1 and V2 against the same source.
+source or infer a second DataForrest runtime contract.
 
 ## Evidence boundary
 
@@ -133,16 +168,17 @@ The durable EV row is valid only after the repository-wide gate recorded below p
 | Stadium Vault | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
 | Trove | Not configured | Not run | Not run | Not run | Not run | BLOCKED ON ENVIRONMENT |
 
-## Exact remaining V2 environment and launch setup
+## Exact remaining current-V1 environment and launch setup
 
 1. Provision a PostgreSQL 16 deployment with current migrations and an organization containing the approved administrator and data-operator accounts.
 2. Supply the admin and worker runtimes with `PACKSCOUT_DATABASE_URL`, distinct 32-byte base64 `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64` and `PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64` values, the worker's `PACKSCOUT_PROVIDER_CREDENTIAL_KEY_VERSION`, and the admin's `PACKSCOUT_SESSION_HASHING_SECRET`. Set `PACKSCOUT_ADMIN_TRUSTED_PROXIES` to the exact comma-separated proxy IP addresses or CIDR ranges when the admin runs behind a reverse proxy; leave it unset for a direct connection so forwarded client-address headers remain untrusted. Set `PACKSCOUT_ESTIMATED_EV_VERIFIED_USD_STABLECOINS` only after financial/data approval, using a comma-separated allowlist of uppercase 2–12 character currency identifiers (maximum 32; no `USD`, duplicates, spaces, or lowercase); unset or empty trusts no stablecoins. Supply normal runtime origin, session, worker identity, pool, and polling settings for the target environment. Secrets must stay in deployment secret storage and out of commands, logs, screenshots, and this scorecard.
-3. Obtain and sanitize one real raw page for each of `catalog`, `pulls`, and `trades`. Record the exact request path, authentication method, stream selector, page-size behavior, raw wrapper, cursor field, end signal, error envelope, and rate-limit signals without recording a credential.
-4. Confirm from provider evidence whether each stream has an independent cursor. Record ordering, cursor expiry, null-cursor full-history behavior, incremental continuation, and catalog correction delivery. If cursor scope differs from the V2 design, stop and revise the contract rather than silently reinterpreting it.
-5. Implement and register one provider-local V2 transport decoder using the observed wrapper. Remove the launch source's aggregate V1 runtime registration, fixtures, and adapter selection in the same cutover; do not introduce aliases, dual reads, or a provider-name branch in generic orchestration.
-6. Migrate unlaunched persistence to one durable checkpoint and run per `(configuration revision, stream)`. In preproduction, backfill each stream to its evidenced terminal state, restart from every stream checkpoint, and verify that only the stream whose validated page commits advances.
-7. Run real incrementals with an exact event replay, a conflicting pull/trade repeat, a catalog correction, a malformed record, timeout, rate limit, authentication failure, stale/recovery, and lost-worker recovery. Reconcile accepted, duplicate, quarantined, canonical-revision, Estimated EV, unavailable, and exported counts using only sanitized stable evidence.
-8. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run the focused V2 checks and `npm run verify:framework`; Product and Engineering owners must review the persisted evidence before enabling incremental schedules or labeling the public catalog live.
+3. Stop local admin and worker runtimes and follow the [local reset and first-administrator bootstrap](local-development-first-admin-bootstrap.md): run `npm run db:reset:local`, then the guarded `npm run db:bootstrap-first-admin:local` stdin-secret workflow. This is a full relational reset and canonical reseed, not a selective provider-data delete. Recreate and test the encrypted DataForrest connection and all four current v1 source revisions afterward.
+4. Create and test one connection and four sources. Verify every immutable diagnostic pin is the exact current source-adapter/observation/mapper tuple before activation.
+5. Run the dedicated Task 010 topology checks. Any historical or mixed tuple must fail closed; cursor reset, adapter upgrade, and source replacement are not reset substitutes.
+6. Begin Task 010 with exactly one supervisor process and active epoch. The dedicated runner pins four execution slots and one fair request-permit lane for each configured platform, operated at one request per lane beneath the provider maximum of two; connection tests use their own one-request lane. A source still has only one sequential page cursor, so the maximum useful page-read concurrency is four, one per provider. The safety fixture and database-backed in-process integration prove that topology; the live four-lane soak, capacity observation, and reconciliation remain pending.
+7. Backfill each source to its evidenced terminal state, restart from every source cursor, and verify that only the source whose validated page commits advances.
+8. Run real incrementals with an exact event replay, a conflicting pull/trade repeat, a catalog correction, a malformed record, timeout, rate limit, authentication failure, stale/recovery, and lost-worker recovery. Reconcile accepted, duplicate, quarantined, canonical-revision, Estimated EV, unavailable, and exported counts using only sanitized stable evidence.
+9. Resolve every real count difference and define numeric release thresholds for quarantine rate and unresolved relationships. Run the focused V1 checks and `npm run verify:framework`; Product and Engineering owners must review the persisted evidence before enabling incremental schedules or labeling the public catalog live.
 
 ## Reproducing the fixture evidence
 
@@ -165,5 +201,5 @@ PACKSCOUT_PROVIDER_SAMPLES=/absolute/path/to/approved/provider-samples \
 ```
 
 The integrated `npm run verify:framework` run recorded on 2026-08-06 applies to
-the historical aggregate V1 fixture implementation only. It does not satisfy
-the V2 gate above. A fresh repository-wide run is required after the V2 cutover.
+the historical aggregate fixture implementation only. A fresh repository-wide
+run is required after the clean-slate V1 cutover.

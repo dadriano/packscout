@@ -13,7 +13,7 @@ PackScout imports provider pages through Prisma without losing atomicity, proven
 
 ## Context
 
-One accepted provider page can create immutable page evidence, source identities, observations, accepted or quarantined outcomes, canonical entities and revisions, current-revision pointers, projection links, relationships, EV recomputation requests, run counters, and a new cursor checkpoint. Those writes become visible together only while the caller owns the run.
+One accepted provider page can create immutable page evidence, source identities, observations, accepted or quarantined outcomes, canonical entities and revisions, current-revision pointers, projection links, relationships, EV recomputation requests, run counters, and a new cursor. Those writes become visible together only while the caller owns the run.
 
 The existing persistence path batches a 550-record page in fewer than 80 database statements. Replacing that path with record-by-record ORM operations would preserve types while breaking the operational contract. This task owns ingestion and its batch writer together so transaction, ordering, and performance behavior cannot diverge.
 
@@ -68,6 +68,6 @@ Tasks `004` and `006` consume the committed run, quarantine, health, and EV work
 ## Spec Compliance
 
 - Related specs reviewed: none
-- Alignment: migrated atomic ingestion, source and canonical history, projections, relationships, quarantines, EV requests, counters, and cursor checkpoints to one Prisma transaction with parameterized set-based PostgreSQL operations
+- Alignment: migrated atomic ingestion, source and canonical history, projections, relationships, quarantines, EV requests, counters, and cursors to one Prisma transaction with parameterized set-based PostgreSQL operations
 - Divergences: none; tasks `007` and `008` completed the runtime wiring and removed the temporary repository names with no dual persistence path
 - Verification: ten real PostgreSQL persistence tests and seven service integration tests cover ownership, rollback, independent-client revision contention, replay, crash recovery, tenant isolation, provenance, relationships, and EV history; the 550-record page commits in 32 statements against the fewer-than-80 budget

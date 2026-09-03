@@ -3,12 +3,17 @@ import { test } from "node:test";
 import {
   DEFAULT_CATALOG_QUERY,
   catalogHrefForSummary,
+  catalogQueryAfterReadError,
+  catalogQueryForPageNavigation,
   catalogSheetInspectorInitiallyOpen,
+  clearCatalogRepackSelection,
+  formatDollarAmount,
   nextCatalogPage,
   parseCatalogViewLayout,
   parseCatalogQueryState,
   previousCatalogPage,
   resetCatalogPagination,
+  selectCatalogRepack,
   serializeCatalogQueryState,
   serializeCatalogViewState,
   serializeDashboardFilters,
@@ -16,6 +21,13 @@ import {
 
 const CATEGORY_ID = "00000000-0000-5000-8000-000000000101";
 const COLLECTIBLE_ID = "00000000-0000-5000-8000-000000000201";
+const REPACK_ID = "00000000-0000-5000-8000-000000000301";
+
+test("minor-unit dollar formatting preserves cents", () => {
+  assert.equal(formatDollarAmount(1), "0.01");
+  assert.equal(formatDollarAmount(2_550), "25.50");
+  assert.equal(formatDollarAmount(10_500), "105");
+});
 
 test("the empty URL restores the complete default repack query", () => {
   const parsed = parseCatalogQueryState(new URLSearchParams());
@@ -23,6 +35,30 @@ test("the empty URL restores the complete default repack query", () => {
   if (!parsed.ok) return;
   assert.deepEqual(parsed.query, DEFAULT_CATALOG_QUERY);
   assert.equal(serializeCatalogQueryState(parsed.query), "/packs");
+});
+
+test("the $1–$12,000 default stays URL-less and sub-$10 ranges round-trip", () => {
+  assert.deepEqual(DEFAULT_CATALOG_QUERY.filters.price, {
+    mode: "full",
+    minMinor: 100,
+    maxMinor: 1_200_000,
+  });
+  assert.equal(serializeCatalogQueryState(DEFAULT_CATALOG_QUERY), "/packs");
+
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams("minPrice=2&maxPrice=9"),
+  );
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.query.filters.price, {
+    mode: "narrowed",
+    minMinor: 200,
+    maxMinor: 900,
+  });
+  assert.equal(
+    serializeCatalogQueryState(parsed.query),
+    "/packs?minPrice=2&maxPrice=9",
+  );
 });
 
 test("query state is normalized and serialized in canonical order", () => {
@@ -56,11 +92,11 @@ test("query state is normalized and serialized in canonical order", () => {
   );
 });
 
-test("sold-out repacks stay hidden unless the URL opts into every availability", () => {
+test("non-available repacks stay hidden unless the URL opts into every availability", () => {
   const parsed = parseCatalogQueryState(new URLSearchParams());
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.query.filters.availability, "active");
+  assert.equal(parsed.query.filters.availability, "available");
 
   const including = parseCatalogQueryState(new URLSearchParams("availability=all"));
   assert.equal(including.ok, true);
@@ -70,6 +106,46 @@ test("sold-out repacks stay hidden unless the URL opts into every availability",
     serializeCatalogQueryState(including.query),
     "/packs?availability=all",
   );
+});
+
+test("selected repack survives canonical URL parsing until filters are revised", () => {
+  const selected = selectCatalogRepack(DEFAULT_CATALOG_QUERY, REPACK_ID);
+  expectSelectionLifecycle(selected);
+
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams(`selected=${REPACK_ID}`),
+  );
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  expectSelectionLifecycle(parsed.query);
+
+  function expectSelectionLifecycle(
+    query: ReturnType<typeof selectCatalogRepack>,
+  ) {
+    assert.equal(query.selectedPublicRepackId, REPACK_ID);
+    assert.equal(
+      serializeCatalogQueryState(query),
+      `/packs?selected=${REPACK_ID}`,
+    );
+    const revised = resetCatalogPagination(query, {
+      filters: { ...query.filters, availability: "all" },
+    });
+    assert.equal(revised.selectedPublicRepackId, null);
+    assert.equal(
+      serializeCatalogQueryState(revised),
+      "/packs?availability=all",
+    );
+  }
+});
+
+test("closing the sheet clears only the selected repack from the query", () => {
+  const selected = selectCatalogRepack(
+    nextCatalogPage(DEFAULT_CATALOG_QUERY, "page-two", "d".repeat(64)),
+    REPACK_ID,
+  );
+  const cleared = clearCatalogRepackSelection(selected);
+  assert.deepEqual(cleared, { ...selected, selectedPublicRepackId: null });
+  assert.equal(serializeCatalogQueryState(cleared).includes("selected"), false);
 });
 
 test("catalog page size and view are constrained, canonical URL state", () => {
@@ -94,14 +170,25 @@ test("malformed singleton, partial price, unknown key, and cursor state are reje
     "surprise=true",
     "cursor=page-two",
     "sort=probability",
-    "availability=active",
+    "availability=available",
     "availability=sold_out",
-    "availability=all&availability=active",
+    "availability=all&availability=available",
+    "selected=not-a-public-repack-id",
+    `selected=${REPACK_ID}&selected=${REPACK_ID}`,
     "pageSize=25&pageSize=50",
     "view=table&view=cards",
   ]) {
     assert.equal(parseCatalogQueryState(new URLSearchParams(query)).ok, false, query);
   }
+});
+
+test("saved links using the retired pre-buyback vendor sort reset instead of reinterpreting", () => {
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams("sort=vendor_reported_ev_percent"),
+  );
+  assert.equal(parsed.ok, false);
+  if (parsed.ok) return;
+  assert.equal(parsed.message, "The catalog sort is invalid.");
 });
 
 test("search, filters, and sorting reset cursor navigation together", () => {
@@ -110,6 +197,7 @@ test("search, filters, and sorting reset cursor navigation together", () => {
     cursor: "page-two",
     cursorStack: "WyJwYWdlLW9uZSJd",
     queryFingerprint: "a".repeat(64),
+    selectedPublicRepackId: REPACK_ID,
   };
   const reset = resetCatalogPagination(paged, { search: "pokemon" });
   assert.equal(reset.search, "pokemon");
@@ -205,6 +293,96 @@ test("cursor navigation keeps a bounded stack of prior non-initial page starts",
   const backToOne = previousCatalogPage(backToTwo, fingerprint);
   assert.equal(backToOne.cursor, null);
   assert.equal(backToOne.cursorStack, null);
+});
+
+test("public read errors produce code-specific truthful catalog query recovery", () => {
+  const paged = {
+    ...nextCatalogPage(
+      nextCatalogPage(DEFAULT_CATALOG_QUERY, "page-two", "a".repeat(64)),
+      "page-three",
+      "a".repeat(64),
+    ),
+    desiredPublicCollectibleId: COLLECTIBLE_ID,
+    selectedPublicRepackId: REPACK_ID,
+  };
+
+  const expired = catalogQueryAfterReadError(paged, "CURSOR_EXPIRED");
+  assert.equal(expired.cursor, null);
+  assert.equal(expired.cursorStack, null);
+  assert.equal(expired.queryFingerprint, null);
+  assert.equal(expired.desiredPublicCollectibleId, COLLECTIBLE_ID);
+  assert.equal(expired.selectedPublicRepackId, null);
+
+  const missingCollectible = catalogQueryAfterReadError(
+    paged,
+    "COLLECTIBLE_NOT_FOUND",
+  );
+  assert.equal(missingCollectible.desiredPublicCollectibleId, null);
+  assert.equal(missingCollectible.cursor, null);
+  assert.equal(missingCollectible.cursorStack, null);
+
+  const missingRepack = catalogQueryAfterReadError(paged, "REPACK_NOT_FOUND");
+  assert.equal(missingRepack.selectedPublicRepackId, null);
+  assert.equal(missingRepack.cursor, paged.cursor);
+  assert.equal(missingRepack.cursorStack, paged.cursorStack);
+
+  assert.deepEqual(
+    catalogQueryAfterReadError(paged, "INVALID_QUERY"),
+    DEFAULT_CATALOG_QUERY,
+  );
+  assert.equal(
+    catalogQueryAfterReadError(paged, "RELEASE_UNAVAILABLE"),
+    paged,
+  );
+});
+
+test("release-changed pagination starts Next from the server-normalized first page", () => {
+  const oldFingerprint = "b".repeat(64);
+  const newFingerprint = "c".repeat(64);
+  const oldPageThree = {
+    ...nextCatalogPage(
+      nextCatalogPage(DEFAULT_CATALOG_QUERY, "old-page-two", oldFingerprint),
+      "old-page-three",
+      oldFingerprint,
+    ),
+    selectedPublicRepackId: REPACK_ID,
+  };
+  const normalized = catalogQueryForPageNavigation(oldPageThree, {
+    activeQuery: {
+      search: "normalized search",
+      filters: {
+        ...DEFAULT_CATALOG_QUERY.filters,
+        vendors: ["courtyard"],
+      },
+      sort: "repack",
+      direction: "asc",
+      pageSize: 12,
+      desiredPublicCollectibleId: null,
+    },
+    paginationReset: "release_changed",
+    queryFingerprint: newFingerprint,
+    rows: [{ publicRepackId: REPACK_ID }],
+  });
+
+  assert.equal(normalized.search, "normalized search");
+  assert.deepEqual(normalized.filters.vendors, ["courtyard"]);
+  assert.equal(normalized.cursor, null);
+  assert.equal(normalized.cursorStack, null);
+  assert.equal(normalized.queryFingerprint, newFingerprint);
+  assert.equal(normalized.selectedPublicRepackId, REPACK_ID);
+
+  const next = nextCatalogPage(normalized, "new-page-two", newFingerprint);
+  assert.equal(next.cursor, "new-page-two");
+  assert.equal(next.cursorStack, null);
+  assert.equal(next.queryFingerprint, newFingerprint);
+
+  const withoutEligibleSelection = catalogQueryForPageNavigation(oldPageThree, {
+    activeQuery: normalized,
+    paginationReset: "release_changed",
+    queryFingerprint: newFingerprint,
+    rows: [],
+  });
+  assert.equal(withoutEligibleSelection.selectedPublicRepackId, null);
 });
 
 test("Overview serializes only compatible accepted filters", () => {

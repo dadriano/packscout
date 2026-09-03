@@ -1,0 +1,22 @@
+# Local credentials and verification artifacts must never enter source uploads.
+.tmp
+.env
+.env.*
+**/.env
+**/.env.*
+.vercel/
+.claude/
+.tasks/
+node_modules/
+**/node_modules/
+packages/database/prisma/generated/
+docs/evidence/
+
+# Generated build output belongs to Vercel's remote build, not the source upload.
+**/.next
+**/.next-*
+**/dist
+**/coverage
+**/*.tsbuildinfo
+apps/admin/public/index.html
+apps/admin/public/assets

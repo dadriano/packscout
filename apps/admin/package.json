@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
+    "build:vercel": "npm run build:vercel:server && tsc -b && vite build --mode vercel",
+    "build:vercel:server": "tsx server/vercel/build.ts",
     "start": "NODE_ENV=production tsx server/index.ts",
     "preview": "vite build && NODE_ENV=production tsx server/index.ts",
     "lint": "eslint .",
@@ -32,6 +34,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.12",
     "eslint": "^9",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^14.0.0",

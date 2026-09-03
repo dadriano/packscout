@@ -11,6 +11,8 @@ import {
 import { PersistenceError } from "./persistence-error.ts";
 import type { CommitPageInput } from "./pipeline-types.ts";
 import { ProtectedEvidenceRepository } from "./protected-evidence.ts";
+import { relationshipPublicEntityKey } from
+  "./public-change-settlement-repository.ts";
 import { PipelineSetupRepository } from "./setup-repository.ts";
 import { createMigratedTestDatabase } from "./test-support.ts";
 
@@ -105,7 +107,7 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
   const payload = {
     catalog: [{ external_id: "catalog-envelope", data: { username: "public-user" } }],
     pulls: [{ external_id: "pull-1", data: { wallet_address: "0xraw-wallet" } }],
-    sales: [],
+    trades: [],
     next_cursor: "cursor-1",
     has_more: true,
   };
@@ -175,12 +177,12 @@ function initialPage(overrides: Partial<CommitPageInput> = {}): CommitPageInput 
     ],
     quarantines: [
       {
-        recordKind: "sale",
+        recordKind: "trade",
         recordIndex: 0,
         externalId: null,
         reasonCode: "MISSING_EXTERNAL_ID",
-        fieldPath: "sales[0].external_id",
-        sanitizedSummary: "A sale record is missing its identity.",
+        fieldPath: "trades[0].external_id",
+        sanitizedSummary: "A trade record is missing its identity.",
         payload: { wallet_address: "0xquarantine-only" },
       },
     ],
@@ -424,6 +426,103 @@ test("independent clients serialize competing revisions for one canonical identi
   }
 });
 
+test("a relationship resolves once when its target is beyond the 500-projection chunk", async (context) => {
+  const harness = await createPipelineHarness();
+  try {
+    const recordCount = 501;
+    const targetIndex = recordCount - 1;
+    const targetExternalId = `cross-chunk-asset-${targetIndex}`;
+    const page = initialPage({
+      payload: { kind: "cross-chunk-forward-target", recordCount },
+      records: Array.from({ length: recordCount }, (_, index) => ({
+        recordKind: "catalog" as const,
+        externalId: `cross-chunk-source-${index}`,
+        sourceTime,
+        collectedAt,
+        payload: { id: `cross-chunk-source-${index}` },
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "catalog_asset" as const,
+          externalId: `cross-chunk-asset-${index}`,
+          content: { name: `Cross-chunk asset ${index}` },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+          relationships: index === 0
+            ? [{
+                relationshipKind: "cross_chunk_forward_target",
+                targetPlatformKey: "beezie",
+                targetRecordKind: "catalog_asset" as const,
+                targetExternalId,
+              }]
+            : [],
+        }],
+      })),
+      quarantines: [],
+    });
+
+    harness.statementCounter.reset();
+    const committed = await harness.ingestion.commitPage(page);
+    context.diagnostic(
+      `501-record forward-target page commit issued ${harness.statementCounter.count} SQL statements`,
+    );
+    assert.equal(committed.newCanonicalRevisions, recordCount);
+
+    const relationships = await harness.database.$queryRaw<Array<{
+      sourceEntityId: string;
+      targetEntityId: string | null;
+      createdSequence: bigint;
+      resolvedSequence: bigint | null;
+    }>>`
+      select relationship.source_entity_id as "sourceEntityId",
+             relationship.target_entity_id as "targetEntityId",
+             relationship.created_public_change_sequence as "createdSequence",
+             relationship.resolved_public_change_sequence as "resolvedSequence"
+      from public.canonical_relationships as relationship
+      join public.canonical_entities as source
+        on source.id = relationship.source_entity_id
+       and source.organization_id = relationship.organization_id
+      where relationship.organization_id = ${ids.organization}::uuid
+        and source.external_id = 'cross-chunk-asset-0'
+        and relationship.relationship_kind = 'cross_chunk_forward_target'
+    `;
+    assert.equal(relationships.length, 1);
+    const relationship = relationships[0]!;
+    assert.ok(relationship.targetEntityId);
+    assert.ok(
+      relationship.resolvedSequence !== null &&
+        relationship.resolvedSequence > relationship.createdSequence,
+    );
+
+    const entityKey = relationshipPublicEntityKey({
+      sourceEntityId: relationship.sourceEntityId,
+      relationshipKind: "cross_chunk_forward_target",
+      targetPlatformKey: "beezie",
+      targetRecordKind: "catalog_asset",
+      targetExternalId,
+    });
+    const relationshipCauses =
+      await harness.database.public_change_causes.findMany({
+        where: {
+          organization_id: ids.organization,
+          change_kind: "relationship_resolution",
+          entity_key: entityKey,
+        },
+        orderBy: { sequence: "asc" },
+        select: { sequence: true, metadata_json: true },
+      });
+    assert.deepEqual(
+      relationshipCauses.map(({ sequence }) => sequence),
+      [relationship.createdSequence, relationship.resolvedSequence],
+    );
+    assert.deepEqual(
+      relationshipCauses.map(({ metadata_json: metadata }) => metadata),
+      [{ relationshipState: "unresolved" }, { relationshipState: "resolved" }],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 test("large page commits batch writes while preserving evidence, projections, and record counts", async (context) => {
   const harness = await createPipelineHarness();
   try {
@@ -478,12 +577,12 @@ test("large page commits batch writes while preserving evidence, projections, an
           payload: { invalid: "pull" },
         },
         {
-          recordKind: "sale",
+          recordKind: "trade",
           recordIndex: recordCount + 1,
           externalId: null,
           reasonCode: "INVALID_SALE_RECORD",
-          sanitizedSummary: "The sale record failed envelope validation.",
-          payload: { invalid: "sale" },
+          sanitizedSummary: "The trade record failed envelope validation.",
+          payload: { invalid: "trade" },
         },
       ],
     });
@@ -515,7 +614,7 @@ test("large page commits batch writes while preserving evidence, projections, an
     assert.deepEqual(storedPage?.record_counts_json, {
       catalog: recordCount,
       pulls: 1,
-      sales: 1,
+      trades: 1,
     });
     assert.equal(await harness.database.source_records.count(), recordCount);
     assert.equal(await harness.database.source_record_observations.count(), recordCount);
@@ -621,6 +720,117 @@ test("unresolved pull relationships persist and reconcile when a pack arrives", 
       resolvedAt: new Date(committedAt.getTime() + 2_000),
     });
     assert.equal(reconciled, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("one catalog arrival resolves more than one allocation bound of prior relationships", async () => {
+  const harness = await createPipelineHarness();
+  try {
+    const recordsPerPage = 550;
+    const targetExternalId = "fanout-card";
+    const pullPage = (
+      pageNumber: number,
+      start: number,
+      requestedCursor: string | null,
+      nextCursor: string,
+    ): CommitPageInput => initialPage({
+      pageNumber,
+      requestedCursor,
+      nextCursor,
+      hasMore: true,
+      committedAt: new Date(committedAt.getTime() + pageNumber * 1_000),
+      payload: { kind: "relationship-fanout", pageNumber },
+      records: Array.from({ length: recordsPerPage }, (_, offset) => {
+        const index = start + offset;
+        return {
+          recordKind: "pull" as const,
+          externalId: `fanout-pull-source-${index}`,
+          sourceTime,
+          collectedAt,
+          payload: { id: `fanout-pull-source-${index}` },
+          projections: [{
+            platformKey: "beezie",
+            recordKind: "pull" as const,
+            externalId: `fanout-pull-${index}`,
+            content: { cardExternalId: targetExternalId },
+            sourceUpdatedAt: sourceTime,
+            sourceCollectedAt: collectedAt,
+            relationships: [{
+              relationshipKind: "contains_card",
+              targetPlatformKey: "beezie",
+              targetRecordKind: "catalog_asset" as const,
+              targetExternalId,
+            }],
+          }],
+        };
+      }),
+      quarantines: [],
+    });
+
+    await harness.ingestion.commitPage(
+      pullPage(1, 0, null, "fanout-cursor-1"),
+    );
+    await harness.ingestion.commitPage(
+      pullPage(2, recordsPerPage, "fanout-cursor-1", "fanout-cursor-2"),
+    );
+    assert.equal(
+      await harness.database.canonical_relationships.count({
+        where: {
+          organization_id: ids.organization,
+          target_external_id: targetExternalId,
+          target_entity_id: null,
+        },
+      }),
+      recordsPerPage * 2,
+    );
+
+    await harness.ingestion.commitPage(initialPage({
+      pageNumber: 3,
+      requestedCursor: "fanout-cursor-2",
+      nextCursor: null,
+      hasMore: false,
+      committedAt: new Date(committedAt.getTime() + 3_000),
+      payload: { kind: "relationship-fanout-target" },
+      records: [{
+        recordKind: "catalog",
+        externalId: "fanout-card-source",
+        sourceTime,
+        collectedAt,
+        payload: { id: targetExternalId },
+        projections: [{
+          platformKey: "beezie",
+          recordKind: "catalog_asset",
+          externalId: targetExternalId,
+          content: { name: "Fanout Card" },
+          sourceUpdatedAt: sourceTime,
+          sourceCollectedAt: collectedAt,
+        }],
+      }],
+      quarantines: [],
+    }));
+
+    const resolved = await harness.database.canonical_relationships.findMany({
+      where: {
+        organization_id: ids.organization,
+        target_external_id: targetExternalId,
+      },
+      select: {
+        target_entity_id: true,
+        created_public_change_sequence: true,
+        resolved_public_change_sequence: true,
+      },
+    });
+    assert.equal(resolved.length, recordsPerPage * 2);
+    assert.equal(resolved.every(({ target_entity_id }) => target_entity_id !== null), true);
+    assert.equal(
+      resolved.every(({ created_public_change_sequence, resolved_public_change_sequence }) =>
+        resolved_public_change_sequence !== null &&
+        resolved_public_change_sequence > created_public_change_sequence
+      ),
+      true,
+    );
   } finally {
     await harness.close();
   }

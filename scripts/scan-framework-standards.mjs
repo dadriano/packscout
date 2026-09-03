@@ -49,6 +49,7 @@ const surfaces = [
   { name: "frontend", directory: "apps/frontend" },
   { name: "admin", directory: "apps/admin" },
   { name: "worker", directory: "apps/worker" },
+  { name: "ops-panel", directory: "apps/ops-panel" },
   { name: "contracts", directory: "packages/contracts" },
   { name: "database", directory: "packages/database" },
   { name: "services", directory: "packages/services" },
@@ -60,7 +61,9 @@ function surfaceForFile(relativePath) {
   );
   return surface ? surface.name : relativePath.split("/")[0];
 }
-const shouldIgnoreDirectory = createDirectorySkipPredicate(["_generated"]);
+const shouldIgnoreDirectory = createDirectorySkipPredicate([
+  "_generated",
+]);
 const sourceExtensions = new Set([
   ".ts",
   ".tsx",
@@ -92,7 +95,11 @@ function walk(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
+    if (
+      entry.isDirectory() &&
+      !shouldIgnoreDirectory(entry.name) &&
+      relative(entryPath) !== "packages/database/prisma/generated"
+    ) {
       files.push(...walk(entryPath));
     } else if (
       entry.isFile() &&

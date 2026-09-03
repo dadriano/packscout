@@ -62,10 +62,67 @@ function retentionRunner(calls?: string[]) {
         knownRemaining: 0,
         deferredOrganizations: 0,
         capReached: false,
+        prunedRecords: 0,
+        prunedFailures: 0,
       };
     },
   };
 }
+
+test("startup prerequisite blocks every sibling lane and aborts cooperatively", async () => {
+  const calls: string[] = [];
+  let announceStarted!: () => void;
+  const prerequisiteStarted = new Promise<void>((resolve) => {
+    announceStarted = resolve;
+  });
+  const runtime = new ProviderWorkerRuntime({
+    startupPrerequisite: {
+      async run(signal) {
+        calls.push("prerequisite.start");
+        announceStarted();
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("cooperative prerequisite abort")),
+            { once: true },
+          );
+        });
+      },
+    },
+    scheduler: { async runOnce() { calls.push("scheduler.run"); return { kind: "idle" }; } },
+    imports: {
+      async executeImport(): Promise<never> { throw new Error("not reached"); },
+      async executeNextImport() { calls.push("imports.run"); return { kind: "idle" }; },
+    },
+    promotion: {
+      async start() { calls.push("promotion.start"); },
+      stop() { calls.push("promotion.stop"); },
+    },
+    heatPromotion: {
+      async start() { calls.push("heat.start"); },
+      stop() { calls.push("heat.stop"); },
+    },
+    catalogRetention: {
+      async start() { calls.push("catalog-retention.start"); },
+      stop() { calls.push("catalog-retention.stop"); },
+    },
+    retention: retentionRunner(calls),
+    logger: capturingLogger([]),
+    workerId: "worker:startup-prerequisite",
+  });
+
+  const started = runtime.start();
+  await prerequisiteStarted;
+  assert.deepEqual(calls, ["prerequisite.start"]);
+  runtime.stop();
+  await started;
+  assert.equal(calls.includes("promotion.start"), false);
+  assert.equal(calls.includes("heat.start"), false);
+  assert.equal(calls.includes("catalog-retention.start"), false);
+  assert.equal(calls.includes("scheduler.run"), false);
+  assert.equal(calls.includes("imports.run"), false);
+  assert.equal(calls.includes("retention.run"), false);
+});
 
 test("a worker cycle composes durable scheduling, shared import execution, and health", async () => {
   const calls: string[] = [];
@@ -391,6 +448,99 @@ test("graceful stop finishes an in-flight import and takes no new claim", async 
   );
 });
 
+test("a failing supervisor stop still stops presence and logs shutdown", async () => {
+  const events: ProviderWorkerLogEvent[] = [];
+  const calls: string[] = [];
+  let releaseImport: (() => void) | undefined;
+  let markImportStarted: (() => void) | undefined;
+  const importGate = new Promise<void>((resolve) => {
+    releaseImport = resolve;
+  });
+  const importStarted = new Promise<void>((resolve) => {
+    markImportStarted = resolve;
+  });
+  let releaseSupervisorStart: (() => void) | undefined;
+  const supervisorStopRequested = new Promise<void>((resolve) => {
+    releaseSupervisorStart = resolve;
+  });
+  const stopFailure = new Error("supervisor stop refused");
+  let supervisorStop: Promise<void> | undefined;
+  const runtime = new ProviderWorkerRuntime({
+    scheduler: {
+      async runOnce(): Promise<ProviderSchedulerResult> {
+        return {
+          kind: "started",
+          organizationId: "organization-1",
+          providerId: "provider-1",
+          configRevisionId: "revision-1",
+          runId: "run-1",
+          nextDueAt: new Date(now.getTime() + 300_000),
+        };
+      },
+    },
+    imports: {
+      async executeImport() {
+        markImportStarted?.();
+        await importGate;
+        return terminalRun();
+      },
+      async executeNextImport() {
+        return { kind: "idle" as const };
+      },
+    },
+    retention: retentionRunner(),
+    sourceSupervisor: {
+      async start() {
+        calls.push("supervisor.start");
+        await supervisorStopRequested;
+      },
+      stop() {
+        calls.push("supervisor.stop");
+        releaseSupervisorStart?.();
+        supervisorStop ??= Promise.reject(stopFailure);
+        return supervisorStop;
+      },
+    },
+    presence: {
+      async start() {
+        calls.push("presence.start");
+      },
+      activity() {},
+      async stop() {
+        calls.push("presence.stop");
+      },
+    },
+    logger: capturingLogger(events),
+    workerId: "worker:1",
+    pollIntervalMilliseconds: 100,
+  });
+
+  const running = runtime.start();
+  await importStarted;
+  runtime.stop();
+  releaseImport?.();
+  await assert.rejects(running, (error: unknown) => error === stopFailure);
+
+  assert.equal(calls.includes("presence.stop"), true);
+  assert.deepEqual(
+    events
+      .filter(({ event }) => event.startsWith("provider_worker_"))
+      .map(({ event }) => event),
+    ["provider_worker_started", "provider_worker_stopped"],
+  );
+  const stopFailureIndex = events.findIndex(({ failureCode }) =>
+    failureCode === "PROVIDER_SOURCE_SUPERVISOR_STOP_ERROR"
+  );
+  const stoppedIndex = events.findIndex(({ event }) =>
+    event === "provider_worker_stopped"
+  );
+  assert.equal(
+    events[stopFailureIndex]?.event,
+    "provider_source_supervisor_runtime_failed",
+  );
+  assert.equal(stopFailureIndex >= 0 && stopFailureIndex < stoppedIndex, true);
+});
+
 test("a cycle drains only its configured bounded claim count", async () => {
   let schedulerCalls = 0;
   const runtime = new ProviderWorkerRuntime({
@@ -514,6 +664,8 @@ test("bounded retention failures are surfaced without changing import counts", a
           knownRemaining: 5,
           deferredOrganizations: 1,
           capReached: true,
+          prunedRecords: 2,
+          prunedFailures: 0,
         };
       },
     },
@@ -544,6 +696,8 @@ test("bounded retention failures are surfaced without changing import counts", a
       retentionFailures: 1,
       retentionDeferredOrganizations: 1,
       retentionCapReached: true,
+      retentionPruned: 2,
+      retentionPruneFailures: 0,
       failureCode: "RETENTION_BATCH_FAILED",
     },
   );

@@ -1,3 +1,4 @@
+import { RESPONSIBLE_PLAY_RESOURCE } from "../responsible-play";
 import type { LearnGuide } from "./types";
 
 export const PACKSCOUT_METHODOLOGY_GUIDE = {
@@ -179,6 +180,10 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
           type: "paragraph",
           text: "PackScout updates its data as new information becomes available from each platform so the metrics shown reflect the latest available state of the pack.",
         },
+        {
+          type: "paragraph",
+          text: "When a previously calculable estimate has not received newer source evidence for more than 60 minutes, PackScout keeps the economics visible as a Last-known estimate and lowers its confidence over time. Provider feed health is informational and does not hide the estimate or exclude it from ranking.",
+        },
       ],
     },
     {
@@ -191,7 +196,7 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "Unavailable does not mean zero. It means the necessary data is not available. We would rather show no number than fill a gap with an unsupported assumption.",
+          text: "Unavailable does not mean zero. It means required supported inputs are missing. Age alone does not make a calculable estimate unavailable; we keep it visible as Last-known instead of filling a gap with an unsupported assumption.",
         },
       ],
     },
@@ -267,14 +272,17 @@ export const PACKSCOUT_METHODOLOGY_GUIDE = {
     {
       id: "responsible-play",
       heading: "Responsible Play",
+      // The helpline contact renders exclusively from the verified
+      // responsible-play registry, so this article can never drift from the
+      // pinned official NCPG contact.
       blocks: [
+        ...RESPONSIBLE_PLAY_RESOURCE.paragraphs.map((text) => ({
+          type: "paragraph" as const,
+          text,
+        })),
         {
           type: "paragraph",
-          text: "Opening a repack involves risk and can result in financial loss. Even a favorable Gross EV reflects an average across many outcomes — any individual pack can lose money, and past outcomes do not guarantee future results.",
-        },
-        {
-          type: "paragraph",
-          text: "If you or someone you know has a gambling problem, help is available 24/7. Call or text 1-800-522-4700, or visit ncpgambling.org.",
+          text: `${RESPONSIBLE_PLAY_RESOURCE.helpline.callLabel} · ${RESPONSIBLE_PLAY_RESOURCE.helpline.textLabel} · ${RESPONSIBLE_PLAY_RESOURCE.helpline.chatLabel}. ${RESPONSIBLE_PLAY_RESOURCE.helpline.name} — ${RESPONSIBLE_PLAY_RESOURCE.helpline.organization}.`,
         },
       ],
     },

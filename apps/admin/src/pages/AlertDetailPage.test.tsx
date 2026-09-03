@@ -91,6 +91,7 @@ test("alert detail loads bounded evidence, acknowledges directly, and confirms r
   assert.match(pageText(renderer), /Provider feed stopped early/);
   assert.match(pageText(renderer), /FailureCode IMPORT_INVALID_CONTRACT/);
   assert.match(pageText(renderer), /Review import run/);
+  assert.ok(renderer.container.querySelector(`a[href="/runs/${alert.runId}?providerId=${alert.providerId}"]`));
 
   await act(async () => findButton(renderer, "Acknowledge").click());
   await settlePage();
@@ -108,6 +109,62 @@ test("alert detail loads bounded evidence, acknowledges directly, and confirms r
   assert.equal([...renderer.container.querySelectorAll("button")]
     .some((button) => button.textContent?.trim() === "Resolve alert"), false);
   assert.match(pageText(renderer), /Occurrence history/);
+});
+
+/**
+ * A machinery alert has no provider, run, or quarantine to open, so its kind
+ * has to carry the operator to the view that shows the same condition. The
+ * lifecycle controls stay exactly as they are for every other alert.
+ */
+const fleetAlert: AdminAlertDetail = {
+  ...alert,
+  id: "00000000-0000-4000-8000-000000000060",
+  kind: "worker_fleet_silent",
+  severity: "critical",
+  title: "No worker is alive",
+  summary: "No worker instance has reported inside the liveness window the fleet published.",
+  providerId: null,
+  runId: null,
+  occurrences: [{
+    id: "00000000-0000-4000-8000-000000000061",
+    kind: "worker_fleet_silent",
+    severity: "critical",
+    occurredAt: "2026-08-06T12:01:00.000Z",
+    evidence: {
+      outcome: "WORKER_FLEET_SILENT",
+      reasonCode: "FLEET_PRESENCE_WINDOW",
+      durationMs: 61_000,
+      thresholdMs: 60_000,
+      count: 2,
+    },
+  }],
+};
+
+test("a machinery alert renders its crossed threshold, links to the fleet view, and keeps its lifecycle controls", async (context) => {
+  stubFetch(context, () => jsonResponse({ alert: fleetAlert }));
+  const renderer = await renderPage(
+    <ToastProvider>
+      <ConfirmProvider>
+        <MemoryRouter initialEntries={[`/alerts/${fleetAlert.id}`]}>
+          <Routes>
+            <Route path="/alerts/:alertId" element={<AlertDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ConfirmProvider>
+    </ToastProvider>,
+  );
+  cleanupPage(context, renderer);
+
+  assert.match(pageText(renderer), /Worker fleet silent/);
+  assert.match(pageText(renderer), /Outcome WORKER_FLEET_SILENT/);
+  assert.match(pageText(renderer), /DurationMs 61000/);
+  assert.match(pageText(renderer), /ThresholdMs 60000/);
+  const target = [...renderer.container.querySelectorAll("a")].find(
+    (link) => link.textContent?.trim() === "Review worker fleet",
+  );
+  assert.equal(target?.getAttribute("href"), "/workers");
+  assert.match(pageText(renderer), /Acknowledge/);
+  assert.match(pageText(renderer), /Resolve alert/);
 });
 
 test("alert detail presents a permission-specific failure without mutation controls", async (context) => {

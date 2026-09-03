@@ -13,3 +13,13 @@ test("card layout keeps the selectable repack and core comparison metrics", () =
   assert.match(source, /metric=\{estimate\.evPercent\}/);
   assert.match(source, /metric=\{buyback\}/);
 });
+
+test("cards delegate confidence evidence and keep explanations out of the layout", () => {
+  assert.match(source, /import \{ CatalogConfidenceEvidence \}/);
+  assert.match(
+    source,
+    /<CatalogConfidenceEvidence[\s\S]*?estimate=\{estimate\}[\s\S]*?providerHealth=\{repack\.providerHealth\}[\s\S]*?repackName=\{repack\.name\}/,
+  );
+  assert.doesNotMatch(source, /className=\{styles\.evidence\}/);
+  assert.doesNotMatch(source, /<dt>Estimate<\/dt>/);
+});

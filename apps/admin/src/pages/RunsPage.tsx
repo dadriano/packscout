@@ -3,12 +3,11 @@ import { useSearchParams } from "react-router-dom";
 import { AdminApiError } from "../api/client";
 import {
   listImportRuns,
-  listProviderOperations,
   type ImportRunState,
   type ImportRunSummary,
   type ImportRunTrigger,
-  type ProviderOperationSummary,
 } from "../api/import-operations";
+import { getProviderSourceOperationsOverview } from "../api/provider-source-operations";
 import { EmptyState } from "../components/EmptyState";
 import { KeysetPagination } from "../components/operations/KeysetPagination";
 import { RunLedger } from "../components/operations/RunLedger";
@@ -19,7 +18,10 @@ export function RunsPage() {
   useDocumentTitle("Import Runs");
   const [searchParams, setSearchParams] = useSearchParams();
   const [runs, setRuns] = useState<ImportRunSummary[]>([]);
-  const [providers, setProviders] = useState<ProviderOperationSummary[]>([]);
+  const [providers, setProviders] = useState<Array<{
+    providerId: string;
+    displayName: string;
+  }>>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,8 +34,11 @@ export function RunsPage() {
 
   useEffect(() => {
     let active = true;
-    void listProviderOperations({ limit: 50 }).then((result) => {
-      if (active) setProviders(result.items);
+    void getProviderSourceOperationsOverview().then((result) => {
+      if (active) setProviders(result.sources.map(({ providerId, displayName }) => ({
+        providerId,
+        displayName,
+      })));
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -79,16 +84,16 @@ export function RunsPage() {
   const filtersActive = Boolean(searchParams.get("providerId") || searchParams.get("state") || searchParams.get("trigger"));
   return (
     <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Runs" title="Import runs" description="Inspect immutable import outcomes, durable page progress, and the current resolution state of related quarantines." />
+      <PageHeader eyebrow="Data pipeline / Runs" title="Import runs" description="Every import that has run, what it committed, and what it quarantined." />
       <form className="ops-filters" aria-label="Filter import runs" onSubmit={applyFilters}>
         <div className="admin-field"><label htmlFor="runs-provider">Provider</label><select id="runs-provider" value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">All providers</option>{providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></div>
         <div className="admin-field"><label htmlFor="runs-state">State</label><select id="runs-state" value={state} onChange={(event) => setState(event.target.value)}><option value="">All states</option><option value="queued">Queued</option><option value="running">Running</option><option value="succeeded">Succeeded</option><option value="incomplete">Incomplete</option><option value="failed">Failed</option></select></div>
-        <div className="admin-field"><label htmlFor="runs-trigger">Trigger</label><select id="runs-trigger" value={trigger} onChange={(event) => setTrigger(event.target.value)}><option value="">All triggers</option><option value="scheduled">Scheduled</option><option value="manual">Manual</option><option value="recovery">Recovery</option></select></div>
-        <button type="submit" className="admin-button admin-button--secondary">Apply filters</button>
-        {filtersActive ? <button type="button" className="admin-button admin-button--secondary" onClick={() => { setProviderId(""); setState(""); setTrigger(""); setCursorStack([]); setLoading(true); setSearchParams({}); }}>Clear</button> : null}
+        <div className="admin-field"><label htmlFor="runs-trigger">Trigger</label><select id="runs-trigger" value={trigger} onChange={(event) => setTrigger(event.target.value)}><option value="">All triggers</option><option value="scheduled">Scheduled</option><option value="manual">Manual</option><option value="continuation">Continuation</option><option value="recovery">Recovery</option></select></div>
+        <button type="submit" className="admin-button admin-button-secondary">Apply filters</button>
+        {filtersActive ? <button type="button" className="admin-button admin-button-secondary" onClick={() => { setProviderId(""); setState(""); setTrigger(""); setCursorStack([]); setLoading(true); setSearchParams({}); }}>Clear</button> : null}
       </form>
       {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading import history…</div> : null}
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
+      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button-secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
       {!loading && !error && runs.length === 0 ? <EmptyState title={filtersActive ? "No runs match these filters" : "No import history yet"} description={filtersActive ? "Change or clear the filters to return to import history." : "A run appears here after a scheduled or manual import is requested."} /> : null}
       {runs.length > 0 ? <RunLedger runs={runs} /> : null}
       <KeysetPagination

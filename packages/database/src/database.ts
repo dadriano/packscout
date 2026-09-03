@@ -27,11 +27,69 @@ export const PACKSCOUT_TRANSACTION_OPTIONS = Object.freeze({
   timeout: 30_000,
 });
 
-const EXPECTED_MIGRATION = Object.freeze({
-  name: "20260816040000_catalog_promotion_retention",
-  checksum: "98e762ab1ec5d877b418a5bebd8f9d605f557e5a8cf6d386a56a0d269ad3a865",
-  tableCount: 56,
-});
+const EXPECTED_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    name: "20260816040000_catalog_promotion_retention",
+    checksum: "98e762ab1ec5d877b418a5bebd8f9d605f557e5a8cf6d386a56a0d269ad3a865",
+  }),
+  Object.freeze({
+    name: "20260819000000_worker_presence",
+    checksum: "25dd46c5d182320654c3e5382b39f81fb82ce194717a3237e6dcfa7dc33d3608",
+  }),
+  Object.freeze({
+    name: "20260819010000_buyback_ev_revisions",
+    checksum: "71afde6ae913c32a5c7f017da5035775ed5f1fba7d1b48e0b7be4a86e4d825b0",
+  }),
+  Object.freeze({
+    name: "20260820000000_machinery_alerts",
+    checksum: "ef91ca0c3cc94a6d9e87215748e2efb35b687441a8d912f635ed4f1d88cdaddc",
+  }),
+  Object.freeze({
+    name: "20260821040000_provider_source_page_plan_digest",
+    checksum: "da6cfb6f7d7cff1818d6d1d62d7688683e9840a872220cac6a64b35f9969c1b9",
+  }),
+  Object.freeze({
+    name: "20260822000000_email_message_outbox",
+    checksum: "833e44b7725dd169cd7d5552a8f85c3c8b9126ff06608e467c33428fa3426d41",
+  }),
+  Object.freeze({
+    name: "20260823010000_email_link_tokens",
+    checksum: "a139abfdbc65b8c689658b278c7e5c4eb7fb9bb8bc6d48d043ebf1f2d8d91507",
+  }),
+  Object.freeze({
+    name: "20260824000000_operator_invitations",
+    checksum: "2ab4f734eb7f1c16532a32b1cd6ae1c098d914b581aa2d9913b719ea9bf4eeaa",
+  }),
+  Object.freeze({
+    name: "20260824223000_fix_normalized_text_vertical_tab",
+    checksum: "646861e4f43ffca67286438276c66cc1a5f82b6706a0566b77d9f627bb4866b3",
+  }),
+  Object.freeze({
+    name: "20260825041000_raise_provider_source_raw_response_limit",
+    checksum: "25899178e7256a15fc4d86c158f560e597b9fa0e8c949caa696aa55439cc57c8",
+  }),
+  Object.freeze({
+    name: "20260826005000_source_relationship_confirmations",
+    checksum: "19cfc4cdae5fc3615159c5ead740fdc3e3e83945bf6c9ec2176ce36067ce9a21",
+  }),
+  Object.freeze({
+    name: "20260826010000_heat_relationship_causality",
+    checksum: "5ac08e4eb77bc83838d94796ace095c93dbdfab2344a2658cb87b46e3397193d",
+  }),
+  Object.freeze({
+    name: "20260826010000_provider_source_records_per_request",
+    checksum: "222365302a3fb76001f1f9cab9b7b80f375dcc629ae7146877661420fafa0d16",
+  }),
+  Object.freeze({
+    name: "20260827010000_provider_source_platform_request_lanes",
+    checksum: "e1832b7d15630efe544dc2d282aa5b221aac52be9fa648fa4b66b856ac84dbb7",
+  }),
+  Object.freeze({
+    name: "20260827020000_buyback_ev_provider_source_origin",
+    checksum: "10ae3670f6fbafb0ed529154ac7aad227b60bab735630e1079e805ddf8e7b24e",
+  }),
+]);
+const EXPECTED_TABLE_COUNT = 91;
 
 interface MigrationReadinessRow {
   migrationName: string;
@@ -59,19 +117,24 @@ async function assertMigrationReadiness(
                and table_class.relname <> '_prisma_migrations'
            ) as "tableCount"
     from public."_prisma_migrations" as migration
-    where migration.migration_name = ${EXPECTED_MIGRATION.name}
+    where migration.migration_name in (${Prisma.join(
+      EXPECTED_MIGRATIONS.map(({ name }) => name),
+    )})
     order by migration.started_at desc
-    limit 1
   `);
-  const migration = rows[0];
-  if (
-    !migration
-    || migration.checksum !== EXPECTED_MIGRATION.checksum
-    || migration.finishedAt === null
-    || migration.rolledBackAt !== null
-    || migration.tableCount !== EXPECTED_MIGRATION.tableCount
-  ) {
-    throw new Error("schema not ready");
+  for (const expected of EXPECTED_MIGRATIONS) {
+    const migration = rows.find(
+      (row) => row.migrationName === expected.name,
+    );
+    if (
+      !migration
+      || migration.checksum !== expected.checksum
+      || migration.finishedAt === null
+      || migration.rolledBackAt !== null
+      || migration.tableCount !== EXPECTED_TABLE_COUNT
+    ) {
+      throw new Error("schema not ready");
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 import type {
+  ImportRunDetailLocation,
   QuarantineEntryDetail,
   QuarantineEntrySummary,
   QuarantineRetryOutcome,
@@ -6,38 +7,16 @@ import type {
 import { requestJson } from "./client";
 
 export type ImportRunState = "queued" | "running" | "succeeded" | "incomplete" | "failed";
-export type ImportRunTrigger = "scheduled" | "manual" | "recovery";
-
-export interface ProviderOperationSummary {
-  providerId: string;
-  displayName: string;
-  platformKey: string;
-  lifecycleState: "draft" | "active" | "disabled" | "archived";
-  configurationRevisionId: string;
-  configurationVersion: number;
-  scheduleSeconds: number;
-  staleAfterSeconds: number;
-  nextDueAt: string | null;
-  lastAttemptedAt: string | null;
-  lastHeadReachedAt: string | null;
-  freshnessState: "fresh" | "stale";
-  qualityState: "healthy" | "warning" | "degraded";
-  activeRun: { id: string; state: "queued" | "running" } | null;
-  latestRun: { id: string; state: ImportRunState } | null;
-  openQuarantineCount: number;
-  consecutiveFailures: number;
-  recoveredAt: string | null;
-  recoveryHint: string;
-}
+export type ImportRunTrigger = "scheduled" | "manual" | "continuation" | "recovery";
 
 export interface ImportRunCounters {
   pages: number;
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
   accepted: number;
   unchanged: number;
-  revised: number;
+  revised: number | null;
   quarantined: number;
   resolvedQuarantines: number;
 }
@@ -70,10 +49,10 @@ export interface ImportRunDetail extends ImportRunSummary {
     committedAt: string;
     catalog: number;
     pulls: number;
-    sales: number;
+    trades: number;
     accepted: number;
     unchanged: number;
-    revised: number;
+    revised: number | null;
     quarantined: number;
   }>;
   timeline: Array<{ state: ImportRunState; occurredAt: string; summary: string }>;
@@ -99,10 +78,6 @@ function queryString<T extends object>(values: T): string {
   return serialized ? `?${serialized}` : "";
 }
 
-export function listProviderOperations(query: PageQuery = {}): Promise<PageResponse<ProviderOperationSummary>> {
-  return requestJson(`/operations/providers${queryString(query)}`);
-}
-
 export function listImportRuns(query: PageQuery & {
   providerId?: string;
   state?: ImportRunState;
@@ -111,20 +86,25 @@ export function listImportRuns(query: PageQuery & {
   return requestJson(`/import-runs${queryString(query)}`);
 }
 
-export function getImportRun(runId: string): Promise<{ run: ImportRunDetail }> {
-  return requestJson(`/import-runs/${encodeURIComponent(runId)}`);
+export function getImportRun(
+  location: ImportRunDetailLocation,
+): Promise<{ run: ImportRunDetail }> {
+  return requestJson(`/import-runs/${encodeURIComponent(location.runId)}${
+    queryString({ providerId: location.providerId })
+  }`);
 }
 
 export function requestManualImport(
   providerId: string,
-  expectedConfigurationRevisionId: string,
+  expectedSourceRevisionId: string,
 ): Promise<{
   run: Pick<ImportRunSummary, "id" | "providerId" | "configurationRevisionId" | "trigger" | "state">;
   deduplicated: boolean;
+  outcome: "queued" | "coalesced";
 }> {
   return requestJson(`/data-providers/${encodeURIComponent(providerId)}/import-runs`, {
     method: "POST",
-    json: { expectedConfigurationRevisionId },
+    json: { expectedSourceRevisionId },
   });
 }
 

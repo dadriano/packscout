@@ -1,13 +1,11 @@
-import type { DataReleaseMetadata } from "@packscout/contracts";
-
 export type DataReleaseStatusValue =
   | { readonly state: "loading" }
   | { readonly state: "unavailable" }
   | {
-      readonly state: "fresh" | "delayed";
+      readonly state: "available";
       readonly updatedAt: string;
-      readonly staleAt: string;
-      readonly dataSource: DataReleaseMetadata["dataSource"];
+      readonly evaluatedAt: string;
+      readonly dataSource?: "canonical" | "mock";
     };
 
 export type DataReleaseStatusPresentation = Readonly<{
@@ -15,6 +13,16 @@ export type DataReleaseStatusPresentation = Readonly<{
   state: DataReleaseStatusValue["state"];
   visibleLabel: string;
 }>;
+
+const RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS = 60_000;
+
+export function recordUpdateRefreshIntervalMilliseconds(
+  status: DataReleaseStatusValue,
+): number | null {
+  return status.state === "available" || status.state === "unavailable"
+    ? RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS
+    : null;
+}
 
 export function formatRelativeReleaseTime(
   updatedAt: string,
@@ -32,7 +40,7 @@ export function formatRelativeReleaseTime(
   const elapsedHours = Math.floor(elapsedMinutes / 60);
   if (elapsedHours < 24) return `${elapsedHours}h ago`;
 
-  return `${Math.min(1, Math.floor(elapsedHours / 24))}d ago`;
+  return `${Math.floor(elapsedHours / 24)}d ago`;
 }
 
 export function presentDataReleaseStatus(
@@ -41,55 +49,40 @@ export function presentDataReleaseStatus(
 ): DataReleaseStatusPresentation {
   if (status.state === "loading") {
     return {
-      exactLabel: "Repack data freshness is loading",
+      exactLabel: "Latest catalog record update time is loading",
       state: status.state,
-      visibleLabel: "Checking repack data",
+      visibleLabel: "Checking latest record update",
     };
   }
 
   if (status.state === "unavailable") {
     return {
-      exactLabel: "Repack data is unavailable",
+      exactLabel: "Latest catalog record update time is unavailable",
       state: status.state,
-      visibleLabel: "Repack data unavailable",
+      visibleLabel: "Latest record update unavailable",
     };
   }
 
-  const staleAt = Date.parse(status.staleAt);
-  const effectiveState =
-    status.state === "delayed" ||
-      (Number.isFinite(staleAt) && now >= staleAt)
-      ? "delayed"
-      : "fresh";
   const relativeTime = formatRelativeReleaseTime(status.updatedAt, now);
-  const exactTime = new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "long",
-  }).format(new Date(status.updatedAt));
+  const updatedAt = Date.parse(status.updatedAt);
+  const exactTime = Number.isFinite(updatedAt)
+    ? new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium",
+        timeStyle: "long",
+      }).format(new Date(updatedAt))
+    : "recently";
 
   if (status.dataSource === "mock") {
     return {
-      exactLabel:
-        effectiveState === "delayed"
-          ? `Mock repack data is delayed. Last updated ${exactTime}`
-          : `Mock repack data updated ${exactTime}`,
-      state: effectiveState,
-      visibleLabel:
-        effectiveState === "delayed"
-          ? `Mock data delayed · ${relativeTime}`
-          : `Mock data · Updated ${relativeTime}`,
+      exactLabel: `Latest mock catalog record update ${exactTime}`,
+      state: status.state,
+      visibleLabel: `Latest mock record update · ${relativeTime}`,
     };
   }
 
   return {
-    exactLabel:
-      effectiveState === "delayed"
-        ? `Some data is delayed. Last updated ${exactTime}`
-        : `Repack data updated ${exactTime}`,
-    state: effectiveState,
-    visibleLabel:
-      effectiveState === "delayed"
-        ? `Some data delayed · Updated ${relativeTime}`
-        : `Updated ${relativeTime}`,
+    exactLabel: `Latest catalog record update ${exactTime}`,
+    state: status.state,
+    visibleLabel: `Latest record update · ${relativeTime}`,
   };
 }

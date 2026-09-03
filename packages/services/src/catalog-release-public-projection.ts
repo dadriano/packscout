@@ -7,6 +7,7 @@ import {
   type PublicCategory,
   type PublicCollectible,
   type PublicCollectibleDisplay,
+  type PublicPackAvailability,
   type PublicRepackChase,
   type PublicRepackDetail,
   type PublicVendor,
@@ -18,6 +19,7 @@ import type {
 } from "./catalog-projection-contracts.ts";
 import type { CanonicalEstimatedEvProjectionContent } from "./estimated-ev-projection-contracts.ts";
 import { publicConfidenceLimitationsFromPipeline } from "./public-confidence-projection.ts";
+import { configuredPublicRepackLink } from "./public-repack-link.ts";
 import type {
   CatalogCanonicalRevisionSnapshot,
   GovernedPublicRepackIdentity,
@@ -39,26 +41,53 @@ interface ProjectionResult {
   readonly dataAsOf: Date;
 }
 
+type PublicAvailabilityPackContent = Omit<
+  CanonicalPackProjectionContent,
+  "availability"
+> & Readonly<{ availability: PublicPackAvailability }>;
+
+type PublicAvailabilityAssetContent = Omit<
+  CanonicalCatalogAssetProjectionContent,
+  "availability"
+> & Readonly<{ availability: PublicPackAvailability }>;
+
 const key = (platformKey: string, externalId: string) =>
   `${platformKey}\u0000${externalId}`;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function packContent(value: unknown): CanonicalPackProjectionContent {
+// Canonical revisions persisted before the availability rename still hold
+// active/disabled; translate them at read time and keep rejecting values
+// outside both vocabularies.
+export const normalizeLegacyAvailability = (value: unknown): unknown =>
+  value === "active" ? "available" : value === "disabled" ? "unavailable" : value;
+
+function packContent(value: unknown): PublicAvailabilityPackContent {
+  const availability = isObject(value)
+    ? normalizeLegacyAvailability(value.availability)
+    : undefined;
   if (!isObject(value) || value.schemaVersion !== "catalog-projection-v1" ||
       value.entityType !== "pack" || typeof value.name !== "string" ||
-      !["active", "disabled", "sold_out", "unknown"].includes(String(value.availability))) {
+      !["available", "unavailable", "unknown", "sold_out"].includes(
+        String(availability),
+      )) {
     throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
   }
-  return value as unknown as CanonicalPackProjectionContent;
+  return { ...value, availability } as unknown as PublicAvailabilityPackContent;
 }
 
-function assetContent(value: unknown): CanonicalCatalogAssetProjectionContent {
+function assetContent(value: unknown): PublicAvailabilityAssetContent {
+  const availability = isObject(value)
+    ? normalizeLegacyAvailability(value.availability)
+    : undefined;
   if (!isObject(value) || value.schemaVersion !== "catalog-projection-v1" ||
-      value.entityType !== "catalog_asset") {
+      value.entityType !== "catalog_asset" ||
+      !["available", "unavailable", "unknown", "sold_out"].includes(
+        String(availability),
+      )) {
     throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
   }
-  return value as unknown as CanonicalCatalogAssetProjectionContent;
+  return { ...value, availability } as unknown as PublicAvailabilityAssetContent;
 }
 
 function evInputContent(value: unknown): CanonicalEvInputProjectionContent {
@@ -101,7 +130,7 @@ function approvedImage(
   return url === undefined ? null : { url, alt };
 }
 
-function publicPrice(content: CanonicalPackProjectionContent) {
+function publicPrice(content: PublicAvailabilityPackContent) {
   const minor = safeMinor(content.priceValueMinor);
   const currency = typeof content.priceCurrency === "string" &&
       /^[A-Z]{3}$/.test(content.priceCurrency)
@@ -134,7 +163,7 @@ function evMetrics(grossMinor: number, priceMinor: number) {
 }
 
 function vendorReportedEv(
-  content: CanonicalPackProjectionContent,
+  content: PublicAvailabilityPackContent,
   sourceUpdatedAt: Date,
 ) {
   const gross = safeMinor(content.providerReportedEvValueMinor);
@@ -196,7 +225,7 @@ function confidence(input: {
 function packScoutEv(input: {
   estimate: CanonicalEstimatedEvProjectionContent | null;
   evInput: CanonicalEvInputProjectionContent | null;
-  pack: CanonicalPackProjectionContent;
+  pack: PublicAvailabilityPackContent;
   policy: ApprovedPublicCatalogConfigurationV1["confidencePolicy"];
 }) {
   const estimate = input.estimate;
@@ -286,7 +315,7 @@ export function projectCatalogRelease(input: {
   const collectibleByAsset = new Map<string, PublicCollectible>();
   for (const revision of assets) {
     const content = assetContent(revision.content);
-    if (content.availability === "disabled" || content.relatedPackExternalId === null) continue;
+    if (content.relatedPackExternalId === null) continue;
     const mapping = collectibleMappings.get(key(revision.platformKey, revision.externalId));
     if (!mapping || content.name === null) {
       throw new CatalogProjectionAssemblyError("PUBLIC_IDENTITY_MAPPING_MISSING");
@@ -337,7 +366,6 @@ export function projectCatalogRelease(input: {
   const repackChases: PublicRepackChase[] = [];
   for (const revision of packs) {
     const content = packContent(revision.content);
-    if (content.availability === "disabled" || content.availability === "unknown") continue;
     const platform = platformByKey.get(revision.platformKey)!;
     const identity = identities.get(key(revision.platformKey, revision.externalId));
     const configuredIdentity = configuredRepackIdentities.get(
@@ -350,8 +378,7 @@ export function projectCatalogRelease(input: {
     const relatedAssets = assets.filter((asset) => {
       if (asset.platformKey !== revision.platformKey) return false;
       const candidate = assetContent(asset.content);
-      return candidate.relatedPackExternalId === revision.externalId &&
-        candidate.availability !== "disabled";
+      return candidate.relatedPackExternalId === revision.externalId;
     });
     const evInput = evInputByPack.get(key(revision.platformKey, revision.externalId)) ?? null;
     const probabilityByBucket = new Map(evInput?.probabilityBuckets.map((bucket) => [bucket.bucketId, bucket.probability]) ?? []);
@@ -397,7 +424,13 @@ export function projectCatalogRelease(input: {
       };
     });
     repackChases.push(...chases);
-    const categoryIds = [...categoryIdsFor(platform, content.category)].sort();
+    const categoryIds = [...new Set([
+      ...categoryIdsFor(platform, content.category),
+      ...chases.flatMap(({ collectible }) => collectible.publicCategoryIds),
+    ])].sort();
+    if (categoryIds.some((categoryId) => !categoryById.has(categoryId))) {
+      throw new CatalogProjectionAssemblyError("CANONICAL_PROJECTION_INVALID");
+    }
     const collectibleTypes = [...new Set(chases.map(({ collectible }) => collectible.collectibleType))].sort();
     const categoryBranches = categoryIds.filter((candidate) =>
       !categoryIds.some((other) => other !== candidate && categoryById.get(other)?.pathPublicCategoryIds.includes(candidate))).length;
@@ -407,7 +440,14 @@ export function projectCatalogRelease(input: {
     const price = publicPrice(content);
     const buybackBasisPoints = content.buybackPercent === null ? null
       : Math.round(content.buybackPercent * 100);
-    const promo = platform.vendor.publicPromo ?? undefined;
+    const promo = content.availability === "available"
+      ? platform.vendor.publicPromo ?? undefined
+      : undefined;
+    const repackLink = configuredPublicRepackLink({
+      identity: configuredIdentity,
+      platform,
+      available: content.availability === "available",
+    }) ?? undefined;
     const packScout = packScoutEv({
       estimate: estimates.get(key(revision.platformKey, revision.externalId)) ?? null,
       evInput,
@@ -445,10 +485,16 @@ export function projectCatalogRelease(input: {
         probabilityCoverageBasisPoints: evInput === null ? null
           : Math.round(evInput.coverage.calculatedCoverage * 10_000),
       },
-      actionAvailability: { promo: promo !== undefined, repackLink: false },
+      actionAvailability: {
+        promo: promo !== undefined,
+        repackLink: repackLink !== undefined,
+      },
       sourceUpdatedAt: iso(revision.sourceUpdatedAt),
       description: content.description?.trim() || null,
-      actions: promo === undefined ? {} : { promo },
+      actions: {
+        ...(promo === undefined ? {} : { promo }),
+        ...(repackLink === undefined ? {} : { repackLink }),
+      },
     });
   }
   repacks.sort((left, right) => left.publicRepackId.localeCompare(right.publicRepackId));

@@ -3,7 +3,7 @@ import globals from "globals";
 import typescriptEslint from "typescript-eslint";
 
 export default typescriptEslint.config(
-  { ignores: ["dist/**"] },
+  { ignores: ["dist/**", "prisma/generated/**"] },
   eslint.configs.recommended,
   ...typescriptEslint.configs.recommended,
   {

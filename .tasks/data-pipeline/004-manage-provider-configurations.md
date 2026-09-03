@@ -24,7 +24,7 @@ The initial HTTP adapter supports authentication mode `none` or `bearer`. Bearer
 - Define provider configuration fields for platform key, adapter key, endpoint, authentication mode, bearer secret reference, schedule interval, stale threshold, state, and version metadata.
 - Validate platform and adapter identities, HTTPS endpoint policy outside local development, authentication requirements, positive schedule and stale durations, and adapter-specific configuration at the owning boundary.
 - Enforce exactly one enabled configuration for a platform. Replacing it creates a new revision and preserves prior revisions, runs, source provenance, and cursor history.
-- Run a bounded non-importing connection test that requests the initial page, validates status, JSON, provider page shape, platform agreement, cursor rules, and configured authentication without persisting raw data or changing a checkpoint.
+- Run a bounded non-importing connection test that requests the initial page, validates status, JSON, provider page shape, platform agreement, cursor rules, and configured authentication without persisting raw data or changing a cursor.
 - Permit activation only after the current revision passes a connection test; record test time, outcome, bounded sanitized evidence, and actor.
 
 ### Permissions and lifecycle
@@ -47,7 +47,7 @@ The adapter resolver receives an enabled configuration revision and a server-onl
 ## Acceptance Criteria
 
 - [x] Configuration validation rejects unknown adapters, invalid endpoints, invalid timing values, missing bearer secrets, and conflicting active configurations with stable errors.
-- [x] A successful connection test validates the first page without creating raw data, canonical data, a run, or a cursor checkpoint; failed tests cannot enable the revision.
+- [x] A successful connection test validates the first page without creating raw data, canonical data, a run, or a cursor; failed tests cannot enable the revision.
 - [x] Enabling a replacement version preserves prior configuration and run provenance and leaves exactly one enabled configuration for the platform.
 - [x] Disabling or archiving stops future scheduling, lets an active revision-bound run finish, and never reveals or deletes the bearer secret history improperly.
 - [x] Administrator and data-operator permissions, tenant scope, secret masking, optimistic conflicts, and audit behavior have direct boundary tests.

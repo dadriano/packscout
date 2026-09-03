@@ -80,13 +80,24 @@ export function ConfiguredPackScoutAuthProvider({
   }, [startProvider]);
 
   const requestLogin = useCallback(() => startProvider(true), [startProvider]);
+  // A boot without login intent: establish an existing session, open nothing.
+  // The holding surface calls this because the server already verified a
+  // session for the visitor (closed-beta-access/008), so waiting on the
+  // returning-session hint alone would leave storage-cleared browsers with a
+  // page that never comes alive. Idempotent: the provider loads once.
+  const requestSessionBoot = useCallback(
+    () => startProvider(false),
+    [startProvider],
+  );
   const lightAuthValue = useMemo<PackScoutAuthValue>(
     () => ({
       status: boot.phase === "loading" ? "loading" : "signed_out",
+      identity: null,
       login: requestLogin,
       logout: async () => undefined,
+      requestSessionBoot,
     }),
-    [boot.phase, requestLogin],
+    [boot.phase, requestLogin, requestSessionBoot],
   );
 
   if (InitializedProvider !== null) {

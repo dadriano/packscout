@@ -25,11 +25,11 @@ Coverage: Automated plus development-browser coverage — the deterministic inte
 
 Given sanitized real catalog, pulls, and trades pages with documented cursor scope
 When the pipeline imports, resumes, and replays those streams
-Then each requested stream advances only its associated durable checkpoint under that documented scope
+Then each requested stream advances only its associated durable cursor under that documented scope
 And catalog corrections create revisions while pulls and trades remain immutable and idempotent
 And no launch-source runtime reads the superseded aggregate V1 contract
 
-Coverage: Partial automated coverage — V2 record fixtures, identity/nullability, mutable-catalog versus immutable-event policy, lifecycle mapping, and currency evidence have focused tests; blocked on real page wrapper/path/auth/cursor evidence, runtime V1 removal, three durable checkpoints, crash recovery, and backfill/incremental proof.
+Coverage: Partial automated coverage — V2 record fixtures, identity/nullability, mutable-catalog versus immutable-event policy, lifecycle mapping, and currency evidence have focused tests; blocked on real page wrapper/path/auth/cursor evidence, runtime V1 removal, three durable cursors, crash recovery, and backfill/incremental proof.
 
 ## Scenario: Public snapshot activation is atomic and idempotent
 

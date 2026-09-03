@@ -1,11 +1,11 @@
 "use client";
 
 import type { ReactNode, RefObject } from "react";
-import type { DashboardBundle } from "@packscout/contracts";
 import {
   DEFAULT_CATALOG_QUERY,
   serializeCatalogQueryState,
 } from "@/lib/catalog-query-state.client";
+import type { DashboardBundleV3 } from "@/lib/public-repacks-v3";
 import type { ClipboardWriter } from "./pack-actions.client";
 import { CatalogSummaries } from "./CatalogSummaries";
 import { OpportunityTable } from "./OpportunityTable.client";
@@ -18,7 +18,7 @@ import { resolveOverviewSelection } from "./overview-presentation";
 import styles from "./OverviewDashboard.module.css";
 
 type OverviewDashboardProps = Readonly<{
-  bundle: DashboardBundle;
+  bundle: DashboardBundleV3;
   controls?: ReactNode;
   selectedPublicRepackId?: string | null;
   inspectorPlacement?: "side" | "preview" | "sheet";
@@ -75,6 +75,7 @@ export function OverviewDashboard({
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
           opportunities={bundle.opportunities}
+          repacksHref={repacksHref}
           selectedPublicRepackId={selectedId}
         />
         <div className={styles.summaryGrid}>
@@ -97,9 +98,9 @@ export function OverviewDashboard({
             <RepackInspector
               clipboardWriter={clipboardWriter}
               key={selectedRepack.publicRepackId}
-              metadata={bundle.metadata}
               onActionOutcome={onInspectorAction}
               onClose={onCloseInspector}
+              release={bundle.release}
               repack={selectedRepack}
               placement={inspectorPlacement}
               returnFocusRef={inspectorReturnFocusRef}
@@ -109,7 +110,7 @@ export function OverviewDashboard({
               <p>
                 {selectedId
                   ? "Updating selected repack details…"
-                  : "Select an opportunity to inspect its current evidence."}
+                  : "Select an opportunity to inspect its published evidence."}
               </p>
             </aside>
           )}
@@ -120,9 +121,9 @@ export function OverviewDashboard({
         <RepackInspector
           clipboardWriter={clipboardWriter}
           key={selectedRepack.publicRepackId}
-          metadata={bundle.metadata}
           onActionOutcome={onInspectorAction}
           onClose={onCloseInspector}
+          release={bundle.release}
           repack={selectedRepack}
           placement="sheet"
           returnFocusRef={inspectorReturnFocusRef}

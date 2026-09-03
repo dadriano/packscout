@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PublicRepackSummary } from "@packscout/contracts";
+import type { PublicRepackSummaryV3 } from "@packscout/contracts";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -8,24 +8,52 @@ import {
   publicRowActions,
 } from "./all-repacks-table";
 
-test("the repack table exposes both EV sources and PackScout confidence", () => {
+test("the table shows the four PackScout metrics together with both EV sources", () => {
   assert.deepEqual(
     ALL_REPACKS_HEADERS.map(({ label }) => label),
     [
       "Vendor",
       "Category",
       "Repack",
-      "Repack Price",
+      "Pack Price",
+      "Gross EV $",
+      "Gross EV %",
       "EV $",
       "EV %",
       "EV Confidence",
-      "Vendor EV %",
       "Buyback %",
-      "Gross EV",
+      "Vendor EV",
       "Top Chase",
       "Top Chase Value",
       "Promo Code",
       "Repack Link",
+    ],
+  );
+});
+
+test("the retired pre-buyback vendor EV percent sort is gone, not remapped", () => {
+  assert.equal(
+    ALL_REPACKS_HEADERS.some(
+      ({ sort }) => sort === "vendor_reported_ev_percent",
+    ),
+    false,
+  );
+  const vendorEv = ALL_REPACKS_HEADERS.find(
+    ({ key }) => key === "vendorReportedEv",
+  );
+  assert.ok(vendorEv);
+  assert.equal(vendorEv.sort, undefined);
+  assert.deepEqual(
+    ALL_REPACKS_HEADERS.flatMap(({ sort }) => (sort ? [sort] : [])),
+    [
+      "repack",
+      "repack_price",
+      "packscout_gross_ev",
+      "packscout_ev_dollars",
+      "packscout_ev_percent",
+      "packscout_confidence",
+      "buyback_percent",
+      "top_chase_value",
     ],
   );
 });
@@ -60,13 +88,32 @@ test("sort headers toggle deterministically and disappear during relevance order
   );
 });
 
-test("sold-out rows never expose an outbound repack action", () => {
-  const repack = {
-    availability: "sold_out",
-    actionAvailability: { promo: true, repackLink: true },
-  } as PublicRepackSummary;
-  assert.deepEqual(publicRowActions(repack), {
-    promo: true,
-    repackLink: false,
-  });
+test("only available rows expose the outbound repack link, and promos are never gated by it", () => {
+  for (const availability of ["unavailable", "unknown", "sold_out"] as const) {
+    const repack = {
+      availability,
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummaryV3;
+    // The pack stays discoverable and keeps its promo; only the way to buy it
+    // is withheld.
+    assert.deepEqual(publicRowActions(repack), {
+      promo: true,
+      repackLink: false,
+    });
+  }
+  assert.deepEqual(
+    publicRowActions({
+      availability: "available",
+      actionAvailability: { promo: true, repackLink: true },
+    } as PublicRepackSummaryV3),
+    { promo: true, repackLink: true },
+  );
+  // A published promo is the only thing that puts a promo action on a row.
+  assert.deepEqual(
+    publicRowActions({
+      availability: "available",
+      actionAvailability: { promo: false, repackLink: false },
+    } as PublicRepackSummaryV3),
+    { promo: false, repackLink: false },
+  );
 });

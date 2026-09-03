@@ -1,13 +1,14 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { DashboardBundle, PublicRepackFilters } from "@packscout/contracts";
+import type { PublicRepackFilters } from "@packscout/contracts";
 import { catalogHrefForSummary } from "@/lib/catalog-query-state.client";
+import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 import { presentCatalogSummaries } from "./overview-presentation";
 import styles from "./CatalogSummaries.module.css";
 
 type CatalogSummariesProps = Readonly<{
   title: "By vendor" | "By category";
-  summaries: DashboardBundle["vendorSummaries"] | DashboardBundle["categorySummaries"];
+  summaries: readonly RepackSummaryGroupV3[];
   activeFilters: PublicRepackFilters;
 }>;
 
@@ -29,7 +30,7 @@ export function CatalogSummaries({
           <h2 className={styles.heading} id={headingId}>
             {title}
           </h2>
-          <p className={styles.context}>Current catalog</p>
+          <p className={styles.context}>Published catalog</p>
         </div>
         <div aria-hidden="true" className={styles.columns}>
           <span>Repacks</span>
@@ -61,6 +62,7 @@ export function CatalogSummaries({
                   aria-hidden="true"
                   className={styles.median}
                   data-state={row.medianEvPercent.semanticState ?? "plain"}
+                  data-tone={row.medianEvPercent.tone ?? "plain"}
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
                   <small>{row.medianEvPercent.semanticLabel}</small>

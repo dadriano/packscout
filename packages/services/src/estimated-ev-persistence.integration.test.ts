@@ -62,7 +62,7 @@ function packCandidate(
     name: "Synthetic Pack",
     description: null,
     category: "fixture",
-    availability: "active",
+    availability: "available",
     price: { amount: price, currency: "usd" },
     providerReportedEv: { amount: 4, currency: "usd" },
     relationships: [],
@@ -206,7 +206,10 @@ function command(calculatedAt: string) {
   return {
     organizationId: ids.organization,
     providerId: ids.provider,
-    configurationRevisionId: ids.configuration,
+    origin: {
+      kind: "legacy_configuration" as const,
+      configurationRevisionId: ids.configuration,
+    },
     platformKey: configuration.platform,
     packExternalId: "pack-1",
     evInputExternalId: "pack-1:odds-v1",
@@ -360,8 +363,11 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
     await harness.persistence.projectDerivedSourceRecord({
       organizationId: ids.organization,
       providerId: ids.provider,
-      configurationRevisionId: ids.configuration,
-      sourceRecordId: calculationInputs.evInput.sourceRecordId,
+      origin: {
+        kind: "legacy_configuration",
+        configurationRevisionId: ids.configuration,
+      },
+      sourceRecordId: calculationInputs.evInput.sourceRecordId!,
       acceptedAt: new Date("2026-08-06T12:10:00.000Z"),
       projections: [
         {
@@ -420,8 +426,11 @@ test("estimated EV revisions are source-linked, explainable, idempotent, and res
       harness.persistence.projectDerivedSourceRecord({
         organizationId: "40000000-0000-4000-8000-000000000099",
         providerId: ids.provider,
-        configurationRevisionId: ids.configuration,
-        sourceRecordId: calculationInputs.evInput.sourceRecordId,
+        origin: {
+          kind: "legacy_configuration",
+          configurationRevisionId: ids.configuration,
+        },
+        sourceRecordId: calculationInputs.evInput.sourceRecordId!,
         acceptedAt: new Date("2026-08-06T12:25:00.000Z"),
         projections: [],
       }),

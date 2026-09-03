@@ -15,6 +15,11 @@ import {
   useConvexAuth,
 } from "convex/react";
 import { AuthenticatedSavedItemsProvider } from "./AuthenticatedSavedItemsProvider.client";
+import { AuthenticatedSignInRecorder } from "./AuthenticatedSignInRecorder.client";
+import {
+  clearBrowserIdentityCookie,
+  IdentityAccessCookieSync,
+} from "./IdentityCookieSync.client";
 import {
   PackScoutAuthContext,
   type PackScoutAuthValue,
@@ -31,6 +36,11 @@ import {
   convexAuthSessionKey,
   fetchPrivyAccessTokenForConvex,
 } from "./convex-auth-adapter";
+import { verifiedIdentityFromProviderUser } from "./verified-identity";
+
+// The provider is initialized here, so a session boot request has nothing
+// left to do.
+const sessionBootAlreadyDone = () => undefined;
 
 function usePrivyAuthForConvex() {
   const { authenticated, getAccessToken, ready, user } = usePrivy();
@@ -80,6 +90,13 @@ function PackScoutAuthBridge({
   } = usePrivy();
   const convex = useConvexAuth();
   const loginInvoked = useRef(false);
+  // The key that generations Convex auth also bounds sign-in recording to one
+  // write per established session.
+  const sessionKey = convexAuthSessionKey({
+    ready,
+    authenticated,
+    userId: user?.id,
+  });
 
   useEffect(() => {
     syncReturningSessionHint(
@@ -125,14 +142,27 @@ function PackScoutAuthBridge({
     ready,
   ]);
 
-  const logout = useCallback(
-    () =>
-      logoutAndClearReturningSessionHint(
+  const logout = useCallback(async () => {
+    try {
+      await logoutAndClearReturningSessionHint(
         privyLogout,
         browserAuthSessionHintStorage(),
-      ),
-    [privyLogout],
-  );
+      );
+    } finally {
+      // The server-readable credential dies with the sign-out attempt, not
+      // with its success, so the very next server-rendered request reads as
+      // signed out (closed-beta-access/007). A provider failure must not
+      // leave the gate admitting someone who asked to leave; the cookie is
+      // transport only, so the sync writes it back on its next pass if the
+      // session really did survive.
+      //
+      // "The attempt" includes one that never answers: the awaited call
+      // bounds the provider itself at SIGN_OUT_CEILING_MS, so this block is
+      // reached even then, and it is reached before the surface is told
+      // anything and leaves.
+      clearBrowserIdentityCookie();
+    }
+  }, [privyLogout]);
   const status: PackScoutAuthValue["status"] = error
     ? "error"
     : !ready
@@ -144,18 +174,34 @@ function PackScoutAuthBridge({
           : convex.isAuthenticated
             ? "signed_in"
             : "error";
+  // Only what the provider verified for this session, and only while the
+  // session stands. Display data for surfaces like the holding page
+  // (closed-beta-access/008); no routing or capability reads it.
+  const identity = useMemo(
+    () =>
+      ready && authenticated ? verifiedIdentityFromProviderUser(user) : null,
+    [authenticated, ready, user],
+  );
   const value = useMemo<PackScoutAuthValue>(
-    () => ({ status, login: requestLogin, logout }),
-    [logout, requestLogin, status],
+    () => ({
+      status,
+      identity,
+      login: requestLogin,
+      logout,
+      requestSessionBoot: sessionBootAlreadyDone,
+    }),
+    [identity, logout, requestLogin, status],
   );
 
   return (
     <PackScoutAuthContext.Provider value={value}>
-      <AuthenticatedSavedItemsProvider
-        key={authenticated ? user?.id : "signed-out"}
-      >
-        {children}
-      </AuthenticatedSavedItemsProvider>
+      <AuthenticatedSignInRecorder sessionKey={sessionKey}>
+        <AuthenticatedSavedItemsProvider
+          key={authenticated ? user?.id : "signed-out"}
+        >
+          {children}
+        </AuthenticatedSavedItemsProvider>
+      </AuthenticatedSignInRecorder>
     </PackScoutAuthContext.Provider>
   );
 }
@@ -182,6 +228,7 @@ export function InitializedPackScoutAuthProvider({
 
   return (
     <PrivyProvider appId={configuration.privyAppId} config={privyConfig}>
+      <IdentityAccessCookieSync />
       <ConvexProviderWithAuth
         client={convexClient}
         useAuth={usePrivyAuthForConvex}

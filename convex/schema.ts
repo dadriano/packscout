@@ -8,7 +8,14 @@ import {
 } from "@packscout/contracts";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { repackSearchRowValidator } from "./publicRepackValidation";
+import { betaAllowlistEntryDocumentValidator } from "./betaAllowlistRecords";
+import { dataReleaseV3SearchRowValidator } from "./dataReleaseV3Search";
+import { productUserDocumentValidator } from "./productUserRecords";
+import {
+  publicPackAvailabilityValidator,
+  storedPackAvailabilityValidator,
+  storedRepackSearchRowValidator,
+} from "./publicRepackValidation";
 
 const sha256Validator = v.string();
 const timestampValidator = v.string();
@@ -492,7 +499,9 @@ const publicRepackDetailValidator = v.object({
   ),
   categories: v.array(publicRepackCategoryValidator),
   collectibleTypes: v.array(collectibleTypeValidator),
-  availability: v.union(v.literal("active"), v.literal("sold_out")),
+  // Stored details may predate the availability rename; reads translate the
+  // legacy vocabulary before it reaches any public result.
+  availability: storedPackAvailabilityValidator,
   price: priceValidator,
   evEstimates: v.object({
     vendorReported: vendorReportedEvEstimateValidator,
@@ -523,6 +532,257 @@ const publicRepackDetailValidator = v.object({
     promo: v.optional(promoValidator),
     repackLink: v.optional(packLinkValidator),
   }),
+});
+
+// --- data_release_v3 (buyback-adjusted PackScout EV) validators ---
+
+const buybackEvMethodVersionValidator = v.literal(
+  "packscout-buyback-adjusted-ev-v1",
+);
+const buybackEvConfidencePolicyVersionValidator = v.literal(
+  "packscout-buyback-adjusted-ev-confidence-v1",
+);
+const publicEvPolicyVersionV3Validator = v.literal(
+  "packscout-public-ev-nonpositive-v1",
+);
+
+const dataReleaseV3ProviderSourceLifecycleValidator = v.union(
+  v.literal("active"),
+  v.literal("paused"),
+  v.literal("disabled"),
+);
+
+const dataReleaseV3ProviderHealthStateValidator = v.union(
+  v.literal("healthy"),
+  v.literal("degraded"),
+  v.literal("unhealthy"),
+  v.literal("unknown"),
+);
+
+const dataReleaseV3ProviderReleaseAlignmentValidator = v.union(
+  v.literal("aligned"),
+  v.literal("behind"),
+);
+
+/**
+ * Temporary retained-document compatibility for the public-EV-policy marker.
+ *
+ * Exact legacy shape: `dataReleaseV3Releases` rows and the active/previous
+ * pointer snapshots written before the nonpositive public-EV policy shipped do
+ * not have `publicEvPolicyVersion`. Convex validates those retained documents
+ * before deploying a schema, so requiring the field in its introducing deploy
+ * would make that deploy impossible. New release and pointer writers still
+ * always set the marker, while every serving/rollback reader rejects an absent
+ * or non-current marker.
+ *
+ * Owner: PackScout data-release V3 promotion maintainers.
+ * Removal condition: in a separate audited migration, backfill or retire every
+ * retained release without the marker and replace the singleton's active and
+ * previous pointer snapshots; after a bounded audit reports zero missing
+ * markers in both tables, make these two fields required in the next deploy.
+ */
+const retainedDataReleaseV3PublicEvPolicyVersionValidator = v.optional(
+  publicEvPolicyVersionV3Validator,
+);
+
+const buybackEvConfidenceResultValidator = v.object({
+  policyVersion: buybackEvConfidencePolicyVersionValidator,
+  scoreBasisPoints: v.number(),
+  band: confidenceBandValidator,
+  limitationCodes: v.array(
+    v.union(
+      v.literal("closed_range_midpoint"),
+      v.literal("platform_published_odds"),
+      v.literal("source_age_over_15_through_30_minutes"),
+      v.literal("source_age_over_30_through_60_minutes"),
+    ),
+  ),
+});
+
+const packScoutPublicEvMetricsV3Validator = v.object({
+  grossEvMoney: usdMoneyValidator,
+  grossReturnBasisPoints: v.number(),
+  evDollars: usdMoneyValidator,
+  evPercentBasisPoints: v.number(),
+});
+
+const packScoutPublicEvSourceAgeV3Validator = v.object({
+  milliseconds: v.number(),
+  state: v.union(
+    v.literal("fresh_within_15_minutes"),
+    v.literal("delayed_over_15_through_30_minutes"),
+    v.literal("delayed_over_30_through_60_minutes"),
+  ),
+});
+
+const buybackEvPublicReasonValidator = v.union(
+  v.literal("SOURCE_EVIDENCE_UNAVAILABLE"),
+  v.literal("PRICE_UNAVAILABLE"),
+  v.literal("CURRENCY_UNSUPPORTED"),
+  v.literal("ODDS_UNAVAILABLE"),
+  v.literal("VALUE_UNAVAILABLE"),
+  v.literal("BUYBACK_UNAVAILABLE"),
+  v.literal("SOURCE_DATA_STALE"),
+  v.literal("CALCULATION_UNAVAILABLE"),
+);
+
+const packScoutPublicEvV3Validator = v.union(
+  v.object({
+    status: v.literal("current"),
+    methodVersion: buybackEvMethodVersionValidator,
+    confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    metrics: packScoutPublicEvMetricsV3Validator,
+    confidence: buybackEvConfidenceResultValidator,
+    calculatedAt: timestampValidator,
+    dataAsOf: v.object({
+      state: v.literal("known"),
+      observedAt: timestampValidator,
+    }),
+    sourceAge: packScoutPublicEvSourceAgeV3Validator,
+    expiresAt: timestampValidator,
+  }),
+  v.object({
+    status: v.literal("sold_out_historical"),
+    methodVersion: buybackEvMethodVersionValidator,
+    confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    metrics: packScoutPublicEvMetricsV3Validator,
+    confidence: buybackEvConfidenceResultValidator,
+    calculatedAt: timestampValidator,
+    dataAsOf: v.object({
+      state: v.literal("known"),
+      observedAt: timestampValidator,
+    }),
+    sourceAge: packScoutPublicEvSourceAgeV3Validator,
+    soldOutAt: timestampValidator,
+    expiresAt: v.null(),
+  }),
+  v.object({
+    status: v.literal("unavailable"),
+    methodVersion: buybackEvMethodVersionValidator,
+    confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    metrics: v.null(),
+    confidence: v.null(),
+    calculatedAt: timestampValidator,
+    dataAsOf: v.union(
+      v.object({ state: v.literal("known"), observedAt: timestampValidator }),
+      v.object({
+        state: v.literal("unknown_source_time"),
+        observedAt: v.null(),
+      }),
+    ),
+    reason: buybackEvPublicReasonValidator,
+  }),
+);
+
+const vendorReportedEvV3Validator = v.union(
+  v.object({
+    status: v.literal("available"),
+    sourceMoney: reportedMoneyValidator,
+    usdComparison: v.union(
+      v.object({ status: v.literal("available"), value: usdMoneyValidator }),
+      v.object({
+        status: v.literal("unavailable"),
+        value: v.null(),
+        reason: v.literal("CURRENCY_UNSUPPORTED"),
+      }),
+    ),
+    observedAt: timestampValidator,
+  }),
+  v.object({
+    status: v.literal("unavailable"),
+    sourceMoney: v.null(),
+    usdComparison: v.null(),
+    observedAt: nullableTimestampValidator,
+    reason: v.literal("NOT_REPORTED"),
+  }),
+);
+
+const publicBuybackSummaryV3Validator = v.union(
+  v.object({
+    kind: v.literal("uniform_rate"),
+    rateBasisPoints: v.number(),
+  }),
+  v.object({ kind: v.literal("varies_by_outcome") }),
+  v.object({ kind: v.literal("fixed_or_final_payout") }),
+  v.object({ kind: v.literal("not_documented") }),
+  v.object({ kind: v.literal("unavailable") }),
+);
+
+export const publicRepackDetailV3Validator = v.object({
+  publicRepackId: v.string(),
+  publicVendorId: v.string(),
+  vendorKey: v.string(),
+  vendorDisplayName: v.string(),
+  vendorLogoUrl: nullableTextValidator,
+  name: v.string(),
+  format: v.union(v.literal("repack"), v.literal("gacha")),
+  contentMode: v.union(
+    v.literal("focused"),
+    v.literal("mixed"),
+    v.literal("unknown"),
+  ),
+  categories: v.array(publicRepackCategoryValidator),
+  collectibleTypes: v.array(collectibleTypeValidator),
+  // data_release_v3 details are written only by this feature's own staging
+  // path, so they carry the current availability vocabulary exactly — no
+  // legacy active/disabled values can predate these tables.
+  availability: publicPackAvailabilityValidator,
+  price: priceValidator,
+  buyback: publicBuybackSummaryV3Validator,
+  primaryImage: nullableImageValidator,
+  evEstimates: v.object({
+    packScout: packScoutPublicEvV3Validator,
+    vendorReported: vendorReportedEvV3Validator,
+  }),
+  topChase: v.union(publicRepackChaseValidator, v.null()),
+  contentSummary: v.object({
+    knownCollectibleCount: v.number(),
+    chaseCount: v.number(),
+    categoryCount: v.number(),
+    collectibleTypeCount: v.number(),
+    evidenceCompleteness: v.union(
+      v.literal("complete"),
+      v.literal("partial"),
+      v.literal("unknown"),
+    ),
+    probabilityCoverageBasisPoints: v.union(v.number(), v.null()),
+  }),
+  actionAvailability: v.object({
+    promo: v.boolean(),
+    repackLink: v.boolean(),
+  }),
+  sourceUpdatedAt: timestampValidator,
+  description: nullableTextValidator,
+  actions: v.object({
+    promo: v.optional(promoValidator),
+    repackLink: v.optional(packLinkValidator),
+  }),
+});
+
+export const dataReleaseV3CountsValidator = v.object({
+  categories: v.number(),
+  collectibles: v.number(),
+  repacks: v.number(),
+  chases: v.number(),
+  searchShards: v.number(),
+});
+
+export const dataReleaseV3EntityChainHashesValidator = v.object({
+  categories: sha256Validator,
+  collectibles: sha256Validator,
+  repacks: sha256Validator,
+  chases: sha256Validator,
+});
+
+export const dataReleaseV3PointerValidator = v.object({
+  publicReleaseId: v.string(),
+  releaseFingerprint: sha256Validator,
+  methodVersion: buybackEvMethodVersionValidator,
+  confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+  publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
+  dataAsOf: timestampValidator,
+  completedAt: timestampValidator,
+  counts: dataReleaseV3CountsValidator,
 });
 
 export const providerCatalogSharedConfigurationEpochValidator = v.object({
@@ -673,10 +933,7 @@ export const globalCatalogProviderActiveObservationValidator = v.object({
   latestAffectedSourceHeadSequence: v.string(),
   initialBackfillComplete: v.boolean(),
   affectedDerivationsSettled: v.boolean(),
-  settledSourceFreshness: v.union(
-    v.literal("fresh"),
-    v.literal("delayed"),
-  ),
+  settledSourceFreshness: v.union(v.literal("fresh"), v.literal("delayed")),
   lastSuccessfulObservationAt: timestampValidator,
   staleAt: timestampValidator,
 });
@@ -692,6 +949,16 @@ export const globalCatalogAggregateObservationValidator = v.object({
   staleAt: timestampValidator,
   freshness: v.union(v.literal("fresh"), v.literal("delayed")),
   delayedProviderCount: v.number(),
+});
+
+const retainedEvValueValidator = v.object({
+  estimate: packScoutPublicEvV3Validator,
+  calculationPriceUsdMinor: v.number(),
+  sourcePublicReleaseId: v.string(),
+  latestUnavailableAttempt: v.union(v.object({
+    calculatedAt: timestampValidator,
+    reason: buybackEvPublicReasonValidator,
+  }), v.null()),
 });
 
 export default defineSchema({
@@ -752,15 +1019,12 @@ export default defineSchema({
       "lifecycle",
       "retentionEligibleAt",
     ])
-    .index(
-      "by_platform_lifecycle_retention_public_id",
-      [
-        "platformKey",
-        "lifecycle",
-        "retentionEligibleAt",
-        "publicProviderReleaseId",
-      ],
-    )
+    .index("by_platform_lifecycle_retention_public_id", [
+      "platformKey",
+      "lifecycle",
+      "retentionEligibleAt",
+      "publicProviderReleaseId",
+    ])
     .index("by_lifecycle_and_retention_eligible_at", [
       "lifecycle",
       "retentionEligibleAt",
@@ -786,10 +1050,7 @@ export default defineSchema({
   providerCatalogTerminalReceiptProofs: defineTable({
     releaseId: v.id("providerCatalogReleases"),
     operationId: v.string(),
-    operationKind: v.union(
-      v.literal("finalize"),
-      v.literal("confirmReuse"),
-    ),
+    operationKind: v.union(v.literal("finalize"), v.literal("confirmReuse")),
     requestDigest: sha256Validator,
     platformKey: v.string(),
     publicProviderReleaseId: v.string(),
@@ -955,7 +1216,7 @@ export default defineSchema({
     rowCount: v.number(),
     byteCount: v.number(),
     contentHash: sha256Validator,
-    rows: v.array(repackSearchRowValidator),
+    rows: v.array(storedRepackSearchRowValidator),
   }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
 
   providerCatalogSearchShardProofs: defineTable({
@@ -1261,10 +1522,7 @@ export default defineSchema({
       "signalSetId",
       "publicRepackId",
     ])
-    .index("by_signal_set_id_and_repack_id", [
-      "signalSetId",
-      "repackId",
-    ]),
+    .index("by_signal_set_id_and_repack_id", ["signalSetId", "repackId"]),
 
   repackHeatPublications: defineTable({
     publicationId: v.string(),
@@ -1309,10 +1567,7 @@ export default defineSchema({
     acceptedAt: timestampValidator,
     operationId: v.string(),
   })
-    .index("by_publication_id_and_batch_index", [
-      "publicationId",
-      "batchIndex",
-    ])
+    .index("by_publication_id_and_batch_index", ["publicationId", "batchIndex"])
     .index("by_idempotency_key", ["idempotencyKey"])
     .index("by_manifest_id", ["manifestId"]),
 
@@ -1350,4 +1605,260 @@ export default defineSchema({
     "ownerTokenIdentifier",
     "publicCollectibleId",
   ]),
+
+  // The decision-state index serves the operator review queue (identities in
+  // one decision state, oldest decision first) and the bounded
+  // awaiting-review count. Records that predate the closed beta store no
+  // `access` at all: they sit in that index's undefined segment, ordered by
+  // creation time (their first sign-in), and the queue reads merge them into
+  // awaiting review — which is what absence already means.
+  productUsers: defineTable(productUserDocumentValidator)
+    .index("by_subject", ["subject"])
+    .index("by_last_seen_at", ["lastSeenAt"])
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_access_state_and_access_decided_at", [
+      "access.state",
+      "access.decidedAt",
+    ])
+    // Welcome-dispatch discovery (messaging/007): the `due` segment lists
+    // identities awaiting their one welcome, and the `claimed` segment is
+    // range-scanned by claim expiry so a crashed dispatcher's claims lapse
+    // back into discovery. Records with no marker sit in the undefined
+    // segment and are never scanned.
+    .index("by_welcome_state_and_welcome_claim_expires_at", [
+      "welcome.state",
+      "welcome.claimExpiresAt",
+    ]),
+
+  // The closed-beta allowlist. The identifier indexes serve exact-match
+  // admission (establishment-time and retroactive), uniqueness checks, and
+  // bounded prefix search; the update-time index serves recency-ordered
+  // listing. Uniqueness of a normalized identifier across entries is an
+  // application invariant enforced by the allowlist mutations.
+  betaAllowlistEntries: defineTable(betaAllowlistEntryDocumentValidator)
+    .index("by_email", ["email"])
+    .index("by_wallet_address_key", ["walletAddressKey"])
+    .index("by_updated_at", ["updatedAt"]),
+
+  dataReleaseV3Releases: defineTable({
+    publicReleaseId: v.string(),
+    releaseFingerprint: sha256Validator,
+    // Absent only on pre-cutover releases; new releases require compact EV facts.
+    evFactsRequired: v.optional(v.literal(true)),
+    lifecycle: v.union(
+      v.literal("staging"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
+    methodVersion: buybackEvMethodVersionValidator,
+    confidencePolicyVersion: buybackEvConfidencePolicyVersionValidator,
+    publicEvPolicyVersion: retainedDataReleaseV3PublicEvPolicyVersionValidator,
+    dataAsOf: timestampValidator,
+    contentHash: sha256Validator,
+    searchAlgorithmVersion: v.literal("repack_ev_search_v3"),
+    expectedCounts: dataReleaseV3CountsValidator,
+    expectedEntityChainHashes: dataReleaseV3EntityChainHashesValidator,
+    expectedTopChaseCount: v.number(),
+    expectedBatchCount: v.number(),
+    expectedBatchChainHash: sha256Validator,
+    acceptedCounts: dataReleaseV3CountsValidator,
+    acceptedEntityChainHashes: dataReleaseV3EntityChainHashesValidator,
+    // Two server-derived views of the same quantity. `acceptedTopChaseCount` is
+    // the count *declared* by the staged repack details (how many advertise a
+    // top chase); `acceptedVerifiedTopChaseCount` is the count *verified*
+    // against staged chase rows that canonically match those details. Finalize
+    // requires them to agree, so a release can never advertise a top chase
+    // whose chase row was never staged.
+    //
+    // The verified counter is `v.optional` only to keep the deploy that
+    // introduces it applicable. This table is never deleted from -- retention
+    // is what makes rollback to the previous release possible -- so documents
+    // written before this field existed outlive the deploy, and
+    // `schemaValidation` (on by default) validates them at push time. A
+    // required field would fail `convex/deploy` outright on any environment
+    // that has ever started a v3 release. Every read coalesces the absent
+    // value to 0, which is the fail-safe direction: a legacy in-flight release
+    // that declared a top chase refuses at finalize instead of completing
+    // unverified. `start` always writes the field, so no release created from
+    // this deploy forward can be missing it.
+    acceptedTopChaseCount: v.number(),
+    acceptedVerifiedTopChaseCount: v.optional(v.number()),
+    acceptedBatchCount: v.number(),
+    acceptedBatchChainHash: sha256Validator,
+    acceptedSearchRowCount: v.number(),
+    acceptedSearchRowSetHash: sha256Validator,
+    lastBatchKind: nullableTextValidator,
+    lastRecordKey: nullableTextValidator,
+    // Absent on releases completed before record-update aggregation existed.
+    // New releases start at null and applyBatch derives the maximum source
+    // timestamp from every collectible, repack, and chase it accepts.
+    latestCatalogRecordUpdatedAt: v.optional(nullableTimestampValidator),
+    createdAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+  })
+    .index("by_public_release_id", ["publicReleaseId"])
+    .index("by_release_fingerprint", ["releaseFingerprint"])
+    .index("by_lifecycle", ["lifecycle"]),
+
+  dataReleaseV3Categories: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicCategoryId: v.string(),
+    detail: publicCategoryValidator,
+  }).index("by_release_id_and_public_category_id", [
+    "releaseId",
+    "publicCategoryId",
+  ]),
+
+  dataReleaseV3Collectibles: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicCollectibleId: v.string(),
+    collectibleType: collectibleTypeValidator,
+    normalizedName: v.string(),
+    searchText: v.string(),
+    detail: publicCollectibleValidator,
+  })
+    .index("by_release_id_and_public_collectible_id", [
+      "releaseId",
+      "publicCollectibleId",
+    ])
+    .searchIndex("search_search_text", {
+      searchField: "searchText",
+      filterFields: ["releaseId", "collectibleType"],
+    }),
+
+  dataReleaseV3Repacks: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicRepackId: v.string(),
+    detail: publicRepackDetailV3Validator,
+  }).index("by_release_id_and_public_repack_id", [
+    "releaseId",
+    "publicRepackId",
+  ]),
+
+  dataReleaseV3Chases: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicRepackId: v.string(),
+    publicCollectibleId: v.string(),
+    detail: publicRepackChaseValidator,
+  })
+    .index("by_release_id_and_public_repack_id_and_public_collectible_id", [
+      "releaseId",
+      "publicRepackId",
+      "publicCollectibleId",
+    ])
+    .index("by_release_id_and_public_collectible_id", [
+      "releaseId",
+      "publicCollectibleId",
+    ]),
+
+  dataReleaseV3SearchShards: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    shardNumber: v.number(),
+    rowCount: v.number(),
+    contentHash: sha256Validator,
+    rows: v.array(dataReleaseV3SearchRowValidator),
+  }).index("by_release_id_and_shard_number", ["releaseId", "shardNumber"]),
+
+  dataReleaseV3Operations: defineTable({
+    operationId: v.string(),
+    kind: v.string(),
+    idempotencyKey: v.string(),
+    bodyHash: sha256Validator,
+    publicReleaseId: nullableTextValidator,
+    status: v.literal("completed"),
+    result: v.string(),
+    receiptDigest: sha256Validator,
+    completedAt: timestampValidator,
+    receiptJson: v.string(),
+  })
+    .index("by_operation_id", ["operationId"])
+    .index("by_kind_and_idempotency_key", ["kind", "idempotencyKey"]),
+
+  dataReleaseV3EvFacts: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    availability: publicPackAvailabilityValidator,
+    calculationPriceUsdMinor: v.union(v.number(), v.null()),
+    estimate: packScoutPublicEvV3Validator,
+  }).index("by_release_id_and_public_repack_id", ["releaseId", "publicRepackId"]),
+
+  dataReleaseV3EvFactSets: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    source: v.union(v.literal("staging"), v.literal("backfill")),
+    factsSha256: v.union(sha256Validator, v.null()),
+    status: v.union(v.literal("building"), v.literal("complete")),
+    count: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    lastRequestCursor: v.union(v.string(), v.null()),
+  }).index("by_release_id", ["releaseId"]),
+
+  // Derived history only: immutable release details and publication hashes
+  // remain unchanged. Only the activation transaction advances these rows.
+  dataReleaseV3RetainedEv: defineTable({
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    value: retainedEvValueValidator,
+  }).index("by_vendor_key_and_public_vendor_id_and_public_repack_id", [
+    "vendorKey", "publicVendorId", "publicRepackId",
+  ]),
+
+  dataReleaseV3EvRetentionTransitions: defineTable({
+    operationId: v.string(),
+    fromReleaseId: v.union(v.id("dataReleaseV3Releases"), v.null()),
+    toReleaseId: v.id("dataReleaseV3Releases"),
+    changeCount: v.number(),
+    changesSha256: v.string(),
+  }).index("by_from_release_id", ["fromReleaseId"])
+    .index("by_to_release_id", ["toReleaseId"]),
+
+  dataReleaseV3EvRetentionChanges: defineTable({
+    transitionId: v.id("dataReleaseV3EvRetentionTransitions"),
+    vendorKey: v.string(),
+    publicVendorId: v.string(),
+    publicRepackId: v.string(),
+    before: v.union(retainedEvValueValidator, v.null()),
+    after: v.union(retainedEvValueValidator, v.null()),
+  }).index("by_transition_id", ["transitionId"]),
+
+  // Provider operations change independently of an immutable catalog release.
+  // Keep their high-churn observation state in a dedicated table so freshness
+  // updates never rewrite stable release documents or their active pointer.
+  dataReleaseV3ProviderObservations: defineTable({
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicReleaseId: v.string(),
+    releaseFingerprint: sha256Validator,
+    publicVendorId: v.string(),
+    vendorKey: v.string(),
+    observationSequence: v.number(),
+    observedAt: timestampValidator,
+    freshThrough: timestampValidator,
+    lastHeadReachedAt: nullableTimestampValidator,
+    sourceHeadSequence: v.string(),
+    settledSequence: v.string(),
+    sourceLifecycle: dataReleaseV3ProviderSourceLifecycleValidator,
+    connectionState: dataReleaseV3ProviderHealthStateValidator,
+    qualityState: dataReleaseV3ProviderHealthStateValidator,
+    releaseAlignment: dataReleaseV3ProviderReleaseAlignmentValidator,
+  }).index("by_release_id_and_public_vendor_id", [
+    "releaseId",
+    "publicVendorId",
+  ]),
+  activeDataReleaseV3State: defineTable({
+    key: v.literal("singleton"),
+    generation: v.number(),
+    activeReleaseId: v.union(v.id("dataReleaseV3Releases"), v.null()),
+    previousReleaseId: v.union(v.id("dataReleaseV3Releases"), v.null()),
+    activeRelease: v.union(dataReleaseV3PointerValidator, v.null()),
+    previousRelease: v.union(dataReleaseV3PointerValidator, v.null()),
+    terminalOperationId: v.union(v.string(), v.null()),
+    // Absent only on pointers activated before derived EV retention existed.
+    // The next successful activation seeds that exact prior public release.
+    retainedEvTransitionId: v.optional(v.id("dataReleaseV3EvRetentionTransitions")),
+    retainedEvTransitionDirection: v.optional(v.union(v.literal("forward"), v.literal("reverse"))),
+    updatedAt: timestampValidator,
+  }).index("by_key", ["key"]),
 });

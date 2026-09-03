@@ -20,10 +20,22 @@ export interface ProtectedPayloadRetentionRunner {
   }): Promise<RetentionBatchResult>;
 }
 
+/**
+ * A fleet-scoped record kind the retention cycle ages out alongside protected
+ * payloads. Each pruner owns its own retention window and deletes at most
+ * `limit` records per cycle so cleanup stays bounded.
+ */
+export interface RetentionRecordPruner {
+  readonly kind: string;
+  readonly retentionMs: number;
+  prune(input: { cutoffAt: Date; limit: number }): Promise<number>;
+}
+
 export interface ProtectedPayloadRetentionCycleConfig {
   readonly batchSize: number;
   readonly maxBatchesPerCycle: number;
   readonly organizationDiscoveryLimit: number;
+  readonly pruners?: readonly RetentionRecordPruner[];
 }
 
 export interface ProtectedPayloadRetentionCycleResult {
@@ -36,6 +48,8 @@ export interface ProtectedPayloadRetentionCycleResult {
   readonly knownRemaining: number;
   readonly deferredOrganizations: number;
   readonly capReached: boolean;
+  readonly prunedRecords: number;
+  readonly prunedFailures: number;
 }
 
 const uuidPattern =
@@ -61,6 +75,15 @@ export class ProtectedPayloadRetentionCoordinator {
       config.organizationDiscoveryLimit > 1_000
     ) {
       throw new RangeError("Retention cycle configuration is invalid.");
+    }
+    for (const pruner of config.pruners ?? []) {
+      if (
+        !Number.isInteger(pruner.retentionMs) ||
+        pruner.retentionMs < 1 ||
+        !/^[a-z][a-z0-9_]{0,63}$/.test(pruner.kind)
+      ) {
+        throw new RangeError("Retention cycle configuration is invalid.");
+      }
     }
   }
 
@@ -118,6 +141,8 @@ export class ProtectedPayloadRetentionCoordinator {
       }
     }
 
+    const pruned = await this.prune(cutoffAt);
+
     return {
       cutoffAt: cutoffAt.toISOString(),
       discoveredOrganizations,
@@ -132,6 +157,30 @@ export class ProtectedPayloadRetentionCoordinator {
       deferredOrganizations: new Set(queue).size,
       capReached:
         batchesRun === this.config.maxBatchesPerCycle && queue.length > 0,
+      ...pruned,
     };
+  }
+
+  /**
+   * Ages out the fleet-scoped record kinds registered with this cycle. A
+   * failing pruner is counted and skipped so it cannot stop protected-payload
+   * cleanup or the next kind in line.
+   */
+  private async prune(
+    now: Date,
+  ): Promise<{ prunedRecords: number; prunedFailures: number }> {
+    let prunedRecords = 0;
+    let prunedFailures = 0;
+    for (const pruner of this.config.pruners ?? []) {
+      try {
+        prunedRecords += await pruner.prune({
+          cutoffAt: new Date(now.getTime() - pruner.retentionMs),
+          limit: this.config.batchSize,
+        });
+      } catch {
+        prunedFailures += 1;
+      }
+    }
+    return { prunedRecords, prunedFailures };
   }
 }

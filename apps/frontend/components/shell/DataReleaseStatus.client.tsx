@@ -8,8 +8,10 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   presentDataReleaseStatus,
+  recordUpdateRefreshIntervalMilliseconds,
   DataReleaseStatusValue,
 } from "@/lib/data-release-status.client";
 
@@ -35,12 +37,19 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
   const context = useContext(DataReleaseStatusContext);
   const state = status.state;
   const updatedAt = "updatedAt" in status ? status.updatedAt : undefined;
-  const staleAt = "staleAt" in status ? status.staleAt : undefined;
+  const evaluatedAt = "evaluatedAt" in status ? status.evaluatedAt : undefined;
   const dataSource = "dataSource" in status ? status.dataSource : undefined;
 
   useEffect(() => {
     context?.setStatus(status);
-  }, [context, dataSource, staleAt, state, status, updatedAt]);
+  }, [
+    context,
+    dataSource,
+    evaluatedAt,
+    state,
+    status,
+    updatedAt,
+  ]);
 
   return null;
 }
@@ -48,28 +57,41 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
 export function DataReleaseStatus() {
   const context = useContext(DataReleaseStatusContext);
   const status = context?.status ?? { state: "loading" };
-  const [clockRevision, setClockRevision] = useState(0);
-  const staleAt = "staleAt" in status ? Date.parse(status.staleAt) : Number.NaN;
+  const router = useRouter();
+  const [clock, setClock] = useState<Readonly<{
+    evaluatedAt: string | null;
+    elapsedMilliseconds: number;
+  }>>({ evaluatedAt: null, elapsedMilliseconds: 0 });
+  const refreshInterval = recordUpdateRefreshIntervalMilliseconds(status);
+  const evaluatedAt = "evaluatedAt" in status ? status.evaluatedAt : null;
+  const updatedAt = "updatedAt" in status ? status.updatedAt : null;
 
   useEffect(() => {
-    if (
-      status.state !== "fresh" ||
-      !Number.isFinite(staleAt) ||
-      Date.now() >= staleAt
-    ) return;
-    const maximumDelay = 2_147_483_647;
-    const delay = Math.min(
-      maximumDelay,
-      Math.max(0, staleAt - Date.now() + 25),
-    );
-    const timer = window.setTimeout(
-      () => setClockRevision((revision) => revision + 1),
-      delay,
-    );
-    return () => window.clearTimeout(timer);
-  }, [clockRevision, staleAt, status.state]);
+    if (refreshInterval === null) return;
+    const startedAt = window.performance.now();
+    const timer = window.setInterval(() => {
+      if (evaluatedAt !== null) {
+        setClock({
+          evaluatedAt,
+          elapsedMilliseconds: Math.max(0, window.performance.now() - startedAt),
+        });
+      }
+      router.refresh();
+    }, refreshInterval);
+    return () => window.clearInterval(timer);
+  }, [evaluatedAt, refreshInterval, router, updatedAt]);
 
-  const presentation = presentDataReleaseStatus(status);
+  const trustedPresentationTime =
+    evaluatedAt !== null
+    ? Date.parse(evaluatedAt) +
+      (clock.evaluatedAt === evaluatedAt ? clock.elapsedMilliseconds : 0)
+    : Number.NaN;
+  const presentation = presentDataReleaseStatus(
+    status,
+    Number.isFinite(trustedPresentationTime)
+      ? trustedPresentationTime
+      : 0,
+  );
 
   return (
     <div

@@ -10,10 +10,17 @@ import {
 import {
   PRICE_FILTER_MAX_DOLLARS,
   PRICE_FILTER_MIN_DOLLARS,
+  PRICE_FILTER_SLIDER_MAX_INDEX,
+  PRICE_FILTER_SLIDER_MIN_INDEX,
   categoryFacetRows,
   clampPriceFilter,
   closerPriceThumb,
+  focusPriceSliderThumb,
   formatFilterPrice,
+  priceSliderIndexForBound,
+  priceSliderIndexFromKeyboard,
+  priceSliderPercent,
+  priceSliderValueFromIndex,
   roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
@@ -70,11 +77,11 @@ function ClearFiltersIcon() {
   return (
     <svg aria-hidden="true" fill="none" height="14" viewBox="0 0 16 16" width="14">
       <path
-        d="M3.2 4.3h9.6M6.2 2.5h3.6M5.1 6.2v5.1M8 6.2v5.1M10.9 6.2v5.1M4.3 4.3l.6 8.5h6.2l.6-8.5"
+        d="M4 4l8 8M12 4 4 12"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="1.4"
+        strokeWidth="1.7"
       />
     </svg>
   );
@@ -95,7 +102,7 @@ function draftStatusMessage(
   changed: boolean,
   accepted: PublicRepackFilters,
 ): string {
-  if (!valid) return "Enter a valid $10–$12,000 range.";
+  if (!valid) return "Enter a valid $1–$12,000 range.";
   if (changed) return "Filters have unapplied changes.";
   if (accepted.price.mode === "full") {
     return "Full price range includes repacks without a USD comparison price.";
@@ -122,6 +129,9 @@ function CatalogFiltersDraft({
   const [minimum, setMinimum] = useState(dollars(accepted.price.minMinor));
   const [maximum, setMaximum] = useState(dollars(accepted.price.maxMinor));
   const [activeThumb, setActiveThumb] = useState<"min" | "max">("max");
+  const draggedThumbRef = useRef<"min" | "max" | null>(null);
+  const minimumRangeRef = useRef<HTMLInputElement>(null);
+  const maximumRangeRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -183,16 +193,8 @@ function CatalogFiltersDraft({
     () => categoryFacetRows(facets.categories),
     [facets.categories],
   );
-  const minPercent = valid
-    ? ((minimum - PRICE_FILTER_MIN_DOLLARS) /
-        (PRICE_FILTER_MAX_DOLLARS - PRICE_FILTER_MIN_DOLLARS)) *
-      100
-    : 0;
-  const maxPercent = valid
-    ? ((maximum - PRICE_FILTER_MIN_DOLLARS) /
-        (PRICE_FILTER_MAX_DOLLARS - PRICE_FILTER_MIN_DOLLARS)) *
-      100
-    : 100;
+  const minPercent = valid ? priceSliderPercent(minimum) : 0;
+  const maxPercent = valid ? priceSliderPercent(maximum) : 100;
 
   function toggle(
     key: string,
@@ -206,16 +208,74 @@ function CatalogFiltersDraft({
     );
   }
 
+  function updateSliderThumb(
+    thumb: "min" | "max",
+    clientX: number,
+    track: DOMRect,
+  ) {
+    const pointerValue = sliderValueFromPointer(clientX, track.left, track.width);
+    if (thumb === "min") {
+      setMinimum(clampPriceFilter(pointerValue, "min", maximum));
+    } else {
+      setMaximum(clampPriceFilter(pointerValue, "max", minimum));
+    }
+  }
+
   function handleSliderPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.target instanceof HTMLInputElement) return;
     const track = event.currentTarget.getBoundingClientRect();
     const pointerValue = sliderValueFromPointer(event.clientX, track.left, track.width);
-    setActiveThumb(
-      closerPriceThumb(
-        pointerValue,
-        Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS,
-        Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS,
-      ),
+    const thumb = closerPriceThumb(
+      pointerValue,
+      Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS,
+      Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS,
     );
+    focusPriceSliderThumb(thumb, minimumRangeRef.current, maximumRangeRef.current);
+    draggedThumbRef.current = thumb;
+    setActiveThumb(thumb);
+    updateSliderThumb(thumb, event.clientX, track);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function handleSliderPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const thumb = draggedThumbRef.current;
+    if (thumb === null) return;
+    updateSliderThumb(
+      thumb,
+      event.clientX,
+      event.currentTarget.getBoundingClientRect(),
+    );
+    event.preventDefault();
+  }
+
+  function handleSliderPointerEnd(event: React.PointerEvent<HTMLDivElement>) {
+    if (draggedThumbRef.current === null) return;
+    draggedThumbRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleSliderKeyDown(
+    thumb: "min" | "max",
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) {
+    const currentValue = thumb === "min" ? minimum : maximum;
+    const nextIndex = priceSliderIndexFromKeyboard(
+      event.key,
+      priceSliderIndexForBound(currentValue, thumb),
+    );
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    setActiveThumb(thumb);
+    const nextValue = priceSliderValueFromIndex(nextIndex);
+    if (thumb === "min") {
+      setMinimum(clampPriceFilter(nextValue, "min", maximum));
+    } else {
+      setMaximum(clampPriceFilter(nextValue, "max", minimum));
+    }
   }
 
   return (
@@ -296,24 +356,34 @@ function CatalogFiltersDraft({
           <div className={styles.sliderRow}>
             <div
               className={styles.slider}
+              onPointerCancel={handleSliderPointerEnd}
               onPointerDown={handleSliderPointerDown}
+              onPointerMove={handleSliderPointerMove}
+              onPointerUp={handleSliderPointerEnd}
             >
               <div aria-hidden="true" className={styles.sliderTrack} />
               <input
+                aria-invalid={!valid}
                 aria-label="Minimum repack price"
                 aria-valuetext={formatFilterPrice(minimum)}
                 className={styles.minRange}
                 data-active={activeThumb === "min" ? "true" : undefined}
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
+                max={PRICE_FILTER_SLIDER_MAX_INDEX}
+                min={PRICE_FILTER_SLIDER_MIN_INDEX}
+                onKeyDown={(event) => handleSliderKeyDown("min", event)}
                 onPointerDown={() => setActiveThumb("min")}
+                ref={minimumRangeRef}
                 onChange={(event) => {
                   setActiveThumb("min");
-                  setMinimum(clampPriceFilter(event.currentTarget.valueAsNumber, "min", maximum));
+                  setMinimum(clampPriceFilter(
+                    priceSliderValueFromIndex(event.currentTarget.valueAsNumber),
+                    "min",
+                    maximum,
+                  ));
                 }}
                 step="1"
                 type="range"
-                value={Number.isFinite(minimum) ? minimum : PRICE_FILTER_MIN_DOLLARS}
+                value={priceSliderIndexForBound(minimum, "min")}
               />
               <input
                 aria-invalid={!valid}
@@ -321,16 +391,22 @@ function CatalogFiltersDraft({
                 aria-valuetext={formatFilterPrice(maximum)}
                 className={styles.maxRange}
                 data-active={activeThumb === "max" ? "true" : undefined}
-                max={PRICE_FILTER_MAX_DOLLARS}
-                min={PRICE_FILTER_MIN_DOLLARS}
+                max={PRICE_FILTER_SLIDER_MAX_INDEX}
+                min={PRICE_FILTER_SLIDER_MIN_INDEX}
+                onKeyDown={(event) => handleSliderKeyDown("max", event)}
                 onPointerDown={() => setActiveThumb("max")}
+                ref={maximumRangeRef}
                 onChange={(event) => {
                   setActiveThumb("max");
-                  setMaximum(clampPriceFilter(event.currentTarget.valueAsNumber, "max", minimum));
+                  setMaximum(clampPriceFilter(
+                    priceSliderValueFromIndex(event.currentTarget.valueAsNumber),
+                    "max",
+                    minimum,
+                  ));
                 }}
                 step="1"
                 type="range"
-                value={Number.isFinite(maximum) ? maximum : PRICE_FILTER_MAX_DOLLARS}
+                value={priceSliderIndexForBound(maximum, "max")}
               />
             </div>
             <div className={styles.priceFields}>
@@ -338,6 +414,7 @@ function CatalogFiltersDraft({
                 <span className="sr-only">Minimum repack price in dollars</span>
                 <span aria-hidden="true">$</span>
                 <input
+                  aria-invalid={!valid}
                   inputMode="numeric"
                   max={PRICE_FILTER_MAX_DOLLARS}
                   min={PRICE_FILTER_MIN_DOLLARS}
@@ -400,11 +477,13 @@ function CatalogFiltersDraft({
             <input
               checked={availability === "all"}
               onChange={(event) =>
-                setAvailability(event.currentTarget.checked ? "all" : "active")
+                setAvailability(event.currentTarget.checked ? "all" : "available")
               }
               type="checkbox"
             />
-            <span>Include sold out</span>
+            <span>
+              Include packs labeled Unavailable, Availability unknown, or Sold out
+            </span>
           </label>
           <p
             aria-live="polite"

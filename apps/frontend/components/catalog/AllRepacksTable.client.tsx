@@ -3,21 +3,22 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
 import type {
-  ListPublicRepacksPage,
   PublicRepackChase,
   PublicRepackSort,
-  PublicRepackViewSummary,
+  PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
-  formatMoneyMinorUnits,
-  presentBuyback,
-  presentPackScoutEv,
+  presentBuybackSummaryV3,
+  presentPackScoutEvV3,
+  presentRepackPrice,
   presentTopChaseValue,
-  presentVendorReportedEv,
-} from "@/lib/metric-presentation";
+  presentVendorReportedEvV3,
+} from "@/lib/packscout-ev-presentation";
+import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   ALL_REPACKS_HEADERS,
   catalogHeaderAriaSort,
@@ -25,20 +26,23 @@ import {
   publicRowActions,
   type CatalogSortDirection,
 } from "@/lib/all-repacks-table";
+import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
+import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
 type AllRepacksTableProps = Readonly<{
-  page: ListPublicRepacksPage;
+  page: ListPublicRepacksPageV3;
   selectedPublicRepackId: string | null;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
   onSort: (sort: PublicRepackSort, direction: CatalogSortDirection) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  repackHrefById: ReadonlyMap<string, string>;
   controls?: ReactNode;
 }>;
 
-function RepackImage({ repack }: { readonly repack: PublicRepackViewSummary }) {
+function RepackImage({ repack }: { readonly repack: PublicRepackViewSummaryV3 }) {
   return repack.primaryImage ? (
     <Image
       alt={repack.primaryImage.alt}
@@ -67,25 +71,31 @@ function RepackRow({
   onSelect,
   onCopyPromo,
   onOpenRepack,
+  repackHref,
   desiredChase,
   desiredSearchActive,
 }: Readonly<{
-  repack: PublicRepackViewSummary;
+  repack: PublicRepackViewSummaryV3;
   selected: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  repackHref: string | null;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
 }>) {
-  const estimate = presentPackScoutEv({
-    repackPrice: repack.price.usdComparison,
-    estimate: repack.evEstimates.packScout,
+  const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
+  const estimate = presentPackScoutEvV3({
+    estimate: boundEstimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
   });
-  const vendorEstimate = presentVendorReportedEv(
+  const vendorEstimate = presentVendorReportedEvV3(
     repack.evEstimates.vendorReported,
   );
-  const buyback = presentBuyback(repack.buyback);
+  const buyback = presentBuybackSummaryV3(repack.buyback);
+  const packPrice = presentRepackPrice(repack.price);
   const displayedChase = desiredSearchActive ? desiredChase : repack.topChase;
   const displayedChaseValue = presentTopChaseValue(
     displayedChase,
@@ -95,10 +105,7 @@ function RepackRow({
     ? presentChaseMatchEvidence(desiredChase)
     : null;
   const actions = publicRowActions(repack);
-  const displayPrice = repack.price.displayMoney ??
-    (repack.price.usdComparison.status === "available"
-      ? repack.price.usdComparison.value
-      : null);
+  const availability = presentPackAvailability(repack.availability);
 
   return (
     <tr className={styles.row} data-selected={selected ? "true" : "false"}>
@@ -114,21 +121,30 @@ function RepackRow({
           <RepackImage repack={repack} />
           <span className={styles.packIdentity}>
             <span className={styles.packName}>{repack.name}</span>
+            {estimate.simulatedLabel ? (
+              <span className={styles.secondaryBadge}>{estimate.simulatedLabel}</span>
+            ) : null}
             {repack.contentMode === "mixed" ? (
-              <span className={styles.soldOut}>Mixed content</span>
+              <span className={styles.secondaryBadge}>Mixed content</span>
             ) : null}
-            {repack.availability === "sold_out" ? (
-              <span className={styles.soldOut}>Sold out</span>
-            ) : null}
+            <span
+              className={styles.availabilityBadge}
+              data-state={repack.availability}
+            >
+              {availability.label}
+              <span className="sr-only">. {availability.description}</span>
+            </span>
           </span>
         </button>
       </td>
       <td className={styles.numeric}>
-        {displayPrice ? (
-          formatMoneyMinorUnits(displayPrice)
-        ) : (
-          <PlainUnavailable reason="Repack price is not available." />
-        )}
+        <MetricValue compact metric={packPrice} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+      </td>
+      <td className={styles.numeric}>
+        <MetricValue compact metric={estimate.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+      </td>
+      <td className={styles.numeric}>
+        <MetricValue compact metric={estimate.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={estimate.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
@@ -137,18 +153,18 @@ function RepackRow({
         <MetricValue compact metric={estimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <span title={estimate.confidence.accessibleLabel}>
-          {estimate.confidence.displayValue}
-        </span>
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={vendorEstimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <CatalogConfidenceEvidence
+          estimate={estimate}
+          providerHealth={repack.providerHealth}
+          repackName={repack.name}
+        />
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.grossEv} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={vendorEstimate.usdComparison} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <span className={styles.chaseEvidence}>{vendorEstimate.sourceNote}</span>
       </td>
       <td>
         {displayedChase ? (
@@ -181,7 +197,17 @@ function RepackRow({
         )}
       </td>
       <td>
-        {actions.repackLink ? (
+        {actions.repackLink && repackHref ? (
+          <a
+            className={styles.inlineAction}
+            href={repackHref}
+            onClick={() => onOpenRepack(repack.publicRepackId)}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Open repack <span aria-hidden="true">↗</span>
+          </a>
+        ) : actions.repackLink ? (
           <button className={styles.inlineAction} onClick={() => onOpenRepack(repack.publicRepackId)} type="button">
             Open repack <span aria-hidden="true">↗</span>
           </button>
@@ -200,6 +226,7 @@ export function AllRepacksTable({
   onSort,
   onCopyPromo,
   onOpenRepack,
+  repackHrefById,
   controls,
 }: AllRepacksTableProps) {
   const { activeQuery } = page;
@@ -228,7 +255,7 @@ export function AllRepacksTable({
           <p className={styles.eyebrow} id={contextId}>
             {desiredCollectibleIdentity
               ? `Exact chase matches · ${desiredCollectibleIdentity}`
-              : "Current repack data"}
+              : "Published repack data"}
           </p>
           <h2 className={styles.title} id="all-repacks-table-title">All repacks</h2>
         </div>
@@ -307,6 +334,7 @@ export function AllRepacksTable({
                 onOpenRepack={onOpenRepack}
                 onSelect={onSelect}
                 repack={repack}
+                repackHref={repackHrefById.get(repack.publicRepackId) ?? null}
                 selected={repack.publicRepackId === selectedPublicRepackId}
               />
             ))}

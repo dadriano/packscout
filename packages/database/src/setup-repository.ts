@@ -31,6 +31,7 @@ export class PipelineSetupRepository {
     organizationId: string;
     platformKey: string;
     displayName: string;
+    state?: "draft" | "active";
     createdAt?: Date;
   }): Promise<string> {
     const created = await this.database.provider_sources.create({
@@ -39,6 +40,7 @@ export class PipelineSetupRepository {
         organization_id: input.organizationId,
         platform_key: input.platformKey,
         display_name: input.displayName,
+        state: input.state,
         created_at: input.createdAt,
         updated_at: input.createdAt,
       },

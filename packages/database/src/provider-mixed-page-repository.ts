@@ -1,0 +1,472 @@
+import { applyProviderFactBatch, isProviderFactRecord, PROVIDER_FACT_BATCH_SIZE, type ProviderFactBatchOutcome } from "./provider-fact-batch-repository.ts";
+import {
+  applyProviderCollectibleBatch, isProviderCollectibleUpsert, PROVIDER_COLLECTIBLE_BATCH_SIZE,
+} from "./provider-collectible-batch-repository.ts";
+import { providerBatchRecordConstraint } from "./provider-canonical-batch-constraint.ts";
+import { randomUUID } from "node:crypto";
+import { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
+import {
+  ProviderCanonicalImmutableFactConflictError,
+  ProviderCanonicalInputError,
+  ProviderCanonicalRetiredError,
+  ProviderCanonicalWriteConflictError,
+  type CanonicalJsonValue,
+} from "./provider-canonical-contract.ts";
+import { createProviderCanonicalTransaction } from "./provider-canonical-repository.ts";
+import type {
+  ProviderPrismaClient,
+  ProviderTransactionClient,
+} from "./provider-database.ts";
+import {
+  persistProviderMixedPageQuarantines, readExistingSourceQuarantineKeys, sourceQuarantineDetails,
+  type ProviderMixedPageQuarantineDraft as QuarantineDraft,
+} from "./provider-mixed-page-quarantine.ts";
+import { runProviderPageTransaction } from "./provider-page-transaction.ts";
+import {
+  type ProviderMixedPageRecord,
+  PROVIDER_MIXED_PAGE_MAX_QUARANTINES,
+  ProviderMixedPageContractError,
+  providerMixedPageCanonicalBytes,
+  requireProviderMixedPageWorkerId,
+  validateProviderMixedPage,
+} from "./provider-mixed-page-contract.ts";
+import {
+  applyProviderMixedPageRecord,
+  ProviderMixedCandidateError,
+} from "./provider-mixed-page-candidates.ts";
+import {
+  lockProviderWorkerLease,
+  providerWorkerLeaseDatabaseNow,
+  providerWorkerLeaseIsLive,
+  setProviderImportLeaseContext,
+} from "./provider-worker-lease-repository.ts";
+
+const RECORD_LOCAL_PRISMA_CODES = new Set([
+  "P2000", "P2002", "P2003", "P2004", "P2005", "P2006", "P2007",
+  "P2011", "P2012", "P2013", "P2014", "P2019", "P2023", "P2025",
+]);
+
+export interface ProviderMixedPageCounts {
+  readonly records: number;
+  readonly catalog: number;
+  readonly pulls: number;
+  readonly marketEvents: number;
+  readonly accepted: number;
+  readonly duplicate: number;
+  readonly quarantined: number;
+  readonly materialChanges: number;
+}
+
+export interface ProviderMixedPageCommittedResult {
+  readonly kind: "committed" | "replayed";
+  readonly pageId: string;
+  readonly runId: string;
+  readonly pageNumber: number;
+  readonly resultingCursorFingerprint: string | null;
+  readonly reachedHead: boolean;
+  readonly counts: ProviderMixedPageCounts;
+  readonly quarantineIds: readonly string[];
+}
+
+export type CommitProviderMixedPageResult = ProviderMixedPageCommittedResult | {
+  readonly kind:
+    | "immutable_conflict"
+    | "provider_mismatch"
+    | "config_mismatch"
+    | "page_number_conflict"
+    | "cursor_conflict"
+    | "lease_lost"
+    | "run_not_running"
+    | "runtime_not_running";
+};
+
+interface RunRow {
+  readonly id: string;
+  readonly state: "queued" | "running" | "succeeded" | "incomplete" | "failed";
+  readonly config_version_id: string;
+  readonly config_version_number: bigint;
+  readonly worker_fence: bigint;
+  readonly page_count: number;
+  readonly reached_source_head: boolean;
+}
+
+interface RuntimeRow {
+  readonly central_provider_id: string;
+  readonly operating_state: "idle" | "running" | "paused" | "stopped" | "error";
+  readonly source_cursor: ProviderPrisma.JsonValue | null;
+  readonly source_cursor_hash: string | null;
+}
+
+interface PriorPageRow {
+  readonly id: string;
+  readonly provider_run_id: string;
+  readonly page_number: number;
+  readonly contract_version: string;
+  readonly requested_cursor: ProviderPrisma.JsonValue | null;
+  readonly requested_cursor_hash: string | null;
+  readonly next_cursor: ProviderPrisma.JsonValue | null;
+  readonly next_cursor_hash: string | null;
+  readonly continuation: "more" | "head";
+  readonly response_digest: string;
+  readonly record_count: number;
+  readonly catalog_record_count: number;
+  readonly pull_record_count: number;
+  readonly market_event_record_count: number;
+  readonly accepted_count: number;
+  readonly duplicate_count: number;
+  readonly quarantined_count: number;
+  readonly material_change_count: number;
+}
+
+function jsonInput(value: CanonicalJsonValue | null): ProviderPrisma.InputJsonValue | typeof ProviderPrisma.DbNull {
+  return value === null ? ProviderPrisma.DbNull : value as ProviderPrisma.InputJsonValue;
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  return providerMixedPageCanonicalBytes(left).equals(providerMixedPageCanonicalBytes(right));
+}
+
+async function lockRun(transaction: ProviderTransactionClient, runId: string): Promise<RunRow | null> {
+  const [row] = await transaction.$queryRaw<RunRow[]>(ProviderPrisma.sql`
+    select id, state, config_version_id, config_version_number, worker_fence,
+           page_count, reached_source_head
+    from provider_runs where id = cast(${runId} as uuid) for update
+  `);
+  return row ?? null;
+}
+
+async function lockRuntime(transaction: ProviderTransactionClient): Promise<RuntimeRow> {
+  const [row] = await transaction.$queryRaw<RuntimeRow[]>(ProviderPrisma.sql`
+    select central_provider_id, operating_state, source_cursor, source_cursor_hash
+    from provider_runtime where singleton_key = true for update
+  `);
+  if (!row) throw new Error("Provider runtime is not initialized.");
+  return row;
+}
+
+function countsFromPage(page: PriorPageRow): ProviderMixedPageCounts {
+  return {
+    records: page.record_count,
+    catalog: page.catalog_record_count,
+    pulls: page.pull_record_count,
+    marketEvents: page.market_event_record_count,
+    accepted: page.accepted_count,
+    duplicate: page.duplicate_count,
+    quarantined: page.quarantined_count,
+    materialChanges: page.material_change_count,
+  };
+}
+
+function knownRecordFailure(error: unknown): {
+  readonly reasonCode: string;
+  readonly fieldPath: string | null;
+} | null {
+  if (error instanceof ProviderMixedCandidateError) {
+    return { reasonCode: error.code, fieldPath: error.fieldPath };
+  }
+  if (error instanceof ProviderCanonicalInputError) {
+    return { reasonCode: error.code, fieldPath: null };
+  }
+  if (error instanceof ProviderCanonicalWriteConflictError) {
+    return { reasonCode: error.code, fieldPath: null };
+  }
+  if (error instanceof ProviderCanonicalRetiredError) {
+    return { reasonCode: error.code, fieldPath: null };
+  }
+  if (error instanceof ProviderCanonicalImmutableFactConflictError) {
+    return { reasonCode: error.code, fieldPath: null };
+  }
+  if (
+    error instanceof ProviderPrisma.PrismaClientKnownRequestError
+    && RECORD_LOCAL_PRISMA_CODES.has(error.code)
+  ) return { reasonCode: "CANONICAL_CONSTRAINT_FAILED", fieldPath: null };
+  if (error instanceof ProviderPrisma.PrismaClientValidationError) {
+    return { reasonCode: "CANONICAL_INPUT_INVALID", fieldPath: null };
+  }
+  return null;
+}
+
+async function applyCanonicalChunk(transaction: ProviderTransactionClient,
+  records: readonly ProviderMixedPageRecord[]): Promise<readonly ProviderFactBatchOutcome[] | null> {
+  await transaction.$executeRawUnsafe("SAVEPOINT packscout_canonical_chunk");
+  try {
+    const result = isProviderFactRecord(records[0]!)
+      ? await applyProviderFactBatch(transaction, records)
+      : await applyProviderCollectibleBatch(transaction, records);
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_canonical_chunk");
+    return result;
+  } catch (error) {
+    if (knownRecordFailure(error) === null && !providerBatchRecordConstraint(error)) throw error;
+    await transaction.$executeRawUnsafe("ROLLBACK TO SAVEPOINT packscout_canonical_chunk");
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_canonical_chunk");
+    return null;
+  }
+}
+
+async function applyRecordWithSavepoint(
+  transaction: ProviderTransactionClient,
+  record: ProviderMixedPageRecord,
+  sourceQuarantineKeys: Set<string>,
+): Promise<
+  | { readonly kind: "accepted" | "duplicate"; readonly materialChange: boolean }
+  | { readonly kind: "quarantined"; readonly draft: QuarantineDraft }
+> {
+  if (record.disposition === "quarantine") {
+    const details = sourceQuarantineDetails(record);
+    if (sourceQuarantineKeys.has(details.sourceRecordKey)) {
+      return { kind: "duplicate", materialChange: false };
+    }
+    sourceQuarantineKeys.add(details.sourceRecordKey);
+    return {
+      kind: "quarantined",
+      draft: {
+        id: randomUUID(),
+        record,
+        reasonCode: details.reasonCode,
+        fieldPath: details.fieldPath,
+      },
+    };
+  }
+  await transaction.$executeRawUnsafe("SAVEPOINT packscout_mixed_record");
+  try {
+    const result = await applyProviderMixedPageRecord(
+      transaction,
+      createProviderCanonicalTransaction(transaction),
+      record,
+    );
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_mixed_record");
+    return {
+      kind: result.duplicate ? "duplicate" : "accepted",
+      materialChange: result.materialChange,
+    };
+  } catch (error) {
+    const failure = knownRecordFailure(error);
+    if (failure === null) throw error;
+    await transaction.$executeRawUnsafe("ROLLBACK TO SAVEPOINT packscout_mixed_record");
+    await transaction.$executeRawUnsafe("RELEASE SAVEPOINT packscout_mixed_record");
+    return {
+      kind: "quarantined",
+      draft: {
+        id: randomUUID(),
+        record,
+        reasonCode: failure.reasonCode,
+        fieldPath: failure.fieldPath,
+      },
+    };
+  }
+}
+function sameReplay(prior: PriorPageRow, page: ReturnType<typeof validateProviderMixedPage>): boolean {
+  return prior.provider_run_id === page.runId
+    && prior.id === page.pageId
+    && prior.page_number === page.pageNumber
+    && prior.contract_version === page.contractVersion
+    && jsonEqual(prior.requested_cursor, page.inputCursor)
+    && prior.requested_cursor_hash === page.inputCursorFingerprint
+    && jsonEqual(prior.next_cursor, page.nextCursor)
+    && prior.next_cursor_hash === page.nextCursorFingerprint
+    && prior.continuation === page.continuation
+    && prior.response_digest === page.responseDigest;
+}
+
+async function replayResult(
+  transaction: ProviderTransactionClient,
+  prior: PriorPageRow,
+): Promise<ProviderMixedPageCommittedResult> {
+  const quarantines = await transaction.quarantine_records.findMany({
+    where: { provider_run_page_id: prior.id },
+    orderBy: [{ record_index: "asc" }, { id: "asc" }],
+    select: { id: true },
+  });
+  return {
+    kind: "replayed",
+    pageId: prior.id,
+    runId: prior.provider_run_id,
+    pageNumber: prior.page_number,
+    resultingCursorFingerprint: prior.next_cursor_hash,
+    reachedHead: prior.continuation === "head",
+    counts: countsFromPage(prior),
+    quarantineIds: quarantines.map(({ id }) => id),
+  };
+}
+
+export class PrismaProviderMixedPageRepository {
+  constructor(private readonly database: ProviderPrismaClient) {}
+
+  async commit(input: {
+    readonly workerId: string;
+    readonly page: unknown;
+    readonly deadlineAt?: number;
+    readonly maximumTransactionMilliseconds?: number;
+  }): Promise<CommitProviderMixedPageResult> {
+    const workerId = requireProviderMixedPageWorkerId(input.workerId);
+    const page = validateProviderMixedPage(input.page);
+    return runProviderPageTransaction({ database: this.database,
+      deadlineAt: input.deadlineAt ?? Date.now() + 55_000,
+      maximumTransactionMilliseconds: input.maximumTransactionMilliseconds,
+      operation: async (transaction, attempt, timeout) => {
+      const lease = await lockProviderWorkerLease(transaction, "import");
+      if (!providerWorkerLeaseIsLive(lease, { owner: workerId, fence: page.leaseFence })) {
+        return { kind: "lease_lost" as const };
+      }
+      if ((attempt > 0 || (input.maximumTransactionMilliseconds ?? 30_000) > 30_000)
+        && lease.lease_expires_at!.getTime() - lease.database_now.getTime() <= timeout + 1_000) {
+        return { kind: "lease_lost" as const };
+      }
+      await setProviderImportLeaseContext(transaction, { owner: workerId, fence: page.leaseFence });
+      const committedAt = providerWorkerLeaseDatabaseNow(lease);
+      const identity = await transaction.database_identity.findUnique({
+        where: { singleton_key: true },
+        select: { provider_id: true },
+      });
+      if (identity?.provider_id !== page.providerId) return { kind: "provider_mismatch" as const };
+      const run = await lockRun(transaction, page.runId);
+      if (!run || run.worker_fence !== page.leaseFence) return { kind: "run_not_running" as const };
+      const prior = await transaction.provider_run_pages.findFirst({
+        where: {
+          OR: [
+            { id: page.pageId },
+            { provider_run_id: page.runId, requested_cursor_hash: page.inputCursorFingerprint },
+          ],
+        },
+      }) as PriorPageRow | null;
+      if (prior !== null) {
+        return sameReplay(prior, page)
+          ? replayResult(transaction, prior)
+          : { kind: "immutable_conflict" as const };
+      }
+      if (run.state !== "running") return { kind: "run_not_running" as const };
+      if (
+        run.config_version_id !== page.configVersionId
+        || run.config_version_number !== page.configVersionNumber
+      ) return { kind: "config_mismatch" as const };
+      if (page.pageNumber !== run.page_count + 1) return { kind: "page_number_conflict" as const };
+      const runtime = await lockRuntime(transaction);
+      if (runtime.operating_state !== "running") return { kind: "runtime_not_running" as const };
+      if (
+        runtime.central_provider_id !== page.providerId
+        || runtime.source_cursor_hash !== page.inputCursorFingerprint
+        || !jsonEqual(runtime.source_cursor, page.inputCursor)
+      ) return { kind: "cursor_conflict" as const };
+
+      let accepted = 0;
+      let duplicate = 0;
+      let materialChanges = 0;
+      const quarantines: QuarantineDraft[] = [];
+      const sourceQuarantineKeys = await readExistingSourceQuarantineKeys(transaction, page.records);
+      let fallbackThrough = 0;
+      for (let recordIndex = 0; recordIndex < page.records.length; recordIndex += 1) {
+        const record = page.records[recordIndex]!;
+        if (recordIndex >= fallbackThrough && (isProviderCollectibleUpsert(record) || isProviderFactRecord(record))) {
+          const factBatch = isProviderFactRecord(record);
+          const maximum = factBatch ? PROVIDER_FACT_BATCH_SIZE : PROVIDER_COLLECTIBLE_BATCH_SIZE;
+          const chunk: ProviderMixedPageRecord[] = [];
+          for (let index = recordIndex; index < page.records.length && chunk.length < maximum; index += 1) {
+            const candidate = page.records[index]!;
+            if (factBatch ? (!isProviderFactRecord(candidate) || candidate.kind !== record.kind)
+              : !isProviderCollectibleUpsert(candidate)) break;
+            chunk.push(candidate);
+          }
+          if (chunk.length > 1) {
+            const batch = await applyCanonicalChunk(transaction, chunk);
+            if (batch !== null) {
+              for (const [index, outcome] of batch.entries()) {
+                if (outcome === true) { accepted += 1; materialChanges += 1; }
+                else if (outcome === false) duplicate += 1;
+                else {
+                  const failure = knownRecordFailure(outcome.error);
+                  if (failure === null) throw outcome.error;
+                  quarantines.push({ id: randomUUID(), record: chunk[index]!, ...failure });
+                }
+              }
+              if (quarantines.length > PROVIDER_MIXED_PAGE_MAX_QUARANTINES) {
+                throw new ProviderMixedPageContractError("MIXED_PAGE_OVERSIZED",
+                  "The provider mixed page exceeds the bounded quarantine limit.");
+              }
+              recordIndex += chunk.length - 1;
+              continue;
+            }
+            // Prevent retrying the same failed batch on each shrinking suffix.
+            fallbackThrough = recordIndex + chunk.length;
+          }
+        }
+        const result = await applyRecordWithSavepoint(
+          transaction,
+          record,
+          sourceQuarantineKeys,
+        );
+        if (result.kind === "quarantined") {
+          quarantines.push(result.draft);
+          if (quarantines.length > PROVIDER_MIXED_PAGE_MAX_QUARANTINES) {
+            throw new ProviderMixedPageContractError(
+              "MIXED_PAGE_OVERSIZED",
+              "The provider mixed page exceeds the bounded quarantine limit.",
+            );
+          }
+        } else if (result.kind === "accepted") {
+          accepted += 1;
+          if (result.materialChange) materialChanges += 1;
+        } else {
+          duplicate += 1;
+        }
+      }
+      const counts: ProviderMixedPageCounts = {
+        records: page.records.length,
+        catalog: page.records.filter(({ kind }) => kind === "catalog").length,
+        pulls: page.records.filter(({ kind }) => kind === "pull").length,
+        marketEvents: page.records.filter(({ kind }) => kind === "market_event").length,
+        accepted,
+        duplicate,
+        quarantined: quarantines.length,
+        materialChanges,
+      };
+      await transaction.provider_runtime.update({
+        where: { singleton_key: true },
+        data: {
+          source_cursor: jsonInput(page.nextCursor),
+          source_cursor_hash: page.nextCursorFingerprint,
+          last_attempted_at: committedAt,
+          last_runner_heartbeat_at: committedAt,
+          row_version: { increment: 1n },
+        },
+      });
+      await transaction.provider_runs.update({
+        where: { id: page.runId },
+        data: {
+          page_count: { increment: 1 }, catalog_record_count: { increment: counts.catalog },
+          pull_record_count: { increment: counts.pulls },
+          market_event_record_count: { increment: counts.marketEvents },
+          accepted_count: { increment: counts.accepted }, duplicate_count: { increment: counts.duplicate },
+          quarantined_count: { increment: counts.quarantined },
+          material_change_count: { increment: counts.materialChanges },
+          reached_source_head: page.continuation === "head" || run.reached_source_head,
+          heartbeat_at: committedAt, last_progress_at: committedAt,
+          row_version: { increment: 1n },
+        },
+      });
+      await transaction.provider_run_pages.create({
+        data: {
+          id: page.pageId, provider_run_id: page.runId, page_number: page.pageNumber,
+          contract_version: page.contractVersion,
+          requested_cursor: jsonInput(page.inputCursor), requested_cursor_hash: page.inputCursorFingerprint,
+          next_cursor: jsonInput(page.nextCursor), next_cursor_hash: page.nextCursorFingerprint,
+          continuation: page.continuation, response_digest: page.responseDigest,
+          record_count: counts.records, catalog_record_count: counts.catalog,
+          pull_record_count: counts.pulls, market_event_record_count: counts.marketEvents,
+          accepted_count: counts.accepted, duplicate_count: counts.duplicate,
+          quarantined_count: counts.quarantined, material_change_count: counts.materialChanges,
+          committed_at: committedAt,
+        },
+      });
+      await persistProviderMixedPageQuarantines(transaction, quarantines, page, committedAt);
+      // Run deferred checks inside the callback, where expiry has a settled
+      // rollback outcome. A COMMIT timeout can hide an already durable page.
+      await transaction.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+      return {
+        kind: "committed" as const, pageId: page.pageId, runId: page.runId,
+        pageNumber: page.pageNumber, resultingCursorFingerprint: page.nextCursorFingerprint,
+        reachedHead: page.continuation === "head", counts,
+        quarantineIds: quarantines.map(({ id }) => id),
+      };
+    } });
+  }
+}

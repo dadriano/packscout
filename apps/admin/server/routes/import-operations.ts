@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Router, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import {
+  importRunDetailQuerySchema,
   quarantineIdSchema,
   quarantineRetryBulkRequestSchema,
   type QuarantineEntryDetail,
@@ -9,11 +10,11 @@ import {
   type QuarantineRetryOutcome,
 } from "@packscout/contracts";
 import {
-  ProviderImportServiceError,
+  ProviderSourceImportRequestError,
   QuarantineServiceError,
   type AuthService,
   type ProviderActor,
-  type QuarantineService,
+  type ProviderSourceQuarantineService,
 } from "@packscout/services";
 import type { SessionCookiePolicy } from "../auth/cookies.ts";
 import { createRequireSession, getAuthenticatedActor } from "../auth/middleware.ts";
@@ -28,51 +29,29 @@ const pageQuerySchema = z.object({
 const runListQuerySchema = pageQuerySchema.extend({
   providerId: providerIdSchema.optional(),
   state: z.enum(["queued", "running", "succeeded", "incomplete", "failed"]).optional(),
-  trigger: z.enum(["scheduled", "manual", "recovery"]).optional(),
+  trigger: z.enum(["scheduled", "manual", "continuation", "recovery"]).optional(),
 }).strict();
 const quarantineListQuerySchema = pageQuerySchema.extend({
   providerId: providerIdSchema.optional(),
   runId: runIdSchema.optional(),
   state: z.enum(["open", "retrying", "resolved", "expired"]).optional(),
-  recordKind: z.enum(["catalog", "pull", "sale"]).optional(),
+  recordKind: z.enum(["catalog", "pull", "trade"]).optional(),
   reasonCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/).optional(),
 }).strict();
 const manualImportRequestSchema = z.object({
-  expectedConfigurationRevisionId: z.string().uuid(),
+  expectedSourceRevisionId: z.string().uuid(),
 }).strict();
 
 type RunState = "queued" | "running" | "succeeded" | "incomplete" | "failed";
-
-export interface ProviderOperationView {
-  readonly providerId: string;
-  readonly displayName: string;
-  readonly platformKey: string;
-  readonly lifecycleState: "draft" | "active" | "disabled" | "archived";
-  readonly configurationRevisionId: string;
-  readonly configurationVersion: number;
-  readonly scheduleSeconds: number;
-  readonly staleAfterSeconds: number;
-  readonly nextDueAt: string | null;
-  readonly lastAttemptedAt: string | null;
-  readonly lastHeadReachedAt: string | null;
-  readonly freshnessState: "fresh" | "stale";
-  readonly qualityState: "healthy" | "warning" | "degraded";
-  readonly activeRun: { id: string; state: "queued" | "running" } | null;
-  readonly latestRun: { id: string; state: RunState } | null;
-  readonly openQuarantineCount: number;
-  readonly consecutiveFailures: number;
-  readonly recoveredAt: string | null;
-  readonly recoveryHint: string;
-}
 
 export interface ImportRunCountersView {
   readonly pages: number;
   readonly catalog: number;
   readonly pulls: number;
-  readonly sales: number;
+  readonly trades: number;
   readonly accepted: number;
   readonly unchanged: number;
-  readonly revised: number;
+  readonly revised: number | null;
   readonly quarantined: number;
   readonly resolvedQuarantines: number;
 }
@@ -84,7 +63,7 @@ export interface ImportRunSummaryView {
   readonly platformKey: string;
   readonly configurationRevisionId: string;
   readonly configurationVersion: number;
-  readonly trigger: "scheduled" | "manual" | "recovery";
+  readonly trigger: "scheduled" | "manual" | "continuation" | "recovery";
   readonly state: RunState;
   readonly requestedAt: string;
   readonly startedAt: string | null;
@@ -112,10 +91,10 @@ export interface ImportRunDetailView extends ImportRunSummaryView {
     readonly committedAt: string;
     readonly catalog: number;
     readonly pulls: number;
-    readonly sales: number;
+    readonly trades: number;
     readonly accepted: number;
     readonly unchanged: number;
-    readonly revised: number;
+    readonly revised: number | null;
     readonly quarantined: number;
   }[];
   readonly timeline: readonly {
@@ -134,21 +113,17 @@ interface Paginated<T> {
 export interface ImportOperationsRouterDependencies {
   auth: Pick<AuthService, "resolveSession" | "requirePermission">;
   reads: {
-    listProviders(input: {
-      organizationId: string;
-      cursor?: string;
-      limit: number;
-    }): Promise<Paginated<ProviderOperationView>>;
     listRuns(input: {
       organizationId: string;
       cursor?: string;
       limit: number;
       providerId?: string;
       state?: RunState;
-      trigger?: "scheduled" | "manual" | "recovery";
+      trigger?: "scheduled" | "manual" | "continuation" | "recovery";
     }): Promise<Paginated<ImportRunSummaryView>>;
     getRun(input: {
       organizationId: string;
+      providerId: string;
       runId: string;
     }): Promise<ImportRunDetailView | null>;
     listQuarantines(input: {
@@ -166,7 +141,7 @@ export interface ImportOperationsRouterDependencies {
     request(input: {
       actor: ProviderActor;
       providerId: string;
-      expectedConfigurationRevisionId: string;
+      expectedSourceRevisionId: string;
     }): Promise<{
       run: Pick<
         ImportRunSummaryView,
@@ -175,7 +150,10 @@ export interface ImportOperationsRouterDependencies {
       deduplicated: boolean;
     }>;
   };
-  quarantine: Pick<QuarantineService, "detail" | "retryOne" | "retryMany">;
+  quarantine: Pick<
+    ProviderSourceQuarantineService,
+    "detail" | "retryOne" | "retryMany"
+  >;
   cookiePolicy: SessionCookiePolicy;
   sameOrigin: RequestHandler;
 }
@@ -225,7 +203,7 @@ function sanitizeCounters(counters: ImportRunCountersView): ImportRunCountersVie
     pages: counters.pages,
     catalog: counters.catalog,
     pulls: counters.pulls,
-    sales: counters.sales,
+    trades: counters.trades,
     accepted: counters.accepted,
     unchanged: counters.unchanged,
     revised: counters.revised,
@@ -301,7 +279,7 @@ function sanitizeRunDetail(run: ImportRunDetailView): ImportRunDetailView {
       committedAt: page.committedAt,
       catalog: page.catalog,
       pulls: page.pulls,
-      sales: page.sales,
+      trades: page.trades,
       accepted: page.accepted,
       unchanged: page.unchanged,
       revised: page.revised,
@@ -313,30 +291,6 @@ function sanitizeRunDetail(run: ImportRunDetailView): ImportRunDetailView {
       summary: timelineSummary(event.state),
     })),
     relatedQuarantines: run.relatedQuarantines.slice(0, 100).map(sanitizeQuarantine),
-  };
-}
-
-function sanitizeProvider(provider: ProviderOperationView): ProviderOperationView {
-  return {
-    providerId: provider.providerId,
-    displayName: bounded(provider.displayName, 120),
-    platformKey: bounded(provider.platformKey, 128),
-    lifecycleState: provider.lifecycleState,
-    configurationRevisionId: provider.configurationRevisionId,
-    configurationVersion: provider.configurationVersion,
-    scheduleSeconds: provider.scheduleSeconds,
-    staleAfterSeconds: provider.staleAfterSeconds,
-    nextDueAt: provider.nextDueAt,
-    lastAttemptedAt: provider.lastAttemptedAt,
-    lastHeadReachedAt: provider.lastHeadReachedAt,
-    freshnessState: provider.freshnessState,
-    qualityState: provider.qualityState,
-    activeRun: provider.activeRun ? { id: provider.activeRun.id, state: provider.activeRun.state } : null,
-    latestRun: provider.latestRun ? { id: provider.latestRun.id, state: provider.latestRun.state } : null,
-    openQuarantineCount: provider.openQuarantineCount,
-    consecutiveFailures: provider.consecutiveFailures,
-    recoveredAt: provider.recoveredAt,
-    recoveryHint: bounded(provider.recoveryHint),
   };
 }
 
@@ -373,7 +327,7 @@ function invalid(response: Response, details: unknown): void {
 }
 
 function failure(response: Response, error: unknown): void {
-  if (error instanceof ProviderImportServiceError) {
+  if (error instanceof ProviderSourceImportRequestError) {
     response.status(error.status).json({ error: error.message, code: error.code });
     return;
   }
@@ -418,24 +372,6 @@ export function createImportOperationsRouter(dependencies: ImportOperationsRoute
     permission: "imports:retry",
   });
 
-  router.get("/operations/providers", read, async (request, response) => {
-    const query = pageQuerySchema.safeParse(request.query);
-    if (!query.success) return invalid(response, query.error.flatten().fieldErrors);
-    try {
-      const session = getAuthenticatedActor(response);
-      const result = await dependencies.reads.listProviders({
-        organizationId: session.organizationId,
-        ...query.data,
-      });
-      response.status(200).json({
-        items: result.items.slice(0, query.data.limit).map(sanitizeProvider),
-        nextCursor: result.nextCursor === null ? null : bounded(result.nextCursor, 512),
-      });
-    } catch (error) {
-      failure(response, error);
-    }
-  });
-
   router.get("/import-runs", read, async (request, response) => {
     const query = runListQuerySchema.safeParse(request.query);
     if (!query.success) return invalid(response, query.error.flatten().fieldErrors);
@@ -457,10 +393,13 @@ export function createImportOperationsRouter(dependencies: ImportOperationsRoute
   router.get("/import-runs/:runId", read, async (request, response) => {
     const runId = runIdSchema.safeParse(request.params.runId);
     if (!runId.success) return invalid(response, runId.error.issues);
+    const query = importRunDetailQuerySchema.safeParse(request.query);
+    if (!query.success) return invalid(response, query.error.flatten().fieldErrors);
     try {
       const session = getAuthenticatedActor(response);
       const detail = await dependencies.reads.getRun({
         organizationId: session.organizationId,
+        providerId: query.data.providerId,
         runId: runId.data,
       });
       if (!detail) {
@@ -490,7 +429,7 @@ export function createImportOperationsRouter(dependencies: ImportOperationsRoute
         const result = await dependencies.manualImports.request({
           actor: actor(response),
           providerId: providerId.data,
-          expectedConfigurationRevisionId: body.data.expectedConfigurationRevisionId,
+          expectedSourceRevisionId: body.data.expectedSourceRevisionId,
         });
         response.status(result.deduplicated ? 200 : 202).json({
           run: {
@@ -501,6 +440,7 @@ export function createImportOperationsRouter(dependencies: ImportOperationsRoute
             state: result.run.state,
           },
           deduplicated: result.deduplicated,
+          outcome: result.deduplicated ? "coalesced" : "queued",
         });
       } catch (error) {
         failure(response, error);

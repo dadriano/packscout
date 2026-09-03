@@ -71,6 +71,12 @@
   align-items: flex-start;
 }
 
+.availabilityStatus {
+  display: grid;
+  max-width: 100%;
+  gap: 0.32rem;
+}
+
 .availability {
   width: fit-content;
   border: 1px solid color-mix(in srgb, var(--color-positive) 32%, transparent);
@@ -85,10 +91,21 @@
   text-transform: uppercase;
 }
 
+.availability[data-state="unavailable"],
+.availability[data-state="unknown"],
 .availability[data-state="sold_out"] {
   border-color: color-mix(in srgb, var(--color-status-neutral) 35%, transparent);
   background: color-mix(in srgb, var(--color-status-neutral) 10%, transparent);
   color: var(--color-status-neutral);
+}
+
+.availabilityDescription {
+  max-width: 32rem;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .category {
@@ -202,6 +219,27 @@
   padding-top: 0.85rem;
 }
 
+.providerHealth {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  padding: 0.65rem 0.72rem;
+  color: var(--color-warning-strong);
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.providerHealth strong {
+  font-size: 0.68rem;
+}
+
+.providerHealth time {
+  color: var(--color-text-muted);
+}
+
 .vendorEstimateMetrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -213,6 +251,13 @@
   color: var(--color-text-muted);
   font-size: 0.66rem;
   line-height: 1.45;
+}
+
+.releaseNote {
+  margin: 0.6rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  line-height: 1.4;
 }
 
 .estimateLearnMore {

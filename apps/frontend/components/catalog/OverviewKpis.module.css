@@ -1,6 +1,6 @@
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.85rem;
   margin: 0;
   padding: 0;
@@ -50,17 +50,27 @@
   opacity: 0;
 }
 
-.card[data-kind="positiveEv"]::after,
-.card[data-state="positive"]::after {
+.card[data-tone="positive"]::after {
   background: var(--color-positive);
   opacity: 0.58;
 }
 
-.card[data-state="negative"]::after {
+.card[data-tone="caution"]::after {
+  background: var(--color-caution);
+  opacity: 0.58;
+}
+
+.card[data-tone="warning"]::after {
+  background: var(--color-warning-strong);
+  opacity: 0.58;
+}
+
+.card[data-tone="negative"]::after {
   background: var(--color-negative);
   opacity: 0.58;
 }
 
+.card[data-tone="unavailable"]::after,
 .card[data-state="unavailable"]::after {
   background: var(--color-status-neutral);
   opacity: 0.42;
@@ -78,12 +88,6 @@
   font-family: var(--font-mono);
   font-size: 1.1rem;
   font-weight: 760;
-}
-
-.card[data-kind="positiveEv"] .mark {
-  border-color: color-mix(in srgb, var(--color-positive) 22%, transparent);
-  background: color-mix(in srgb, var(--color-positive) 12%, transparent);
-  color: var(--color-positive);
 }
 
 .card[data-kind="highestChase"] .mark {
@@ -126,14 +130,23 @@
   letter-spacing: -0.045em;
 }
 
-.card[data-state="positive"] .value {
+.card[data-tone="positive"] .value {
   color: var(--color-positive);
 }
 
-.card[data-state="negative"] .value {
+.card[data-tone="caution"] .value {
+  color: var(--color-caution);
+}
+
+.card[data-tone="warning"] .value {
+  color: var(--color-warning-strong);
+}
+
+.card[data-tone="negative"] .value {
   color: var(--color-negative);
 }
 
+.card[data-tone="unavailable"] .value,
 .card[data-state="unavailable"] .value {
   color: var(--color-status-neutral);
   font-size: 1rem;
@@ -164,11 +177,27 @@
   position: absolute;
   top: 0.42rem;
   right: 0.52rem;
-  color: var(--color-positive);
+  color: var(--color-text-muted);
   font-size: 0.5rem;
   font-weight: 780;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.card[data-tone="positive"] .stateLabel {
+  color: var(--color-positive);
+}
+
+.card[data-tone="caution"] .stateLabel {
+  color: var(--color-caution);
+}
+
+.card[data-tone="warning"] .stateLabel {
+  color: var(--color-warning-strong);
+}
+
+.card[data-tone="negative"] .stateLabel {
+  color: var(--color-negative);
 }
 
 @media (max-width: 1180px) {

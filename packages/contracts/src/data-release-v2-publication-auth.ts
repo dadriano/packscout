@@ -4,6 +4,7 @@ import { PRODUCTION_REPACK_HEAT_PATHS } from "./repack-heat-publication.ts";
 import { PRODUCTION_PROVIDER_RELEASE_PATHS } from "./provider-release-publication-v1.ts";
 import { PRODUCTION_CATALOG_MANIFEST_PATHS } from "./catalog-manifest-publication-v1.ts";
 import { PRODUCTION_CATALOG_RETENTION_PATHS } from "./catalog-retention-v1-paths.ts";
+import { PRODUCTION_DATA_RELEASE_V3_PATHS } from "./data-release-v3-publication-paths.ts";
 
 export const PRODUCTION_AUTH_SIGNATURE_VERSION = "v1" as const;
 export const PRODUCTION_AUTH_WINDOW_MILLISECONDS = 5 * 60 * 1_000;
@@ -128,12 +129,25 @@ export const productionCatalogRetentionPathSchema = z.enum([
   PRODUCTION_CATALOG_RETENTION_PATHS.status,
 ]);
 
+export const productionDataReleaseV3PathSchema = z.enum([
+  PRODUCTION_DATA_RELEASE_V3_PATHS.activeState,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.retainedEvWitness,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.start,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.applyBatch,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.finalize,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.activate,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.rollback,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.status,
+  PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
+]);
+
 export const productionPublicationPathSchema = z.union([
   productionDataReleasePathSchema,
   productionRepackHeatPathSchema,
   productionProviderReleasePathSchema,
   productionCatalogManifestPathSchema,
   productionCatalogRetentionPathSchema,
+  productionDataReleaseV3PathSchema,
 ]);
 
 export type ProductionDataReleasePath = z.infer<
@@ -150,6 +164,9 @@ export type ProductionCatalogManifestPath = z.infer<
 >;
 export type ProductionCatalogRetentionPath = z.infer<
   typeof productionCatalogRetentionPathSchema
+>;
+export type ProductionDataReleaseV3Path = z.infer<
+  typeof productionDataReleaseV3PathSchema
 >;
 export type ProductionPublicationPath = z.infer<
   typeof productionPublicationPathSchema
@@ -189,6 +206,7 @@ export type ProductionDataReleaseErrorCode =
   | "PUBLICATION_SCHEMA_UNSUPPORTED" | "PUBLICATION_REQUEST_INVALID"
   | "PUBLICATION_OPERATION_CONFLICT" | "PUBLICATION_STATE_CONFLICT"
   | "PUBLICATION_PREDECESSOR_CONFLICT" | "PUBLICATION_SEQUENCE_REGRESSED"
+  | "PUBLICATION_DATA_REGRESSION"
   | "PUBLICATION_MANIFEST_BLOCKED" | "PUBLICATION_MANIFEST_MISMATCH"
   | "PUBLICATION_BATCH_CONFLICT" | "PUBLICATION_BATCH_OUT_OF_ORDER"
   | "PUBLICATION_BATCH_TOO_LARGE" | "PUBLICATION_ENTITY_INVALID"
@@ -204,6 +222,7 @@ export const productionDataReleaseErrorCodeSchema = z.enum([
   "PUBLICATION_SCHEMA_UNSUPPORTED", "PUBLICATION_REQUEST_INVALID",
   "PUBLICATION_OPERATION_CONFLICT", "PUBLICATION_STATE_CONFLICT",
   "PUBLICATION_PREDECESSOR_CONFLICT", "PUBLICATION_SEQUENCE_REGRESSED",
+  "PUBLICATION_DATA_REGRESSION",
   "PUBLICATION_MANIFEST_BLOCKED", "PUBLICATION_MANIFEST_MISMATCH",
   "PUBLICATION_BATCH_CONFLICT", "PUBLICATION_BATCH_OUT_OF_ORDER",
   "PUBLICATION_BATCH_TOO_LARGE", "PUBLICATION_ENTITY_INVALID",

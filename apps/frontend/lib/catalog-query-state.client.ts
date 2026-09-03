@@ -6,17 +6,24 @@ import {
   encodePublicCursorStack,
   listPublicRepacksInputSchema,
   type ListPublicRepacksInput,
+  type ListPublicRepacksPage,
+  type PublicReadErrorCode,
   type PublicRepackFilters,
   type PublicRepackSort,
 } from "@packscout/contracts";
 import type { DashboardProvider } from "./provider-banner";
 
+/**
+ * Sorts the data_release_v3 read boundary can honor. The pre-buyback
+ * `vendor_reported_ev_percent` sort is deliberately absent: vendor-reported
+ * EV carries no percent projection in v3, so links that depended on it reset
+ * through the invalid-link recovery instead of silently reinterpreting.
+ */
 const SORT_KEYS = new Set<PublicRepackSort>([
   "repack",
   "repack_price",
   "packscout_ev_dollars",
   "packscout_ev_percent",
-  "vendor_reported_ev_percent",
   "buyback_percent",
   "packscout_gross_ev",
   "top_chase_value",
@@ -29,7 +36,7 @@ export const DEFAULT_CATALOG_QUERY: ListPublicRepacksInput = Object.freeze({
     vendors: Object.freeze([]),
     categories: Object.freeze([]),
     collectibleTypes: Object.freeze([]),
-    availability: "active",
+    availability: "available",
     price: Object.freeze({
       mode: "full",
       minMinor: PUBLIC_REPACK_PRICE_MIN_MINOR,
@@ -68,7 +75,7 @@ function parseDollarAmount(value: string | null): number | null {
   return Number.isSafeInteger(minorUnits) ? minorUnits : null;
 }
 
-function formatDollarAmount(minorUnits: number): string {
+export function formatDollarAmount(minorUnits: number): string {
   const dollars = Math.trunc(minorUnits / 100);
   const cents = minorUnits % 100;
   return cents === 0
@@ -96,6 +103,7 @@ function onlyKnownKeys(parameters: URLSearchParams): boolean {
     "cursorStack",
     "queryFingerprint",
     "pageSize",
+    "selected",
     "view",
   ]);
   return [...parameters.keys()].every((key) => knownKeys.has(key));
@@ -114,6 +122,7 @@ function hasDuplicateSingleton(parameters: URLSearchParams): boolean {
     "cursorStack",
     "queryFingerprint",
     "pageSize",
+    "selected",
     "view",
   ].some((key) => parameters.getAll(key).length > 1);
 }
@@ -183,7 +192,7 @@ export function parseCatalogQueryState(
       vendors: canonicalValues(parameters.getAll("vendor")),
       categories: canonicalValues(parameters.getAll("category")),
       collectibleTypes: canonicalValues(parameters.getAll("collectibleType")),
-      availability: availabilityRaw === "all" ? "all" : "active",
+      availability: availabilityRaw === "all" ? "all" : "available",
       price:
         minRaw === null && maxRaw === null
           ? DEFAULT_CATALOG_QUERY.filters.price
@@ -196,7 +205,7 @@ export function parseCatalogQueryState(
     queryFingerprint,
     pageSize,
     desiredPublicCollectibleId: parameters.get("chase"),
-    selectedPublicRepackId: null,
+    selectedPublicRepackId: parameters.get("selected"),
   });
 
   return parsed.success
@@ -210,6 +219,9 @@ export function serializeCatalogQueryState(query: ListPublicRepacksInput): strin
   if (parsed.search) parameters.set("q", parsed.search);
   if (parsed.desiredPublicCollectibleId) {
     parameters.set("chase", parsed.desiredPublicCollectibleId);
+  }
+  if (parsed.selectedPublicRepackId) {
+    parameters.set("selected", parsed.selectedPublicRepackId);
   }
   for (const vendor of parsed.filters.vendors) parameters.append("vendor", vendor);
   for (const category of parsed.filters.categories) parameters.append("category", category);
@@ -265,6 +277,25 @@ export function catalogSheetInspectorInitiallyOpen(
   return selectedPublicRepackId !== null;
 }
 
+export function selectCatalogRepack(
+  query: ListPublicRepacksInput,
+  publicRepackId: string,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    selectedPublicRepackId: publicRepackId,
+  });
+}
+
+export function clearCatalogRepackSelection(
+  query: ListPublicRepacksInput,
+): ListPublicRepacksInput {
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    selectedPublicRepackId: null,
+  });
+}
+
 export function serializeDashboardFilters(
   filters: ListPublicRepacksInput["filters"],
   provider?: DashboardProvider,
@@ -296,6 +327,59 @@ export function resetCatalogPagination(
     cursorStack: null,
     queryFingerprint: null,
     selectedPublicRepackId: null,
+  });
+}
+
+export function catalogQueryAfterReadError(
+  query: ListPublicRepacksInput,
+  code: PublicReadErrorCode,
+): ListPublicRepacksInput {
+  switch (code) {
+    case "INVALID_QUERY":
+      return DEFAULT_CATALOG_QUERY;
+    case "CURSOR_EXPIRED":
+      return resetCatalogPagination(query, {});
+    case "COLLECTIBLE_NOT_FOUND":
+      return resetCatalogPagination(query, {
+        desiredPublicCollectibleId: null,
+      });
+    case "REPACK_NOT_FOUND":
+      return clearCatalogRepackSelection(query);
+    case "RELEASE_UNAVAILABLE":
+      return query;
+  }
+}
+
+export function catalogQueryForPageNavigation(
+  query: ListPublicRepacksInput,
+  page: Pick<
+    ListPublicRepacksPage,
+    "activeQuery" | "paginationReset" | "queryFingerprint"
+  > &
+    Readonly<{
+      rows: ReadonlyArray<
+        Pick<ListPublicRepacksPage["rows"][number], "publicRepackId">
+      >;
+    }>,
+): ListPublicRepacksInput {
+  const releaseChanged = page.paginationReset === "release_changed";
+  const selectedPublicRepackId =
+    releaseChanged && query.selectedPublicRepackId !== null
+      ? page.rows.some(
+          ({ publicRepackId }) =>
+            publicRepackId === query.selectedPublicRepackId,
+        )
+        ? query.selectedPublicRepackId
+        : null
+      : query.selectedPublicRepackId;
+
+  return listPublicRepacksInputSchema.parse({
+    ...query,
+    ...page.activeQuery,
+    cursor: releaseChanged ? null : query.cursor,
+    cursorStack: releaseChanged ? null : query.cursorStack,
+    queryFingerprint: page.queryFingerprint,
+    selectedPublicRepackId,
   });
 }
 

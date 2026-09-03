@@ -1,0 +1,269 @@
+.source-config-page {
+  --source-config-grid: minmax(13rem, 0.85fr) auto minmax(22rem, 1.5fr);
+}
+
+.source-config-note,
+.source-config-success {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--admin-border);
+  border-left: 3px solid var(--admin-accent);
+  background: var(--admin-surface-quiet);
+}
+
+.source-config-note strong {
+  font-size: 0.78rem;
+}
+
+.source-config-note p,
+.source-config-success {
+  margin: 0.2rem 0 0;
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.source-config-success {
+  margin: 0;
+  border-left-color: var(--admin-success);
+  color: var(--admin-success);
+}
+
+.source-config-announcer:empty {
+  display: none;
+}
+
+.source-config-ledger {
+  padding: 1.4rem;
+  border: 1px solid var(--admin-border);
+  background: var(--admin-surface);
+}
+
+.source-config-editor {
+  margin-bottom: 1rem;
+  border: 1px solid var(--admin-accent-border);
+  background: var(--admin-accent-soft);
+}
+
+.source-config-editor > summary,
+.source-config-rotate > summary {
+  cursor: pointer;
+  color: var(--admin-accent);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.source-config-editor > summary {
+  padding: 0.8rem 1rem;
+}
+
+.source-config-editor > summary:focus-visible,
+.source-config-rotate > summary:focus-visible {
+  outline: 2px solid var(--admin-accent);
+  outline-offset: 2px;
+}
+
+.source-config-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(10rem, 1fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+}
+
+.source-config-form__wide {
+  grid-column: span 2;
+}
+
+.source-config-form__records {
+  grid-column: span 2;
+}
+
+.source-config-field-help {
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.source-config-field-error.admin-form-error {
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.55rem;
+  font-size: 0.82rem;
+}
+
+.source-config-form__evidence {
+  align-self: center;
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-family: var(--admin-font-mono);
+  font-size: 0.58rem;
+}
+
+.source-config-ledger__rows {
+  border-top: 1px solid var(--admin-border-strong);
+}
+
+.source-config-ledger__rows:empty::after {
+  display: block;
+  padding: 1.3rem 0;
+  color: var(--admin-text-muted);
+  content: "No records configured.";
+  font-size: 0.72rem;
+}
+
+.source-config-ledger__rows article {
+  display: grid;
+  grid-template-columns: var(--source-config-grid);
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.source-config-ledger__identity {
+  display: grid;
+  min-width: 0;
+  gap: 0.22rem;
+}
+
+.source-config-ledger__identity strong {
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-config-ledger__identity span {
+  overflow-wrap: anywhere;
+  color: var(--admin-text-muted);
+  font-family: var(--admin-font-mono);
+  font-size: 0.55rem;
+  line-height: 1.45;
+}
+
+.source-config-ledger__badges,
+.source-config-ledger__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.source-config-ledger__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(6rem, 1fr));
+  gap: 0.65rem 0.9rem;
+  margin: 0;
+}
+
+.source-config-ledger__facts dt {
+  color: var(--admin-text-faint);
+  font-family: var(--admin-font-mono);
+  font-size: 0.5rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.source-config-ledger__facts dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.source-config-ledger__fingerprint dd {
+  max-width: 15rem;
+  font-family: var(--admin-font-mono);
+  font-size: 0.55rem;
+}
+
+.source-config-ledger__actions,
+.source-config-rotate,
+.source-config-interval {
+  grid-column: 1 / -1;
+}
+
+.source-config-ledger__actions .admin-button,
+.source-config-interval .admin-button {
+  min-height: 2rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.61rem;
+}
+
+.source-config-rotate {
+  border-left: 2px solid var(--admin-border-strong);
+  padding-left: 0.8rem;
+}
+
+.source-config-rotate form,
+.source-config-interval {
+  display: flex;
+  align-items: end;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+}
+
+.source-config-rotate .admin-field {
+  width: min(24rem, 100%);
+}
+
+.source-config-interval label {
+  align-self: center;
+  color: var(--admin-text-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.source-config-interval input {
+  width: 8rem;
+}
+
+@media (max-width: 1100px) {
+  .source-config-form {
+    grid-template-columns: repeat(2, minmax(10rem, 1fr));
+  }
+
+  .source-config-ledger__rows article {
+    grid-template-columns: minmax(12rem, 0.8fr) auto;
+  }
+
+  .source-config-ledger__facts {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .source-config-ledger {
+    padding: 1rem;
+  }
+
+  .source-config-form,
+  .source-config-ledger__rows article,
+  .source-config-ledger__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .source-config-form__wide,
+  .source-config-form__records,
+  .source-config-ledger__facts,
+  .source-config-ledger__badges {
+    grid-column: 1;
+  }
+
+  .source-config-rotate form,
+  .source-config-interval {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-config-interval input {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-config-editor > summary,
+  .source-config-rotate > summary {
+    scroll-behavior: auto;
+  }
+}

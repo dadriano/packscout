@@ -1,67 +1,328 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  ProviderSourceOperationsOverview,
+  ProviderSourceOperationsSource,
+} from "@packscout/contracts";
+import { Link } from "react-router-dom";
 import { AdminApiError } from "../api/client";
-import { listProviderOperations, type ProviderOperationSummary } from "../api/import-operations";
+import { requestManualImport } from "../api/import-operations";
+import { getProviderSourceOperationsOverview } from "../api/provider-source-operations";
+import { commandProviderSource } from "../api/provider-sources";
 import { EmptyState } from "../components/EmptyState";
-import { KeysetPagination } from "../components/operations/KeysetPagination";
-import { ProviderOperationsLedger } from "../components/operations/ProviderOperationsLedger";
+import { IndicatorTooltip } from "../components/IndicatorTooltip";
+import { ProviderPulseOverview } from "../components/operations/ProviderPulseOverview";
+import { pulseState } from "../components/operations/provider-pulse-presentation";
+import { expireRecentRates, observeRecentRates, readRecentRate, type RecentRateHistory } from "../components/operations/provider-recent-rate";
+import {
+  ConnectionOperationsSummary,
+  ProviderSourceOperationsLedger,
+  sourceOperationalLabel,
+  type SourceOperationCommand,
+} from "../components/operations/SourceOperationsViews";
 import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useSession } from "../providers/session";
+import { useToast } from "../providers/toast";
 
-export function OperationsPage() {
-  useDocumentTitle("Pipeline Status");
-  const [providers, setProviders] = useState<ProviderOperationSummary[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [cursorStack, setCursorStack] = useState<Array<string | undefined>>([]);
+const REFRESH_INTERVAL_MS = 5_000;
+
+function readError(error: unknown): string {
+  if (!(error instanceof AdminApiError)) {
+    return "Processor status is temporarily unavailable. Prior safe evidence remains visible.";
+  }
+  if (error.status === 403) {
+    return "Your role no longer permits processor status access.";
+  }
+  if (error.status === 429) {
+    return "Too many operation requests. Live refresh is waiting before it tries again.";
+  }
+  return error.message ||
+    "Processor status is temporarily unavailable. Prior safe evidence remains visible.";
+}
+
+function commandError(error: unknown): string {
+  if (!(error instanceof AdminApiError)) {
+    return "The processor command could not be completed. Current safe evidence has not been discarded.";
+  }
+  if (error.status === 403) {
+    return "Your role cannot operate this processor. No source state was changed.";
+  }
+  if (error.code === "SOURCE_CONFLICT" || error.code === "SOURCE_REVISION_CONFLICT") {
+    return "The selected source changed before the command completed. Refresh and try its current revision.";
+  }
+  if (error.code === "SOURCE_DEPENDENCY_REQUIRED") {
+    return "The shared connection must recover before this processor can continue.";
+  }
+  return error.message || "The processor command could not be completed.";
+}
+
+export function OperationsPage({
+  presentation = "status",
+}: {
+  readonly presentation?: "status" | "providers";
+} = {}) {
+  const providerCatalog = presentation === "providers";
+  useDocumentTitle(providerCatalog ? "Data Providers" : "Pipeline Status");
+  const { status } = useSession();
+  const { showToast } = useToast();
+  const canOperate = status.phase === "authenticated" &&
+    status.session.permissions.includes("imports:start");
+  const canConfigure = status.phase === "authenticated" &&
+    status.session.permissions.includes("providers:manage");
+  const organizationId = status.phase === "authenticated" ? status.session.membership.organizationId : null;
+  const [overview, setOverview] = useState<ProviderSourceOperationsOverview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryIndex, setRetryIndex] = useState(0);
+  const [readFailure, setReadFailure] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [displayPaused, setDisplayPaused] = useState(false);
+  const [refreshIndex, setRefreshIndex] = useState(0);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const priorStates = useRef(new Map<string, string>());
+  const readInFlight = useRef(false);
+  const refreshAfterRead = useRef(false);
+  const rateGeneration = useRef(0);
+  const [rateHistory, setRateHistory] = useState<RecentRateHistory>({});
+
+  const resetRates = useCallback(() => {
+    rateGeneration.current += 1;
+    setRateHistory((history) => Object.keys(history).length > 0 ? {} : history);
+  }, []);
+
+  const refresh = useCallback((reason: "explicit" | "poll" = "explicit") => {
+    if (readInFlight.current) {
+      if (reason === "explicit") refreshAfterRead.current = true;
+      return;
+    }
+    setRefreshIndex((value) => value + 1);
+  }, []);
 
   useEffect(() => {
+    if (displayPaused) return;
     let active = true;
-    void listProviderOperations({ cursor, limit: 25 })
+    const requestRateGeneration = rateGeneration.current;
+    readInFlight.current = true;
+    void getProviderSourceOperationsOverview()
       .then((result) => {
-        if (!active) return;
-        setProviders(result.items);
-        setNextCursor(result.nextCursor);
-        setError(null);
+        if (!active || refreshAfterRead.current) return;
+        if (!providerCatalog && organizationId && document.visibilityState === "visible"
+          && requestRateGeneration === rateGeneration.current) {
+          const receivedAt = window.performance.now();
+          setRateHistory((history) => observeRecentRates(history, result, organizationId, receivedAt));
+        }
+        const changes = result.sources.flatMap((source) => {
+          const next = providerCatalog ? sourceOperationalLabel(source) : pulseState(source).label;
+          const previous = priorStates.current.get(source.providerId);
+          priorStates.current.set(source.providerId, next);
+          return previous && previous !== next
+            ? [`${source.displayName} changed from ${previous} to ${next}.`]
+            : [];
+        });
+        if (changes.length > 0) setAnnouncement(changes.join(" "));
+        setOverview(result);
+        setReadFailure(null);
       })
-      .catch((reason: unknown) => {
-        if (!active) return;
-        setError(reason instanceof AdminApiError && reason.status === 403
-          ? "Your role no longer permits provider operations access."
-          : reason instanceof AdminApiError && reason.status === 429
-            ? "Too many operation requests. Wait before refreshing pipeline status."
-            : "Pipeline status is temporarily unavailable. Prior safe results remain visible.");
+      .catch((error: unknown) => {
+        if (active) resetRates();
+        if (active && !refreshAfterRead.current) setReadFailure(readError(error));
       })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [cursor, retryIndex]);
+      .finally(() => {
+        if (active) {
+          readInFlight.current = false;
+          setLoading(false);
+          if (refreshAfterRead.current) {
+            refreshAfterRead.current = false;
+            setRefreshIndex((value) => value + 1);
+          }
+        }
+      });
+    return () => {
+      active = false;
+      readInFlight.current = false;
+      refreshAfterRead.current = false;
+    };
+  }, [refreshIndex, displayPaused, providerCatalog, organizationId, resetRates]);
 
+  useEffect(() => {
+    if (displayPaused) return;
+    const poll = () => {
+      if (document.visibilityState === "visible") {
+        const receivedAt = window.performance.now();
+        setRateHistory((history) => expireRecentRates(history, receivedAt));
+        refresh("poll");
+      } else resetRates();
+    };
+    const intervalId = window.setInterval(poll, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [displayPaused, refresh, resetRates]);
+
+  async function operate(
+    source: ProviderSourceOperationsSource,
+    command: SourceOperationCommand,
+  ): Promise<void> {
+    if (!source.source) return;
+    setPendingKey(`${source.providerId}:${command}`);
+    setActionFailure(null);
+    try {
+      if (command === "run") {
+        const result = await requestManualImport(
+          source.providerId,
+          source.source.sourceRevisionId,
+        );
+        const message = result.outcome === "coalesced"
+          ? `${source.displayName}: request coalesced into the existing ${result.run.state} run.`
+          : `${source.displayName}: manual run created and queued.`;
+        setAnnouncement(message);
+        showToast(message, "success");
+      } else {
+        const result = await commandProviderSource(
+          source.providerId,
+          source.source.sourceInstanceId,
+          command,
+          source.source.sourceRevisionId,
+        );
+        const outcome = result.state === "pause_requested"
+          ? "pause requested; the current page may commit"
+          : result.state === "paused"
+            ? "paused before another page began"
+            : "resumed from the committed cursor";
+        const message = `${source.displayName}: ${outcome}.`;
+        setAnnouncement(message);
+        showToast(message, "success");
+      }
+      refresh();
+    } catch (error) {
+      const message = commandError(error);
+      setActionFailure(message);
+      setAnnouncement(message);
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  const staleDisplay = displayPaused || readFailure !== null;
   return (
-    <div className="admin-page">
-      <PageHeader eyebrow="Data pipeline / Status" title="Pipeline status" description="Freshness shows whether each feed reached provider head on time. Quality separately shows quarantines and mapping problems." />
-      {loading ? <div className="ops-loading" aria-live="polite" aria-busy="true">Loading provider operations…</div> : null}
-      {error ? <div className="ops-error" role="alert"><p>{error}</p><button type="button" className="admin-button admin-button--secondary" onClick={() => { setLoading(true); setRetryIndex((value) => value + 1); }}>Try again</button></div> : null}
-      {!loading && !error && providers.length === 0 ? <EmptyState title="No provider operations yet" description="Enable a tested provider to begin scheduled or manual imports." /> : null}
-      {providers.length > 0 ? <ProviderOperationsLedger providers={providers} /> : null}
-      <KeysetPagination
-        page={cursorStack.length + 1}
-        hasPrevious={cursorStack.length > 0}
-        hasNext={Boolean(nextCursor)}
-        onPrevious={() => {
-          const previous = cursorStack.at(-1);
-          setCursorStack((values) => values.slice(0, -1));
-          setCursor(previous);
-          setLoading(true);
-        }}
-        onNext={() => {
-          if (!nextCursor) return;
-          setCursorStack((values) => [...values, cursor]);
-          setCursor(nextCursor);
-          setLoading(true);
-        }}
+    <div className={`admin-page source-operations-page${providerCatalog ? "" : " provider-pulse-page"}`}>
+      <PageHeader
+        eyebrow={providerCatalog ? "Data pipeline / Providers" : "Data pipeline / Status"}
+        title={providerCatalog ? "Data providers" : "Pipeline status"}
+        description={providerCatalog
+          ? "Canonical provider roots and their isolated source lanes. Platforms may share one connection while retaining independent cursors, runs, freshness, and quality."
+          : "All providers. Problems first."}
+        actions={
+          <>
+            {canConfigure ? (
+              <Link className="admin-button admin-button-secondary" to="/source-configuration">
+                Configure sources
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              aria-pressed={displayPaused}
+              onClick={() => {
+                resetRates();
+                setDisplayPaused(!displayPaused);
+                setAnnouncement(!displayPaused
+                  ? "Display refresh paused. Ingestion continues."
+                  : "Display refresh resumed.");
+                if (displayPaused) refresh();
+              }}
+            >
+              {displayPaused ? "Resume display" : "Pause display"}
+            </button>
+          </>
+        }
       />
+
+      {providerCatalog && !canConfigure ? (
+        <aside className="provider-read-only-note">
+          <strong>Read-only access to provider configuration</strong>
+          <p>You can inspect canonical source health and use any separately authorized run controls. Changing connection or source configuration requires administrator access.</p>
+        </aside>
+      ) : null}
+
+      <p className="admin-visually-hidden" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
+      <section className={providerCatalog ? "source-refresh-strip" : "provider-pulse__refresh"} aria-label="Display refresh status">
+        <div>
+          {providerCatalog ? <StatusBadge label={staleDisplay ? "Stale display" : "Live display"} tone={staleDisplay ? "pending" : "ready"} /> : (
+            <IndicatorTooltip label={displayPaused ? "Display paused" : readFailure ? "Refresh failed" : "Auto-refresh"}
+              tone={staleDisplay ? "pending" : "neutral"}
+              description={displayPaused ? "The displayed snapshot is frozen. Ingestion and scheduling continue. Resume display to fetch current evidence."
+                : readFailure ? "The latest refresh failed. Previously loaded evidence is retained and its displayed measurement times have not changed."
+                  : "Status and leases refresh every 5 seconds while this page is visible. Row counts, retained-run totals, last-page history, and quarantine counts are cached for up to 60 seconds. Refreshing does not prove a worker is running."} />
+          )}
+          <span>
+            {providerCatalog ? displayPaused
+              ? "Display updates are paused; ingestion and scheduling continue."
+              : overview
+                ? `Visible-page refresh every 5 seconds · evidence time ${new Date(overview.refreshedAt).toLocaleString()}`
+                : "Visible-page refresh every 5 seconds"
+              : displayPaused ? "Snapshot paused · ingestion continues"
+                : overview ? `Updated ${new Date(overview.refreshedAt).toLocaleTimeString()} · every 5s` : "Every 5 seconds"}
+          </span>
+        </div>
+        {!canOperate ? <span>{providerCatalog ? "Read-only: processor commands require data-operator access." : "Read-only access"}</span> : null}
+      </section>
+
+      {loading && !overview ? (
+        <div className="ops-loading" aria-live="polite" aria-busy="true">
+          {providerCatalog ? "Loading registered connection and processor state…" : "Loading providers…"}
+        </div>
+      ) : null}
+      {readFailure ? (
+        <div className="ops-error" role="alert">
+          <p>{readFailure}</p>
+          <button type="button" className="admin-button admin-button-secondary" onClick={() => {
+            resetRates();
+            setDisplayPaused(false);
+            setLoading(true);
+            refresh();
+          }}>Refresh safe evidence</button>
+        </div>
+      ) : null}
+      {actionFailure ? (
+        <div className="ops-error" role="alert">
+          <p>{actionFailure}</p>
+          <button type="button" className="admin-button admin-button-secondary" onClick={() => setActionFailure(null)}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {overview && !providerCatalog ? <ProviderPulseOverview overview={overview} canOperate={canOperate} pendingKey={pendingKey}
+        recentRates={Object.fromEntries(overview.sources.map((source) => [source.providerId,
+          organizationId && !displayPaused && !readFailure ? readRecentRate(rateHistory, source, organizationId) : { state: "unavailable" as const },
+        ]))}
+        onCommand={(source, command) => { void operate(source, command); }} /> : null}
+      {overview && providerCatalog ? (
+        <>
+          <ConnectionOperationsSummary
+            connection={overview.connection}
+            mode={overview.connectionMode}
+          />
+          {providerCatalog && overview.sources.length === 0 ? (
+            <EmptyState
+              title="No stable providers are available"
+              description="Seed the canonical provider roots before binding source lanes. No legacy provider revision is required."
+            />
+          ) : (
+            <ProviderSourceOperationsLedger
+              sources={overview.sources}
+              canOperate={canOperate}
+              pendingKey={pendingKey}
+              onCommand={(source, command) => { void operate(source, command); }}
+            />
+          )}
+        </>
+      ) : null}
     </div>
   );
 }

@@ -38,7 +38,6 @@
 }
 
 .scroller {
-  contain: layout paint inline-size;
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
@@ -82,6 +81,11 @@
 
 .table th:nth-child(11),
 .table td:nth-child(11) {
+  min-width: 190px;
+}
+
+.table th:nth-child(12),
+.table td:nth-child(12) {
   min-width: 250px;
 }
 
@@ -147,7 +151,7 @@
   height: 46px;
   flex: 0 0 auto;
   border-radius: 0.28rem;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .imagePlaceholder {
@@ -172,15 +176,30 @@
   text-overflow: ellipsis;
 }
 
-.soldOut {
+.secondaryBadge,
+.availabilityBadge {
   width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--color-border-strong);
   border-radius: 999px;
   padding: 0.05rem 0.35rem;
   color: var(--color-text-muted);
   font-size: 0.62rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
   text-transform: uppercase;
+  white-space: normal;
+}
+
+.availabilityBadge[data-state="available"] {
+  border-color: color-mix(in srgb, var(--color-positive) 38%, var(--color-border));
+  color: var(--color-positive);
+}
+
+.availabilityBadge[data-state="unavailable"],
+.availabilityBadge[data-state="unknown"],
+.availabilityBadge[data-state="sold_out"] {
+  background: color-mix(in srgb, var(--color-status-neutral) 8%, transparent);
 }
 
 .numeric {
@@ -216,12 +235,16 @@
 }
 
 .inlineAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   border: 1px solid var(--color-border);
   border-radius: 0.45rem;
   padding: 0.42rem 0.58rem;
   color: var(--color-action-strong);
   font-size: 0.72rem;
   font-weight: 700;
+  text-decoration: none;
 }
 
 .inlineAction:hover {

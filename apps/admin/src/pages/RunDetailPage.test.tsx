@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act } from "react";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ImportRunDetail } from "../api/import-operations.ts";
 import {
   cleanupPage,
@@ -31,7 +32,7 @@ const run: ImportRunDetail = {
     pages: 1,
     catalog: 3,
     pulls: 4,
-    sales: 5,
+    trades: 5,
     accepted: 9,
     unchanged: 2,
     revised: 1,
@@ -52,7 +53,7 @@ const run: ImportRunDetail = {
     committedAt: "2026-08-06T12:00:55.000Z",
     catalog: 3,
     pulls: 4,
-    sales: 5,
+    trades: 5,
     accepted: 9,
     unchanged: 2,
     revised: 1,
@@ -66,9 +67,9 @@ const run: ImportRunDetail = {
   relatedQuarantines: [],
 };
 
-function route() {
+function route(initialEntry = `/runs/${run.id}?providerId=${run.providerId}`) {
   return (
-    <MemoryRouter initialEntries={[`/runs/${run.id}`]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/runs/:runId" element={<RunDetailPage />} />
       </Routes>
@@ -79,7 +80,7 @@ function route() {
 test("run detail moves from durable loading state to bounded historical evidence", async (context) => {
   const load = deferred<Response>();
   const requests = stubFetch(context, ({ input }) => {
-    assert.equal(String(input), `/api/import-runs/${run.id}`);
+    assert.equal(String(input), `/api/import-runs/${run.id}?providerId=${run.providerId}`);
     return load.promise;
   });
   const renderer = await renderPage(route());
@@ -107,5 +108,52 @@ test("run detail replaces loading with a permission-specific failure", async (co
 
   assert.match(pageText(renderer), /Your role no longer permits access to this run/);
   assert.match(pageText(renderer), /Return to runs/);
+  assert.doesNotMatch(pageText(renderer), /Fanatics cards/);
+});
+
+for (const query of ["", "?providerId=courtyard", `?providerId=${run.providerId}&providerId=${run.providerId}`]) {
+  test(`run detail rejects absent or malformed provider context without discovery: ${query || "absent"}`, async (context) => {
+    const requests = stubFetch(context, () => { throw new Error("Unqualified run must not be fetched."); });
+    const renderer = await renderPage(route(`/runs/${run.id}${query}`));
+    cleanupPage(context, renderer);
+    assert.equal(requests.length, 0);
+    assert.match(pageText(renderer), /A valid provider and run are required/);
+    assert.match(pageText(renderer), /Return to runs/);
+  });
+}
+
+test("run detail does not render a response belonging to a different provider", async (context) => {
+  stubFetch(context, () => jsonResponse({ run: { ...run, providerId: run.configurationRevisionId } }));
+  const renderer = await renderPage(route());
+  cleanupPage(context, renderer);
+  assert.match(pageText(renderer), /Run evidence is temporarily unavailable/);
+  assert.doesNotMatch(pageText(renderer), /Fanatics cards/);
+});
+
+test("switching provider context clears prior run evidence while the exact new target loads", async (context) => {
+  const selectedProviderId = "00000000-0000-4000-8000-000000000022";
+  const load = deferred<Response>();
+  const requests = stubFetch(context, ({ input }, index) => {
+    if (index === 0) return jsonResponse({ run });
+    assert.equal(String(input), `/api/import-runs/${run.id}?providerId=${selectedProviderId}`);
+    return load.promise;
+  });
+  const renderer = await renderPage(
+    <MemoryRouter initialEntries={[`/runs/${run.id}?providerId=${run.providerId}`]}>
+      <Link to={`/runs/${run.id}?providerId=${selectedProviderId}`}>Select another provider</Link>
+      <Routes><Route path="/runs/:runId" element={<RunDetailPage />} /></Routes>
+    </MemoryRouter>,
+  );
+  cleanupPage(context, renderer);
+  assert.match(pageText(renderer), /Fanatics cards/);
+  const select = renderer.container.querySelector<HTMLAnchorElement>("a");
+  assert.ok(select);
+  await act(async () => select.click());
+  assert.match(pageText(renderer), /Loading durable run evidence/);
+  assert.doesNotMatch(pageText(renderer), /Fanatics cards/);
+  load.resolve(jsonResponse({ error: "Not found", code: "IMPORT_RUN_NOT_FOUND" }, 404));
+  await settlePage();
+  assert.equal(requests.length, 2);
+  assert.match(pageText(renderer), /Import run not found/);
   assert.doesNotMatch(pageText(renderer), /Fanatics cards/);
 });

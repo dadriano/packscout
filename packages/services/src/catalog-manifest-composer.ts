@@ -162,7 +162,11 @@ function validateSearchProjection(
 
 function validateProviderGraph(plan: ProviderCatalogReleasePublishPlanV1): void {
   const vendors = recordsForKind<PublicVendor>(plan, "vendors");
-  const categories = recordsForKind<PublicCategory>(plan, "categories");
+  const categories = [...recordsForKind<PublicCategory>(plan, "categories")]
+    .sort((left, right) => compareText(
+      left.publicCategoryId,
+      right.publicCategoryId,
+    ));
   const collectibles = recordsForKind<PublicCollectible>(plan, "collectibles");
   const repacks = recordsForKind<PublicRepackDetail>(plan, "repacks");
   const repackChases = recordsForKind<PublicRepackChase>(

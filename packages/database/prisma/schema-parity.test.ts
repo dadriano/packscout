@@ -15,6 +15,7 @@ import {
   inspectSchema,
   loadSchemaParityManifest,
 } from "./schema-parity.ts";
+import { endPoolFully } from "./postgres-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));

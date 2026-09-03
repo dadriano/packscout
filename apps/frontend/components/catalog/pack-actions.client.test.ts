@@ -19,7 +19,7 @@ const publishedLink: PublicRepackLink = {
 };
 
 test("builds the approved outbound URL with each referral parameter exactly once", () => {
-  const result = buildPublishedRepackHref(publishedLink, "active");
+  const result = buildPublishedRepackHref(publishedLink, "available");
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -33,8 +33,8 @@ test("builds the approved outbound URL with each referral parameter exactly once
   assert.equal(url.hash, "#details");
 });
 
-test("blocks missing, sold-out, unapproved, and malformed outbound actions", () => {
-  assert.deepEqual(buildPublishedRepackHref(undefined, "active"), {
+test("blocks every non-available, missing, unapproved, and malformed outbound action", () => {
+  assert.deepEqual(buildPublishedRepackHref(undefined, "available"), {
     ok: false,
     code: "MISSING_LINK",
   });
@@ -42,10 +42,18 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
     ok: false,
     code: "SOLD_OUT",
   });
+  assert.deepEqual(buildPublishedRepackHref(publishedLink, "unavailable"), {
+    ok: false,
+    code: "UNAVAILABLE",
+  });
+  assert.deepEqual(buildPublishedRepackHref(publishedLink, "unknown"), {
+    ok: false,
+    code: "AVAILABILITY_UNKNOWN",
+  });
   assert.deepEqual(
     buildPublishedRepackHref(
       { ...publishedLink, listingUrl: "http://packs.example/listing/alpha" },
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
@@ -55,14 +63,14 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
         ...publishedLink,
         listingUrl: "https://person:secret@packs.example/listing/alpha",
       },
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
     buildPublishedRepackHref(
       { ...publishedLink, listingHost: "other.example" },
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
@@ -72,7 +80,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
         ...publishedLink,
         listingUrl: "https://packs.example.attacker.test/listing/alpha",
       },
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
@@ -82,14 +90,14 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
         ...publishedLink,
         listingUrl: "https://packs.example:8443/listing/alpha",
       },
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
   assert.deepEqual(
     buildPublishedRepackHref(
       { ...publishedLink, listingHost: "PACKS.EXAMPLE" } as PublicRepackLink,
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
@@ -100,7 +108,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
         listingUrl: "https://sub.packs.example/listing/alpha",
         listingHost: "*.packs.example",
       } as PublicRepackLink,
-      "active",
+      "available",
     ),
     { ok: false, code: "UNAPPROVED_ORIGIN" },
   );
@@ -113,7 +121,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
           { name: "ref", value: "two" },
         ],
       } as PublicRepackLink,
-      "active",
+      "available",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },
   );
@@ -123,7 +131,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
         ...publishedLink,
         referralParameters: [{ name: "ref", value: "  " }],
       } as PublicRepackLink,
-      "active",
+      "available",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },
   );
@@ -136,7 +144,7 @@ test("blocks missing, sold-out, unapproved, and malformed outbound actions", () 
           value: "packscout",
         })),
       } as PublicRepackLink,
-      "active",
+      "available",
     ),
     { ok: false, code: "INVALID_REFERRAL_CONFIG" },
   );

@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+packages/database/prisma/generated/
 
 # Build output
 .next/
@@ -15,6 +16,9 @@ coverage/
 !**/.env.example
 *.pem
 
+# Generated launch-evidence artifacts (see docs/buyback-adjusted-ev-operational-readiness.md)
+docs/evidence/
+
 # Logs and editor files
 *.log
 .DS_Store
@@ -24,3 +28,5 @@ coverage/
 .tmp/
 .vercel/
 .convex/
+apps/admin/public/index.html
+apps/admin/public/assets/

@@ -120,7 +120,7 @@ export type NormalizedReplaceProviderRevisionRequest = z.output<
 export interface ProviderConnectionRecordCounts {
   catalog: number;
   pulls: number;
-  sales: number;
+  trades: number;
 }
 
 export type ProviderConnectionVerdict =
@@ -167,6 +167,46 @@ export interface ProviderConfigurationSummary {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Source-native provider identity stored at the root of Provider Sources.
+ * It deliberately excludes the retired provider configuration projection.
+ */
+export interface ProviderSourceRootSummary {
+  id: string;
+  platformKey: string;
+  displayName: string;
+  state: ProviderLifecycleState;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Public-safe outcome of resolving and checking one server-owned provider DB route. */
+export type ProviderDatabaseFailureCode =
+  | "destination_not_allowed"
+  | "credential_unavailable"
+  | "database_unreachable"
+  | "database_identity_missing"
+  | "database_name_mismatch"
+  | "database_role_mismatch"
+  | "database_schema_mismatch"
+  | "provider_identity_mismatch"
+  | "route_changed";
+
+export type ProviderDatabaseGatewayOutcome =
+  | {
+      readonly state: "reachable";
+      readonly providerId: string;
+      readonly observedSchemaVersion: string;
+      readonly observedAt: string;
+    }
+  | {
+      readonly state: "unreachable";
+      readonly providerId: string;
+      readonly failureCode: ProviderDatabaseFailureCode;
+      readonly observedAt: string;
+      readonly retryHint: string;
+    };
 
 export const providerConfigurationErrorCodes = [
   "BEARER_SECRET_REQUIRED",

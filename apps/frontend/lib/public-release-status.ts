@@ -1,29 +1,24 @@
-import type {
-  DataReleaseMetadata,
-  GetPublicShellStatusResult,
-} from "@packscout/contracts";
 import type { DataReleaseStatusValue } from "./data-release-status.client";
+import type { GetPublicCatalogRecordUpdateStatusV3Result } from "./public-repacks-v3";
 
-export function dataReleaseStatusFromMetadata(
-  metadata: DataReleaseMetadata,
-  now: number = Date.now(),
+/**
+ * The shell reports the maximum source timestamp among every timestamped
+ * collectible, repack, and chase in the active public catalog.
+ */
+export function dataReleaseStatusFromRecordUpdateResult(
+  result: GetPublicCatalogRecordUpdateStatusV3Result,
+  expectedPublicReleaseId?: string,
 ): DataReleaseStatusValue {
-  const staleAt = Date.parse(metadata.staleAt);
+  if (
+    !result.ok ||
+    (expectedPublicReleaseId !== undefined &&
+      result.data.publicReleaseId !== expectedPublicReleaseId)
+  ) {
+    return { state: "unavailable" };
+  }
   return {
-    state:
-      metadata.freshness === "delayed" ||
-        (Number.isFinite(staleAt) && now >= staleAt)
-        ? "delayed"
-        : "fresh",
-    updatedAt: metadata.lastSuccessfulObservationAt,
-    staleAt: metadata.staleAt,
-    dataSource: metadata.dataSource,
+    state: "available",
+    updatedAt: result.data.latestCatalogRecordUpdatedAt,
+    evaluatedAt: result.data.evaluatedAt,
   };
-}
-
-export function dataReleaseStatusFromPublicResult(
-  result: GetPublicShellStatusResult,
-): DataReleaseStatusValue {
-  if (!result.ok) return { state: "unavailable" };
-  return dataReleaseStatusFromMetadata(result.data.metadata);
 }

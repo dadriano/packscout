@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import {
+  persistCanonicalRelationshipConfirmations,
+  persistConfirmedRelationshipHeatSources,
+  resolveConfirmedRelationshipsForNewTargets,
+} from "./canonical-relationship-batch-writer.ts";
 import type { PackscoutTransactionClient } from "./database.ts";
 import type {
   CanonicalProjectionInput,
@@ -9,13 +14,12 @@ import type {
 } from "./pipeline-types.ts";
 import {
   allocatePublicChangeCauses,
-  canonicalCatalogPlatformKeys,
   canonicalPublicEntityKey,
-  relationshipPublicEntityKey,
   type PublicCatalogImpact,
   type PublicChangeKind,
 } from "./public-change-settlement-repository.ts";
-import { persistNormalizedHeatObservationsForCanonicalWrites } from "./normalized-heat-observation-repository.ts";
+import { persistNormalizedHeatObservationsForCanonicalWrites } from
+  "./normalized-heat-persistence.ts";
 import {
   assertCanonicalActorDataSafe,
   hashJson,
@@ -39,19 +43,6 @@ function canonicalProjectionCatalogImpact(
     : { kind: "none" };
 }
 
-function relationshipCatalogImpact(
-  sourcePlatformKey: string,
-  targetPlatformKey: string,
-): PublicCatalogImpact {
-  return {
-    kind: "catalog",
-    providerPlatformKeys: canonicalCatalogPlatformKeys([
-      sourcePlatformKey,
-      targetPlatformKey,
-    ]),
-  };
-}
-
 function assertCanonicalWriteTransaction(
   database: PackscoutTransactionClient,
 ): void {
@@ -62,21 +53,46 @@ function assertCanonicalWriteTransaction(
   }
 }
 
-interface CanonicalProjectionWriteInput {
+export type CanonicalProjectionWriteOrigin =
+  | Readonly<{
+      kind: "legacy_source_record";
+      configurationRevisionId: string;
+      sourceRecordId: string;
+    }>
+  | Readonly<{
+      kind: "semantic_observation";
+      sourceRevisionId: string;
+      semanticObservationId: string;
+    }>
+  | Readonly<{
+      kind: "ev_recomputation";
+      sourceRevisionId: string;
+      recomputationRequestId: string;
+    }>;
+
+export interface CanonicalProjectionWriteInput {
   readonly organizationId: string;
   readonly providerId: string;
-  readonly configRevisionId: string;
-  readonly sourceRecordId: string;
+  readonly origin: CanonicalProjectionWriteOrigin;
   readonly projection: CanonicalProjectionInput;
   readonly projectionIndex: number;
+  readonly becomesCurrent: boolean;
   readonly acceptedAt: Date;
   readonly publicChangeKind: PublicChangeKind;
+  /** Lifecycle-authorized duplicate: reuse this exact retained revision, or
+   * resolve the unique exact content/effective-time revision created earlier
+   * in the same batch when null. Relationships and confirmations still write. */
+  readonly reuseCanonicalRevisionId?: string | null;
 }
 
 export interface CanonicalProjectionWriteResult {
   readonly revisionId: string;
   readonly created: boolean;
   readonly publicChangeSequence: bigint;
+}
+
+export interface CanonicalProjectionWriteOptions {
+  readonly mode?: "forward" | "source_relationship_confirmation_backfill";
 }
 
 interface PreparedSourceRecord {
@@ -116,12 +132,15 @@ interface ExistingCanonicalRevision {
   readonly revisionNumber: number;
   readonly contentHash: string;
   readonly provenanceHash: string;
+  readonly sourceUpdatedAt: Date;
   publicChangeSequence: bigint;
 }
 
 interface CanonicalRevisionInsert extends ExistingCanonicalRevision {
   readonly organizationId: string;
-  readonly sourceRecordId: string;
+  readonly sourceRecordId: string | null;
+  readonly originSemanticObservationId: string | null;
+  readonly originEvRecomputationRequestId: string | null;
   readonly content: Record<string, unknown>;
   readonly provenance: Record<string, unknown>;
   readonly actorKey: string | null;
@@ -136,21 +155,6 @@ interface ProjectionLinkInsert {
   readonly organizationId: string;
   readonly projectionIndex: number;
   readonly createdAt: Date;
-}
-
-interface RelationshipInsert {
-  readonly organizationId: string;
-  readonly sourceEntityId: string;
-  readonly sourcePlatformKey: string;
-  readonly relationshipKind: string;
-  readonly targetPlatformKey: string;
-  readonly targetRecordKind: CanonicalProjectionInput["recordKind"];
-  readonly targetExternalId: string | null;
-  readonly targetEntityId: string | null;
-  createdPublicChangeSequence: bigint;
-  resolvedPublicChangeSequence: bigint | null;
-  readonly createdAt: Date;
-  readonly resolvedAt: Date | null;
 }
 
 interface SourceOutcomeInsert {
@@ -247,20 +251,10 @@ function canonicalRevisionKey(input: {
   return [input.entityId, input.contentHash, input.provenanceHash].join("\u0000");
 }
 
-function relationshipIdentityKey(input: {
-  sourceEntityId: string;
-  relationshipKind: string;
-  targetPlatformKey: string;
-  targetRecordKind: CanonicalProjectionInput["recordKind"];
-  targetExternalId: string | null;
-}): string {
-  return [
-    input.sourceEntityId,
-    input.relationshipKind,
-    input.targetPlatformKey,
-    input.targetRecordKind,
-    input.targetExternalId ?? "<null>",
-  ].join("\u0000");
+function canonicalSourceRevisionKey(origin: CanonicalProjectionWriteOrigin): string {
+  return origin.kind === "legacy_source_record"
+    ? origin.configurationRevisionId
+    : origin.sourceRevisionId;
 }
 
 async function resolveSourceRecords(
@@ -431,68 +425,34 @@ async function loadCanonicalEntities(
   return entitiesByIdentity;
 }
 
-async function loadRelationshipTargets(
-  database: PackscoutTransactionClient,
-  organizationId: string,
-  identities: readonly CanonicalEntityIdentity[],
-  knownEntities: ReadonlyMap<string, CanonicalEntityRecord>,
-): Promise<Map<string, CanonicalEntityRecord>> {
-  const targets = new Map(knownEntities);
-  const missingByIdentity = new Map<string, CanonicalEntityIdentity>();
-  for (const identity of identities) {
-    const key = canonicalIdentityKey(identity);
-    if (!targets.has(key)) missingByIdentity.set(key, identity);
-  }
-  for (const batch of batches([...missingByIdentity.values()])) {
-    const rows = batch.map((identity) => Prisma.sql`(
-      ${identity.platformKey},
-      cast(${identity.recordKind} as public.canonical_record_kind),
-      ${identity.externalId}
-    )`);
-    const records = await database.$queryRaw<CanonicalEntityRecord[]>(Prisma.sql`
-      select
-        entity.id,
-        entity.platform_key as "platformKey",
-        entity.record_kind::text as "recordKind",
-        entity.external_id as "externalId",
-        revision.public_change_sequence as "publicChangeSequence"
-      from public.canonical_entities as entity
-      join public.canonical_revisions as revision
-        on revision.id = entity.current_revision_id
-      where entity.organization_id = ${uuid(organizationId)}
-        and (entity.platform_key, entity.record_kind, entity.external_id) in (
-          values ${Prisma.join(rows)}
-        )
-    `);
-    for (const record of records) {
-      targets.set(canonicalIdentityKey(record), record);
-    }
-  }
-  return targets;
-}
-
-export async function writeCanonicalProjectionBatch(
-  database: PackscoutTransactionClient,
-  policy: RawEvidencePolicy,
+function assertCanonicalProjectionBatchScope(
   inputs: readonly CanonicalProjectionWriteInput[],
-): Promise<CanonicalProjectionWriteResult[]> {
-  assertCanonicalWriteTransaction(database);
-  if (inputs.length === 0) return [];
+): CanonicalProjectionWriteInput {
   const scope = inputs[0]!;
   if (
     inputs.some(
       (input) =>
         input.organizationId !== scope.organizationId ||
         input.providerId !== scope.providerId ||
-        input.configRevisionId !== scope.configRevisionId ||
+        input.origin.kind !== scope.origin.kind ||
+        canonicalSourceRevisionKey(input.origin) !==
+          canonicalSourceRevisionKey(scope.origin) ||
         input.publicChangeKind !== scope.publicChangeKind ||
         input.acceptedAt.getTime() !== scope.acceptedAt.getTime(),
     )
   ) {
     throw new Error(
-      "Canonical projection batches cannot span tenant, provider, configuration, or commit scopes.",
+      "Canonical projection batches cannot span tenant, provider, source origin, or commit scopes.",
     );
   }
+  return scope;
+}
+
+async function validateCanonicalProjectionProviderScope(
+  database: PackscoutTransactionClient,
+  scope: CanonicalProjectionWriteInput,
+  inputs: readonly CanonicalProjectionWriteInput[],
+): Promise<void> {
   const providerRows = await database.$queryRaw<Array<{ platformKey: string }>>(
     Prisma.sql`
       select platform_key as "platformKey"
@@ -520,44 +480,63 @@ export async function writeCanonicalProjectionBatch(
       ),
     ),
   ].sort();
-  if (relationshipPlatformKeys.length > 0) {
+  if (relationshipPlatformKeys.length === 0) return;
+
+  const registeredTargetKeys = new Set<string>();
+  for (const batch of batches(relationshipPlatformKeys)) {
     const registeredTargets = await database.$queryRaw<
       Array<{ platformKey: string }>
     >(Prisma.sql`
       select platform_key as "platformKey"
       from public.provider_sources
       where organization_id = ${uuid(scope.organizationId)}
-        and platform_key in (${Prisma.join(relationshipPlatformKeys)})
-      order by platform_key collate "C"
+        and platform_key in (${Prisma.join(batch)})
       for share
     `);
-    if (
-      registeredTargets.length !== relationshipPlatformKeys.length ||
-      registeredTargets.some(
-        ({ platformKey }, index) =>
-          platformKey !== relationshipPlatformKeys[index],
-      )
-    ) {
-      throw new Error("Canonical relationship provider scope is invalid.");
+    for (const { platformKey } of registeredTargets) {
+      registeredTargetKeys.add(platformKey);
     }
   }
-  for (const input of inputs) {
-    assertCanonicalActorDataSafe(input.projection.content);
+  if (
+    registeredTargetKeys.size !== relationshipPlatformKeys.length ||
+    relationshipPlatformKeys.some((key) => !registeredTargetKeys.has(key))
+  ) {
+    throw new Error("Canonical relationship provider scope is invalid.");
   }
-  const entitiesByIdentity = await loadCanonicalEntities(
-    database,
-    scope.organizationId,
-    inputs.map(({ projection }) => projection),
-    scope.acceptedAt,
-  );
+}
+
+async function writeCanonicalProjectionChunk(
+  database: PackscoutTransactionClient,
+  policy: RawEvidencePolicy,
+  inputs: readonly CanonicalProjectionWriteInput[],
+  entitiesByIdentity: Map<string, CanonicalEntityRecord>,
+  mode: NonNullable<CanonicalProjectionWriteOptions["mode"]>,
+): Promise<CanonicalProjectionWriteResult[]> {
+  const scope = inputs[0]!;
   const prepared: PreparedCanonicalProjection[] = inputs.map((input) => {
     const entity = entitiesByIdentity.get(canonicalIdentityKey(input.projection));
     if (!entity) throw new Error("Canonical entity insert returned no identity.");
     const provenance = {
       ...(input.projection.provenance ?? {}),
-      configRevisionId: input.configRevisionId,
       providerId: input.providerId,
-      sourceRecordId: input.sourceRecordId,
+      sourceOrigin:
+        input.origin.kind === "legacy_source_record"
+          ? {
+              kind: input.origin.kind,
+              configurationRevisionId: input.origin.configurationRevisionId,
+              sourceRecordId: input.origin.sourceRecordId,
+            }
+          : input.origin.kind === "semantic_observation"
+            ? {
+                kind: input.origin.kind,
+                sourceRevisionId: input.origin.sourceRevisionId,
+                semanticObservationId: input.origin.semanticObservationId,
+              }
+            : {
+                kind: input.origin.kind,
+                sourceRevisionId: input.origin.sourceRevisionId,
+                recomputationRequestId: input.origin.recomputationRequestId,
+              },
     };
     return {
       ...input,
@@ -579,6 +558,7 @@ export async function writeCanonicalProjectionBatch(
           revision_number as "revisionNumber",
           content_hash as "contentHash",
           provenance_hash as "provenanceHash",
+          source_updated_at as "sourceUpdatedAt",
           public_change_sequence as "publicChangeSequence"
         from public.canonical_revisions
         where entity_id in (${Prisma.join(batch.map(uuid))})
@@ -604,6 +584,36 @@ export async function writeCanonicalProjectionBatch(
   const currentRevisionByEntity = new Map<string, string>();
   let results: CanonicalProjectionWriteResult[] = [];
   for (const projection of prepared) {
+    if (projection.reuseCanonicalRevisionId !== undefined) {
+      if (projection.becomesCurrent) {
+        throw new TypeError(
+          "A reused canonical revision cannot replace the current revision.",
+        );
+      }
+      const candidates = [...existingRevisions, ...revisionsToInsert].filter(
+        (revision) =>
+          revision.entityId === projection.entityId
+          && revision.contentHash === projection.contentHash
+          && (
+            typeof projection.reuseCanonicalRevisionId === "string"
+              ? revision.id === projection.reuseCanonicalRevisionId
+              : revision.sourceUpdatedAt.getTime()
+                === projection.projection.sourceUpdatedAt.getTime()
+          ),
+      );
+      if (candidates.length !== 1) {
+        throw new TypeError(
+          "Reused canonical revision is missing or ambiguous.",
+        );
+      }
+      const reused = candidates[0]!;
+      results.push({
+        revisionId: reused.id,
+        created: false,
+        publicChangeSequence: reused.publicChangeSequence,
+      });
+      continue;
+    }
     const revisionKey = canonicalRevisionKey(projection);
     const existing = revisionsByIdentity.get(revisionKey);
     if (existing) {
@@ -623,7 +633,18 @@ export async function writeCanonicalProjectionBatch(
       organizationId: projection.organizationId,
       entityId: projection.entityId,
       revisionNumber,
-      sourceRecordId: projection.sourceRecordId,
+      sourceRecordId:
+        projection.origin.kind === "legacy_source_record"
+          ? projection.origin.sourceRecordId
+          : null,
+      originSemanticObservationId:
+        projection.origin.kind === "semantic_observation"
+          ? projection.origin.semanticObservationId
+          : null,
+      originEvRecomputationRequestId:
+        projection.origin.kind === "ev_recomputation"
+          ? projection.origin.recomputationRequestId
+          : null,
       content: projection.projection.content,
       contentHash: projection.contentHash,
       provenance: projection.provenance,
@@ -643,7 +664,9 @@ export async function writeCanonicalProjectionBatch(
     revisionsByIdentity.set(revisionKey, revision);
     revisionsToInsert.push(revision);
     projectionByRevisionId.set(revisionId, projection);
-    currentRevisionByEntity.set(projection.entityId, revisionId);
+    if (projection.becomesCurrent) {
+      currentRevisionByEntity.set(projection.entityId, revisionId);
+    }
     results.push({ revisionId, created: true, publicChangeSequence: 0n });
   }
 
@@ -656,7 +679,7 @@ export async function writeCanonicalProjectionBatch(
         changeKind: projection.publicChangeKind,
         entityKey: canonicalPublicEntityKey(revision.entityId),
         sourceKey: projection.projection.platformKey,
-        sourceRevisionKey: projection.configRevisionId,
+        sourceRevisionKey: canonicalSourceRevisionKey(projection.origin),
         metadata: { canonicalRevisionId: revision.id },
         occurredAt: projection.acceptedAt,
         catalogImpact: canonicalProjectionCatalogImpact(projection.projection),
@@ -688,6 +711,15 @@ export async function writeCanonicalProjectionBatch(
       publicChangeSequence: sequence,
     });
   }
+  const readyEntitiesByIdentity = new Map<string, CanonicalEntityRecord>();
+  for (const { projection } of prepared) {
+    const identityKey = canonicalIdentityKey(projection);
+    const entity = entitiesByIdentity.get(identityKey);
+    if (!entity || entity.publicChangeSequence === null) {
+      throw new Error("Canonical relationship target cause is missing.");
+    }
+    readyEntitiesByIdentity.set(identityKey, entity);
+  }
 
   for (const batch of batches(revisionsToInsert)) {
     const rows = batch.map((revision) => Prisma.sql`(
@@ -695,7 +727,13 @@ export async function writeCanonicalProjectionBatch(
       ${uuid(revision.organizationId)},
       ${uuid(revision.entityId)},
       ${revision.revisionNumber},
-      ${uuid(revision.sourceRecordId)},
+      ${revision.sourceRecordId ? uuid(revision.sourceRecordId) : Prisma.sql`null::uuid`},
+      ${revision.originSemanticObservationId
+        ? uuid(revision.originSemanticObservationId)
+        : Prisma.sql`null::uuid`},
+      ${revision.originEvRecomputationRequestId
+        ? uuid(revision.originEvRecomputationRequestId)
+        : Prisma.sql`null::uuid`},
       ${jsonValue(revision.content)},
       ${revision.contentHash},
       ${jsonValue(revision.provenance)},
@@ -709,6 +747,7 @@ export async function writeCanonicalProjectionBatch(
     await database.$executeRaw(Prisma.sql`
       insert into public.canonical_revisions (
         id, organization_id, entity_id, revision_number, source_record_id,
+        origin_semantic_observation_id, origin_ev_recomputation_request_id,
         content_json, content_hash, provenance_json, provenance_hash, actor_key,
         source_updated_at, source_collected_at, accepted_at,
         public_change_sequence
@@ -730,13 +769,18 @@ export async function writeCanonicalProjectionBatch(
     `);
   }
 
-  const projectionLinks: ProjectionLinkInsert[] = prepared.map((projection, index) => ({
-    sourceRecordId: projection.sourceRecordId,
-    canonicalRevisionId: results[index]!.revisionId,
-    organizationId: projection.organizationId,
-    projectionIndex: projection.projectionIndex,
-    createdAt: projection.acceptedAt,
-  }));
+  const projectionLinks: ProjectionLinkInsert[] = prepared.flatMap(
+    (projection, index) =>
+      projection.origin.kind === "legacy_source_record"
+        ? [{
+            sourceRecordId: projection.origin.sourceRecordId,
+            canonicalRevisionId: results[index]!.revisionId,
+            organizationId: projection.organizationId,
+            projectionIndex: projection.projectionIndex,
+            createdAt: projection.acceptedAt,
+          }]
+        : [],
+  );
   for (const batch of batches(projectionLinks)) {
     const rows = batch.map((link) => Prisma.sql`(
       ${uuid(link.sourceRecordId)},
@@ -755,234 +799,95 @@ export async function writeCanonicalProjectionBatch(
     `);
   }
 
-  const relationshipTargets = prepared.flatMap(({ projection }) =>
-    (projection.relationships ?? [])
-      .filter(({ targetExternalId }) => targetExternalId !== null)
-      .map((relationship) => ({
-        platformKey: relationship.targetPlatformKey,
-        recordKind: relationship.targetRecordKind,
-        externalId: relationship.targetExternalId!,
-      })),
-  );
-  const targetsByIdentity = await loadRelationshipTargets(
-    database,
-    scope.organizationId,
-    relationshipTargets,
-    entitiesByIdentity,
-  );
-  const proposedRelationships = prepared.flatMap((projection) => {
-    const sourceEntity = entitiesByIdentity.get(
-      canonicalIdentityKey(projection.projection),
-    );
-    if (!sourceEntity) throw new Error("Canonical relationship source is missing.");
-    return (projection.projection.relationships ?? []).map((relationship) => {
-      const target = relationship.targetExternalId
-        ? targetsByIdentity.get(
-            canonicalIdentityKey({
-              platformKey: relationship.targetPlatformKey,
-              recordKind: relationship.targetRecordKind,
-              externalId: relationship.targetExternalId,
-            }),
-          )
-        : undefined;
-      return {
-        organizationId: projection.organizationId,
-        sourceEntityId: sourceEntity.id,
-        sourcePlatformKey: sourceEntity.platformKey,
-        relationshipKind: relationship.relationshipKind,
-        targetPlatformKey: relationship.targetPlatformKey,
-        targetRecordKind: relationship.targetRecordKind,
-        targetExternalId: relationship.targetExternalId,
-        targetEntityId: target?.id ?? null,
-        createdPublicChangeSequence: 0n,
-        resolvedPublicChangeSequence: null,
-        createdAt: projection.acceptedAt,
-        resolvedAt: target ? projection.acceptedAt : null,
-      };
+  const relationshipConfirmations =
+    await persistCanonicalRelationshipConfirmations(database, {
+      organizationId: scope.organizationId,
+      providerId: scope.providerId,
+      sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
+      acceptedAt: scope.acceptedAt,
+      projections: prepared,
+      revisionResults: results,
+      entitiesByIdentity: readyEntitiesByIdentity,
     });
-  });
-  const proposedByIdentity = new Map<string, RelationshipInsert>();
-  for (const relationship of proposedRelationships) {
-    proposedByIdentity.set(relationshipIdentityKey(relationship), relationship);
-  }
-  const existingRelationshipKeys = new Set<string>();
-  const sourceEntityIds = [
-    ...new Set([...proposedByIdentity.values()].map(({ sourceEntityId }) => sourceEntityId)),
-  ];
-  for (const batch of batches(sourceEntityIds)) {
-    const existing = await database.$queryRaw<Array<{
-      sourceEntityId: string;
-      relationshipKind: string;
-      targetPlatformKey: string;
-      targetRecordKind: CanonicalProjectionInput["recordKind"];
-      targetExternalId: string | null;
-    }>>(Prisma.sql`
-      select source_entity_id as "sourceEntityId",
-             relationship_kind as "relationshipKind",
-             target_platform_key as "targetPlatformKey",
-             target_record_kind::text as "targetRecordKind",
-             target_external_id as "targetExternalId"
-      from public.canonical_relationships
-      where organization_id = ${uuid(scope.organizationId)}
-        and source_entity_id in (${Prisma.join(batch.map(uuid))})
-    `);
-    existing.forEach((relationship) => {
-      existingRelationshipKeys.add(relationshipIdentityKey(relationship));
+  if (mode === "forward") {
+    await persistNormalizedHeatObservationsForCanonicalWrites(database, {
+      organizationId: scope.organizationId,
+      createdAt: scope.acceptedAt,
+      revisions: revisionsToInsert.map((revision) => {
+        const projection = projectionByRevisionId.get(revision.id);
+        if (!projection) throw new Error("Canonical Heat source projection is missing.");
+        return {
+          revisionId: revision.id,
+          entityId: revision.entityId,
+          platformKey: projection.projection.platformKey,
+          recordKind: projection.projection.recordKind,
+          externalId: projection.projection.externalId,
+          content: revision.content,
+          publicChangeSequence: revision.publicChangeSequence,
+          occurredAt: revision.sourceUpdatedAt,
+        };
+      }),
     });
-  }
-  const relationships = [...proposedByIdentity.entries()]
-    .filter(([key]) => !existingRelationshipKeys.has(key))
-    .map(([, relationship]) => relationship);
-  const relationshipCauses = await allocatePublicChangeCauses(database, {
-    organizationId: scope.organizationId,
-    changes: relationships.map((relationship) => ({
-      changeKind: "relationship_resolution",
-      entityKey: relationshipPublicEntityKey(relationship),
-      sourceKey: relationship.targetPlatformKey,
-      sourceRevisionKey: scope.configRevisionId,
-      metadata: { relationshipState: relationship.targetEntityId ? "resolved" : "unresolved" },
-      occurredAt: relationship.createdAt,
-      catalogImpact: relationshipCatalogImpact(
-        relationship.sourcePlatformKey,
-        relationship.targetPlatformKey,
-      ),
-    })),
-  });
-  relationships.forEach((relationship, index) => {
-    const sequence = relationshipCauses[index]?.sequence;
-    if (sequence === undefined) throw new Error("Relationship cause is missing.");
-    relationship.createdPublicChangeSequence = sequence;
-    relationship.resolvedPublicChangeSequence = relationship.targetEntityId
-      ? sequence
-      : null;
-  });
-  for (const batch of batches(relationships)) {
-    const rows = batch.map((relationship) => Prisma.sql`(
-      ${uuid(relationship.organizationId)},
-      ${uuid(relationship.sourceEntityId)},
-      ${relationship.relationshipKind},
-      ${relationship.targetPlatformKey},
-      cast(${relationship.targetRecordKind} as public.canonical_record_kind),
-      ${relationship.targetExternalId},
-      ${relationship.targetEntityId ? uuid(relationship.targetEntityId) : Prisma.sql`null::uuid`},
-      ${relationship.createdPublicChangeSequence},
-      ${relationship.resolvedPublicChangeSequence},
-      ${relationship.createdAt},
-      ${relationship.resolvedAt}
-    )`);
-    await database.$executeRaw(Prisma.sql`
-      insert into public.canonical_relationships (
-        organization_id, source_entity_id, relationship_kind,
-        target_platform_key, target_record_kind, target_external_id,
-        target_entity_id, created_public_change_sequence,
-        resolved_public_change_sequence, created_at, resolved_at
-      )
-      values ${Prisma.join(rows)}
-      on conflict do nothing
-    `);
+    await persistConfirmedRelationshipHeatSources(database, {
+      organizationId: scope.organizationId,
+      createdAt: scope.acceptedAt,
+      relationships: relationshipConfirmations.newlyPersistedConfirmations,
+    });
   }
 
-  for (const batch of batches([...entitiesByIdentity.values()])) {
-    const rows = batch.map((entity) => {
-      if (entity.publicChangeSequence === null) {
-        throw new Error("Canonical relationship target cause is missing.");
-      }
-      return Prisma.sql`(
-        ${entity.platformKey},
-        cast(${entity.recordKind} as public.canonical_record_kind),
-        ${entity.externalId},
-        ${uuid(entity.id)},
-        ${entity.publicChangeSequence}
-      )`;
-    });
-    const unresolved = await database.$queryRaw<Array<{
-      id: string;
-      sourceEntityId: string;
-      sourcePlatformKey: string;
-      relationshipKind: string;
-      targetPlatformKey: string;
-      targetRecordKind: CanonicalProjectionInput["recordKind"];
-      targetExternalId: string;
-      targetEntityId: string;
-    }>>(Prisma.sql`
-      select relationship.id,
-             relationship.source_entity_id as "sourceEntityId",
-             source_entity.platform_key as "sourcePlatformKey",
-             relationship.relationship_kind as "relationshipKind",
-             relationship.target_platform_key as "targetPlatformKey",
-             relationship.target_record_kind::text as "targetRecordKind",
-             relationship.target_external_id as "targetExternalId",
-             targets.entity_id as "targetEntityId"
-      from public.canonical_relationships as relationship
-      join public.canonical_entities as source_entity
-        on source_entity.id = relationship.source_entity_id
-       and source_entity.organization_id = relationship.organization_id
-      join (values ${Prisma.join(rows)})
-        as targets(
-          platform_key, record_kind, external_id, entity_id,
-          public_change_sequence
-        )
-        on relationship.target_platform_key = targets.platform_key
-       and relationship.target_record_kind = targets.record_kind
-       and relationship.target_external_id = targets.external_id
-      where relationship.organization_id = ${uuid(scope.organizationId)}
-        and relationship.target_entity_id is null
-      for update of relationship
-    `);
-    const resolutionCauses = await allocatePublicChangeCauses(database, {
-      organizationId: scope.organizationId,
-      changes: unresolved.map((relationship) => ({
-        changeKind: "relationship_resolution",
-        entityKey: relationshipPublicEntityKey(relationship),
-        sourceKey: relationship.targetPlatformKey,
-        sourceRevisionKey: scope.configRevisionId,
-        metadata: { relationshipState: "resolved" },
-        occurredAt: scope.acceptedAt,
-        catalogImpact: relationshipCatalogImpact(
-          relationship.sourcePlatformKey,
-          relationship.targetPlatformKey,
-        ),
-      })),
-    });
-    const resolutionRows = unresolved.map((relationship, index) => {
-      const sequence = resolutionCauses[index]?.sequence;
-      if (sequence === undefined) throw new Error("Resolution cause is missing.");
-      return Prisma.sql`(
-        ${uuid(relationship.id)}, ${uuid(relationship.targetEntityId)}, ${sequence}
-      )`;
-    });
-    if (resolutionRows.length > 0) {
-      await database.$executeRaw(Prisma.sql`
-        update public.canonical_relationships as relationship
-        set target_entity_id = resolutions.target_entity_id,
-            resolved_at = ${scope.acceptedAt},
-            resolved_public_change_sequence = resolutions.public_change_sequence
-        from (values ${Prisma.join(resolutionRows)})
-          as resolutions(relationship_id, target_entity_id, public_change_sequence)
-        where relationship.id = resolutions.relationship_id
-          and relationship.organization_id = ${uuid(scope.organizationId)}
-          and relationship.target_entity_id is null
-      `);
-    }
-  }
-  await persistNormalizedHeatObservationsForCanonicalWrites(database, {
+  await resolveConfirmedRelationshipsForNewTargets(database, {
     organizationId: scope.organizationId,
-    createdAt: scope.acceptedAt,
-    revisions: revisionsToInsert.map((revision) => {
-      const projection = projectionByRevisionId.get(revision.id);
-      if (!projection) throw new Error("Canonical Heat source projection is missing.");
-      return {
-        revisionId: revision.id,
-        entityId: revision.entityId,
-        platformKey: projection.projection.platformKey,
-        recordKind: projection.projection.recordKind,
-        externalId: projection.projection.externalId,
-        content: revision.content,
-        publicChangeSequence: revision.publicChangeSequence,
-        occurredAt: revision.sourceUpdatedAt,
-      };
-    }),
+    sourceRevisionKey: canonicalSourceRevisionKey(scope.origin),
+    acceptedAt: scope.acceptedAt,
+    mode,
+    entities: [...readyEntitiesByIdentity.values()],
   });
+  return results;
+}
+
+export async function writeCanonicalProjectionBatch(
+  database: PackscoutTransactionClient,
+  policy: RawEvidencePolicy,
+  inputs: readonly CanonicalProjectionWriteInput[],
+  options: CanonicalProjectionWriteOptions = {},
+): Promise<CanonicalProjectionWriteResult[]> {
+  assertCanonicalWriteTransaction(database);
+  if (inputs.length === 0) return [];
+  const mode = options.mode ?? "forward";
+  if (
+    mode === "source_relationship_confirmation_backfill"
+    && inputs.some((input) =>
+      input.origin.kind !== "semantic_observation"
+      || input.becomesCurrent
+      || typeof input.reuseCanonicalRevisionId !== "string"
+    )
+  ) {
+    throw new TypeError(
+      "Relationship confirmation backfill requires exact retained revisions.",
+    );
+  }
+  const scope = assertCanonicalProjectionBatchScope(inputs);
+  await validateCanonicalProjectionProviderScope(database, scope, inputs);
+  for (const input of inputs) {
+    assertCanonicalActorDataSafe(input.projection.content);
+  }
+  const entitiesByIdentity = await loadCanonicalEntities(
+    database,
+    scope.organizationId,
+    inputs.map(({ projection }) => projection),
+    scope.acceptedAt,
+  );
+
+  const results: CanonicalProjectionWriteResult[] = [];
+  for (const batch of batches(inputs)) {
+    results.push(...await writeCanonicalProjectionChunk(
+      database,
+      policy,
+      batch,
+      entitiesByIdentity,
+      mode,
+    ));
+  }
   return results;
 }
 
@@ -1052,10 +957,14 @@ export async function persistPageRecordsInBatches(
       : record.input.projections.map((projection, projectionIndex) => ({
           organizationId: input.organizationId,
           providerId: input.providerId,
-          configRevisionId: input.configRevisionId,
-          sourceRecordId: record.sourceRecordId,
+          origin: {
+            kind: "legacy_source_record" as const,
+            configurationRevisionId: input.configRevisionId,
+            sourceRecordId: record.sourceRecordId,
+          },
           projection,
           projectionIndex,
+          becomesCurrent: true,
           acceptedAt: input.committedAt,
           publicChangeKind: "provider_projection" as const,
           sourcePosition: record.sourcePosition,

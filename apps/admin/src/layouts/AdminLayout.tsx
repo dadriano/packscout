@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useTheme } from "../hooks/useTheme";
 import { useSession } from "../providers/session";
 import { useToast } from "../providers/toast";
+import { navigationSections, pageTitleForPath } from "../routes/admin-routes";
 
-const baseNavigation = [{ to: "/", label: "Overview", index: "01" }];
+function CloseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M5 5l10 10M15 5L5 15" />
+    </svg>
+  );
+}
 
 function ThemeIcon({ dark }: { dark: boolean }) {
   return dark ? (
@@ -29,23 +37,7 @@ export function AdminLayout() {
   const [navOpenedAt, setNavOpenedAt] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const navOpen = navOpenedAt === location.pathname;
-  const title =
-    location.pathname === "/"
-      ? "Overview"
-      : location.pathname === "/operators"
-        ? "Operators"
-        : location.pathname.startsWith("/providers")
-          ? "Data Providers"
-        : location.pathname.startsWith("/operations")
-          ? "Pipeline Status"
-        : location.pathname.startsWith("/runs")
-          ? "Import Runs"
-        : location.pathname.startsWith("/quarantine")
-          ? "Quarantine"
-        : location.pathname.startsWith("/alerts")
-          ? "Operational Alerts"
-        : "Not found";
-  useDocumentTitle(title);
+  useDocumentTitle(pageTitleForPath(location.pathname));
 
   useEffect(() => {
     if (!navOpen) return;
@@ -58,25 +50,13 @@ export function AdminLayout() {
 
   if (status.phase !== "authenticated") return null;
   const { session } = status;
-  const canManageOperators = session.permissions.includes("operators:manage");
-  const canViewProviders = session.permissions.includes("providers:view");
-  const workspaceNavigation = [
-    ...baseNavigation,
-    ...(canManageOperators ? [{ to: "/operators", label: "Operators", index: "02" }] : []),
-  ];
-  const pipelineNavigation = [
-    ...(canViewProviders ? [{ to: "/operations", label: "Status", index: "01" }] : []),
-    ...(canViewProviders ? [{ to: "/providers", label: "Providers", index: "02" }] : []),
-    ...(canViewProviders ? [{ to: "/runs", label: "Import Runs", index: "03" }] : []),
-    ...(canViewProviders ? [{ to: "/quarantine", label: "Quarantine", index: "04" }] : []),
-    ...(canViewProviders ? [{ to: "/alerts", label: "Alerts", index: "05" }] : []),
-  ];
+  const sections = navigationSections(session.permissions);
 
   return (
     <div className="admin-layout" data-nav-open={navOpen ? "true" : "false"}>
       <button
         type="button"
-        className="admin-sidebar-backdrop"
+        className={`admin-sidebar-backdrop${navOpen ? " is-visible" : ""}`}
         aria-label="Close navigation"
         aria-hidden={!navOpen}
         tabIndex={navOpen ? 0 : -1}
@@ -85,73 +65,74 @@ export function AdminLayout() {
 
       <aside className="admin-sidebar" aria-label="Admin navigation">
         <div className="admin-sidebar__brand">
-          <NavLink to="/" className="admin-brand" aria-label="Packscout admin overview">
-            <span className="admin-brand__mark" aria-hidden="true">
-              PS
-            </span>
+          <NavLink
+            to="/"
+            className="admin-brand-lockup"
+            aria-label="Packscout admin overview"
+          >
+            {/* Served from the app's public directory rather than imported, so
+                the asset resolves the same way under the bundler and under the
+                test runner, which does not process binary imports. */}
+            <img
+              className="admin-brand-mark"
+              src="/brand/packscout-icon.png"
+              alt=""
+              aria-hidden="true"
+              width={128}
+              height={128}
+            />
             <span>
-              <strong>Packscout</strong>
-              <small>Operations console</small>
+              <span className="admin-brand-eyebrow">Operations console</span>
+              <span className="admin-brand-title">Packscout</span>
             </span>
           </NavLink>
           <button
             type="button"
-            className="admin-icon-button admin-sidebar__close"
+            className="admin-icon-button admin-sidebar-close"
             aria-label="Close navigation"
             onClick={() => setNavOpenedAt(null)}
           >
-            <span aria-hidden="true">×</span>
+            <CloseIcon />
           </button>
         </div>
 
         <nav className="admin-sidebar__nav">
-          <section className="admin-nav-section">
-            <h2>Workspace</h2>
-            {workspaceNavigation.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) =>
-                    `admin-nav-link${isActive ? " is-active" : ""}`
-                  }
-                  onClick={() => setNavOpenedAt(null)}
-                >
-                  <span aria-hidden="true">{item.index}</span>
-                  {item.label}
-                </NavLink>
-            ))}
-          </section>
-          {pipelineNavigation.length > 0 ? (
-            <section className="admin-nav-section">
-              <h2>Data pipeline</h2>
-              {pipelineNavigation.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) => `admin-nav-link${isActive ? " is-active" : ""}`}
-                  onClick={() => setNavOpenedAt(null)}
-                >
-                  <span aria-hidden="true">{item.index}</span>
-                  {item.label}
-                </NavLink>
-              ))}
+          {sections.map((section) => (
+            <section key={section.id} className="admin-sidebar__section">
+              <div className="admin-sidebar__heading">{section.heading}</div>
+              <div className="admin-sidebar__list">
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) =>
+                      `admin-sidebar__link${isActive ? " is-active" : ""}`
+                    }
+                    onClick={() => setNavOpenedAt(null)}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
             </section>
-          ) : null}
+          ))}
         </nav>
 
         <div className="admin-sidebar__footer">
-          <span className="admin-eyebrow">Active workspace</span>
-          <p>{session.membership.organizationName}</p>
+          <div className="admin-platform-notice">
+            <strong>Active workspace</strong>
+            {session.membership.organizationName}
+          </div>
         </div>
       </aside>
 
       <div className="admin-layout__main">
-        <header className="admin-topbar">
-          <div className="admin-topbar__start">
+        <header className="admin-header">
+          <div className="admin-header__start">
             <button
               type="button"
-              className="admin-icon-button admin-sidebar__toggle"
+              className="admin-icon-button admin-sidebar-toggle"
               aria-label="Open navigation"
               onClick={() => setNavOpenedAt(location.pathname)}
             >
@@ -159,13 +140,13 @@ export function AdminLayout() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
-            <div>
-              <span className="admin-eyebrow">Field operations</span>
+            <div className="admin-header__summary">
+              <span className="admin-kicker">Field operations</span>
               <strong>Pack intelligence workspace</strong>
             </div>
           </div>
-          <div className="admin-topbar__end">
-            <div className="admin-operator-identity">
+          <div className="admin-header__end">
+            <div className="admin-user-pill">
               <strong>{session.operator.displayName}</strong>
               <span>
                 {session.membership.role === "admin"
@@ -175,7 +156,7 @@ export function AdminLayout() {
             </div>
             <button
               type="button"
-              className="admin-button admin-button--secondary admin-sign-out"
+              className="admin-button admin-button-secondary admin-sign-out"
               disabled={signingOut}
               onClick={() => {
                 setSigningOut(true);
@@ -204,7 +185,10 @@ export function AdminLayout() {
 
         <main className="admin-main">
           <div className="admin-main__inner">
-            <Outlet />
+            <Breadcrumbs />
+            <div className="admin-main__content">
+              <Outlet />
+            </div>
           </div>
         </main>
       </div>

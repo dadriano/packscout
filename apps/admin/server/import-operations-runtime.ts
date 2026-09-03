@@ -1,33 +1,23 @@
 import { createHmac, randomUUID } from "node:crypto";
 import {
+  CentralAdminProviderRepository,
   PrismaAdminImportRunRepository,
-  PrismaAdminProviderOperationRepository,
-  PrismaImportRunRepository,
-  PrismaProviderConfigurationRepository,
-  PrismaProviderHealthRepository,
-  PrismaQuarantineRepository,
-  IngestionPersistenceRepository,
+  ProviderSourceImportRunRepository,
+  ProviderSourceQuarantineRepository,
   type AdminImportRunRecord,
   type AdminImportRunState,
-  type PersistedQuarantineEntry,
+  type CentralQueryClient,
 } from "@packscout/database";
 import {
-  AesGcmProviderCredentialCipher,
-  CatalogProjectionService,
-  createProviderMappingAdapterRegistryFromManifest,
-  DefaultProviderImportPagePlanner,
-  EventProjectionService,
-  HmacProviderActorPseudonymizer,
-  HttpCursorAdapter,
-  ProviderHealthService,
-  ProviderImportService,
-  ProviderProjectionService,
-  ProviderTransportAdapterRegistry,
-  QuarantineService,
+  ProviderSourceImportAdmissionService,
+  ProviderSourceImportRequestService,
+  ProviderSourceQuarantineService,
+  createProviderObservationMapperRegistryFromManifest,
+  providerSourceQuarantineSummary,
   type ProviderActorKeyer,
-  type ProviderFreshnessOperationalHooks,
-  type ProviderRuntimeEnvironment,
-  type QuarantineOperationalHooks,
+  type ProviderSourceImportRunSummary,
+  type ProviderSourceIntegrationCapabilityRegistry,
+  type ProviderSourceManualImportDelegate,
 } from "@packscout/services";
 import type { QuarantineEntrySummary } from "@packscout/contracts";
 import type {
@@ -43,10 +33,16 @@ type AdminOperationsDatabase = ConstructorParameters<
 export interface AdminImportOperationsRuntimeInput {
   readonly database: AdminOperationsDatabase;
   readonly actorPseudonymKey: Uint8Array;
-  readonly credentialKey: Uint8Array;
-  readonly credentialKeyVersion?: number;
-  readonly environment: ProviderRuntimeEnvironment;
-  readonly operational?: ProviderFreshnessOperationalHooks & QuarantineOperationalHooks;
+}
+
+export interface AdminManualImportAdmissionRuntimeInput {
+  readonly central: CentralQueryClient;
+  readonly sourceIntegrations: Pick<
+    ProviderSourceIntegrationCapabilityRegistry,
+    "resolve"
+  >;
+  readonly delegate: ProviderSourceManualImportDelegate;
+  readonly now?: () => Date;
 }
 
 export class InvalidOperationCursorError extends Error {
@@ -58,7 +54,7 @@ export class InvalidOperationCursorError extends Error {
   }
 }
 
-type CursorKind = "provider" | "run" | "quarantine";
+type CursorKind = "run" | "quarantine";
 
 interface CursorPayload {
   readonly version: 1;
@@ -90,7 +86,7 @@ function decodeCursor(kind: CursorKind, cursor: string | undefined): CursorPaylo
     ) {
       throw new Error("invalid");
     }
-    if (kind !== "provider" && !Number.isFinite(Date.parse(parsed.value))) {
+    if (!Number.isFinite(Date.parse(parsed.value))) {
       throw new Error("invalid");
     }
     return parsed as CursorPayload;
@@ -125,32 +121,6 @@ function failureClass(code: string): string {
   if (code.includes("TIMEOUT")) return "timeout";
   if (code.includes("UNREACHABLE") || code.includes("HTTP")) return "unreachable";
   return "unknown";
-}
-
-function quarantineSummary(entry: PersistedQuarantineEntry): QuarantineEntrySummary {
-  return {
-    id: entry.id,
-    providerId: entry.providerId,
-    configurationRevisionId: entry.configurationRevisionId,
-    platformKey: entry.platformKey,
-    runId: entry.runId,
-    pageId: entry.pageId,
-    recordKind: entry.recordKind,
-    recordIndex: entry.recordIndex,
-    externalId: entry.externalId,
-    reasonCode: safeCodePattern.test(entry.reasonCode)
-      ? entry.reasonCode
-      : "QUARANTINE_REASON_UNAVAILABLE",
-    fieldPath: entry.fieldPath,
-    sanitizedSummary: entry.sanitizedSummary,
-    state: entry.state,
-    attemptCount: entry.retryCount,
-    firstFailureAt: entry.createdAt.toISOString(),
-    latestFailureAt: (entry.lastRetryAt ?? entry.createdAt).toISOString(),
-    rawExpiresAt: entry.expiresAt.toISOString(),
-    resolvedAt: entry.resolvedAt?.toISOString() ?? null,
-    resolutionSummary: entry.resolutionSummary,
-  };
 }
 
 function runSummary(run: AdminImportRunRecord): ImportRunSummaryView {
@@ -214,7 +184,7 @@ function toRunDetail(
       committedAt: page.committedAt.toISOString(),
       catalog: page.catalog,
       pulls: page.pulls,
-      sales: page.sales,
+      trades: page.trades,
       accepted: page.accepted,
       unchanged: page.unchanged,
       revised: page.revised,
@@ -225,112 +195,77 @@ function toRunDetail(
   };
 }
 
+interface AdminManualImportRequestDelegate {
+  requestManual(input: Parameters<
+    ImportOperationsRouterDependencies["manualImports"]["request"]
+  >[0]): Promise<Readonly<{
+    run: ProviderSourceImportRunSummary;
+    coalesced: boolean;
+  }>>;
+}
+
+function manualImportRoutes(
+  imports: AdminManualImportRequestDelegate,
+): ImportOperationsRouterDependencies["manualImports"] {
+  return {
+    async request(request) {
+      const result = await imports.requestManual(request);
+      return {
+        run: {
+          id: result.run.id,
+          providerId: result.run.providerId,
+          configurationRevisionId: result.run.sourceRevisionId,
+          trigger: result.run.trigger,
+          state: result.run.state,
+        },
+        deduplicated: result.coalesced,
+      };
+    },
+  };
+}
+
+/**
+ * Distributed Run now composition. It deliberately accepts only a central
+ * client and an already provider-routed delegate; the route cannot choose a
+ * database target and the delegate is unreachable until admission succeeds.
+ */
+export function createAdminManualImportAdmissionRuntime(
+  input: AdminManualImportAdmissionRuntimeInput,
+): ImportOperationsRouterDependencies["manualImports"] {
+  return manualImportRoutes(new ProviderSourceImportAdmissionService({
+    providers: new CentralAdminProviderRepository(input.central),
+    sourceIntegrations: input.sourceIntegrations,
+    delegate: input.delegate,
+    clock: { now: input.now ?? (() => new Date()) },
+  }));
+}
+
 export function createAdminImportOperationsRuntime(
   input: AdminImportOperationsRuntimeInput,
 ): Omit<ImportOperationsRouterDependencies, "auth" | "cookiePolicy" | "sameOrigin"> {
   const clock = { now: () => new Date() };
   const keyer = actorKeyer(input.actorPseudonymKey);
-  const providerReads = new PrismaAdminProviderOperationRepository(input.database);
   const runReads = new PrismaAdminImportRunRepository(input.database);
-  const quarantineRepository = new PrismaQuarantineRepository(input.database);
-  const health = new ProviderHealthService(
-    new PrismaProviderHealthRepository(input.database),
-    clock,
-    input.operational,
+  const quarantineRepository = new ProviderSourceQuarantineRepository(
+    input.database,
+    input.actorPseudonymKey,
   );
-  const ingestion = new IngestionPersistenceRepository(input.database, {
-    retentionDays: 90,
-    actorPseudonymKey: input.actorPseudonymKey,
-  });
-  const mappings = createProviderMappingAdapterRegistryFromManifest();
-  const projections = new ProviderProjectionService(
-    new CatalogProjectionService(),
-    new EventProjectionService(
-      new HmacProviderActorPseudonymizer(input.actorPseudonymKey),
-    ),
-  );
-  const imports = new ProviderImportService({
-    runs: new PrismaImportRunRepository(input.database),
-    revisions: new PrismaProviderConfigurationRepository(input.database),
-    pages: ingestion,
-    transportAdapters: new ProviderTransportAdapterRegistry([
-      new HttpCursorAdapter(),
-    ]),
-    pagePlanner: new DefaultProviderImportPagePlanner(mappings, projections),
-    credentialCipher: new AesGcmProviderCredentialCipher({
-      primaryVersion: input.credentialKeyVersion ?? 1,
-      keys: new Map([[input.credentialKeyVersion ?? 1, input.credentialKey]]),
-    }),
+  const imports = new ProviderSourceImportRequestService({
+    runs: new ProviderSourceImportRunRepository(input.database),
     actorKeyer: keyer,
     clock,
     ids: { id: randomUUID },
-    environment: input.environment,
   });
-  const quarantine = new QuarantineService({
+  const quarantine = new ProviderSourceQuarantineService({
     repository: quarantineRepository,
-    projectionRepository: ingestion,
-    mappings,
-    projections,
+    mappers: createProviderObservationMapperRegistryFromManifest(),
     actorKeyer: keyer,
     clock,
     ids: { id: randomUUID },
-    operational: input.operational,
   });
 
   return {
     reads: {
-      async listProviders(request) {
-        const after = decodeCursor("provider", request.cursor);
-        const page = await providerReads.listPage({
-          organizationId: request.organizationId,
-          limit: request.limit,
-          ...(after
-            ? {
-                after: {
-                  platformKey: after.value,
-                  providerId: after.id,
-                },
-              }
-            : {}),
-        });
-        const items = await Promise.all(
-          page.items.map(async (provider) => {
-            const status = await health.getHealth({
-              organizationId: request.organizationId,
-              providerId: provider.providerId,
-            });
-            return {
-              providerId: provider.providerId,
-              displayName: status.displayName,
-              platformKey: status.platformKey,
-              lifecycleState: status.providerState,
-              configurationRevisionId: provider.configurationRevisionId,
-              configurationVersion: provider.configurationVersion,
-              scheduleSeconds: status.scheduleSeconds,
-              staleAfterSeconds: status.staleAfterSeconds,
-              nextDueAt: status.nextDueAt,
-              lastAttemptedAt: status.lastAttemptedAt,
-              lastHeadReachedAt: status.lastHeadReachedAt,
-              freshnessState: status.freshnessState,
-              qualityState: status.qualityState,
-              activeRun: status.activeRun,
-              latestRun: status.latestRun,
-              openQuarantineCount: status.openQuarantineCount,
-              consecutiveFailures: status.consecutiveFailures,
-              recoveredAt: status.recoveredAt,
-              recoveryHint: status.recoveryHint,
-            };
-          }),
-        );
-        const last = page.items.at(-1);
-        return {
-          items,
-          nextCursor:
-            page.hasMore && last
-              ? encodeCursor("provider", last.platformKey, last.providerId)
-              : null,
-        };
-      },
       async listRuns(request) {
         const after = decodeCursor("run", request.cursor);
         const page = await runReads.listPage({
@@ -359,13 +294,16 @@ export function createAdminImportOperationsRuntime(
       },
       async getRun(request) {
         const run = await runReads.get(request);
-        if (!run) return null;
+        if (!run || run.providerId !== request.providerId) return null;
         const related = await quarantineRepository.listEntriesPage(
           request.organizationId,
           { runId: request.runId, limit: 100 },
           clock.now(),
         );
-        return toRunDetail(run, related.items.map(quarantineSummary));
+        return toRunDetail(
+          run,
+          related.items.map(providerSourceQuarantineSummary),
+        );
       },
       async listQuarantines(request) {
         const after = decodeCursor("quarantine", request.cursor);
@@ -376,7 +314,9 @@ export function createAdminImportOperationsRuntime(
             ...(request.providerId ? { providerId: request.providerId } : {}),
             ...(request.runId ? { runId: request.runId } : {}),
             ...(request.state ? { state: request.state } : {}),
-            ...(request.recordKind ? { recordKind: request.recordKind } : {}),
+            ...(request.recordKind && request.recordKind !== "unknown"
+              ? { recordKind: request.recordKind }
+              : {}),
             ...(request.reasonCode ? { reasonCode: request.reasonCode } : {}),
             ...(after
               ? { before: { createdAt: new Date(after.value), id: after.id } }
@@ -386,7 +326,7 @@ export function createAdminImportOperationsRuntime(
         );
         const last = page.items.at(-1);
         return {
-          items: page.items.map(quarantineSummary),
+          items: page.items.map(providerSourceQuarantineSummary),
           nextCursor:
             page.hasMore && last
               ? encodeCursor("quarantine", last.createdAt.toISOString(), last.id)
@@ -394,27 +334,7 @@ export function createAdminImportOperationsRuntime(
         };
       },
     },
-    manualImports: {
-      async request(request) {
-        const result = await imports.requestImport({
-          trigger: "manual",
-          actor: request.actor,
-          providerId: request.providerId,
-          expectedConfigurationRevisionId:
-            request.expectedConfigurationRevisionId,
-        });
-        return {
-          run: {
-            id: result.run.id,
-            providerId: result.run.providerId,
-            configurationRevisionId: result.run.configRevisionId,
-            trigger: result.run.trigger,
-            state: result.run.state,
-          },
-          deduplicated: result.coalesced,
-        };
-      },
-    },
+    manualImports: manualImportRoutes(imports),
     quarantine,
   };
 }

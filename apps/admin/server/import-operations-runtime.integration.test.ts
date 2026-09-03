@@ -1,18 +1,24 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { userInfo } from "node:os";
 import { test } from "node:test";
 import type { Express } from "express";
+import {
+  PROVIDER_OBSERVATION_CONTRACT_VERSION,
+  dataforrestEventsV1SourceAdapterManifest,
+  providerIdentityNamespaceByLaunchProvider,
+  providerSourceLaunchBounds,
+} from "@packscout/contracts";
 import {
   DatabaseLoginAttemptLimiter,
   PrismaAuthAuditSink,
   PrismaAuthRepository,
   IngestionPersistenceRepository,
   PipelineSetupRepository,
+  ProviderSourceLifecycleRepository,
 } from "@packscout/database";
 import { createMigratedTestDatabase } from "@packscout/database/test-support";
+import { launchSourceMapperDescriptors } from "@packscout/services";
 import { createAdminApp } from "./app.ts";
 import { createNodeAuthSecurity } from "./auth/crypto.ts";
 import { createAdminAuthRuntime } from "./auth/runtime.ts";
@@ -31,63 +37,6 @@ const now = new Date("2026-08-06T12:00:00.000Z");
 const sessionSecret = "admin-runtime-session-secret-at-least-32-bytes";
 const password = "correct horse battery staple";
 const rawSecret = "Bearer never-return private-user 0xprivate-wallet";
-
-async function reserveFreePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  return port;
-}
-
-async function childDatabaseUrl(
-  database: Awaited<ReturnType<typeof createMigratedTestDatabase>>["database"],
-): Promise<string> {
-  const [current] = await database.$queryRaw<Array<{ databaseName: string }>>`
-    select current_database() as "databaseName"
-  `;
-  if (!current) throw new Error("Test database identity is unavailable.");
-  const configured = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL;
-  const adminUrl = new URL(
-    configured ??
-      `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`,
-  );
-  adminUrl.pathname = `/${current.databaseName}`;
-  adminUrl.search = "";
-  adminUrl.hash = "";
-  return adminUrl.toString();
-}
-
-function waitForChildOutput(
-  child: ChildProcess,
-  marker: string,
-): Promise<{ readOutput(): string }> {
-  let output = "";
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Admin entrypoint did not report startup."));
-    }, 15_000);
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-      if (!output.includes(marker)) return;
-      clearTimeout(timeout);
-      resolve({ readOutput: () => output });
-    };
-    child.stdout?.on("data", onData);
-    child.stderr?.on("data", onData);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      if (!output.includes(marker)) {
-        reject(new Error("Admin entrypoint exited before startup."));
-      }
-    });
-  });
-}
 
 async function withServer(app: Express, run: (baseUrl: string) => Promise<void>) {
   const server = app.listen(0, "127.0.0.1");
@@ -117,8 +66,8 @@ async function createHarness() {
   await setup.createProviderSource({
     id: ids.provider,
     organizationId: ids.organization,
-    platformKey: "beezie",
-    displayName: "Beezie",
+    platformKey: "courtyard",
+    displayName: "Courtyard",
     createdAt: now,
   });
   await setup.createConfigRevision({
@@ -159,7 +108,7 @@ async function createHarness() {
     createdAt: now,
   });
   const pull = {
-    platform: "beezie",
+    platform: "courtyard",
     external_id: "pull-1",
     pack_external_id: null,
     occurred_at: "2026-08-06T11:55:00.000Z",
@@ -184,7 +133,7 @@ async function createHarness() {
     requestedCursor: "raw-cursor-in-private-user",
     nextCursor: "raw-cursor-out-0xprivate-wallet",
     hasMore: false,
-    payload: { catalog: [], pulls: [pull], sales: [], rawSecret },
+    payload: { catalog: [], pulls: [pull], trades: [], rawSecret },
     records: [],
     quarantines: [{
       recordKind: "pull",
@@ -206,6 +155,74 @@ async function createHarness() {
       failure_code: "IMPORT_MAPPING_FAILED",
       failure_summary: `unsafe ${rawSecret}`,
     },
+  });
+
+  const sourceManifest = dataforrestEventsV1SourceAdapterManifest;
+  const mapper = launchSourceMapperDescriptors.find(
+    ({ provider }) => provider === "courtyard",
+  );
+  assert.ok(mapper);
+  const sourceLifecycle = new ProviderSourceLifecycleRepository(
+    harness.database,
+  );
+  const connection = await sourceLifecycle.createConnectionProfileRevision({
+    organizationId: ids.organization,
+    sourceTypeKey: sourceManifest.sourceTypeKey,
+    connectionTypeKey: sourceManifest.compatibleConnectionTypeKey,
+    displayName: "DataForrest admin runtime",
+    requestLimit: providerSourceLaunchBounds.stablePlatformRequestCap,
+    sourceAdapterVersion: sourceManifest.adapterVersion,
+    revisionNumber: 1,
+    configurationCiphertext: new Uint8Array(32).fill(1),
+    configurationNonce: new Uint8Array(12).fill(2),
+    configurationAuthTag: new Uint8Array(16).fill(3),
+    encryptionKeyVersion: 1,
+    configurationFingerprint: "a".repeat(64),
+    actorKey: "actor:admin",
+    createdAt: now,
+  });
+  const source = await sourceLifecycle.createSourceInstanceRevision({
+    organizationId: ids.organization,
+    providerId: ids.provider,
+    connectionProfileId: connection.profileId,
+    sourceTypeKey: sourceManifest.sourceTypeKey,
+    sourceAdapterVersion: sourceManifest.adapterVersion,
+    normalizedContractVersion: PROVIDER_OBSERVATION_CONTRACT_VERSION,
+    mapperKey: mapper.mapperKey,
+    mapperVersion: mapper.mapperVersion,
+    identityNamespaceKey:
+      providerIdentityNamespaceByLaunchProvider.courtyard,
+    cursorCodecVersion: sourceManifest.cursorCodecKey,
+    revisionNumber: 1,
+    intervalSeconds: 60,
+    configuration: { platform: "courtyard" },
+    configurationHash: "b".repeat(64),
+    recordIdScopes: [
+      "catalog-pack-v1",
+      "catalog-card-v1",
+      "pull-v1",
+      "trade-v1",
+    ],
+    actorKey: "actor:admin",
+    createdAt: now,
+  });
+  await harness.database.$transaction(async (transaction) => {
+    await transaction.source_connection_revisions.update({
+      where: { id: connection.revisionId },
+      data: { state: "active", activated_at: now },
+    });
+    await transaction.source_connection_profiles.update({
+      where: { id: connection.profileId },
+      data: {
+        state: "active",
+        active_revision_id: connection.revisionId,
+        updated_at: now,
+      },
+    });
+    await transaction.provider_source_instances.update({
+      where: { id: source.sourceInstanceId },
+      data: { state: "active", activated_at: now, updated_at: now },
+    });
   });
 
   const authRepository = new PrismaAuthRepository(harness.database);
@@ -243,8 +260,6 @@ async function createHarness() {
     importOperations: createAdminImportOperationsRuntime({
       database: harness.database,
       actorPseudonymKey,
-      credentialKey: new Uint8Array(32).fill(7),
-      environment: "test",
     }),
   });
   const quarantine = await harness.database.quarantine_records.findFirst({
@@ -252,10 +267,15 @@ async function createHarness() {
     select: { id: true },
   });
   assert.ok(quarantine);
-  return { ...harness, app, quarantineId: quarantine.id };
+  return {
+    ...harness,
+    app,
+    quarantineId: quarantine.id,
+    sourceRevisionId: source.sourceRevisionId,
+  };
 }
 
-test("real admin composition reads safe operations, coalesces manual runs, and resolves quarantine independently", async () => {
+test("real admin composition reads safe operations, queues source runs, and excludes legacy quarantine", async () => {
   const harness = await createHarness();
   try {
     await withServer(harness.app, async (baseUrl) => {
@@ -278,15 +298,11 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
         "X-CSRF-Token": session.csrfToken,
       };
 
-      const overview = await fetch(`${baseUrl}/api/operations/providers?limit=25`, {
-        headers: readHeaders,
-      });
-      assert.equal(overview.status, 200);
       const runs = await fetch(`${baseUrl}/api/import-runs?limit=25`, {
         headers: readHeaders,
       });
       assert.equal(runs.status, 200);
-      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      const detailBefore = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       assert.equal(detailBefore.status, 200);
@@ -296,7 +312,6 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       );
       assert.equal(quarantineBefore.status, 200);
       const safeReadBody = [
-        await overview.text(),
         await runs.text(),
         await detailBefore.text(),
         await quarantineBefore.text(),
@@ -319,22 +334,19 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
             summary: attemptRecord.sanitized_summary,
           }
         : null;
-      assert.equal(
-        retryBody.outcome.outcome,
-        "resolved",
-        JSON.stringify({ retryBody, attempt }),
-      );
-      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}`, {
+      assert.equal(retryBody.outcome.outcome, "not_found");
+      assert.equal(attempt, null);
+      const detailAfter = await fetch(`${baseUrl}/api/import-runs/${ids.run}?providerId=${ids.provider}`, {
         headers: readHeaders,
       });
       const historical = await detailAfter.json() as {
         run: { state: string; counters: { resolvedQuarantines: number } };
       };
       assert.equal(historical.run.state, "incomplete");
-      assert.equal(historical.run.counters.resolvedQuarantines, 1);
+      assert.equal(historical.run.counters.resolvedQuarantines, 0);
 
       const manualRequest = JSON.stringify({
-        expectedConfigurationRevisionId: ids.revision,
+        expectedSourceRevisionId: harness.sourceRevisionId,
       });
       const staleManual = await fetch(
         `${baseUrl}/api/data-providers/${ids.provider}/import-runs`,
@@ -342,7 +354,7 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
           method: "POST",
           headers: mutationHeaders,
           body: JSON.stringify({
-            expectedConfigurationRevisionId:
+            expectedSourceRevisionId:
               "72000000-0000-4000-8000-000000000099",
           }),
         },
@@ -350,7 +362,7 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
       assert.equal(staleManual.status, 409);
       assert.equal(
         (await staleManual.json() as { code: string }).code,
-        "CONFIG_REVISION_CONFLICT",
+        "SOURCE_REVISION_CONFLICT",
       );
       const firstManual = await fetch(
         `${baseUrl}/api/data-providers/${ids.provider}/import-runs`,
@@ -385,12 +397,13 @@ test("real admin composition reads safe operations, coalesces manual runs, and r
   }
 });
 
-test("admin entrypoint starts Prisma before listening and closes cleanly on SIGTERM", async () => {
-  const harness = await createMigratedTestDatabase();
+test("admin entrypoint rejects a disallowed central destination before connecting and never falls back to legacy", async () => {
   let child: ChildProcess | undefined;
   try {
-    const databaseUrl = await childDatabaseUrl(harness.database);
-    const port = await reserveFreePort();
+    const controlDatabaseUrl =
+      "postgresql://control-user:control-secret@127.0.0.1:1/packscout";
+    const legacyDatabaseUrl =
+      "postgresql://legacy-user:legacy-secret@127.0.0.1:1/packscout_dev";
     child = spawn(
       process.execPath,
       ["--import", "tsx", "apps/admin/server/index.ts"],
@@ -399,9 +412,13 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
         env: {
           ...process.env,
           NODE_ENV: "production",
-          PACKSCOUT_DATABASE_URL: databaseUrl,
+          PACKSCOUT_DATABASE_MODE: "remote",
+          PACKSCOUT_CENTRAL_DATABASE_ALLOWED_HOSTS: "127.0.0.1",
+          PACKSCOUT_PROVIDER_DATABASE_ALLOWED_HOSTS: "provider.example.test",
+          PACKSCOUT_CONTROL_DATABASE_URL: controlDatabaseUrl,
+          PACKSCOUT_DATABASE_URL: legacyDatabaseUrl,
           PACKSCOUT_ADMIN_HOST: "127.0.0.1",
-          PACKSCOUT_ADMIN_PORT: String(port),
+          PACKSCOUT_ADMIN_PORT: "5101",
           PACKSCOUT_ADMIN_ALLOWED_ORIGINS: origin,
           PACKSCOUT_SESSION_HASHING_SECRET: sessionSecret,
           PACKSCOUT_PROVIDER_CREDENTIAL_KEY_BASE64: Buffer.alloc(32, 7).toString(
@@ -410,29 +427,37 @@ test("admin entrypoint starts Prisma before listening and closes cleanly on SIGT
           PACKSCOUT_PROVIDER_ACTOR_KEY_BASE64: Buffer.alloc(32, 9).toString(
             "base64",
           ),
+          PACKSCOUT_SOURCE_CONNECTION_KEY_BASE64: Buffer.alloc(32, 11).toString(
+            "base64",
+          ),
+          PACKSCOUT_SOURCE_CONNECTION_KEY_VERSION: "1",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    const startup = await waitForChildOutput(
-      child,
-      `Packscout Admin is available at http://127.0.0.1:${port}`,
-    );
-    assert.equal(startup.readOutput().includes(databaseUrl), false);
-    const exitPromise = new Promise<{
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    const exit = await new Promise<{
       code: number | null;
       signal: NodeJS.Signals | null;
     }>((resolve) => {
       child!.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    assert.equal(child.kill("SIGTERM"), true);
-    const exit = await exitPromise;
-    assert.deepEqual(exit, { code: 0, signal: null });
+    assert.notEqual(exit.code, 0);
+    assert.equal(exit.signal, null);
+    assert.match(output, /Remote central database destination is not allowed/i);
+    assert.doesNotMatch(output, /central database is unavailable/i);
+    assert.doesNotMatch(output, /provider runtime composition is required/i);
+    assert.doesNotMatch(output, /control-secret|legacy-secret|packscout_dev/);
     child = undefined;
   } finally {
     if (child?.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
     }
-    await harness.close();
   }
 });

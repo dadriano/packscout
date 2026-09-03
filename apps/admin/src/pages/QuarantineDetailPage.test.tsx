@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { QuarantineEntryDetail } from "@packscout/contracts";
+import * as React from "react";
+import type { AuthSessionResponse, QuarantineEntryDetail } from "@packscout/contracts";
 import { act } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ConfirmProvider } from "../providers/confirm.tsx";
+import { SessionProvider } from "../providers/session.tsx";
 import { ToastProvider } from "../providers/toast.tsx";
 import {
   cleanupPage,
@@ -16,6 +18,8 @@ import {
   stubFetch,
 } from "../testing/react-page-test.tsx";
 import { QuarantineDetailPage } from "./QuarantineDetailPage.tsx";
+
+Object.assign(globalThis, { React });
 
 const entry: QuarantineEntryDetail = {
   id: "00000000-0000-4000-8000-000000000040",
@@ -40,15 +44,33 @@ const entry: QuarantineEntryDetail = {
   attempts: [],
 };
 
-function route() {
+const session: AuthSessionResponse = {
+  operator: {
+    id: "00000000-0000-4000-8000-000000000050",
+    email: "operator@example.test",
+    displayName: "Data Operator",
+    state: "active",
+  },
+  membership: {
+    organizationId: "00000000-0000-4000-8000-000000000051",
+    organizationName: "PackScout",
+    role: "data_operator",
+  },
+  permissions: ["providers:view", "imports:start", "imports:retry"],
+  csrfToken: "fixture-csrf",
+};
+
+function route(currentEntry: QuarantineEntryDetail = entry) {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <MemoryRouter initialEntries={[`/quarantine/${entry.id}`]}>
-          <Routes>
-            <Route path="/quarantine/:quarantineId" element={<QuarantineDetailPage />} />
-          </Routes>
-        </MemoryRouter>
+        <SessionProvider initialSession={session}>
+          <MemoryRouter initialEntries={[`/quarantine/${currentEntry.id}`]}>
+            <Routes>
+              <Route path="/quarantine/:quarantineId" element={<QuarantineDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </SessionProvider>
       </ConfirmProvider>
     </ToastProvider>
   );
@@ -87,6 +109,7 @@ test("quarantine detail loads safe evidence and retries one open record with con
   await settlePage();
   assert.match(pageText(renderer), /safe-source-42/);
   assert.match(pageText(renderer), /The item could not be mapped/);
+  assert.equal(renderer.container.querySelectorAll(`a[href="/runs/${entry.runId}?providerId=${entry.providerId}"]`).length, 2);
 
   await act(async () => findButton(renderer, "Retry record").click());
   assert.match(pageText(renderer), /does not rewind the provider cursor/);
@@ -112,4 +135,27 @@ test("quarantine detail explains when the operator loses permission", async (con
   assert.match(pageText(renderer), /Your role no longer permits quarantine access/);
   assert.match(pageText(renderer), /Return to quarantine/);
   assert.doesNotMatch(pageText(renderer), /Retry record/);
+});
+
+test("expired source quarantines explain that no retry artifact was retained", async (context) => {
+  const expiredEntry: QuarantineEntryDetail = {
+    ...entry,
+    sanitizedSummary:
+      "The source adapter rejected this record before canonical translation; no retry artifact is retained.",
+    state: "expired",
+    rawExpiresAt: entry.firstFailureAt,
+  };
+  stubFetch(context, () => jsonResponse({ entry: expiredEntry }));
+  const renderer = await renderPage(route(expiredEntry));
+  cleanupPage(context, renderer);
+  await settlePage();
+
+  assert.match(pageText(renderer), /no retry artifact is retained/);
+  assert.match(pageText(renderer), /Retry artifact Unavailable/);
+  assert.doesNotMatch(pageText(renderer), /Source evidence expired/);
+  assert.equal(
+    [...renderer.container.querySelectorAll("button")]
+      .some((button) => button.textContent?.trim() === "Retry record"),
+    false,
+  );
 });
