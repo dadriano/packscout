@@ -4,14 +4,17 @@ import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogSourceAdapterManifest,
   dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
+  dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
+  dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
@@ -112,7 +115,20 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     `courtyard:${dataforrestCourtyardDistributedV2SourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsDistributedV2SourceAdapterManifest.adapterVersion}`,
+    // Pack-reading catalog versions, admitted before activation so the admin
+    // admission gate does not refuse a run with PROVIDER_SOURCE_ADAPTER_UNAVAILABLE.
+    `courtyard:${dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion}`,
+    `phygitals:${dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion}`,
   ].sort());
+  for (const [providerKey, adapterVersion] of [
+    ["courtyard", dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion],
+    ["phygitals", dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion],
+  ] as const) {
+    assert.equal(installed.has(providerKey, adapterVersion), true,
+      `${providerKey} must be admitted on ${adapterVersion}`);
+  }
   assert.equal(installed.has("courtyard", adapterKey), false);
   assert.equal(installed.has("courtyard",
     dataforrestCourtyardDistributedSourceAdapterManifest.adapterVersion), false);

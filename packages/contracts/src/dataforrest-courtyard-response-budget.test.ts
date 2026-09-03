@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES,
   dataforrestEventsJsonNodeBudget,
   dataforrestCourtyardCatalogSourceAdapterManifest,
+  dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestEventRecordV1Schema,
@@ -34,8 +36,15 @@ test("Courtyard response budget stays isolated to v2-derived immutable profiles"
   assert.equal(catalog.adapterVersion, DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION);
   assert.deepEqual(catalog.requestBounds, manifest.requestBounds);
   assert.equal(dataforrestEventsJsonNodeBudget(catalog.adapterVersion), 640_000);
+  // Catalog-v2 adds the native pack reader on the same reviewed transport
+  // admissions; it is a v2-derived profile, not a historical 8 MiB one.
+  const catalogV2 = dataforrestCourtyardCatalogV2SourceAdapterManifest;
+  assert.equal(catalogV2.adapterVersion, DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION);
+  assert.deepEqual(catalogV2.requestBounds, manifest.requestBounds);
+  assert.equal(dataforrestEventsJsonNodeBudget(catalogV2.adapterVersion), 640_000);
   for (const historical of dataforrestEventsV1SourceAdapterManifests.filter(
-    (candidate) => candidate !== manifest && candidate !== catalog,
+    (candidate) =>
+      candidate !== manifest && candidate !== catalog && candidate !== catalogV2,
   )) {
     assert.equal(historical.requestBounds.maximumResponseBytes, 8 * 1024 * 1024);
     assert.equal(dataforrestEventsJsonNodeBudget(historical.adapterVersion), 480_000);
