@@ -53,9 +53,12 @@ test("renders the four metrics, price, status, source, and advice lines", () => 
   ]) {
     assert.ok(markup.includes(fragment), fragment);
   }
-  // Semantic state is text, not color alone.
+  // Semantic state is text, not color alone: the accessible label carries it.
   assert.match(markup, /Negative/);
   assert.match(markup, /data-state="negative"/);
+  // Every public EV is at or below zero, so no visible "Negative" word repeats
+  // beside EV $; the sign and tone carry it for sighted readers.
+  assert.equal(markup.includes('class="stateLabel"'), false);
 });
 
 test("unavailable estimates show the stable reason and never a zero", () => {
@@ -83,14 +86,16 @@ test("sold-out historical estimates keep values with sold-out wording", () => {
   });
   assert.ok(markup.includes("Sold out · historical estimate"));
   assert.ok(markup.includes("$85.00"));
-  assert.match(markup, /Sold out Aug 19, 2026/);
+  assert.ok(markup.includes("<dt>Sold out</dt>"));
+  assert.match(markup, /datetime="2026-08-19T10:05:00.000Z"/i);
 });
 
 test("delayed source age renders the delayed freshness text", () => {
   const markup = render(buildV3DelayedEv(8_500));
   assert.ok(markup.includes("Source data delayed (15–30 minutes old)"));
-  assert.ok(markup.includes("Calculated "));
-  assert.ok(markup.includes("Source evidence last observed "));
+  assert.ok(markup.includes("<dt>Calculated</dt>"));
+  assert.ok(markup.includes("<dt>Source evidence last observed</dt>"));
+  assert.ok(markup.includes("<dt>Confidence evaluated</dt>"));
 });
 
 test("a valid zero payout renders $0.00 with the explicit note", () => {

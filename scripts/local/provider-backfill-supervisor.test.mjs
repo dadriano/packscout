@@ -24,12 +24,54 @@ function intent(s = snapshot(), previous = null) {
   return policy.createBackfillIntent({ pins, authorityDigest: "c".repeat(64), snapshot: s, previous, jitter: 0 });
 }
 
+/**
+ * A run can reach source head and then fail while finalizing, committing no
+ * pages. The checkpoint is then exactly where the run started, so the state is
+ * as safe to retry as a pre-head failure. Before this was classified,
+ * collector_crypt sat blocked on BACKFILL_TERMINAL_CHECKPOINT_UNSAFE for 16
+ * hours with an intact checkpoint and a transient failure code.
+ */
+test("a head-reaching run that committed nothing retries on a transient failure", () => {
+  const s = snapshot();
+  s.run.reachedHead = true;
+  s.run.pageCount = 0;
+  s.run.committedPageCount = 0;
+  s.run.requestedHash = s.checkpointHash;
+  s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  s.lastPage = null;
+  assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
+});
+
+test("a head-reaching run that committed pages is still refused as unsafe", () => {
+  const s = snapshot();
+  s.run.reachedHead = true;
+  s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  assert.throws(() => policy.classifyBackfillCheckpoint(s),
+    /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
+});
+
+test("a head-reaching run whose checkpoint moved is still refused as unsafe", () => {
+  const s = snapshot();
+  s.run.reachedHead = true;
+  s.run.pageCount = 0;
+  s.run.committedPageCount = 0;
+  s.run.requestedHash = "d".repeat(64);
+  s.lastPage = null;
+  s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  assert.throws(() => policy.classifyBackfillCheckpoint(s),
+    /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
+});
+
 test("only explicit transport/rate/server and settled expired-query failures automatically retry", () => {
   for (const code of policy.transientBackfillCodes) {
     const s = snapshot(); s.run.failureCode = code;
     assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
   }
-  for (const suffix of ["INVALID_RESPONSE", "RESPONSE_TOO_LARGE", "INVALID_CURSOR", "CANCELLED", "TLS_FAILED", "AUTHENTICATION_FAILED", "UNKNOWN"]) {
+  // RESPONSE_TOO_LARGE is deliberately NOT here: it is recoverable by retrying
+  // under a lowered maximumPageRecords, and classifying it permanent latched a
+  // resident on an intact checkpoint.
+  assert.equal(policy.transientBackfillCodes.has("PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE"), true);
+  for (const suffix of ["INVALID_RESPONSE", "INVALID_CURSOR", "CANCELLED", "TLS_FAILED", "AUTHENTICATION_FAILED", "UNKNOWN"]) {
     const s = snapshot(); s.run.failureCode = `PROVIDER_DATAFORREST_${suffix}`;
     assert.throws(() => policy.classifyBackfillCheckpoint(s), /BACKFILL_PERMANENT_FAILURE/);
   }

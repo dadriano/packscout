@@ -22,6 +22,11 @@ type PackScoutEvMetricsProps = Readonly<{
  * EV % beside Pack Price, with confidence, status, freshness, and the
  * required source and advice lines. Every value arrives pre-formatted from
  * the presentation boundary; this component renders and never calculates.
+ *
+ * EV $ carries no visible "Negative" word: every public PackScout EV is at or
+ * below zero, so the word never distinguishes one pack from another. The
+ * sign is in the value, the tone color says how far from break-even it is,
+ * and the accessible label still names the state for assistive technology.
  */
 export function PackScoutEvMetrics({
   presentation,
@@ -66,11 +71,6 @@ export function PackScoutEvMetrics({
         <span className={styles.confidenceLabel}>
           EV confidence
           <GlossaryHint
-            content={{
-              label: "EV confidence",
-              definition: METRIC_TRUST_COPY.confidenceExplanation,
-              learnHref: EXPECTED_VALUE_ARTICLE_HREF,
-            }}
             details={presentation.confidence.limitations}
             field="evConfidence"
           />
@@ -95,6 +95,7 @@ export function PackScoutEvMetrics({
           compact={compact}
           metric={presentation.evDollars}
           showReason={false}
+          showSemanticState={false}
         />
         <MetricValue
           compact={compact}
@@ -124,31 +125,51 @@ export function PackScoutEvMetrics({
 
       {showFreshness ? (
         <div className={styles.freshness}>
-          <p>
-            <time dateTime={freshness.calculatedAt}>
-              {freshness.calculatedLabel}
-            </time>
-          </p>
-          <p>
-            {freshness.dataAsOf ? (
-              <time dateTime={freshness.dataAsOf}>{freshness.dataAsOfLabel}</time>
-            ) : (
-              freshness.dataAsOfLabel
-            )}
-          </p>
           {freshness.sourceAgeLabel ? (
-            <p data-delayed={freshness.delayed}>{freshness.sourceAgeLabel}</p>
-          ) : null}
-          <p>
-            <time dateTime={freshness.confidenceEvaluatedAt}>
-              {freshness.confidenceEvaluatedLabel}
-            </time>
-          </p>
-          {freshness.soldOutLabel && freshness.soldOutAt ? (
-            <p>
-              <time dateTime={freshness.soldOutAt}>{freshness.soldOutLabel}</time>
+            <p className={styles.sourceAge} data-delayed={freshness.delayed}>
+              {freshness.sourceAgeLabel}
             </p>
           ) : null}
+          <dl className={styles.freshnessList}>
+            <div className={styles.freshnessRow}>
+              <dt>Calculated</dt>
+              <dd>
+                <time dateTime={freshness.calculatedAt}>
+                  {freshness.calculatedTimeLabel}
+                </time>
+              </dd>
+            </div>
+            <div className={styles.freshnessRow}>
+              <dt>Source evidence last observed</dt>
+              <dd>
+                {freshness.dataAsOf && freshness.dataAsOfTimeLabel ? (
+                  <time dateTime={freshness.dataAsOf}>
+                    {freshness.dataAsOfTimeLabel}
+                  </time>
+                ) : (
+                  "Unknown"
+                )}
+              </dd>
+            </div>
+            <div className={styles.freshnessRow}>
+              <dt>Confidence evaluated</dt>
+              <dd>
+                <time dateTime={freshness.confidenceEvaluatedAt}>
+                  {freshness.confidenceEvaluatedTimeLabel}
+                </time>
+              </dd>
+            </div>
+            {freshness.soldOutAt && freshness.soldOutTimeLabel ? (
+              <div className={styles.freshnessRow}>
+                <dt>Sold out</dt>
+                <dd>
+                  <time dateTime={freshness.soldOutAt}>
+                    {freshness.soldOutTimeLabel}
+                  </time>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
         </div>
       ) : null}
 

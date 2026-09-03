@@ -12,6 +12,11 @@ export const transientBackfillCodes = new Set([
   // Emitted only for a trusted expired query after its rejected transaction
   // callback has settled; unknown P2028/commit outcomes retain permanent policy.
   "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED",
+  // A response only exceeds the fixed ceiling for a page size the runtime chooses,
+  // so a retry under a lowered maximumPageRecords issues a materially smaller
+  // request. Treating this as permanent latched the resident on a recoverable
+  // condition with an intact checkpoint.
+  "PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE",
 ]);
 export function safeBackfillFailureCode(value: string | null): string | null {
   return value === null || /^PROVIDER_[A-Z0-9_]{1,110}$/u.test(value) ? value : "BACKFILL_UNKNOWN_FAILURE";
@@ -105,7 +110,15 @@ export function classifyBackfillCheckpoint(snapshot: BackfillSnapshot): "head" |
     (run.state === "queued" ? snapshot.state === "idle" && run.requestedHash === snapshot.checkpointHash
       : snapshot.state === "running" && (run.pageCount === 0 ? run.requestedHash === snapshot.checkpointHash
         : snapshot.lastPage?.matches && snapshot.lastPage.number === run.pageCount && snapshot.lastPage.hash === snapshot.checkpointHash))) return "execute";
-  if (run.state !== "failed" || run.reachedHead || !run.finishedAt || snapshot.state !== "error" ||
+  // A run that reached head and committed nothing leaves the checkpoint exactly
+  // where it started, so a transient failure at that point is as safe to retry
+  // as one before head. Without this a head-reaching commit failure matches no
+  // classification branch at all and latches the provider on an intact
+  // checkpoint: collector_crypt sat blocked for 16 hours this way.
+  const headWithoutCommit = run.reachedHead && run.pageCount === 0 &&
+    run.requestedHash === snapshot.checkpointHash;
+  if (run.state !== "failed" || (run.reachedHead && !headWithoutCommit) ||
+    !run.finishedAt || snapshot.state !== "error" ||
     snapshot.activeRunIds.length !== 0 || snapshot.actionableCommands.length !== 0 ||
     !run.finalMatches || run.finalHash !== snapshot.checkpointHash || !snapshot.checkpointHash ||
     (run.pageCount > 0 && (!snapshot.lastPage?.matches || snapshot.lastPage.number !== run.pageCount ||

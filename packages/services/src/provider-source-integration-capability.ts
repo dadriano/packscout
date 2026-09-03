@@ -1,12 +1,18 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
+  dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
+  dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV3SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import {
@@ -166,6 +172,38 @@ ProviderSourceIntegrationCapabilityRegistry {
     providerSourceIntegrationCapability(
       "phygitals",
       dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion,
+    ),
+    // The pack-reading catalog versions. Without these tuples the admin
+    // admission gate refuses a run on an activated source with
+    // PROVIDER_SOURCE_ADAPTER_UNAVAILABLE, so they are admitted alongside the
+    // predecessors rather than after activation.
+    providerSourceIntegrationCapability(
+      "courtyard",
+      dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion,
+    ),
+    // The pack-reading DISTRIBUTED versions. Production runs all-stream sources
+    // for these three providers, so the catalog-scoped identities above cannot
+    // carry their packs without stopping pull and trade ingestion. Admitted
+    // before activation for the same admission-gate reason as the catalog ones.
+    providerSourceIntegrationCapability(
+      "courtyard",
+      dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion,
     ),
   ]);
 }

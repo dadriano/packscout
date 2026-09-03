@@ -3,19 +3,28 @@ import { test } from "node:test";
 import {
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
+  dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
+  dataforrestCourtyardDistributedV3SourceAdapterManifest,
   dataforrestEventsCatalogSourceConfigurationV1Schema,
   dataforrestEventsJsonNodeBudget,
   dataforrestEventsSourceConfigurationSchemaForAdapter,
   dataforrestEventsSourceConfigurationV1Schema,
   dataforrestEventsV1SourceAdapterManifests,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
+  dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV3SourceAdapterManifest,
   normalizeDataforrestEventRecordForAdapter,
   type DataforrestEventRecordV1,
 } from "./index.ts";
@@ -42,6 +51,31 @@ const catalogProfiles = [
     predecessor: dataforrestPhygitalsDistributedV2SourceAdapterManifest,
     pageLimit: 100,
   },
+  // Pack-reader identities. Each keeps its catalog predecessor's transport
+  // admissions exactly; the new version exists only to carry the native
+  // catalog-pack interpretation, which adapter immutability forbids adding
+  // to an already-admitted version.
+  {
+    provider: "collector_crypt",
+    version: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
+    manifest: dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
+    predecessor: dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+    pageLimit: 100,
+  },
+  {
+    provider: "courtyard",
+    version: DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
+    manifest: dataforrestCourtyardCatalogV2SourceAdapterManifest,
+    predecessor: dataforrestCourtyardCatalogSourceAdapterManifest,
+    pageLimit: 100,
+  },
+  {
+    provider: "phygitals",
+    version: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
+    manifest: dataforrestPhygitalsCatalogV2SourceAdapterManifest,
+    predecessor: dataforrestPhygitalsCatalogSourceAdapterManifest,
+    pageLimit: 100,
+  },
 ] as const;
 
 test("catalog profiles keep provider-local bounds under new immutable identities", () => {
@@ -60,6 +94,18 @@ test("catalog profiles keep provider-local bounds under new immutable identities
   assert.equal(
     DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     "dataforrest-phygitals-catalog-adapter-v1",
+  );
+  assert.equal(
+    DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
+    "dataforrest-collector-crypt-catalog-adapter-v3",
+  );
+  assert.equal(
+    DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
+    "dataforrest-courtyard-catalog-adapter-v2",
+  );
+  assert.equal(
+    DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
+    "dataforrest-phygitals-catalog-adapter-v2",
   );
   for (const { provider, version, manifest, predecessor, pageLimit } of catalogProfiles) {
     assert.equal(manifest.adapterVersion, version);
@@ -122,6 +168,39 @@ test("catalog source configuration is exact and selected only by catalog version
     assert.equal(
       dataforrestEventsSourceConfigurationSchemaForAdapter(version),
       dataforrestEventsCatalogSourceConfigurationV1Schema,
+    );
+  }
+  // The pack-reading DISTRIBUTED identities must stay all-stream. Pinning one
+  // to the catalog configuration would make its source catalog-only and stop
+  // pull and trade ingestion, which is why the catalog identities above cannot
+  // carry production's packs.
+  for (
+    const distributed of [
+      dataforrestCourtyardDistributedV3SourceAdapterManifest,
+      dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+      dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+    ]
+  ) {
+    const platform = distributed.supportedProviders[0]!.provider;
+    assert.equal(
+      dataforrestEventsSourceConfigurationSchemaForAdapter(
+        distributed.adapterVersion,
+      ),
+      dataforrestEventsSourceConfigurationV1Schema,
+      distributed.adapterVersion,
+    );
+    assert.equal(
+      dataforrestEventsSourceConfigurationV1Schema.safeParse({ platform })
+        .success,
+      true,
+      distributed.adapterVersion,
+    );
+    assert.equal(
+      dataforrestEventsSourceConfigurationSchemaForAdapter(
+        distributed.adapterVersion,
+      ).safeParse({ platform, stream: "catalog" }).success,
+      false,
+      distributed.adapterVersion,
     );
   }
   const catalogVersions: ReadonlySet<string> = new Set(
