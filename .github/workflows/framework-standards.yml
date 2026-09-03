@@ -35,7 +35,18 @@ jobs:
   verify-framework:
     name: Verify framework standards
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # `verify:framework` runs the whole gate in one sequential chain and lands
+    # between 21 and 24 minutes: the tests alone take about 14, and
+    # `test:services` and `test:database` are over half of that. The first
+    # green run under this budget took 23m23s. Twenty minutes used to look
+    # sufficient only because the gate kept aborting early on a failing package
+    # before reaching `test:tooling` and the build. Once those failures were
+    # fixed the full chain ran to completion and was cancelled twice at the
+    # cap, the second time inside `build:admin` — the final step. Thirty leaves
+    # room for runner variance without hiding growth. See
+    # .tasks/test-overhead-reduction/008-cache-and-deduplicate-ci.md for the
+    # work that would bring the gate back down.
+    timeout-minutes: 30
     env:
       PACKSCOUT_TEST_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
