@@ -175,3 +175,4 @@ export * from "./providers/clutchpacks/public-pack-membership-source-v1.ts";
 export * from "./public-repack-link.ts";
 export * from "./convex-pack-catalog-publication-client.ts";
 export * from "./provider-pack-readiness-evaluator.ts";
+export * from "./provider-pack-snapshot-assembler.ts";
