@@ -16,14 +16,21 @@ export function providerPageFactReferenceTargets(page: ValidatedProviderMixedPag
   return { packKeys: [...packKeys], collectibleKeys: [...collectibleKeys] };
 }
 
-export async function reconcileProviderPageFactReferences(input: {
+export interface ProviderPageFactReferenceReconciliation {
   page: ValidatedProviderMixedPage;
   reachedHead: boolean;
   signal: AbortSignal;
   maximumBatches: number;
   renewLease(): Promise<boolean>;
   reconcile(scan: ProviderFactReferenceScan): Promise<FactReferenceReconciliationResult | null>;
-}): Promise<"complete" | "aborted" | "lease_lost" | "limit_exceeded"> {
+}
+
+export type ProviderPageFactReferenceOutcome =
+  "complete" | "aborted" | "lease_lost" | "limit_exceeded";
+
+export async function reconcileProviderPageFactReferences(
+  input: ProviderPageFactReferenceReconciliation,
+): Promise<ProviderPageFactReferenceOutcome> {
   const targets = input.reachedHead ? undefined : providerPageFactReferenceTargets(input.page);
   if (targets && targets.packKeys.length + targets.collectibleKeys.length === 0) return "complete";
   let after: ProviderFactReferenceScan["after"];
@@ -39,4 +46,32 @@ export async function reconcileProviderPageFactReferences(input: {
     after = result.nextScanCursor;
   }
   return "limit_exceeded";
+}
+
+/**
+ * Runs the non-head pass, absorbing database faults.
+ *
+ * That pass is opportunistic by construction: it executes a single batch and
+ * discards whatever remains, because the durable head scan drains all remaining
+ * work regardless. By the time it runs, the page is committed and the checkpoint
+ * has already advanced - so failing to reconcile costs nothing and is undone by
+ * the next head scan, while letting the fault propagate fails the run and latches
+ * the provider behind a permanent-failure classification. collector_crypt sat
+ * blocked for over an hour on a P2028 raised here, holding an intact checkpoint
+ * and eight committed pages.
+ *
+ * Only database faults are absorbed. Anything else is a defect in our own code
+ * and must still fail loudly.
+ */
+export async function reconcileProviderPageFactReferencesOpportunistically(
+  input: ProviderPageFactReferenceReconciliation & {
+    isDatabaseFailure(error: unknown): boolean;
+  },
+): Promise<ProviderPageFactReferenceOutcome> {
+  try {
+    return await reconcileProviderPageFactReferences(input);
+  } catch (error) {
+    if (!input.isDatabaseFailure(error)) throw error;
+    return "complete";
+  }
 }
