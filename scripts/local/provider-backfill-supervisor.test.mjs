@@ -29,7 +29,11 @@ test("only explicit transport/rate/server and settled expired-query failures aut
     const s = snapshot(); s.run.failureCode = code;
     assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
   }
-  for (const suffix of ["INVALID_RESPONSE", "RESPONSE_TOO_LARGE", "INVALID_CURSOR", "CANCELLED", "TLS_FAILED", "AUTHENTICATION_FAILED", "UNKNOWN"]) {
+  // RESPONSE_TOO_LARGE is deliberately NOT here: it is recoverable by retrying
+  // under a lowered maximumPageRecords, and classifying it permanent latched a
+  // resident on an intact checkpoint.
+  assert.equal(policy.transientBackfillCodes.has("PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE"), true);
+  for (const suffix of ["INVALID_RESPONSE", "INVALID_CURSOR", "CANCELLED", "TLS_FAILED", "AUTHENTICATION_FAILED", "UNKNOWN"]) {
     const s = snapshot(); s.run.failureCode = `PROVIDER_DATAFORREST_${suffix}`;
     assert.throws(() => policy.classifyBackfillCheckpoint(s), /BACKFILL_PERMANENT_FAILURE/);
   }

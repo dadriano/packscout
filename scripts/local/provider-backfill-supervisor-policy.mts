@@ -12,6 +12,11 @@ export const transientBackfillCodes = new Set([
   // Emitted only for a trusted expired query after its rejected transaction
   // callback has settled; unknown P2028/commit outcomes retain permanent policy.
   "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED",
+  // A response only exceeds the fixed ceiling for a page size the runtime chooses,
+  // so a retry under a lowered maximumPageRecords issues a materially smaller
+  // request. Treating this as permanent latched the resident on a recoverable
+  // condition with an intact checkpoint.
+  "PROVIDER_DATAFORREST_RESPONSE_TOO_LARGE",
 ]);
 export function safeBackfillFailureCode(value: string | null): string | null {
   return value === null || /^PROVIDER_[A-Z0-9_]{1,110}$/u.test(value) ? value : "BACKFILL_UNKNOWN_FAILURE";
