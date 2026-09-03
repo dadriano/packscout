@@ -4,19 +4,27 @@ import { clutchpacksPackProviderFacts } from
   "./dataforrest-clutchpacks-pack-v3.ts";
 import { collectorCryptCardProviderFactsV1 } from
   "./dataforrest-collector-crypt-card-v1.ts";
+import { collectorCryptPackProviderFactsV1 } from
+  "./dataforrest-collector-crypt-pack-v1.ts";
 import { phygitalsCardProviderFactsV1 } from
   "./dataforrest-phygitals-card-v1.ts";
 import { phygitalsCardProviderFactsV2 } from
   "./dataforrest-phygitals-card-v2.ts";
+import { phygitalsPackProviderFactsV1 } from
+  "./dataforrest-phygitals-pack-v1.ts";
 import { courtyardCardProviderFactsV1 } from
   "./dataforrest-courtyard-card-v1.ts";
+import { courtyardPackProviderFactsV1 } from
+  "./dataforrest-courtyard-pack-v1.ts";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
@@ -24,6 +32,7 @@ import {
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
@@ -85,6 +94,20 @@ const providerFactsAdapters = Object.freeze([
     kind: "card",
     read: collectorCryptCardProviderFactsV1,
   },
+  // Catalog-v3 adds the native pack reader. The catalog-v2 card interpretation
+  // is carried forward unchanged so a source pinned to v3 reads both entities.
+  {
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
+    provider: "collector_crypt",
+    kind: "card",
+    read: collectorCryptCardProviderFactsV1,
+  },
+  {
+    adapterVersion: DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
+    provider: "collector_crypt",
+    kind: "pack",
+    read: collectorCryptPackProviderFactsV1,
+  },
   {
     adapterVersion: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
     provider: "courtyard",
@@ -102,6 +125,21 @@ const providerFactsAdapters = Object.freeze([
     provider: "courtyard",
     kind: "card",
     read: courtyardCardProviderFactsV1,
+  },
+  // Catalog-v2 adds the native pack reader. Without it Courtyard packs fell
+  // through to the provider-declared display-name field (`provider_label`),
+  // which no observed Courtyard pack payload carries.
+  {
+    adapterVersion: DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
+    provider: "courtyard",
+    kind: "card",
+    read: courtyardCardProviderFactsV1,
+  },
+  {
+    adapterVersion: DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
+    provider: "courtyard",
+    kind: "pack",
+    read: courtyardPackProviderFactsV1,
   },
   {
     adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
@@ -121,6 +159,20 @@ const providerFactsAdapters = Object.freeze([
     kind: "card",
     read: phygitalsCardProviderFactsV2,
   },
+  // Catalog-v2 adds the native pack reader and carries the catalog-v1 card
+  // interpretation (phygitals card V2) forward unchanged.
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
+    provider: "phygitals",
+    kind: "card",
+    read: phygitalsCardProviderFactsV2,
+  },
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
+    provider: "phygitals",
+    kind: "pack",
+    read: phygitalsPackProviderFactsV1,
+  },
 ] as const satisfies readonly ProviderFactsAdapter[]);
 
 const supportedAdapterVersions: ReadonlySet<string> = new Set([
@@ -130,13 +182,16 @@ const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V3_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
+  DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
 ]);
