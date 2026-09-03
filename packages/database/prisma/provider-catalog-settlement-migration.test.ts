@@ -70,24 +70,12 @@ async function createPreProviderSettlementDatabase(): Promise<{
       await applyMigration(database, migrationName);
     }
   } catch (error) {
-    try {
-      await endPoolFully(database);
-      await admin.query(`drop database if exists "${databaseName}" with (force)`);
-    } finally {
-      await endPoolFully(admin);
-    }
+    await teardown();
     throw error;
   }
   return {
     database,
-    close: async () => {
-      try {
-        await endPoolFully(database);
-        await admin.query(`drop database if exists "${databaseName}" with (force)`);
-      } finally {
-        await endPoolFully(admin);
-      }
-    },
+    close: teardown,
   };
 }
 
