@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   PACK_CATALOG_V1,
   PACK_SNAPSHOT_HASH_DOMAIN,
@@ -203,7 +204,8 @@ async function makePackPayload(input: {
   return { ...base, summaryProjection, searchProjection: { publicRepackId: input.id, normalizedText: normalizePackCatalogSearchText([input.title, ...records.map(({ displayName }) => displayName), ...aliases].join(" ")), aliases, categoryIds: [packCatalogFixtureIds.category] } } as PublicPackSnapshotPayload;
 }
 
-export async function sealFixturePack(payloadInput: unknown) {
+export async function sealFixturePack(payloadInput: unknown, batchSize = 250) {
+  z.number().int().min(1).max(250).parse(batchSize);
   const payload = normalizePublicPackSnapshotPayload(payloadInput);
   assertPublicPackCatalogBytes(payload);
   const probabilityInputsSha256 = await hashPackCatalogValue(
@@ -244,8 +246,8 @@ export async function sealFixturePack(payloadInput: unknown) {
     byteCount: number;
     batchSha256: string;
   }> = [];
-  for (let start = 0; start < contents.length; start += 250) {
-    const records = contents.slice(start, start + 250);
+  for (let start = 0; start < contents.length; start += batchSize) {
+    const records = contents.slice(start, start + batchSize);
     const batchIndex = proofs.length;
     const body = { kind: "contents_batch", providerId: payload.providerId, publicRepackId: payload.publicRepackId, batchIndex, records };
     proofs.push({ batchIndex, records, recordCount: records.length, byteCount: packCatalogCanonicalByteCount(body), batchSha256: await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, body) });
@@ -255,9 +257,10 @@ export async function sealFixturePack(payloadInput: unknown) {
     header,
     batches: proofs.map(({ batchIndex, recordCount, byteCount, batchSha256 }) => ({ batchIndex, recordCount, byteCount, batchSha256 })),
   });
-  const identity = publicPackSnapshotIdentitySchema.parse({ providerId: payload.providerId, publicRepackId: payload.publicRepackId, publicPackSnapshotId: `pps_${contentSha256}`, contentSha256, dataAsOf: payload.dataAsOf, evMethodIdentity: payload.evMethodIdentity, evPolicyIdentity: payload.evPolicyIdentity });
+  const summarySha256 = await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, payload.summaryProjection);
+  const identity = publicPackSnapshotIdentitySchema.parse({ providerId: payload.providerId, publicRepackId: payload.publicRepackId, publicPackSnapshotId: `pps_${contentSha256}`, contentSha256, summarySha256, dataAsOf: payload.dataAsOf, evMethodIdentity: payload.evMethodIdentity, evPolicyIdentity: payload.evPolicyIdentity });
   const batches = proofs.map((proof) => publicPackSnapshotBatchSchema.parse({ publicPackSnapshotId: identity.publicPackSnapshotId, ...proof }));
-  const snapshot = publicPackSnapshotSchema.parse({ identity, payload });
+  const snapshot = await publicPackSnapshotSchema.parseAsync({ identity, payload });
   const descriptor = publicPackSnapshotDescriptorSchema.parse({
     identity,
     lifecycle: payload.lifecycle,
@@ -294,8 +297,8 @@ export async function createPackCatalogV1Fixture(signingKey: Uint8Array) {
   const payloadAUpdate = await makePackPayload({ id: packCatalogFixtureIds.packA, title: "Alpha Pack", contents: [item(0), item(1)], lifecycle: lifecycle("sold_out", "active"), evMinorUnits: 25_000, previous: { snapshotId: packA.snapshot.identity.publicPackSnapshotId, economicsSha256: packA.snapshot.payload.economicsSha256 } });
   payloadAUpdate.providerProfileSnapshotId = provider.profile.identity.publicProfileSnapshotId;
   const packAUpdate = await sealFixturePack(payloadAUpdate);
-  const head = (pack: typeof packA, sequence: string) => activePackHeadSchema.parse({ providerId: pack.snapshot.identity.providerId, publicRepackId: pack.snapshot.identity.publicRepackId, generation: 1, publicationEpoch: 0, held: false, holdReason: null, latestAcceptedPackPublicationSequence: sequence, activeSnapshot: pack.snapshot.identity, previousSnapshot: null, indexableSummary: pack.snapshot.payload.summaryProjection, activatedAt: DATA_AS_OF });
-  const heads = { packA: head(packA, "1"), packB: head(packB, "2") };
+  const head = (pack: typeof packA, sequence: string) => activePackHeadSchema.parseAsync({ providerId: pack.snapshot.identity.providerId, publicRepackId: pack.snapshot.identity.publicRepackId, generation: 1, publicationEpoch: 0, held: false, holdReason: null, latestAcceptedPackPublicationSequence: sequence, activeSnapshot: pack.snapshot.identity, previousSnapshot: null, indexableSummary: pack.snapshot.payload.summaryProjection, activatedAt: DATA_AS_OF });
+  const heads = { packA: await head(packA, "1"), packB: await head(packB, "2") };
   const evidence = { providerId: packCatalogFixtureIds.providerId, publicRepackId: packCatalogFixtureIds.packA, packPublicationSequence: "1", providerChangeIdentity: "provider-change:1", sourceRevisionIdentity: "source-revision:1", sharedDependencies: [] };
   const buildRequest = packBuildRequestSchema.parse({ requestId: "60000000-0000-4000-8000-000000000001", schemaVersion: PACK_CATALOG_V1, providerId: packCatalogFixtureIds.providerId, publicRepackId: packCatalogFixtureIds.packA, packPublicationSequence: "1", desiredStateSha256: HASH_A, contentsSha256: HASH_B, probabilityInputsSha256: payloadA.probabilityInputsSha256, valuationInputsSha256: payloadA.valuationsSha256, evInputsSha256: payloadA.evInputsSha256, profilePrerequisiteMode: "initial_heads_required", requiredProfileSnapshotIds: [provider.profile.identity.publicProfileSnapshotId, ...payloadA.collectibleProfileSnapshotIds].sort(compareCanonicalStrings), expectedPublicationEpoch: 0, evidence, requestedAt: DATA_AS_OF });
   const intent = (intentId: string) => packActivationIntentSchema.parse({ intentId, idempotencyKey: `activate:${intentId}`, snapshot: packA.snapshot.identity, packPublicationSequence: "1", evidence, expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null }, operationDigest: HASH_C, createdAt: DATA_AS_OF, expiresAt: "2026-09-03T19:00:00.000Z" });

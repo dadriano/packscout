@@ -22,6 +22,8 @@ import {
   isPublicationAlertAgeEligible,
   isTerminalPublicationWork,
   packBuildRequestSchema,
+  packPublicationEnvelopeSchema,
+  profilePublicationEnvelopeSchema,
   publicationOperationOutcomes,
   publicationPlannerOutcomeSchema,
   publicationReasonCodes,
@@ -33,11 +35,14 @@ import {
 } from "./pack-publication.ts";
 import {
   normalizePublicPackSnapshotPayload,
+  publicPackActionSchema,
   publicPackLifecycleSchema,
   publicPackSnapshotPayloadSchema,
+  publicPackSummaryCore,
 } from "./pack-catalog-domain.ts";
 import {
   PackCatalogCursorError,
+  issuePackCatalogCursor,
   packCatalogQueryNames,
   packCatalogReadErrorCodes,
   packCatalogV1QueryContracts,
@@ -72,10 +77,96 @@ async function expectCursorExpired(run: () => Promise<unknown>) {
 test("Native pack catalog contract matrix", async (context) => {
   const fixture = await createPackCatalogV1Fixture(SIGNING_KEY);
 
+  await context.test("publication envelopes reject mismatched manifests, payloads, and digests", async () => {
+    const pack = fixture.packs.packA;
+    const envelope = { intent: fixture.activationIntents[0]!, descriptor: pack.descriptor,
+      snapshot: pack.snapshot, batches: pack.batches, authorizationScopeSha256: SHA_A,
+      payloadSha256: await hashPackCatalogValue("packscout.public-pack-snapshot.v1", pack.snapshot.payload) };
+    assert.equal((await packPublicationEnvelopeSchema.safeParseAsync(envelope)).success, true);
+    const mutations: Array<(value: typeof envelope) => void> = [
+      value => { value.batches[0]!.batchIndex = 1; },
+      value => { value.batches[0]!.records.pop(); value.batches[0]!.recordCount = 1; },
+      value => { value.batches[0]!.byteCount += 1; },
+      value => { value.batches[0]!.batchSha256 = SHA_A; },
+      value => { value.batches[0]!.records[0]!.displayName = "Substituted record"; },
+      value => { value.batches.push(structuredClone(value.batches[0]!)); },
+      value => { value.batches = []; },
+      value => { value.payloadSha256 = SHA_A; },
+      value => { value.descriptor.lifecycle = fixture.packs.packB.snapshot.payload.lifecycle; },
+      value => { value.snapshot.payload.actions[0]!.label = "Substituted payload"; },
+      value => { value.batches[0]!.batchSha256 = value.descriptor.batches[0]!.batchSha256 = SHA_A; },
+    ];
+    for (const mutate of mutations) {
+      const changed = structuredClone(envelope); mutate(changed);
+      assert.equal((await packPublicationEnvelopeSchema.safeParseAsync(changed)).success, false);
+    }
+    const forged = structuredClone(envelope);
+    forged.snapshot.payload.actions[0]!.label = "Changed with a matching payload hash";
+    forged.payloadSha256 = await hashPackCatalogValue("packscout.public-pack-snapshot.v1", forged.snapshot.payload);
+    assert.equal((await packPublicationEnvelopeSchema.safeParseAsync(forged)).success, false);
+    const split = await sealFixturePack(pack.snapshot.payload, 1);
+    const splitEnvelope = { ...envelope, ...split, intent: { ...envelope.intent, snapshot: split.snapshot.identity } };
+    const { canonicalBytes, ...boundedSplit } = splitEnvelope;
+    assert.ok(canonicalBytes.length > 0);
+    assert.equal((await packPublicationEnvelopeSchema.safeParseAsync(boundedSplit)).success, true);
+    boundedSplit.batches.reverse();
+    assert.equal((await packPublicationEnvelopeSchema.safeParseAsync(boundedSplit)).success, false);
+    const provider = fixture.provider;
+    const profileEnvelope = { profile: provider.profile, descriptor: provider.descriptor, batch: provider.batch,
+      intent: { intentId: fixture.activationIntents[0]!.intentId, idempotencyKey: "profile:1", profile: provider.profile.identity,
+        expectedGeneration: 0, operationDigest: SHA_A, createdAt: "2026-09-03T18:00:00.000Z", expiresAt: "2026-09-03T19:00:00.000Z" },
+      authorizationScopeSha256: SHA_A, payloadSha256: await hashPackCatalogValue("packscout.public-profile-snapshot.v1", provider.profile) };
+    assert.equal((await profilePublicationEnvelopeSchema.safeParseAsync(profileEnvelope)).success, true);
+    for (const changed of [
+      { ...profileEnvelope, payloadSha256: SHA_A },
+      { ...profileEnvelope, batch: { ...provider.batch, byteCount: provider.batch.byteCount + 1 } },
+      { ...profileEnvelope, profile: { ...provider.profile, displayName: "Substituted provider" } },
+    ]) assert.equal((await profilePublicationEnvelopeSchema.safeParseAsync(changed)).success, false);
+  });
+
+  await context.test("pack heads reject stale and cross-provider summaries", async () => {
+    const current = fixture.heads.packA;
+    assert.equal((await activePackHeadSchema.safeParseAsync(current)).success, true);
+    assert.equal((await activePackHeadSchema.safeParseAsync({ ...current,
+      activeSnapshot: fixture.packs.packAUpdate.snapshot.identity })).success, false);
+    assert.equal((await activePackHeadSchema.safeParseAsync({ ...current,
+      indexableSummary: { ...current.indexableSummary, providerId: packCatalogFixtureIds.organizationId } })).success, false);
+  });
+
+  await context.test("public actions use safe HTTPS and exact lifecycle reasons", () => {
+    const action = fixture.packs.packA.snapshot.payload.actions[0]!;
+    for (const url of ["javascript:alert(1)", "http://provider.test", "data:text/html,test", "https://user:password@provider.test/"]) {
+      assert.equal(publicPackActionSchema.safeParse({ ...action, url }).success, false);
+    }
+    assert.equal(publicPackActionSchema.safeParse({ ...action, url: "https://provider.test/offer?pack=1" }).success, true);
+    for (const lifecycle of fixture.lifecycleCases) {
+      const expected = lifecycle.retirement === "retired" ? "PACK_RETIRED" : lifecycle.availability !== "available" ? "PACK_UNAVAILABLE" : null;
+      for (const disabledReason of [null, "PACK_RETIRED", "PACK_UNAVAILABLE"] as const) {
+        const payload = structuredClone(fixture.packs.packA.snapshot.payload);
+        payload.lifecycle = lifecycle;
+        payload.actions = payload.actions.map(item => ({ ...item, enabled: disabledReason === null, disabledReason }));
+        payload.summaryProjection = publicPackSummaryCore(payload);
+        assert.equal(publicPackSnapshotPayloadSchema.safeParse(payload).success, disabledReason === expected);
+      }
+    }
+  });
+
+  await context.test("maximum accepted filters can issue and consume a bounded cursor", async () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `80000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`);
+    const request = packCatalogV1QueryContracts.listPublicPacks.input.parse({ providerIds: ids, categoryIds: ids });
+    const binding = { ...fixture.query.binding, filters: { providerIds: request.providerIds, categoryIds: request.categoryIds } };
+    const cursor = await issuePackCatalogCursor({ binding, lastSortKey: "\u0000".repeat(500), lastStableId: ids[0]!,
+      issuedAt: "2026-09-03T18:00:00.000Z", signingKey: SIGNING_KEY });
+    packCatalogV1QueryContracts.listPublicPacks.input.parse({ ...request, cursor });
+    assert.equal((await readPackCatalogCursor({ cursor, binding, now: NOW, signingKey: SIGNING_KEY })).lastStableId, ids[0]);
+    await expectCursorExpired(() => readPackCatalogCursor({ cursor, binding: { ...binding,
+      filters: { ...binding.filters, providerIds: ids.slice(1) } }, now: NOW, signingKey: SIGNING_KEY }));
+  });
+
   await context.test("one pack advances without changing another pack", async () => {
     const packBBefore = structuredClone(fixture.packs.packB);
     const headBBefore = structuredClone(fixture.heads.packB);
-    const updatedHeadA = activePackHeadSchema.parse({
+    const updatedHeadA = await activePackHeadSchema.parseAsync({
       ...fixture.heads.packA,
       generation: 2,
       latestAcceptedPackPublicationSequence: "3",

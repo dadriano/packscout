@@ -2,6 +2,11 @@ import { z } from "zod";
 import {
   PACK_CATALOG_V1,
   PACK_PUBLICATION_REPLAY_LIFETIME_MS,
+  PACK_SNAPSHOT_HASH_DOMAIN,
+  PROFILE_SNAPSHOT_HASH_DOMAIN,
+  hashPackCatalogValue,
+  packCatalogCanonicalByteCount,
+  packCatalogCanonicalJson,
   isCanonicalAscending,
   packCatalogSequenceSchema,
   packCatalogSha256Schema,
@@ -176,14 +181,18 @@ export const activePackHeadSchema = z.object({
   previousSnapshot: publicPackSnapshotIdentitySchema.nullable(),
   indexableSummary: publicPackSummaryCoreSchema,
   activatedAt: packCatalogTimestampSchema,
-}).strict().superRefine((value, context) => {
+}).strict().superRefine(async (value, context) => {
   if (value.held !== (value.holdReason !== null)) {
     context.addIssue({ code: "custom", path: ["holdReason"], message: "pack.head_hold_invalid" });
   }
   if (value.providerId !== value.activeSnapshot.providerId ||
+    value.providerId !== value.indexableSummary.providerId ||
     value.publicRepackId !== value.activeSnapshot.publicRepackId ||
     value.publicRepackId !== value.indexableSummary.publicRepackId) {
     context.addIssue({ code: "custom", path: ["activeSnapshot"], message: "pack.head_identity_mismatch" });
+  }
+  if (value.activeSnapshot.summarySha256 !== await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value.indexableSummary)) {
+    context.addIssue({ code: "custom", path: ["indexableSummary"], message: "pack.head_summary_mismatch" });
   }
   if (value.previousSnapshot !== null &&
     (value.previousSnapshot.providerId !== value.providerId ||
@@ -212,15 +221,23 @@ export const profilePublicationEnvelopeSchema = z.object({
   profile: z.union([publicProviderProfileSchema, publicCollectibleProfileSchema]),
   payloadSha256: packCatalogSha256Schema,
   authorizationScopeSha256: packCatalogSha256Schema,
-}).strict().refine(
-  ({ intent, descriptor, batch, profile }) => {
-    const snapshotId = intent.profile.publicProfileSnapshotId;
-    return descriptor.identity.publicProfileSnapshotId === snapshotId &&
-      batch.publicProfileSnapshotId === snapshotId &&
-      profile.identity.publicProfileSnapshotId === snapshotId;
-  },
-  "Profile publication envelope identities must match.",
-);
+}).strict().superRefine(async ({ intent, descriptor, batch, profile, payloadSha256 }, context) => {
+  const { profile: batchProfile, ...manifest } = batch;
+  const { identity, ...fields } = profile;
+  const source = { profileKind: identity.profileKind, sourceIdentity: identity.sourceIdentity, dataAsOf: identity.dataAsOf,
+    ...(identity.profileKind === "provider" ? { providerId: identity.providerId } : { publicCollectibleId: identity.publicCollectibleId }) };
+  const body = { kind: "profile_batch", profile };
+  if (packCatalogCanonicalJson(intent.profile) !== packCatalogCanonicalJson(identity) ||
+    packCatalogCanonicalJson(descriptor.identity) !== packCatalogCanonicalJson(identity) ||
+    packCatalogCanonicalJson(descriptor.batch) !== packCatalogCanonicalJson(manifest) ||
+    packCatalogCanonicalJson(batchProfile) !== packCatalogCanonicalJson(profile) ||
+    batch.byteCount !== packCatalogCanonicalByteCount(body) ||
+    batch.batchSha256 !== await hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, body) ||
+    identity.contentSha256 !== await hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, { ...source, ...fields }) ||
+    payloadSha256 !== await hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, profile)) {
+    context.addIssue({ code: "custom", message: "profile.publication_envelope_mismatch" });
+  }
+});
 
 export const packPublicationEnvelopeSchema = z.object({
   intent: packActivationIntentSchema,
@@ -229,12 +246,34 @@ export const packPublicationEnvelopeSchema = z.object({
   batches: z.array(publicPackSnapshotBatchSchema).min(1).max(32),
   payloadSha256: packCatalogSha256Schema,
   authorizationScopeSha256: packCatalogSha256Schema,
-}).strict().superRefine((value, context) => {
-  const snapshotId = value.intent.snapshot.publicPackSnapshotId;
-  if (value.descriptor.identity.publicPackSnapshotId !== snapshotId ||
-    value.snapshot.identity.publicPackSnapshotId !== snapshotId ||
-    value.batches.some((batch) => batch.publicPackSnapshotId !== snapshotId)) {
+}).strict().superRefine(async (value, context) => {
+  const { identity, payload } = value.snapshot;
+  const { contents, ...header } = payload;
+  const manifest = value.batches.map(({ publicPackSnapshotId, batchIndex, recordCount, byteCount, batchSha256 }) =>
+    ({ publicPackSnapshotId, batchIndex, recordCount, byteCount, batchSha256 }));
+  const descriptor = value.descriptor;
+  const matches = (left: unknown, right: unknown) => packCatalogCanonicalJson(left) === packCatalogCanonicalJson(right);
+  if (!matches(value.intent.snapshot, identity) || !matches(descriptor.identity, identity) ||
+    !matches(descriptor.batches, manifest) || !matches(contents, value.batches.flatMap(batch => batch.records)) ||
+    !matches(descriptor.lifecycle, payload.lifecycle) || descriptor.contentCount !== payload.contentCount ||
+    descriptor.valuationDependencyCount !== payload.valuationDependencyIdentities.length ||
+    (["probabilityInputsSha256", "valuationsSha256", "evInputsSha256", "economicsSha256"] as const)
+      .some(key => descriptor[key] !== payload[key])) {
     context.addIssue({ code: "custom", path: ["snapshot"], message: "pack.publication_envelope_mismatch" });
+  }
+  for (const batch of value.batches) {
+    const body = { kind: "contents_batch", providerId: payload.providerId, publicRepackId: payload.publicRepackId,
+      batchIndex: batch.batchIndex, records: batch.records };
+    if (batch.byteCount !== packCatalogCanonicalByteCount(body) ||
+      batch.batchSha256 !== await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, body)) {
+      context.addIssue({ code: "custom", path: ["batches", batch.batchIndex], message: "pack.batch_digest_mismatch" });
+    }
+  }
+  const contentSha256 = await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, { kind: "complete_pack", header,
+    batches: manifest.map(({ batchIndex, recordCount, byteCount, batchSha256 }) => ({ batchIndex, recordCount, byteCount, batchSha256 })) });
+  if (identity.contentSha256 !== contentSha256 ||
+    value.payloadSha256 !== await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, payload)) {
+    context.addIssue({ code: "custom", path: ["payloadSha256"], message: "pack.payload_digest_mismatch" });
   }
   if (Date.parse(value.intent.createdAt) >= Date.parse(value.snapshot.payload.ev.validUntil)) {
     context.addIssue({ code: "custom", path: ["snapshot", "payload", "ev"], message: "pack.ev_evidence_expired" });

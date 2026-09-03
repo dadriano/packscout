@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { publicHttpsUrlSchema } from "./public-url.ts";
 import {
   PACK_CATALOG_V1,
+  PACK_SNAPSHOT_HASH_DOMAIN,
   PACK_SNAPSHOT_BATCH_MAX_BYTES,
   PACK_SNAPSHOT_BATCH_MAX_ITEMS,
   PACK_SNAPSHOT_MAX_CONTENTS,
@@ -8,6 +10,7 @@ import {
   derivePublicProfileSnapshotId,
   compareCanonicalStrings,
   isCanonicalAscending,
+  hashPackCatalogValue,
   normalizePackCatalogSearchText,
   packCatalogCanonicalJson,
   packCatalogSha256Schema,
@@ -16,7 +19,7 @@ import {
   packCatalogUuidSchema,
 } from "./pack-catalog-v1.ts";
 
-const imageUrlSchema = z.string().url().max(2_048);
+const imageUrlSchema = publicHttpsUrlSchema;
 export const publicPackSnapshotIdSchema = z.string().regex(/^pps_[0-9a-f]{64}$/u);
 export const publicProfileSnapshotIdSchema = z.string().regex(/^ppfs_[0-9a-f]{64}$/u);
 const canonicalStrings = (schema: z.ZodType<string>, maximum: number) => z
@@ -139,7 +142,7 @@ export const publicPackActionSchema = z.object({
   actionId: z.string().regex(/^[a-z0-9](?:[a-z0-9_-]{0,63})$/u),
   kind: z.enum(["purchase", "promotion"]),
   label: packCatalogTextSchema(100),
-  url: z.string().url().max(2_048),
+  url: publicHttpsUrlSchema,
   enabled: z.boolean(),
   disabledReason: z.enum(["PACK_UNAVAILABLE", "PACK_RETIRED"]).nullable(),
 }).strict().superRefine((value, context) => {
@@ -269,7 +272,10 @@ export const publicPackSnapshotPayloadSchema = publicPackSnapshotPayloadBaseSche
       issue(["topChase"], "pack.top_chase_invalid");
     }
     const actionable = value.lifecycle.availability === "available" && value.lifecycle.retirement === "active";
-    if (value.actions.some(({ enabled }) => enabled && !actionable)) issue(["actions"], "pack.action_not_eligible");
+    const disabledReason = value.lifecycle.retirement === "retired" ? "PACK_RETIRED" : actionable ? null : "PACK_UNAVAILABLE";
+    if (value.actions.some((action) => action.enabled !== actionable || action.disabledReason !== disabledReason)) {
+      issue(["actions"], "pack.action_not_eligible");
+    }
     const currencies = [
       value.price.currency,
       ...value.contents.flatMap(({ valuation }) => valuation.status === "available" ? [valuation.amount.currency] : []),
@@ -357,6 +363,7 @@ export const publicPackSnapshotIdentitySchema = z.object({
   publicRepackId: packCatalogUuidSchema,
   publicPackSnapshotId: publicPackSnapshotIdSchema,
   contentSha256: packCatalogSha256Schema,
+  summarySha256: packCatalogSha256Schema,
   dataAsOf: packCatalogTimestampSchema,
   evMethodIdentity: packCatalogTextSchema(120),
   evPolicyIdentity: packCatalogTextSchema(120),
@@ -369,11 +376,14 @@ export const publicPackSnapshotIdentitySchema = z.object({
 export const publicPackSnapshotSchema = z.object({
   identity: publicPackSnapshotIdentitySchema,
   payload: publicPackSnapshotPayloadSchema,
-}).strict().superRefine(({ identity, payload }, context) => {
+}).strict().superRefine(async ({ identity, payload }, context) => {
   for (const key of ["providerId", "publicRepackId", "dataAsOf", "evMethodIdentity", "evPolicyIdentity"] as const) {
     if (identity[key] !== payload[key]) {
       context.addIssue({ code: "custom", path: ["identity", key], message: "pack.snapshot_identity_mismatch" });
     }
+  }
+  if (identity.summarySha256 !== await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, payload.summaryProjection)) {
+    context.addIssue({ code: "custom", path: ["identity", "summarySha256"], message: "pack.summary_digest_mismatch" });
   }
 });
 
@@ -437,7 +447,7 @@ const providerPromotionSchema = z.object({
   promotionId: z.string().regex(/^[a-z0-9](?:[a-z0-9_-]{0,63})$/u),
   label: packCatalogTextSchema(100),
   copy: packCatalogTextSchema(500),
-  url: z.string().url().max(2_048),
+  url: publicHttpsUrlSchema,
 }).strict();
 export const publicProviderProfileSchema = z.object({
   identity: publicProviderProfileSnapshotIdentitySchema,

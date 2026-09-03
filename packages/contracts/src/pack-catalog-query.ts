@@ -7,6 +7,7 @@ import {
   SAVED_CATALOG_ITEM_LIMIT,
   compareCanonicalStrings,
   derivePublicPackSnapshotId,
+  hashPackCatalogValue,
   isCanonicalAscending,
   normalizePackCatalogSearchText,
   packCatalogCanonicalJson,
@@ -52,7 +53,7 @@ export const packCatalogLifecycleFilterSchema = z.object({
     .default(["available"]),
 }).strict();
 
-const cursorSchema = z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u).max(4_096);
+const cursorSchema = z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u).max(8_192);
 const listPageSizeSchema = z.number().int().safe().min(1).max(PACK_CATALOG_LIST_MAX_ITEMS).default(25);
 const listBase = {
   lifecycle: packCatalogLifecycleFilterSchema.default({
@@ -198,7 +199,8 @@ export const packCatalogCursorBindingSchema = z.object({
   pageSize: z.number().int().safe().min(1).max(PACK_CONTENT_PAGE_MAX_ITEMS),
   publicPackSnapshotId: publicPackSnapshotIdSchema.nullable(),
 }).strict();
-export const packCatalogCursorPayloadSchema = packCatalogCursorBindingSchema.extend({
+export const packCatalogCursorPayloadSchema = packCatalogCursorBindingSchema.omit({ filters: true }).extend({
+  filtersSha256: packCatalogSha256Schema,
   schemaVersion: z.literal(PACK_CATALOG_V1),
   lastSortKey: z.string().min(1).max(500),
   lastStableId: packCatalogUuidSchema,
@@ -256,8 +258,10 @@ export async function issuePackCatalogCursor(input: {
   readonly signingKey: Uint8Array;
 }): Promise<string> {
   const issuedAt = packCatalogTimestampSchema.parse(input.issuedAt);
+  const { filters, ...binding } = packCatalogCursorBindingSchema.parse(input.binding);
   const payload = packCatalogCursorPayloadSchema.parse({
-    ...packCatalogCursorBindingSchema.parse(input.binding),
+    ...binding,
+    filtersSha256: await hashPackCatalogValue("packscout.pack-catalog-cursor-filters.v1", filters),
     schemaVersion: PACK_CATALOG_V1,
     lastSortKey: input.lastSortKey,
     lastStableId: input.lastStableId,
@@ -288,13 +292,14 @@ export async function readPackCatalogCursor(input: {
     }
     const actualBinding = packCatalogCursorBindingSchema.parse({
       operation: payload.operation,
-      filters: payload.filters,
+      filters: input.binding.filters,
       sort: payload.sort,
       direction: payload.direction,
       pageSize: payload.pageSize,
       publicPackSnapshotId: payload.publicPackSnapshotId,
     });
-    if (packCatalogCanonicalJson(actualBinding) !== packCatalogCanonicalJson(packCatalogCursorBindingSchema.parse(input.binding))) {
+    if (packCatalogCanonicalJson(actualBinding) !== packCatalogCanonicalJson(packCatalogCursorBindingSchema.parse(input.binding)) ||
+      payload.filtersSha256 !== await hashPackCatalogValue("packscout.pack-catalog-cursor-filters.v1", actualBinding.filters)) {
       throw new PackCatalogCursorError();
     }
     const now = Date.parse(packCatalogTimestampSchema.parse(input.now));
