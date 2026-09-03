@@ -329,7 +329,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. Public V3 only exposes signed EV at or below break-even; a positive raw result is labeled Unavailable under the versioned nonpositive-EV publication policy. Values below break-even render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
+          text: `Gross EV % of ${BREAK_EVEN_GROSS_EV_PERCENT_LABEL} is the break-even point: the expected guaranteed payout exactly equals Pack Price. Independent PackScout estimates only expose signed EV at or below break-even; a positive raw result is labeled Unavailable under the versioned nonpositive-EV publication policy. Separately labeled platform-derived EV preserves the reported calculation’s signed result, including positive values. Values below break-even render negative — in the shared example, a Gross EV % of ${CANONICAL_EXAMPLE.presentation.grossEvPercent.displayValue} is exactly an EV % of ${CANONICAL_EXAMPLE.presentation.evPercent.displayValue}.`,
         },
       ],
       metricKeys: EXPECTED_VALUE_METRIC_KEYS,
@@ -416,11 +416,11 @@ export const EXPECTED_VALUE_GUIDE = {
     },
     {
       id: "packscout-vendor-separation",
-      heading: "Vendor-Reported EV and PackScout EV Stay Separate",
+      heading: "EV from a Platform’s Reported EV",
       blocks: [
         {
           type: "paragraph",
-          text: "A vendor may publish its own EV using its inventory, odds, and valuation approach. PackScout independently calculates PackScout Gross EV from platform-provided evidence, and each estimate carries its own observation time.",
+          text: "Phygitals, Courtyard, and Collector Crypt report an underlying EV using their own inventory, odds, and valuation approach. When an independent PackScout estimate is unavailable and the platform supplies a USD EV, a USD pack price, and one uniform buyback rate, PackScout displays platform-derived Gross EV: reported underlying EV × buyback rate. Gross EV % divides that result by the pack price and multiplies by 100.",
         },
         {
           type: "paragraph",
@@ -428,7 +428,7 @@ export const EXPECTED_VALUE_GUIDE = {
         },
         {
           type: "paragraph",
-          text: "A missing estimate is never filled from the other source, and disagreement does not mean either value was silently changed.",
+          text: "For example, a $100 pack with a reported underlying EV of $104.21 and a 90% buyback has Gross EV of $93.79 and Gross EV % of 93.79%. EV $ subtracts the pack price, giving −$6.21; EV % divides that difference by the price, giving −6.21%. The platform source and observation time remain visible. This calculation does not create an independent PackScout estimate or confidence score: confidence requires validated outcome probabilities or inventory evidence. Missing inputs remain unavailable. A final buyback payout is never discounted again.",
         },
       ],
     },

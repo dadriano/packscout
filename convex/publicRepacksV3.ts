@@ -48,6 +48,7 @@ import {
 } from "./dataReleaseV3Lifecycle";
 import {
   dataReleaseV3SearchRowMatchesDetail,
+  displayedEvMetricFromDataReleaseV3SearchRow,
   type DataReleaseV3SearchRow,
 } from "./dataReleaseV3Search";
 import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
@@ -453,6 +454,8 @@ function compareRows(
   left: DataReleaseV3SearchRow,
   right: DataReleaseV3SearchRow,
   input: Pick<ListPublicRepacksInput, "search" | "sort" | "direction">,
+  estimates?: ReadonlyMap<string, PackScoutDisplayedEvV3>,
+  legacyEvSnapshot = false,
 ): number {
   if (input.search !== "") {
     const leftRelevance = relevance(left, input.search);
@@ -476,11 +479,17 @@ function compareRows(
     return compareText(left.publicRepackId, right.publicRepackId);
   }
   const [valueField, rankField] = fields;
-  const leftRank = left[rankField];
-  const rightRank = right[rankField];
+  const displayedEvSort = valueField === "packScoutGrossEvMinor" ||
+    valueField === "packScoutEvDollarsMinor" || valueField === "packScoutEvPercentBasisPoints";
+  const leftValue = displayedEvSort
+    ? displayedEvMetricFromDataReleaseV3SearchRow(left, valueField, estimates?.get(left.publicRepackId), legacyEvSnapshot)
+    : left[valueField];
+  const rightValue = displayedEvSort
+    ? displayedEvMetricFromDataReleaseV3SearchRow(right, valueField, estimates?.get(right.publicRepackId), legacyEvSnapshot)
+    : right[valueField];
+  const leftRank = displayedEvSort ? (leftValue === null ? 1 : 0) : left[rankField];
+  const rightRank = displayedEvSort ? (rightValue === null ? 1 : 0) : right[rankField];
   if (leftRank !== rightRank) return leftRank - rightRank;
-  const leftValue = left[valueField];
-  const rightValue = right[valueField];
   if (leftValue !== null && rightValue !== null && leftValue !== rightValue) {
     const comparison = leftValue - rightValue;
     return input.direction === "asc" ? comparison : -comparison;
@@ -1015,7 +1024,7 @@ export const listPublicRepacksV3AtTime = internalQuery({
           rowMatchesSearch(row, request.search) &&
           rowMatchesFilters(row, request.filters),
       )
-      .sort((left, right) => compareRows(left, right, request));
+      .sort((left, right) => compareRows(left, right, request, active.evByPublicId, active.legacyEvSnapshot));
     if (pagination.offset > matchingRows.length) {
       return publicReadError("INVALID_QUERY");
     }

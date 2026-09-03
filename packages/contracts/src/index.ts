@@ -49,6 +49,7 @@ export * from "./data-inspection-canonical.ts";
 export * from "./message-delivery.ts";
 export * from "./buyback-adjusted-ev-v1.ts";
 export * from "./data-release-v3.ts";
+export * from "./vendor-reported-gross-ev-v3.ts";
 export * from "./data-release-v3-publication-paths.ts";
 export * from "./provider-pack-membership-v1.ts";
 export * from "./provider-pack-membership-snapshot-v1.ts";

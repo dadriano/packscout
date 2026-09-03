@@ -61,6 +61,49 @@ test("builds a production nonce policy from only exact configured origins", () =
   assert.equal(policy.includes("*.convex.cloud"), false);
 });
 
+test("admits promoted provider pack images through exact production origins", () => {
+  const imageOrigins = [
+    "https://api.courtyard.io",
+    "https://d18ez2bunk7yz0.cloudfront.net",
+    "https://degwuxynwtb2zaso.public.blob.vercel-storage.com",
+    "https://images.pokemontcg.io",
+    "https://placehold.co",
+    "https://storage.googleapis.com",
+    "https://xexhjcyxgwxfopyobhmk.supabase.co",
+  ];
+  const configuration = readPublicSecurityConfiguration({
+    NODE_ENV: "production",
+    NEXT_PUBLIC_CONVEX_URL: "https://fixture-deployment.convex.cloud",
+    PACKSCOUT_PUBLIC_IMAGE_ORIGINS: imageOrigins.join(","),
+    PACKSCOUT_PUBLIC_ORIGIN_SET_HASH:
+      "0811f492080098e5e98d1d636ff9b9762de311d62af178ae0e031f79c0567d51",
+  });
+  const sources = directiveSources(
+    buildContentSecurityPolicy({
+      nonce: "abcdefghijklmnopqrstuvwx",
+      configuration,
+    }),
+    "img-src",
+  );
+
+  assert.deepEqual(sources, ["'self'", "data:", ...imageOrigins]);
+  for (const imageUrl of [
+    "https://api.courtyard.io/configs/vending-machine/pkmn-basic-pack/resources/sealed_pack.png",
+    "https://storage.googleapis.com/prod-courtyard-backend-api-config-files/configs/vending-machine/pkmn-ex-pack/resources/sealed_pack_image.png",
+    "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/baseball_100/thumb-Vf4W8Uail9gORl3lOfp9mkD30dInuj.png",
+    "https://xexhjcyxgwxfopyobhmk.supabase.co/storage/v1/object/public/images/claw-listings/4d09c210-41b9-4b71-a7ed-e5ebb36b9ea0.webp",
+  ]) {
+    assert.ok(sources.includes(new URL(imageUrl).origin));
+  }
+  assert.equal(sources.includes("https://unreviewed.supabase.co"), false);
+  assert.equal(
+    sources.includes("https://unreviewed.public.blob.vercel-storage.com"),
+    false,
+  );
+  assert.equal(sources.some((source) => source.includes("*")), false);
+  assert.equal(sources.includes("https:"), false);
+});
+
 test("allows exact cloud HTTPS/WSS and loopback HTTP/WS origins in development", () => {
   const loopbackConfiguration = readPublicSecurityConfiguration({
     NODE_ENV: "development",

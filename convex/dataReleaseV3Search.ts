@@ -1,5 +1,6 @@
 import {
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_PENALTIES_V1,
+  calculateVendorReportedGrossEvV3,
   normalizePublicSearchText,
   repackEvSortRowV3FromDetail,
   repackEvSortRowV3Schema,
@@ -288,4 +289,33 @@ export function displayDataReleaseV3SearchRow(
     packScoutConfidenceBand: ranked?.confidence.band ?? null,
     packScoutExpiresAtMillis: null,
   };
+}
+
+/** Sort purchasable EV by its displayed source without changing stored evidence. */
+export function displayedEvMetricFromDataReleaseV3SearchRow(
+  row: DataReleaseV3SearchRow,
+  field: "packScoutGrossEvMinor" | "packScoutEvDollarsMinor" | "packScoutEvPercentBasisPoints",
+  estimate: PackScoutDisplayedEvV3 | undefined,
+  legacyEvSnapshot = false,
+): number | null {
+  if (row[field] !== null) return row[field];
+  // Sold-out and other non-purchasable packs keep the historical null rank,
+  // just as they do for independent EV, even when a value remains displayed.
+  if (row.availability !== "available") return null;
+  // The existing legacy reader serves the published snapshot without an EV
+  // map. Its canonical available row has null Gross only for an unavailable
+  // estimate: current EV is stored above, and sold-out history requires sold_out.
+  const sourceUnavailable = estimate?.status === "unavailable" ||
+    (legacyEvSnapshot && estimate === undefined);
+  if (!sourceUnavailable) return null;
+  const source = calculateVendorReportedGrossEvV3({
+    vendorKey: row.vendorKey,
+    priceUsdMinor: row.priceMinor,
+    vendorReportedEvUsdMinor: row.vendorReportedEvUsdMinor,
+    buybackRateBasisPoints: row.buybackRateBasisPoints,
+  });
+  if (source === null) return null;
+  if (field === "packScoutEvDollarsMinor") return source.evDollarsMoney.minorUnits;
+  if (field === "packScoutEvPercentBasisPoints") return source.evPercentBasisPoints;
+  return source.grossEvMoney.minorUnits;
 }

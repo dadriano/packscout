@@ -1,5 +1,6 @@
 import {
   packScoutBuybackEvMetricsAreConsistentV1,
+  vendorReportedGrossEvV3,
   type DashboardKpis,
   type DataReleaseV3Identity,
   type PackScoutDisplayedEvSourceAgeStateV3,
@@ -8,6 +9,7 @@ import {
   type PublicRepackChase,
   type PublicRepackSummaryV3,
   type VendorReportedEvV3,
+  type VendorReportedGrossEvV3Input,
 } from "@packscout/contracts";
 import { presentConfidenceLimitations } from "./confidence-limitations";
 import { presentPackAvailability } from "./pack-availability-presentation";
@@ -147,6 +149,17 @@ export type VendorReportedEvV3Presentation = Readonly<{
   observedLabel: string | null;
   reasonCopy?: string;
   accessibleLabel: string;
+}>;
+
+export type GrossEvV3Presentation = Readonly<{
+  source: "packscout" | "vendor_reported";
+  grossEvDollars: MetricValuePresentation;
+  grossEvPercent: MetricValuePresentation;
+  evDollars: MetricValuePresentation;
+  evPercent: MetricValuePresentation;
+  sourceNote: string | null;
+  sourceLabel: string | null;
+  observedLabel: string | null;
 }>;
 
 export type PackScoutEvV3PresentationInput = Readonly<{
@@ -773,6 +786,49 @@ export function presentPackScoutEvV3(
 }
 
 // --- vendor-reported EV ---------------------------------------------------------
+
+/** Source-derived Gross EV remains separate from independent PackScout metrics. */
+export function presentGrossEvV3(
+  repack: VendorReportedGrossEvV3Input & { vendorDisplayName: string },
+  packScout: PackScoutEvV3Presentation,
+): GrossEvV3Presentation {
+  const derived = packScout.availability === "unavailable"
+    ? vendorReportedGrossEvV3(repack) : null;
+  if (derived === null) return {
+    source: "packscout",
+    grossEvDollars: packScout.grossEvDollars,
+    grossEvPercent: packScout.grossEvPercent,
+    evDollars: packScout.evDollars,
+    evPercent: packScout.evPercent,
+    sourceNote: null,
+    sourceLabel: null,
+    observedLabel: null,
+  };
+  const sourceNote = `Calculated from ${repack.vendorDisplayName}-reported EV × buyback.`;
+  const grossEvDollars = availableMoneyMetric("Gross EV $", "grossEv", derived.grossEvMoney);
+  const grossEvPercent = availableMetric("Gross EV %",
+    formatGrossEvPercent(derived.grossReturnBasisPoints), "grossEvPercent");
+  // Independent PackScout estimates enforce a nonpositive policy; platform
+  // reports may exceed the price and retain their explicit positive sign.
+  const state = derived.evPercentBasisPoints > 0 ? undefined
+    : semanticStateForSignedBasisPoints(derived.evPercentBasisPoints);
+  const tone = evToneForSignedBasisPoints(derived.evPercentBasisPoints);
+  const evDollars = availableMoneyMetric("EV $", "evDollars", derived.evDollarsMoney, {
+    signed: true, state, tone,
+  });
+  const evPercent = availableMetric("EV %", formatSignedEvPercent(derived.evPercentBasisPoints),
+    "evPercent", state, tone);
+  return {
+    source: "vendor_reported",
+    grossEvDollars: { ...grossEvDollars, accessibleLabel: `${grossEvDollars.accessibleLabel} ${sourceNote}` },
+    grossEvPercent: { ...grossEvPercent, accessibleLabel: `${grossEvPercent.accessibleLabel} ${sourceNote}` },
+    evDollars: { ...evDollars, accessibleLabel: `${evDollars.accessibleLabel} ${sourceNote}` },
+    evPercent: { ...evPercent, accessibleLabel: `${evPercent.accessibleLabel} ${sourceNote}` },
+    sourceNote,
+    sourceLabel: "Platform EV × buyback",
+    observedLabel: `Platform EV observed ${formatPublicTimestamp(derived.observedAt)}`,
+  };
+}
 
 const VENDOR_SOURCE_NOTE =
   "Reported by vendor — separate from PackScout Gross EV" as const;

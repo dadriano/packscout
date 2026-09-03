@@ -938,7 +938,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/lib/metric-vocabulary.test.ts",
           testName:
-            "gross EV is defined as the expected guaranteed buyback payout",
+            "gross EV explains the platform reported value and buyback calculation",
         },
         {
           file: "apps/frontend/lib/metric-vocabulary.test.ts",

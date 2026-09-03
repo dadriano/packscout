@@ -9,6 +9,7 @@ import { CatalogImage } from "@/components/catalog/CatalogImage.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
   presentBuybackSummaryV3,
+  presentGrossEvV3,
   presentPackScoutEvV3,
   presentRepackPrice,
   presentTopChaseValue,
@@ -51,6 +52,7 @@ function RepackCard({
     repackName: repack.name,
   });
   const buyback = presentBuybackSummaryV3(repack.buyback);
+  const grossEv = presentGrossEvV3(repack, estimate);
   const price = presentRepackPrice(repack.price);
   const displayedChase = desiredSearchActive ? desiredChase : repack.topChase;
   const displayedChaseValue = presentTopChaseValue(
@@ -93,10 +95,13 @@ function RepackCard({
       </button>
 
       <div className={styles.metrics}>
-        <MetricValue compact metric={estimate.evDollars} showReason={false} />
-        <MetricValue compact metric={estimate.evPercent} showReason={false} />
+        <MetricValue compact metric={grossEv.grossEvDollars} showReason={false} />
+        <MetricValue compact metric={grossEv.grossEvPercent} showReason={false} />
+        <MetricValue compact metric={grossEv.evDollars} showReason={false} />
+        <MetricValue compact metric={grossEv.evPercent} showReason={false} />
         <MetricValue compact metric={buyback} showReason={false} />
       </div>
+      {grossEv.sourceNote ? <p className={styles.sourceNote} title={grossEv.sourceNote}>{grossEv.sourceLabel}</p> : null}
 
       <dl className={styles.details}>
         <div>
