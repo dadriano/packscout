@@ -27,7 +27,7 @@ const DEFAULT_FILTERS = {
   categories: [],
   collectibleTypes: [],
   availability: "available",
-  price: { mode: "full", minMinor: 1_000, maxMinor: 1_200_000 },
+  price: { mode: "full", minMinor: 100, maxMinor: 1_200_000 },
 } as const;
 
 const EMPTY_FACETS = { vendors: [], categories: [], collectibleTypes: [] } as const;

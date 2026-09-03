@@ -37,6 +37,30 @@ test("the empty URL restores the complete default repack query", () => {
   assert.equal(serializeCatalogQueryState(parsed.query), "/packs");
 });
 
+test("the $1–$12,000 default stays URL-less and sub-$10 ranges round-trip", () => {
+  assert.deepEqual(DEFAULT_CATALOG_QUERY.filters.price, {
+    mode: "full",
+    minMinor: 100,
+    maxMinor: 1_200_000,
+  });
+  assert.equal(serializeCatalogQueryState(DEFAULT_CATALOG_QUERY), "/packs");
+
+  const parsed = parseCatalogQueryState(
+    new URLSearchParams("minPrice=2&maxPrice=9"),
+  );
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.query.filters.price, {
+    mode: "narrowed",
+    minMinor: 200,
+    maxMinor: 900,
+  });
+  assert.equal(
+    serializeCatalogQueryState(parsed.query),
+    "/packs?minPrice=2&maxPrice=9",
+  );
+});
+
 test("query state is normalized and serialized in canonical order", () => {
   const parameters = new URLSearchParams();
   parameters.append("category", CATEGORY_ID);
