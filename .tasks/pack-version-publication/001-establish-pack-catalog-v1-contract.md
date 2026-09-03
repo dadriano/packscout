@@ -170,7 +170,7 @@ The `pack_catalog_v1` read surface exposes `getPublicShellStatus`, `getDashboard
 - **Alignment:** P01 adds the sole V1 contract modules, strict canonicalization, deterministic two-pack fixture, and the exact query, save, state, reason, and authorization vocabularies.
 - **Divergences:** Review hardening binds cursor filters by a canonical SHA-256 digest instead of embedding them, with one 8,192-character wire bound. Snapshot identities add a verified summary digest; snapshot, active-head, and publication-envelope schemas require asynchronous parsing for cryptographic validation. PR #66 remains an extraction ledger; no runtime source was ported.
 - **Later owners:** P02–P10 retain persistence, assembly runtime, fan-out, public storage/API, publication/recovery, frontend, operations, retention, and launch.
-- **Evidence:** The named matrix (12 tests), contracts suite (431 tests), and full `verify:framework` gate pass. The local gate skips 57 explicit-target database/worker tests; the previously failing head-reconciliation regression also passes separately against disposable PostgreSQL with merged PR #85. Two inherited test-only lint/typecheck defects from `main` are corrected in a separate commit.
+- **Evidence:** The named matrix (12 tests), contracts suite (431 tests), and full `verify:framework` gate pass. The local gate skips 66 opt-in database, capture, and tooling integration tests; the previously failing head-reconciliation regression also passes separately against disposable PostgreSQL with merged PR #85. Two inherited test-only lint/typecheck defects from `main` are corrected in a separate commit.
 
 ## Verification
 
