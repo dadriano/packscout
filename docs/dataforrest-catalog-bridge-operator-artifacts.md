@@ -70,6 +70,12 @@ strictly one after the other. Do not run another manual source tool concurrently
 Each request is bounded to the immutable Collector Crypt catalog-v2 limit of 100
 records, and the command performs no database writes or process changes.
 
+If the command result is lost after the proof is written, repeat the exact same
+command. The producer validates the existing canonical proof against the
+operation, checkout, commit, module hashes, and source definition, then returns
+`already_captured` before opening database or source dependencies. A malformed,
+unsafe, or differently bound output refuses without another source traversal.
+
 Both passes must agree exactly on the card and pack counts, page and cursor
 traversal evidence, and identity-multiset digest. The owner-only proof binds the
 clean checkout, commit, census module hashes, source authority and credential

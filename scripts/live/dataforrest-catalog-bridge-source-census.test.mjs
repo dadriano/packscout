@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -218,6 +218,220 @@ test("census refuses invalid records, duplicate identities and cursor stalls", a
   { code: "CATALOG_BRIDGE_SOURCE_CENSUS_CURSOR_INVALID" });
 });
 
+test("canonical operation-bound census is reused before source traversal or persistence", async () => {
+  const temporaryBase = await realpath(tmpdir());
+  const root = await mkdtemp(path.join(temporaryBase, "packscout-source-census-retry-"));
+  const file = path.join(root, "census.json");
+  const proof = syntheticProof();
+  const bytes = proofModule.catalogBridgeSourceCensusBytes(proof);
+  const expectedFileSha256 = proofModule.catalogBridgeSourceCensusFileSha256(proof);
+  const calls = [];
+  try {
+    await chmod(root, 0o700);
+    await writeFile(file, bytes, { mode: 0o600 });
+    assert.equal(await census.readCatalogBridgeSourceCensusIfPresent(
+      path.join(root, "missing.json")), null);
+
+    const result = await capture.captureOrReuseCatalogBridgeSourceCensus({
+      args: { operationId, providerKey: "collector_crypt",
+        executorCheckout: proof.executor.checkout, executorCommit: proof.executor.commit,
+        outputPath: file },
+      executor: { runnerModuleSha256: proof.executor.runnerModuleSha256,
+        censusModuleSha256: proof.executor.censusModuleSha256,
+        inspectionModuleSha256: proof.executor.inspectionModuleSha256 },
+      readExisting: async () => {
+        calls.push("read-existing");
+        return census.readCatalogBridgeSourceCensusIfPresent(file);
+      },
+      captureFresh: async () => {
+        calls.push("capture-fresh");
+        return proof;
+      },
+      persistFresh: async fresh => {
+        calls.push("persist-fresh");
+        return { fileSha256: proofModule.catalogBridgeSourceCensusFileSha256(fresh),
+          exactRetry: false };
+      },
+    });
+
+    assert.deepEqual(result, {
+      outcome: "already_captured",
+      operationId,
+      providerKey: "collector_crypt",
+      sourceCensusFileSha256: expectedFileSha256,
+      sourceCensusProofDigest: census.catalogBridgeSourceCensusDigest(proof),
+      sourceHeadCardCount: proof.agreement.cardCount,
+      sourceHeadPackCount: proof.agreement.packCount,
+      sourceHeadIdentityMultisetDigest: proof.agreement.identityMultisetDigest,
+      sourceRequestsPerformed: false,
+      sourceRequestCount: 0,
+      databaseWritesPerformed: false,
+    });
+    assert.deepEqual(calls, ["read-existing"]);
+  } finally {
+    bytes.fill(0);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("absent census performs and persists one fresh source capture", async () => {
+  const temporaryBase = await realpath(tmpdir());
+  const root = await mkdtemp(path.join(temporaryBase, "packscout-source-census-fresh-"));
+  const file = path.join(root, "census.json");
+  const proof = syntheticProof();
+  const calls = [];
+  try {
+    await chmod(root, 0o700);
+    const result = await capture.captureOrReuseCatalogBridgeSourceCensus({
+      args: { operationId, providerKey: "collector_crypt",
+        executorCheckout: proof.executor.checkout, executorCommit: proof.executor.commit,
+        outputPath: file },
+      executor: { runnerModuleSha256: proof.executor.runnerModuleSha256,
+        censusModuleSha256: proof.executor.censusModuleSha256,
+        inspectionModuleSha256: proof.executor.inspectionModuleSha256 },
+      readExisting: async () => {
+        calls.push("read-existing");
+        return census.readCatalogBridgeSourceCensusIfPresent(file);
+      },
+      captureFresh: async () => {
+        calls.push("capture-fresh");
+        return proof;
+      },
+      persistFresh: async fresh => {
+        calls.push("persist-fresh");
+        return { fileSha256: proofModule.catalogBridgeSourceCensusFileSha256(fresh),
+          exactRetry: false };
+      },
+    });
+
+    assert.equal(result.outcome, "captured");
+    assert.equal(result.sourceRequestsPerformed, true);
+    assert.equal(result.sourceRequestCount,
+      proof.passes.reduce((sum, pass) => sum + pass.sourceRequestCount, 0));
+    assert.deepEqual(calls, ["read-existing", "capture-fresh", "persist-fresh"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("optional census lookup refuses unsafe or aliased parents before fresh source work", async t => {
+  const temporaryBase = await realpath(tmpdir());
+  const root = await mkdtemp(path.join(temporaryBase, "packscout-source-census-parent-"));
+  const proof = syntheticProof();
+  const assertParentRefused = async outputPath => {
+    const calls = [];
+    await assert.rejects(capture.captureOrReuseCatalogBridgeSourceCensus({
+      args: { operationId, providerKey: "collector_crypt",
+        executorCheckout: proof.executor.checkout, executorCommit: proof.executor.commit,
+        outputPath },
+      executor: { runnerModuleSha256: proof.executor.runnerModuleSha256,
+        censusModuleSha256: proof.executor.censusModuleSha256,
+        inspectionModuleSha256: proof.executor.inspectionModuleSha256 },
+      readExisting: async () => {
+        calls.push("read-existing");
+        return census.readCatalogBridgeSourceCensusIfPresent(outputPath);
+      },
+      captureFresh: async () => {
+        calls.push("capture-fresh");
+        return proof;
+      },
+      persistFresh: async fresh => {
+        calls.push("persist-fresh");
+        return { fileSha256: proofModule.catalogBridgeSourceCensusFileSha256(fresh),
+          exactRetry: false };
+      },
+    }), { code: "CATALOG_BRIDGE_SOURCE_CENSUS_FILE_UNSAFE" });
+    assert.deepEqual(calls, ["read-existing"]);
+  };
+  try {
+    await t.test("missing file under permissive parent", async () => {
+      await chmod(root, 0o755);
+      await assertParentRefused(path.join(root, "missing.json"));
+    });
+    await t.test("missing file through parent symlink", async () => {
+      await chmod(root, 0o700);
+      const privateParent = path.join(root, "private");
+      const aliasedParent = path.join(root, "alias");
+      await mkdir(privateParent, { mode: 0o700 });
+      await symlink(privateParent, aliasedParent);
+      await assertParentRefused(path.join(aliasedParent, "missing.json"));
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("invalid or conflicting existing census never falls through to fresh source work", async t => {
+  const temporaryBase = await realpath(tmpdir());
+  const root = await mkdtemp(path.join(temporaryBase, "packscout-source-census-conflict-"));
+  const file = path.join(root, "census.json");
+  const proof = syntheticProof();
+  const foreignProof = syntheticProof({
+    operationId: "90000000-0000-4000-8000-000000000002",
+  });
+  const executorMismatchProof = syntheticProof({
+    executor: { ...proof.executor, runnerModuleSha256: hash("different-runner-module") },
+  });
+  const sourceMismatchProof = syntheticProof({
+    source: { ...proof.source, configNumber: proof.source.configNumber + 1 },
+  });
+  const malformedBytes = Buffer.from("{broken-json\n", "utf8");
+  const noncanonicalBytes = Buffer.from(JSON.stringify(proof), "utf8");
+  const foreignBytes = proofModule.catalogBridgeSourceCensusBytes(foreignProof);
+  const executorMismatchBytes = proofModule.catalogBridgeSourceCensusBytes(executorMismatchProof);
+  const sourceMismatchBytes = proofModule.catalogBridgeSourceCensusBytes(sourceMismatchProof);
+  assert.notEqual(hash(noncanonicalBytes), proofModule.catalogBridgeSourceCensusFileSha256(proof));
+  try {
+    await chmod(root, 0o700);
+    for (const scenario of [
+      { name: "malformed", bytes: malformedBytes,
+        code: "CATALOG_BRIDGE_SOURCE_CENSUS_INVALID" },
+      { name: "noncanonical", bytes: noncanonicalBytes,
+        code: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" },
+      { name: "foreign operation", bytes: foreignBytes,
+        code: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" },
+      { name: "executor module mismatch", bytes: executorMismatchBytes,
+        code: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" },
+      { name: "static source pin mismatch", bytes: sourceMismatchBytes,
+        code: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" },
+    ]) {
+      await t.test(scenario.name, async () => {
+        await writeFile(file, scenario.bytes, { mode: 0o600 });
+        const calls = [];
+        await assert.rejects(capture.captureOrReuseCatalogBridgeSourceCensus({
+          args: { operationId, providerKey: "collector_crypt",
+            executorCheckout: proof.executor.checkout, executorCommit: proof.executor.commit,
+            outputPath: file },
+          executor: { runnerModuleSha256: proof.executor.runnerModuleSha256,
+            censusModuleSha256: proof.executor.censusModuleSha256,
+            inspectionModuleSha256: proof.executor.inspectionModuleSha256 },
+          readExisting: async () => {
+            calls.push("read-existing");
+            return census.readCatalogBridgeSourceCensusIfPresent(file);
+          },
+          captureFresh: async () => {
+            calls.push("capture-fresh");
+            return proof;
+          },
+          persistFresh: async fresh => {
+            calls.push("persist-fresh");
+            return { fileSha256: proofModule.catalogBridgeSourceCensusFileSha256(fresh),
+              exactRetry: false };
+          },
+        }), { code: scenario.code });
+        assert.deepEqual(calls, ["read-existing"]);
+      });
+    }
+  } finally {
+    malformedBytes.fill(0);
+    noncanonicalBytes.fill(0);
+    foreignBytes.fill(0);
+    executorMismatchBytes.fill(0);
+    sourceMismatchBytes.fill(0);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("proof schema and private reader reject pass disagreement, tampering and unsafe modes", async () => {
   const proof = syntheticProof();
   const drift = structuredClone(proof);
@@ -238,6 +452,10 @@ test("proof schema and private reader reject pass disagreement, tampering and un
       { code: "CATALOG_BRIDGE_SOURCE_CENSUS_FILE_DIGEST_MISMATCH" });
     await chmod(file, 0o644);
     await assert.rejects(census.readCatalogBridgeSourceCensus(file, expected),
+      { code: "CATALOG_BRIDGE_SOURCE_CENSUS_FILE_UNSAFE" });
+    await chmod(file, 0o600);
+    await chmod(root, 0o755);
+    await assert.rejects(census.readCatalogBridgeSourceCensusIfPresent(file),
       { code: "CATALOG_BRIDGE_SOURCE_CENSUS_FILE_UNSAFE" });
   } finally {
     bytes.fill(0);

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   providerCatalogIdentityChainDigest,
@@ -212,13 +212,21 @@ export function catalogBridgeSourceCensusDigest(proof: CatalogBridgeSourceCensus
   return catalogBridgeDigest(catalogBridgeSourceCensusSchema.parse(proof));
 }
 
-export async function readCatalogBridgeSourceCensus(
+async function readCatalogBridgeSourceCensusFile(
   filePath: string,
-  expectedFileSha256: string,
-): Promise<Readonly<{ proof: CatalogBridgeSourceCensus; fileSha256: string }>> {
-  if (!path.isAbsolute(filePath) || path.resolve(filePath) !== filePath || /[\r\n\0]/u.test(filePath) ||
-    !/^[a-f0-9]{64}$/u.test(expectedFileSha256)) {
+  missing: "throw" | "return_null",
+): Promise<Readonly<{ proof: CatalogBridgeSourceCensus; fileSha256: string }> | null> {
+  if (!path.isAbsolute(filePath) || path.resolve(filePath) !== filePath || /[\r\n\0]/u.test(filePath)) {
     refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_PATH_INVALID");
+  }
+  const parentPath = path.dirname(filePath);
+  const [parent, resolvedParent] = await Promise.all([
+    lstat(parentPath),
+    realpath(parentPath),
+  ]);
+  if (!parent.isDirectory() || resolvedParent !== parentPath ||
+    parent.uid !== process.getuid?.() || (parent.mode & 0o077) !== 0) {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_FILE_UNSAFE");
   }
   let handle;
   try {
@@ -230,12 +238,11 @@ export async function readCatalogBridgeSourceCensus(
     }
     const bytes = await handle.readFile();
     const fileSha256 = createHash("sha256").update(bytes).digest("hex");
-    if (fileSha256 !== expectedFileSha256) {
-      refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_FILE_DIGEST_MISMATCH");
-    }
     const proof = catalogBridgeSourceCensusSchema.parse(JSON.parse(bytes.toString("utf8")));
     return Object.freeze({ proof, fileSha256 });
   } catch (error) {
+    if (missing === "return_null" && error instanceof Error &&
+      "code" in error && error.code === "ENOENT") return null;
     if (error instanceof SyntaxError || error instanceof z.ZodError) {
       refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_INVALID");
     }
@@ -243,4 +250,27 @@ export async function readCatalogBridgeSourceCensus(
   } finally {
     await handle?.close();
   }
+}
+
+export function readCatalogBridgeSourceCensusIfPresent(
+  filePath: string,
+): Promise<Readonly<{ proof: CatalogBridgeSourceCensus; fileSha256: string }> | null> {
+  return readCatalogBridgeSourceCensusFile(filePath, "return_null");
+}
+
+export async function readCatalogBridgeSourceCensus(
+  filePath: string,
+  expectedFileSha256: string,
+): Promise<Readonly<{ proof: CatalogBridgeSourceCensus; fileSha256: string }>> {
+  if (!/^[a-f0-9]{64}$/u.test(expectedFileSha256)) {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_PATH_INVALID");
+  }
+  const sourceCensus = await readCatalogBridgeSourceCensusFile(filePath, "throw");
+  if (sourceCensus === null) {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_INVALID");
+  }
+  if (sourceCensus.fileSha256 !== expectedFileSha256) {
+    refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_FILE_DIGEST_MISMATCH");
+  }
+  return sourceCensus;
 }

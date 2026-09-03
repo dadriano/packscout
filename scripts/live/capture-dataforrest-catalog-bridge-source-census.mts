@@ -25,7 +25,9 @@ import {
   assertCatalogBridgeSourceCensusAuthority,
   captureCatalogBridgeSourceCensusPass,
   catalogBridgeSourceCensusDigest,
+  catalogBridgeSourceCensusFileSha256,
   catalogBridgeSourceCensusSchema,
+  readCatalogBridgeSourceCensusIfPresent,
   type CatalogBridgeSourceCensus,
 } from "./dataforrest-catalog-bridge-source-census.mts";
 import { inspectCatalogBridgeSourcePage } from
@@ -38,6 +40,7 @@ const censusModule = "scripts/live/dataforrest-catalog-bridge-source-census.mts"
 const inspectionModule = "scripts/live/dataforrest-catalog-bridge-source-inspection.mts";
 const maximumOperationMilliseconds = 48 * 60 * 60_000;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const sha256Pattern = /^[a-f0-9]{64}$/u;
 
 export interface CatalogBridgeSourceCensusCaptureArguments {
   readonly operationId: string;
@@ -45,6 +48,26 @@ export interface CatalogBridgeSourceCensusCaptureArguments {
   readonly executorCheckout: string;
   readonly executorCommit: string;
   readonly outputPath: string;
+}
+
+export interface CatalogBridgeSourceCensusExecutorEvidence {
+  readonly runnerModuleSha256: string;
+  readonly censusModuleSha256: string;
+  readonly inspectionModuleSha256: string;
+}
+
+export interface CatalogBridgeSourceCensusCaptureResult {
+  readonly outcome: "already_captured" | "captured";
+  readonly operationId: string;
+  readonly providerKey: "collector_crypt";
+  readonly sourceCensusFileSha256: string;
+  readonly sourceCensusProofDigest: string;
+  readonly sourceHeadCardCount: number;
+  readonly sourceHeadPackCount: number;
+  readonly sourceHeadIdentityMultisetDigest: string;
+  readonly sourceRequestsPerformed: boolean;
+  readonly sourceRequestCount: number;
+  readonly databaseWritesPerformed: false;
 }
 
 function safeAbsolutePath(value: string): boolean {
@@ -88,11 +111,7 @@ export function parseCatalogBridgeSourceCensusCaptureArguments(
 
 export async function performCatalogBridgeSourceCensus(input: Readonly<{
   args: CatalogBridgeSourceCensusCaptureArguments;
-  executor: Readonly<{
-    runnerModuleSha256: string;
-    censusModuleSha256: string;
-    inspectionModuleSha256: string;
-  }>;
+  executor: CatalogBridgeSourceCensusExecutorEvidence;
   resolveAuthority: () => Promise<ResolvedDataforrestSourceAuthority>;
   readPage: (authority: ResolvedDataforrestSourceAuthority, cursor: string | null,
     signal: AbortSignal) => ReturnType<typeof inspectCatalogBridgeSourcePage>;
@@ -173,16 +192,116 @@ export async function performCatalogBridgeSourceCensus(input: Readonly<{
   });
 }
 
-export async function captureCatalogBridgeSourceCensus(input: Readonly<{
+function captureProofBinding(input: Readonly<{
   args: CatalogBridgeSourceCensusCaptureArguments;
-  environment?: NodeJS.ProcessEnv;
-}>): Promise<Readonly<Record<string, unknown>>> {
-  const checkout = await observeCatalogBridgeCheckout({
-    checkout: input.args.executorCheckout,
-    expectedCommit: input.args.executorCommit,
-    executingRoot: catalogBridgeRepositoryRoot(import.meta.url),
-    modules: { runner: runnerModule, census: censusModule, inspection: inspectionModule },
+  executor: CatalogBridgeSourceCensusExecutorEvidence;
+  proof: unknown;
+  failureCode: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" |
+    "CATALOG_BRIDGE_SOURCE_CENSUS_INVALID";
+}>): CatalogBridgeSourceCensus {
+  const parsed = catalogBridgeSourceCensusSchema.safeParse(input.proof);
+  if (!parsed.success) refuseCatalogBridge(input.failureCode);
+  const proof = parsed.data;
+  const definition = catalogBridgeProvider(input.args.providerKey);
+  if (!uuidPattern.test(input.args.operationId) ||
+    input.args.providerKey !== "collector_crypt" ||
+    !safeAbsolutePath(input.args.executorCheckout) ||
+    !safeAbsolutePath(input.args.outputPath) ||
+    input.args.outputPath === input.args.executorCheckout ||
+    !/^[a-f0-9]{40}$/u.test(input.args.executorCommit) ||
+    Object.values(input.executor).some((digest) => !sha256Pattern.test(digest)) ||
+    proof.operationId !== input.args.operationId ||
+    proof.providerKey !== input.args.providerKey ||
+    proof.executor.checkout !== input.args.executorCheckout ||
+    proof.executor.commit !== input.args.executorCommit ||
+    proof.executor.runnerModuleSha256 !== input.executor.runnerModuleSha256 ||
+    proof.executor.censusModuleSha256 !== input.executor.censusModuleSha256 ||
+    proof.executor.inspectionModuleSha256 !== input.executor.inspectionModuleSha256 ||
+    proof.source.providerId !== definition.providerId ||
+    proof.source.configId !== definition.currentConfigId ||
+    proof.source.configNumber !== definition.currentConfigNumber ||
+    proof.source.activeAdapterVersion !== definition.currentEventManifest.adapterVersion ||
+    proof.source.catalogAdapterVersion !== definition.catalogAdapterVersion ||
+    proof.source.pageLimit !== definition.catalogManifest.requestBounds.pageLimit ||
+    proof.source.requestTimeoutMilliseconds !==
+      definition.catalogManifest.requestBounds.timeoutMilliseconds ||
+    proof.source.maximumResponseBytes !==
+      definition.catalogManifest.requestBounds.maximumResponseBytes ||
+    proof.agreement.cardCount < definition.documentedCatalogFloor.card ||
+    proof.agreement.packCount < definition.documentedCatalogFloor.pack) {
+    refuseCatalogBridge(input.failureCode);
+  }
+  return proof;
+}
+
+function captureResult(input: Readonly<{
+  proof: CatalogBridgeSourceCensus;
+  fileSha256: string;
+  outcome: "already_captured" | "captured";
+  sourceRequestsPerformed: boolean;
+}>): CatalogBridgeSourceCensusCaptureResult {
+  return Object.freeze({
+    outcome: input.outcome,
+    operationId: input.proof.operationId,
+    providerKey: input.proof.providerKey as "collector_crypt",
+    sourceCensusFileSha256: input.fileSha256,
+    sourceCensusProofDigest: catalogBridgeSourceCensusDigest(input.proof),
+    sourceHeadCardCount: input.proof.agreement.cardCount,
+    sourceHeadPackCount: input.proof.agreement.packCount,
+    sourceHeadIdentityMultisetDigest: input.proof.agreement.identityMultisetDigest,
+    sourceRequestsPerformed: input.sourceRequestsPerformed,
+    sourceRequestCount: input.sourceRequestsPerformed
+      ? input.proof.passes.reduce((sum, pass) => sum + pass.sourceRequestCount, 0)
+      : 0,
+    databaseWritesPerformed: false,
   });
+}
+
+/** Resolves a completed operation before lazily invoking any fresh source work. */
+export async function captureOrReuseCatalogBridgeSourceCensus(input: Readonly<{
+  args: CatalogBridgeSourceCensusCaptureArguments;
+  executor: CatalogBridgeSourceCensusExecutorEvidence;
+  readExisting: () => Promise<Readonly<{
+    proof: CatalogBridgeSourceCensus;
+    fileSha256: string;
+  }> | null>;
+  captureFresh: () => Promise<CatalogBridgeSourceCensus>;
+  persistFresh: (proof: CatalogBridgeSourceCensus) => Promise<Readonly<{
+    fileSha256: string;
+    exactRetry: boolean;
+  }>>;
+}>): Promise<CatalogBridgeSourceCensusCaptureResult> {
+  const existing = await input.readExisting();
+  if (existing !== null) {
+    const proof = captureProofBinding({ args: input.args, executor: input.executor,
+      proof: existing.proof, failureCode: "CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT" });
+    if (!sha256Pattern.test(existing.fileSha256) ||
+      existing.fileSha256 !== catalogBridgeSourceCensusFileSha256(proof)) {
+      refuseCatalogBridge("CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT");
+    }
+    return captureResult({ proof, fileSha256: existing.fileSha256,
+      outcome: "already_captured", sourceRequestsPerformed: false });
+  }
+
+  const proof = captureProofBinding({ args: input.args, executor: input.executor,
+    proof: await input.captureFresh(), failureCode: "CATALOG_BRIDGE_SOURCE_CENSUS_INVALID" });
+  const persisted = await input.persistFresh(proof);
+  const expectedFileSha256 = catalogBridgeSourceCensusFileSha256(proof);
+  if (!sha256Pattern.test(persisted.fileSha256) ||
+    persisted.fileSha256 !== expectedFileSha256 ||
+    typeof persisted.exactRetry !== "boolean") {
+    refuseCatalogBridge("CATALOG_BRIDGE_OPERATOR_OUTPUT_CONFLICT");
+  }
+  return captureResult({ proof, fileSha256: persisted.fileSha256,
+    outcome: persisted.exactRetry ? "already_captured" : "captured",
+    sourceRequestsPerformed: true });
+}
+
+async function captureFreshCatalogBridgeSourceCensus(input: Readonly<{
+  args: CatalogBridgeSourceCensusCaptureArguments;
+  executor: CatalogBridgeSourceCensusExecutorEvidence;
+  environment?: NodeJS.ProcessEnv;
+}>): Promise<CatalogBridgeSourceCensus> {
   const environment = readCatalogBridgeLiveDrainEnvironment(input.environment ?? process.env);
   const centralUrl = new URL(environment.centralDatabaseUrl);
   centralUrl.searchParams.set("connect_timeout", "5");
@@ -213,11 +332,7 @@ export async function captureCatalogBridgeSourceCensus(input: Readonly<{
     });
     const proof = await performCatalogBridgeSourceCensus({
       args: input.args,
-      executor: {
-        runnerModuleSha256: checkout.moduleSha256.runner!,
-        censusModuleSha256: checkout.moduleSha256.census!,
-        inspectionModuleSha256: checkout.moduleSha256.inspection!,
-      },
+      executor: input.executor,
       resolveAuthority,
       readPage: (authority, cursor, signal) => inspectCatalogBridgeSourcePage({
         authority,
@@ -233,30 +348,48 @@ export async function captureCatalogBridgeSourceCensus(input: Readonly<{
       })}\n`),
     });
     if (controller.signal.aborted) refuseCatalogBridge("CATALOG_BRIDGE_SOURCE_CENSUS_ABORTED");
-    const bytes = catalogBridgePrivateJsonBytes(proof);
-    try {
-      const persisted = await persistCatalogBridgePrivateBytes(input.args.outputPath, bytes);
-      return Object.freeze({
-        outcome: persisted.exactRetry ? "already_captured" : "captured",
-        operationId: proof.operationId,
-        providerKey: proof.providerKey,
-        sourceCensusFileSha256: persisted.fileSha256,
-        sourceCensusProofDigest: catalogBridgeSourceCensusDigest(proof),
-        sourceHeadCardCount: proof.agreement.cardCount,
-        sourceHeadPackCount: proof.agreement.packCount,
-        sourceHeadIdentityMultisetDigest: proof.agreement.identityMultisetDigest,
-        sourceRequestCount: proof.passes.reduce((sum, pass) => sum + pass.sourceRequestCount, 0),
-        databaseWritesPerformed: false,
-      });
-    } finally {
-      bytes.fill(0);
-    }
+    return proof;
   } finally {
     clearTimeout(deadline);
     process.off("SIGINT", abort);
     process.off("SIGTERM", abort);
     try { await central.close(); } finally { environment.credentialKey.fill(0); }
   }
+}
+
+export async function captureCatalogBridgeSourceCensus(input: Readonly<{
+  args: CatalogBridgeSourceCensusCaptureArguments;
+  environment?: NodeJS.ProcessEnv;
+}>): Promise<CatalogBridgeSourceCensusCaptureResult> {
+  const checkout = await observeCatalogBridgeCheckout({
+    checkout: input.args.executorCheckout,
+    expectedCommit: input.args.executorCommit,
+    executingRoot: catalogBridgeRepositoryRoot(import.meta.url),
+    modules: { runner: runnerModule, census: censusModule, inspection: inspectionModule },
+  });
+  const executor = Object.freeze({
+    runnerModuleSha256: checkout.moduleSha256.runner!,
+    censusModuleSha256: checkout.moduleSha256.census!,
+    inspectionModuleSha256: checkout.moduleSha256.inspection!,
+  });
+  return captureOrReuseCatalogBridgeSourceCensus({
+    args: input.args,
+    executor,
+    readExisting: () => readCatalogBridgeSourceCensusIfPresent(input.args.outputPath),
+    captureFresh: () => captureFreshCatalogBridgeSourceCensus({
+      args: input.args,
+      executor,
+      environment: input.environment,
+    }),
+    persistFresh: async (proof) => {
+      const bytes = catalogBridgePrivateJsonBytes(proof);
+      try {
+        return await persistCatalogBridgePrivateBytes(input.args.outputPath, bytes);
+      } finally {
+        bytes.fill(0);
+      }
+    },
+  });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

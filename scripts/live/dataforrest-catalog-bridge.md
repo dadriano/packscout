@@ -269,6 +269,7 @@ do not turn it into a resumable run.
 | A pause-race reconciled head uses a distinct proof policy | Automated: both drain and plan tests |
 | Catalog authority contains the explicit catalog stream | Automated: `dataforrest-catalog-bridge-plan.test.mjs` |
 | Two sequential null-origin source passes must agree on counts and identity evidence without persisting raw IDs, cursors, or bodies | Automated: `dataforrest-catalog-bridge-source-census.test.mjs` |
+| An exact census-capture retry reuses only the canonical operation-bound proof before database or source work; unsafe or conflicting output fails closed | Automated: `dataforrest-catalog-bridge-source-census.test.mjs` |
 | A census is single-operation-bound and refuses cross-operation replay before database or source work | Automated: source-census, plan, and operator-materialization tests |
 | Preparation binds the census file, proof digest, counts, and identity-multiset digest | Automated: plan and operator-materialization tests |
 | Raw cursor stays out of public receipts and CLI output | Automated: both bridge tests |
