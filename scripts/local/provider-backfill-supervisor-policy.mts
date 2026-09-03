@@ -110,7 +110,15 @@ export function classifyBackfillCheckpoint(snapshot: BackfillSnapshot): "head" |
     (run.state === "queued" ? snapshot.state === "idle" && run.requestedHash === snapshot.checkpointHash
       : snapshot.state === "running" && (run.pageCount === 0 ? run.requestedHash === snapshot.checkpointHash
         : snapshot.lastPage?.matches && snapshot.lastPage.number === run.pageCount && snapshot.lastPage.hash === snapshot.checkpointHash))) return "execute";
-  if (run.state !== "failed" || run.reachedHead || !run.finishedAt || snapshot.state !== "error" ||
+  // A run that reached head and committed nothing leaves the checkpoint exactly
+  // where it started, so a transient failure at that point is as safe to retry
+  // as one before head. Without this a head-reaching commit failure matches no
+  // classification branch at all and latches the provider on an intact
+  // checkpoint: collector_crypt sat blocked for 16 hours this way.
+  const headWithoutCommit = run.reachedHead && run.pageCount === 0 &&
+    run.requestedHash === snapshot.checkpointHash;
+  if (run.state !== "failed" || (run.reachedHead && !headWithoutCommit) ||
+    !run.finishedAt || snapshot.state !== "error" ||
     snapshot.activeRunIds.length !== 0 || snapshot.actionableCommands.length !== 0 ||
     !run.finalMatches || run.finalHash !== snapshot.checkpointHash || !snapshot.checkpointHash ||
     (run.pageCount > 0 && (!snapshot.lastPage?.matches || snapshot.lastPage.number !== run.pageCount ||
