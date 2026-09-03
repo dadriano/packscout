@@ -6,8 +6,12 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 
-const migrationPath = fileURLToPath(new URL(
+const baselineMigrationPath = fileURLToPath(new URL(
   "./migrations/20260829000000_distributed_central_baseline/migration.sql",
+  import.meta.url,
+));
+const catalogBudgetMigrationPath = fileURLToPath(new URL(
+  "./migrations/20260902130000_provider_promotion_catalog_budget/migration.sql",
   import.meta.url,
 ));
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
@@ -64,7 +68,8 @@ async function createMigratedDatabase(): Promise<{
   const db = new Client({ connectionString: databaseUrl.toString() });
   try {
     await db.connect();
-    await db.query(await readFile(migrationPath, "utf8"));
+    await db.query(await readFile(baselineMigrationPath, "utf8"));
+    await db.query(await readFile(catalogBudgetMigrationPath, "utf8"));
   } catch (error) {
     await db.end().catch(() => undefined);
     if (created) await admin.query(`drop database "${databaseName}"`);

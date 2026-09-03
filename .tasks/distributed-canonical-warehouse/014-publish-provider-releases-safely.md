@@ -5,27 +5,15 @@
 **Blocks:** distributed-canonical-warehouse/015, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including authenticated operations, idempotent receipts, and lost-response recovery
-**Status:** in progress
+**Status:** done
 
-## Current Porting Constraint
+## Completed Port
 
-The original implementation branch targets an older Convex schema. The
-authoritative commit-`225f9a1` application already owns product-user,
-allowlist, saved-item, provider-catalog, global-manifest, and Data Release V3
-contracts that must remain intact. Task 014 therefore stays in progress until
-its reusable provider-local publication repository/coordinator is ported behind
-those active contracts and Convex finalization enforces the complete active
-release invariant set. The older `convex/schema.ts` is not integration-ready and
-must not replace the authoritative schema.
-
-The reusable WIP protocol is preserved at commit
-`847ce287bc615ce46b5b841340d39b89c8228b17`. Its provider-local durable
-intent/attempt/receipt state, exact receipt verification, idempotent recovery,
-owner claims, activity outbox, and worker coordination passed focused and full
-changed-surface verification. It is a selective port source, not a completed
-Task 014 implementation. The active finalizer still needs complete category,
-content-mode, timing, chase, and known-collectible graph invariants plus non-empty
-tamper coverage; retry backpressure is still process-local.
+The reusable provider-local publication protocol is ported behind the current
+Convex contracts without replacing the authoritative schema. Durable exact
+operations, compact receipt evidence, status-first recovery, final graph
+validation, completed-versus-active separation, and per-provider retry
+isolation are covered by focused and repository-wide verification.
 
 ## Start Here
 
@@ -89,22 +77,23 @@ The output is a complete provider release and completed-provider head eligible f
 
 ### Operation acceptance
 
-- [ ] Start, batch, finalize, status, block, and reuse operations enforce server-only authentication, provider ownership, schema, predecessor, and bounds.
-- [ ] Identical retries return the prior receipt, while changed bytes under one idempotency key fail without mutation.
-- [ ] Timeout, duplicate delivery, lost acknowledgement, and restart reconcile exact status before checkpoint movement.
-- [ ] Finalization verifies every batch, count, hash, and reference before marking the release complete.
-- [ ] Protected provider and infrastructure data never appears in Convex artifacts, operation responses, logs, or diagnostics.
+- [x] Start, batch, finalize, status, block, and reuse operations enforce server-only authentication, provider ownership, schema, predecessor, and bounds.
+- [x] Identical retries return the prior receipt, while changed bytes under one idempotency key fail without mutation.
+- [x] Timeout, duplicate delivery, lost acknowledgement, and restart reconcile exact status before checkpoint movement.
+- [x] Finalization verifies every batch, count, hash, and reference before marking the release complete.
+- [x] Protected provider and infrastructure data never appears in Convex artifacts, operation responses, logs, or diagnostics.
 
 ### Independence acceptance
 
-- [ ] Completing a provider release advances only its completed head and never changes the active manifest.
-- [ ] A failed release preserves the prior complete and active release.
-- [ ] One failed provider cannot block another provider's publication or exhaust its retry capacity.
-- [ ] Confirmed checkpoint advancement occurs only after durable exact receipts.
-- [ ] Publication metrics expose provider-specific lag, retries, ambiguity, completion, and failure without secrets.
+- [x] Completing a provider release advances only its completed head and never changes the active manifest.
+- [x] A failed release preserves the prior complete and active release.
+- [x] One failed provider cannot block another provider's publication or exhaust its retry capacity.
+- [x] Confirmed checkpoint advancement occurs only after durable exact receipts.
+- [x] Publication metrics expose provider-specific lag, retries, ambiguity, completion, and failure without secrets.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - Exact canonical request bytes and append-only receipts gate lifecycle and checkpoint advancement.
-- No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+- No deviations remain; current provider-release contract, repository,
+  lifecycle/security, recovery, and full-volume tests are green.

@@ -58,18 +58,47 @@ const safeFailurePattern = /^[A-Z][A-Z0-9_]{0,127}$/;
 const protectedTextPattern =
   /(?:authorization|bearer\s+|cookie|credential|cursor|database[_-]?url|password|payload|secret|(?:api|access|refresh|auth)[_-]?token|api[_-]?key|postgres(?:ql)?:\/\/)/i;
 const activityEvidenceKeys = new Set([
+  "catalogContentHash",
+  "catalogVersionId",
   "coalescedCount",
+  "completedThroughChangeSequence",
   "expiredCount",
   "failureCode",
   "generation",
   "overflowDigest",
   "overflowGeneration",
+  "providerReleaseContentHash",
+  "providerReleaseFingerprint",
+  "providerReleaseId",
+  "providerInvocationIdDigest",
+  "providerInvocationProjectionDigest",
+  "publicProviderReleaseId",
   "quarantineState",
   "retentionState",
   "runState",
   "selectedCount",
   "state",
+  "terminalReceiptSha256",
 ]);
+
+export interface ProviderReleaseCompletedActivityEvidence {
+  readonly state: "complete" | "reused";
+  readonly providerReleaseId: string;
+  readonly publicProviderReleaseId: string;
+  readonly catalogVersionId: string;
+  readonly catalogContentHash: string;
+  readonly providerReleaseContentHash: string;
+  readonly providerReleaseFingerprint: string;
+  readonly completedThroughChangeSequence: string;
+  readonly terminalReceiptSha256: string;
+}
+
+export interface ProviderPromotionInvocationTerminalActivityEvidence {
+  readonly providerInvocationIdDigest: string;
+  readonly providerInvocationProjectionDigest: string;
+}
+
+const maximumPostgresBigint = 9_223_372_036_854_775_807n;
 
 function validDate(value: Date): boolean {
   return value instanceof Date && Number.isFinite(value.getTime());
@@ -122,6 +151,131 @@ export function sanitizeProviderActivityEvidence(
     throw new TypeError("Provider activity evidence is too large.");
   }
   return Object.freeze(output);
+}
+
+const providerReleaseCompletedEvidenceKeys = [
+  "catalogContentHash",
+  "catalogVersionId",
+  "completedThroughChangeSequence",
+  "providerReleaseContentHash",
+  "providerReleaseFingerprint",
+  "providerReleaseId",
+  "publicProviderReleaseId",
+  "state",
+  "terminalReceiptSha256",
+] as const;
+
+/** Strict typed evidence consumed by the central completion relay. */
+export function providerReleaseCompletedActivityEvidence(
+  event: Pick<ProviderActivityEvent, "eventType" | "evidence">,
+): ProviderReleaseCompletedActivityEvidence {
+  const evidence = sanitizeProviderActivityEvidence(event.evidence);
+  if (
+    event.eventType !== "provider_release_completed"
+    || Object.keys(evidence).sort().join("\0") !==
+      [...providerReleaseCompletedEvidenceKeys].sort().join("\0")
+    || (evidence.state !== "complete" && evidence.state !== "reused")
+    || typeof evidence.providerReleaseId !== "string"
+    || !uuidPattern.test(evidence.providerReleaseId)
+    || typeof evidence.publicProviderReleaseId !== "string"
+    || !uuidPattern.test(evidence.publicProviderReleaseId)
+    || typeof evidence.catalogVersionId !== "string"
+    || !uuidPattern.test(evidence.catalogVersionId)
+    || typeof evidence.catalogContentHash !== "string"
+    || !digestPattern.test(evidence.catalogContentHash)
+    || typeof evidence.providerReleaseContentHash !== "string"
+    || !digestPattern.test(evidence.providerReleaseContentHash)
+    || typeof evidence.providerReleaseFingerprint !== "string"
+    || !digestPattern.test(evidence.providerReleaseFingerprint)
+    || typeof evidence.completedThroughChangeSequence !== "string"
+    || !/^[1-9][0-9]{0,18}$/u.test(
+      evidence.completedThroughChangeSequence,
+    )
+    || BigInt(evidence.completedThroughChangeSequence) > maximumPostgresBigint
+    || typeof evidence.terminalReceiptSha256 !== "string"
+    || !digestPattern.test(evidence.terminalReceiptSha256)
+  ) throw new TypeError("Provider release completion evidence is invalid.");
+  return Object.freeze({
+    state: evidence.state,
+    providerReleaseId: evidence.providerReleaseId,
+    publicProviderReleaseId: evidence.publicProviderReleaseId,
+    catalogVersionId: evidence.catalogVersionId,
+    catalogContentHash: evidence.catalogContentHash,
+    providerReleaseContentHash: evidence.providerReleaseContentHash,
+    providerReleaseFingerprint: evidence.providerReleaseFingerprint,
+    completedThroughChangeSequence:
+      evidence.completedThroughChangeSequence,
+    terminalReceiptSha256: evidence.terminalReceiptSha256,
+  });
+}
+
+/**
+ * Validates the fixed provider-owned envelope as well as its typed evidence.
+ * Central uses this before treating a general activity event as manifest work.
+ */
+export function assertProviderReleaseCompletedActivity(
+  event: ProviderActivityEvent,
+): ProviderReleaseCompletedActivityEvidence {
+  const validated = assertProviderActivityEvent(event);
+  const evidence = providerReleaseCompletedActivityEvidence(validated);
+  const expectedSummary = evidence.state === "complete"
+    ? "An immutable provider release completed publication."
+    : "An unchanged immutable provider release confirmed a newer boundary.";
+  if (
+    validated.severity !== "info"
+    || validated.localRunId !== null
+    || validated.localQuarantineId !== null
+    || validated.dedupeKey !==
+      `provider-release-completed:${evidence.providerReleaseId}:${evidence.completedThroughChangeSequence}`
+    || validated.recoveryKey !==
+      `provider-release:${evidence.providerReleaseId}`
+    || validated.title !== "Provider release publication completed"
+    || validated.summary !== expectedSummary
+  ) {
+    throw new TypeError("Provider release completion envelope is invalid.");
+  }
+  return evidence;
+}
+
+const providerPromotionInvocationTerminalEvidenceKeys = [
+  "providerInvocationIdDigest",
+  "providerInvocationProjectionDigest",
+] as const;
+
+/** Strict opaque evidence used to fetch one provider-local terminal record. */
+export function assertProviderPromotionInvocationTerminalActivity(
+  event: ProviderActivityEvent,
+): ProviderPromotionInvocationTerminalActivityEvidence {
+  const validated = assertProviderActivityEvent(event);
+  const evidence = sanitizeProviderActivityEvidence(validated.evidence);
+  if (
+    validated.eventType !== "provider_promotion_invocation_terminal"
+    || Object.keys(evidence).sort().join("\0") !==
+      [...providerPromotionInvocationTerminalEvidenceKeys].sort().join("\0")
+    || typeof evidence.providerInvocationIdDigest !== "string"
+    || !digestPattern.test(evidence.providerInvocationIdDigest)
+    || typeof evidence.providerInvocationProjectionDigest !== "string"
+    || !digestPattern.test(evidence.providerInvocationProjectionDigest)
+    || validated.severity !== "info"
+    || validated.localRunId !== null
+    || validated.localQuarantineId !== null
+    || validated.dedupeKey !==
+      `provider-promotion-invocation:${evidence.providerInvocationIdDigest}`
+    || validated.recoveryKey !==
+      `provider-promotion-invocation:${evidence.providerInvocationIdDigest}`
+    || validated.title !== "Provider promotion job finished"
+    || validated.summary !==
+      "A provider promotion invocation reached a terminal state."
+  ) {
+    throw new TypeError(
+      "Provider promotion invocation terminal envelope is invalid.",
+    );
+  }
+  return Object.freeze({
+    providerInvocationIdDigest: evidence.providerInvocationIdDigest,
+    providerInvocationProjectionDigest:
+      evidence.providerInvocationProjectionDigest,
+  });
 }
 
 function safeSentence(value: string, maximum: number): boolean {

@@ -408,15 +408,57 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   assert.match(runtime, /database\.datname::text/u);
   assert.match(runtime, /state === "nonempty"/u);
   assert.match(executor, /grant select, insert, update on table/u);
+  const schemaTables = (source) => [...source.matchAll(/^model\s+(\w+)\s*\{/gmu)]
+    .map((match) => match[1])
+    .filter((name) => name !== "database_identity")
+    .sort();
+  const allowlistTables = (match, label) => {
+    assert.ok(match, label);
+    return [...match[1].matchAll(/"([a-z_]+)"/gu)]
+      .map((entry) => entry[1])
+      .sort();
+  };
+  const centralSchema = readFileSync(new URL(
+    "../../packages/database/prisma/central/schema.prisma", import.meta.url,
+  ), "utf8");
   const providerSchema = readFileSync(new URL(
     "../../packages/database/prisma/provider/schema.prisma", import.meta.url,
   ), "utf8");
-  const providerTables = [...providerSchema.matchAll(/^model\s+(\w+)\s*\{/gmu)]
-    .map((match) => match[1]).filter((name) => name !== "database_identity").sort();
-  const grantList = /const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
-  assert.ok(grantList, "provider runtime grants must remain an explicit table allowlist");
-  assert.deepEqual([...grantList[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]).sort(), providerTables);
+  const centralGrantList = /const CENTRAL_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  const providerGrantList = /const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  assert.deepEqual(allowlistTables(
+    centralGrantList,
+    "central runtime grants must remain an explicit table allowlist",
+  ), schemaTables(centralSchema));
+  assert.deepEqual(allowlistTables(
+    providerGrantList,
+    "provider runtime grants must remain an explicit table allowlist",
+  ), schemaTables(providerSchema));
+  const centralDeleteList = /const CENTRAL_DELETE_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  const providerDeleteList = /const PROVIDER_DELETE_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
+  assert.deepEqual(allowlistTables(
+    centralDeleteList,
+    "central deletes must remain an explicit table allowlist",
+  ), [
+    "auth_rate_limits",
+    "email_link_tokens",
+    "email_message_attempts",
+    "email_message_intents",
+    "manifest_reconciliation_job_delivery_tombstones",
+    "manifest_reconciliation_job_invocations",
+    "provider_promotion_invocation_projections",
+    "worker_instances",
+  ]);
+  assert.deepEqual(allowlistTables(
+    providerDeleteList,
+    "provider deletes must remain an explicit table allowlist",
+  ), [
+    "provider_activity_outbox",
+    "provider_promotion_job_delivery_tombstones",
+    "provider_promotion_job_invocations",
+  ]);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
+  assert.match(executor, /grant delete on table \$\{qualifiedTables\(PROVIDER_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);
   assert.match(executor, /updated_at = greatest\(\$3, updated_at \+ interval '1 microsecond'\)/u);

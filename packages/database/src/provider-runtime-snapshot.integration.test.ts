@@ -79,73 +79,86 @@ async function createHarness() {
   }
 }
 
-test("provider status remains readable during a worker transaction while runtime mutations retain locking", async (context) => {
+type RuntimeSnapshotHarness = Awaited<ReturnType<typeof createHarness>>;
+
+async function assertSnapshotReadsCommittedState(
+  harness: RuntimeSnapshotHarness,
+  repository: PrismaProviderRuntimeRepository,
+): Promise<void> {
+  const committed = await repository.snapshot();
+  assert.equal(committed.freshness, "unknown");
+  const writer = await harness.writer.connect();
+  try {
+    await writer.query("begin");
+    await writer.query("select singleton_key from provider_runtime where singleton_key = true for update");
+    await writer.query(`update provider_runtime
+      set freshness_state = 'stale', row_version = row_version + 1
+      where singleton_key = true`);
+
+    const snapshot = await repository.snapshot();
+    assert.equal(snapshot.freshness, committed.freshness, "uncommitted worker changes are not exposed");
+    assert.equal(snapshot.rowVersion, committed.rowVersion);
+    assert.equal(snapshot.state, committed.state);
+    assert.equal(snapshot.generation, committed.generation);
+
+    const overview = await new PrismaAdminProviderRuntimeRepository(harness.client).overview();
+    assert.equal(overview.freshnessState, committed.freshness);
+    assert.equal(overview.runtimeState, committed.state);
+    assert.equal(overview.runtimeGeneration, committed.generation);
+    assert.equal(overview.activeRun, null);
+    assert.equal(overview.latestRun, null);
+    const uncommitted = await writer.query<{ freshness_state: string }>(
+      "select freshness_state from provider_runtime where singleton_key = true",
+    );
+    assert.equal(uncommitted.rows[0]?.freshness_state, "stale", "the writer still owns its pending change");
+  } finally {
+    await writer.query("rollback");
+    writer.release();
+  }
+}
+
+async function assertTransitionRetainsRuntimeLocking(
+  harness: RuntimeSnapshotHarness,
+  repository: PrismaProviderRuntimeRepository,
+): Promise<void> {
+  const committed = await repository.snapshot();
+  const transition = {
+    expectedGeneration: committed.generation,
+    to: "paused" as const,
+    reason: "Snapshot contention regression test",
+    actorType: "operator" as const,
+    actorId: "snapshot-regression-test",
+    correlationId: randomUUID(),
+    occurredAt: new Date(),
+  };
+  const writer = await harness.writer.connect();
+  try {
+    await writer.query("begin");
+    await writer.query("select singleton_key from provider_runtime where singleton_key = true for update");
+    await assert.rejects(repository.transition(transition), /lock timeout/u);
+    const unchanged = await writer.query<{ operating_state: string; state_generation: string }>(
+      "select operating_state, state_generation from provider_runtime where singleton_key = true",
+    );
+    assert.equal(unchanged.rows[0]?.operating_state, committed.state);
+    assert.equal(unchanged.rows[0]?.state_generation, committed.generation.toString());
+  } finally {
+    await writer.query("rollback");
+    writer.release();
+  }
+  const applied = await repository.transition(transition);
+  assert.equal(applied.kind, "transitioned");
+  assert.equal(applied.runtime.state, "paused");
+  assert.equal(applied.runtime.generation, committed.generation + 1n);
+}
+
+test("provider status remains readable during a worker transaction while runtime mutations retain locking", async () => {
   const harness = await createHarness();
   const repository = new PrismaProviderRuntimeRepository(harness.client);
   try {
-    await context.test("snapshot and admin overview read committed runtime state while its row is locked", async () => {
-      const committed = await repository.snapshot();
-      assert.equal(committed.freshness, "unknown");
-      const writer = await harness.writer.connect();
-      try {
-        await writer.query("begin");
-        await writer.query("select singleton_key from provider_runtime where singleton_key = true for update");
-        await writer.query(`update provider_runtime
-          set freshness_state = 'stale', row_version = row_version + 1
-          where singleton_key = true`);
-
-        const snapshot = await repository.snapshot();
-        assert.equal(snapshot.freshness, committed.freshness, "uncommitted worker changes are not exposed");
-        assert.equal(snapshot.rowVersion, committed.rowVersion);
-        assert.equal(snapshot.state, committed.state);
-        assert.equal(snapshot.generation, committed.generation);
-
-        const overview = await new PrismaAdminProviderRuntimeRepository(harness.client).overview();
-        assert.equal(overview.freshnessState, committed.freshness);
-        assert.equal(overview.runtimeState, committed.state);
-        assert.equal(overview.runtimeGeneration, committed.generation);
-        assert.equal(overview.activeRun, null);
-        assert.equal(overview.latestRun, null);
-        const uncommitted = await writer.query<{ freshness_state: string }>(
-          "select freshness_state from provider_runtime where singleton_key = true",
-        );
-        assert.equal(uncommitted.rows[0]?.freshness_state, "stale", "the writer still owns its pending change");
-      } finally {
-        await writer.query("rollback");
-        writer.release();
-      }
-    });
-
-    await context.test("a state transition still requires the worker's runtime lock to be released", async () => {
-      const committed = await repository.snapshot();
-      const transition = {
-        expectedGeneration: committed.generation,
-        to: "paused" as const,
-        reason: "Snapshot contention regression test",
-        actorType: "operator" as const,
-        actorId: "snapshot-regression-test",
-        correlationId: randomUUID(),
-        occurredAt: new Date(),
-      };
-      const writer = await harness.writer.connect();
-      try {
-        await writer.query("begin");
-        await writer.query("select singleton_key from provider_runtime where singleton_key = true for update");
-        await assert.rejects(repository.transition(transition), /lock timeout/u);
-        const unchanged = await writer.query<{ operating_state: string; state_generation: string }>(
-          "select operating_state, state_generation from provider_runtime where singleton_key = true",
-        );
-        assert.equal(unchanged.rows[0]?.operating_state, committed.state);
-        assert.equal(unchanged.rows[0]?.state_generation, committed.generation.toString());
-      } finally {
-        await writer.query("rollback");
-        writer.release();
-      }
-      const applied = await repository.transition(transition);
-      assert.equal(applied.kind, "transitioned");
-      assert.equal(applied.runtime.state, "paused");
-      assert.equal(applied.runtime.generation, committed.generation + 1n);
-    });
+    // Keep both phases in this test's async scope so their shared Prisma
+    // resources remain owned until the harness is fully closed.
+    await assertSnapshotReadsCommittedState(harness, repository);
+    await assertTransitionRetainsRuntimeLocking(harness, repository);
   } finally {
     await harness.close();
   }

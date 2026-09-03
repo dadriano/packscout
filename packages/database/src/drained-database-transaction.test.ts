@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runDrainedDatabaseTransaction } from "./drained-database-transaction.ts";
+import { PrismaProviderRuntimeRepository } from "./provider-runtime-repository.ts";
 import { PrismaProviderWorkerLeaseRepository } from "./provider-worker-lease-repository.ts";
 import type { ProviderPrismaClient, ProviderTransactionClient } from "./provider-database.ts";
 
@@ -44,3 +45,61 @@ for (const action of ["acquire", "renew", "release"] as const) {
     assert.deepEqual(events, ["query-start", "query-end", "mutation-attempt", "close"]);
   });
 }
+
+test("runtime transition preserves its timeout and drains its late transaction callback", async () => {
+  const timeout = new Error("simulated Prisma deadline"), events: string[] = [];
+  let unblock!: () => void;
+  const gate = new Promise<void>(resolve => { unblock = resolve; });
+  const transaction = {
+    $queryRaw: async () => {
+      events.push("query-start");
+      await gate;
+      events.push("query-end");
+      return [{
+        singleton_key: true,
+        central_provider_id: "6ca57c71-52e3-43f0-b5e4-1bb80396079c",
+        provider_key: "fixture",
+        operating_state: "idle",
+        state_reason: null,
+        state_generation: 1n,
+        row_version: 1n,
+      }];
+    },
+    provider_state_events: {
+      create: async () => {
+        events.push("mutation-attempt");
+        throw new Error("Transaction already closed");
+      },
+    },
+  } as unknown as ProviderTransactionClient;
+  const database = {
+    $transaction: async (callback: (tx: ProviderTransactionClient) => Promise<unknown>, options: unknown) => {
+      assert.deepEqual(options, {
+        maxWait: 5_000,
+        timeout: 15_000,
+        isolationLevel: "Serializable",
+      });
+      void callback(transaction).catch(() => undefined);
+      await Promise.resolve();
+      throw timeout;
+    },
+  } as unknown as ProviderPrismaClient;
+  const repository = new PrismaProviderRuntimeRepository(database);
+  const operation = repository.transition({
+    expectedGeneration: 1n,
+    to: "paused",
+    reason: "Test pause",
+    actorType: "operator",
+    actorId: "fixture:operator",
+    correlationId: "75fe8117-bc71-4934-bffe-a1aba074c990",
+    occurredAt: new Date("2026-09-02T12:00:00.000Z"),
+  });
+  const result = operation
+    .catch(error => { assert.equal(error, timeout); })
+    .finally(() => { events.push("close"); });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["query-start"]);
+  unblock();
+  await result;
+  assert.deepEqual(events, ["query-start", "query-end", "mutation-attempt", "close"]);
+});

@@ -52,17 +52,25 @@ function epoch() {
   } as const;
 }
 
-async function references(): Promise<readonly [
+interface GlobalCatalogManifestFixtureOptions {
+  readonly mixedProviderEpochs?: boolean;
+  readonly distinctProviderOrigins?: boolean;
+}
+
+async function references(options: GlobalCatalogManifestFixtureOptions): Promise<readonly [
   GlobalCatalogProviderReferenceV1,
   GlobalCatalogProviderReferenceV1,
 ]> {
-  const publicAssetOrigins = ["https://cdn.packscout.test"];
-  const originSetHash = await recomputeGlobalCatalogManifestOriginSetHashV1(
-    publicAssetOrigins,
-  );
+  const alphaOrigins = ["https://cdn.packscout.test"];
+  const betaOrigins = options.distinctProviderOrigins
+    ? ["https://other.packscout.test"]
+    : alphaOrigins;
+  const [alphaOriginSetHash, betaOriginSetHash] = await Promise.all([
+    recomputeGlobalCatalogManifestOriginSetHashV1(alphaOrigins),
+    recomputeGlobalCatalogManifestOriginSetHashV1(betaOrigins),
+  ]);
   const common = {
     sharedConfigurationEpoch: epoch(),
-    publicAssetOrigins,
     searchAlgorithmVersion: "repack_search_v2" as const,
     batchCount: 1,
     batchChainHash: HASH_F,
@@ -75,11 +83,12 @@ async function references(): Promise<readonly [
         "11111111-1111-5111-8111-111111111111",
       providerReleaseFingerprint: HASH_A,
       contentHash: HASH_B,
+      publicAssetOrigins: alphaOrigins,
       governingHashes: {
         providerConfigurationHash: HASH_A,
         sharedCategoriesHash: HASH_B,
         identityMappingsHash: HASH_C,
-        originSetHash,
+        originSetHash: alphaOriginSetHash,
         confidencePolicyHash: HASH_D,
       },
       entityHashes: {
@@ -108,11 +117,18 @@ async function references(): Promise<readonly [
         "22222222-2222-5222-8222-222222222222",
       providerReleaseFingerprint: HASH_B,
       contentHash: HASH_C,
+      sharedConfigurationEpoch: options.mixedProviderEpochs ? {
+        configurationKey: "catalog-version:beta",
+        revision: 1,
+        publicChangeSequence: "11",
+        configurationHash: HASH_B,
+      } : epoch(),
+      publicAssetOrigins: betaOrigins,
       governingHashes: {
         providerConfigurationHash: HASH_B,
         sharedCategoriesHash: HASH_C,
         identityMappingsHash: HASH_D,
-        originSetHash,
+        originSetHash: betaOriginSetHash,
         confidencePolicyHash: HASH_D,
       },
       entityHashes: {
@@ -139,9 +155,12 @@ async function references(): Promise<readonly [
 
 export async function buildGlobalCatalogManifestFixtureV1(
   dataSource: "canonical" | "mock" = "canonical",
+  options: GlobalCatalogManifestFixtureOptions = {},
 ): Promise<GlobalCatalogManifestV1> {
-  const providerReferences = await references();
-  const publicAssetOrigins = providerReferences[0].publicAssetOrigins;
+  const providerReferences = await references(options);
+  const publicAssetOrigins = [...new Set(
+    providerReferences.flatMap((reference) => reference.publicAssetOrigins),
+  )].sort();
   const [
     providerReferenceSetHash,
     providerConfigurationsHash,

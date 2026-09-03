@@ -172,6 +172,41 @@ for (const code of ["P2010", "P2028"] as const) {
   });
 }
 
+test("Prisma client validation errors abort the page instead of quarantining source records", async context => {
+  if (!process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL) { context.skip("Explicit disposable PostgreSQL required."); return; }
+  const harness = await createProviderHarness(), { client } = harness;
+  try {
+    const fixture = await prepareBatchFixture(client, harness.providerKey);
+    const before = await collectibleBatchState(client, fixture.runId);
+    const error = new Prisma.PrismaClientValidationError(
+      "Synthetic repository programming error",
+      { clientVersion: "6.19.3" },
+    );
+    let intercepted = 0;
+    const database = new Proxy(client, { get(target, property, receiver) {
+      if (property !== "$transaction") return Reflect.get(target, property, receiver);
+      return <T>(operation: (tx: ProviderTransactionClient) => Promise<T>, options: object) =>
+        target.$transaction(tx => operation(new Proxy(tx, { get(inner, key, innerReceiver) {
+          if (key !== "$queryRaw") return Reflect.get(inner, key, innerReceiver);
+          return async (query: Prisma.Sql) => {
+            if (query.sql.includes("provider_promotion_job_wake")) {
+              intercepted += 1;
+              throw error;
+            }
+            return inner.$queryRaw(query);
+          };
+        } })), options);
+    } });
+    const page = fixture.page([categoryRecord(), cardRecord("must-roll-back")]);
+    await assert.rejects(
+      new PrismaProviderMixedPageRepository(database).commit({ workerId: batchWorker, page }),
+      actual => actual === error,
+    );
+    assert.equal(intercepted, 1);
+    assert.deepEqual(await collectibleBatchState(client, fixture.runId), before);
+  } finally { await harness.close(); }
+});
+
 test("a foreign-provider collectible page is refused before any canonical batch effect", async context => {
   if (!process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL) { context.skip("Explicit disposable PostgreSQL required."); return; }
   const harness = await createProviderHarness(), { client } = harness;

@@ -53,12 +53,21 @@ import {
   resolveProviderFactReferencesBatch,
   type ProviderResolvedFactRow,
 } from "./provider-fact-reference-reconciliation.ts";
+import {
+  PROVIDER_PROMOTION_JOB_STORE_CONFIGURATION,
+  SplitPromotionJobStore,
+} from "./split-promotion-job-store.ts";
+import { providerPromotionJobSqlClient } from
+  "./promotion-job-sql-client.ts";
 
 const TRANSACTION_OPTIONS = Object.freeze({
   maxWait: 5_000,
   timeout: 30_000,
   isolationLevel: ProviderPrisma.TransactionIsolationLevel.ReadCommitted,
 });
+const providerPromotionJobs = new SplitPromotionJobStore(
+  PROVIDER_PROMOTION_JOB_STORE_CONFIGURATION,
+);
 
 interface PromotionChangeDraft {
   readonly entityType: ProviderCanonicalEntityType;
@@ -180,6 +189,14 @@ export async function appendPromotionRange(
       operation: change.operation,
       changed_at: changedAt,
     })),
+  });
+  // This uses the same already-open provider transaction as the canonical
+  // rows and promotion range. A rollback therefore removes both the material
+  // change and its durable publication wake.
+  await providerPromotionJobs.coalesceWake(providerPromotionJobSqlClient(client), {
+    requestedGeneration: head.last_sequence,
+    cause: "canonical_settlement",
+    requestedAt: changedAt,
   });
   return { first, last: head.last_sequence };
 }

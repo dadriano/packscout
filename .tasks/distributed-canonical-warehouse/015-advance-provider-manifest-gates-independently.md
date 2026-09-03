@@ -5,7 +5,7 @@
 **Blocks:** distributed-canonical-warehouse/016, distributed-canonical-warehouse/017, distributed-canonical-warehouse/018, distributed-canonical-warehouse/019
 **Estimated scope:** large
 **Estimated effort:** 4–6 days for one builder, including atomic activation, compatibility checks, rollback, and receipt reconciliation
-**Status:** not started
+**Status:** done
 
 ## Start Here
 
@@ -61,22 +61,28 @@ An activation command contains one target provider, expected active manifest ID,
 
 ### Gate acceptance
 
-- [ ] One active manifest selects complete provider release and catalog version pairs with unique provider entries.
-- [ ] Advancing one provider changes only that provider entry and the immutable manifest metadata.
-- [ ] Missing, incomplete, incompatible, cross-provider, dangling, or blocked artifacts prevent activation.
-- [ ] Add, remove, and rollback are explicit provider-entry operations and do not follow runtime disablement implicitly.
-- [ ] A failed provider does not create an all-provider activation barrier.
+- [x] One active manifest selects complete provider release and catalog version pairs with unique provider entries.
+- [x] Advancing one provider changes only that provider entry and the immutable manifest metadata.
+- [x] Missing, incomplete, incompatible, cross-provider, dangling, or blocked artifacts prevent activation.
+- [x] Add, remove, and rollback are explicit provider-entry operations and do not follow runtime disablement implicitly.
+- [x] A failed provider does not create an all-provider activation barrier.
 
 ### Atomicity acceptance
 
-- [ ] Compare-and-swap activation is atomic and stale requests preserve and return the current active manifest.
-- [ ] Duplicate request, timeout, lost acknowledgement, and restart reconcile the exact activation receipt.
-- [ ] Validation or receipt failure leaves the prior active manifest and all provider entries readable.
-- [ ] Retention protects every manifest, release, and catalog version required for active, previous, in-flight, or rollback state.
-- [ ] Gate diagnostics and metrics contain no credentials, database details, internal cursors, or protected provider data.
+- [x] Compare-and-swap activation is atomic and stale requests preserve and return the current active manifest.
+- [x] Duplicate request, timeout, lost acknowledgement, and restart reconcile the exact activation receipt.
+- [x] Validation or receipt failure leaves the prior active manifest and all provider entries readable.
+- [x] The Convex retention graph protects every manifest, release, and catalog
+  version required for active, previous, in-flight, or rollback state.
+- [x] Gate diagnostics and metrics contain no credentials, database details, internal cursors, or protected provider data.
 
 ## Spec Compliance
 
 - Implementation authority: `tech-001-database-schema-contract.md`.
 - The manifest operation vocabulary is exactly `advance | add | remove | rollback`; no duplicate `clear` synonym exists.
-- No deviations are planned; acceptance evidence is recorded before this task is marked complete.
+- Scope refinement: this task proves the Convex-side protection graph.
+  Distributed Task 017 owns the split PostgreSQL proof source, startup
+  reconciliation, and bounded destructive cleanup.
+- Independent gate/coordinator, compare-and-swap, add/remove/rollback, receipt
+  recovery, Convex graph retention, and unrelated-entry preservation tests are
+  green.

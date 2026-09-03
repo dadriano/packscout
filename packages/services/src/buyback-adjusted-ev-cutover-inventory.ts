@@ -311,6 +311,31 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
       note: "Provider-scoped v2 release types.",
     }),
     item({
+      itemKey: "projection:distributed-provider-release-contract",
+      kind: "projection",
+      path: "packages/database/src/provider-release-contract.ts",
+      elements: ["provider-local v2 PackScout EV public projection"],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-release-assembler.ts",
+      note:
+        "The distributed immutable provider release retains the active v2 public contract until the buyback-adjusted release cutover.",
+    }),
+    item({
+      itemKey: "projection:distributed-provider-release-money",
+      kind: "projection",
+      path: "packages/database/src/provider-release-money.ts",
+      elements: [
+        "v2 PackScout EV modelVersion",
+        "v2 unavailable-reason vocabulary",
+      ],
+      disposition: "replaced_by_v3",
+      replacementPath:
+        "packages/services/src/buyback-adjusted-ev-release-assembler.ts",
+      note:
+        "The distributed release's v2 money projection is inventoried explicitly and cannot enter the V3 replacement surface.",
+    }),
+    item({
       itemKey: "projection:public-confidence",
       kind: "projection",
       path: "packages/services/src/public-confidence-projection.ts",

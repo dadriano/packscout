@@ -50,6 +50,7 @@ export const dataReleaseV3SearchRowValidator = v.object({
     v.union(
       v.literal("card"),
       v.literal("watch"),
+      v.literal("art"),
       v.literal("coin"),
       v.literal("sealed_product"),
       v.literal("memorabilia"),

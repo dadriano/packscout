@@ -187,13 +187,6 @@ function validateProviderGraph(plan: ProviderCatalogReleasePublishPlanV1): void 
   validateSearchProjection(plan, repacks);
 }
 
-function sameEpoch(
-  left: ProviderCatalogSharedConfigurationEpochV1,
-  right: ProviderCatalogSharedConfigurationEpochV1,
-): boolean {
-  return canonicalJson(left) === canonicalJson(right);
-}
-
 /**
  * Authoritative PostgreSQL-side composition boundary. The caller supplies the
  * exact enabled-platform snapshot and retained, fully reconstructed publish
@@ -232,13 +225,6 @@ export async function composeGlobalCatalogManifest(input: Readonly<{
     canonicalJson(plans.map(({ platformKey }) => platformKey)) !==
       canonicalJson(input.enabledPlatformKeys)
   ) fail("MANIFEST_PLATFORM_SET_INVALID");
-  if (plans.some((plan) => !sameEpoch(
-    plan.sharedConfigurationEpoch,
-    input.approvedConfiguration.sharedConfigurationEpoch,
-  ))) {
-    fail("MANIFEST_CONFIGURATION_EPOCH_INVALID");
-  }
-
   for (const plan of plans) validateProviderGraph(plan);
 
   const providerReferences = plans.map((plan) =>
@@ -267,8 +253,17 @@ export async function composeGlobalCatalogManifest(input: Readonly<{
   const repackChases = canonicalChases(plans.flatMap((plan) =>
     recordsForKind<PublicRepackChase>(plan, "repack_chases")));
 
+  // The manifest epoch is central coordination metadata. Each provider
+  // reference remains bound to the exact catalog/configuration epoch used to
+  // assemble that release, so independently completed providers are not held
+  // behind a same-epoch barrier. Origins are likewise the canonical union of
+  // the selected immutable releases rather than a global equality constraint.
+  const publicAssetOrigins = [...new Set(providerReferences.flatMap(
+    ({ publicAssetOrigins: origins }) => origins,
+  ))].sort();
+
   if (graphIssues({
-    publicAssetOrigins: providerReferences[0]!.publicAssetOrigins,
+    publicAssetOrigins,
     vendors,
     categories,
     collectibles,
@@ -276,11 +271,7 @@ export async function composeGlobalCatalogManifest(input: Readonly<{
     repackChases,
   }).length > 0) fail("MANIFEST_REFERENCE_INVALID");
 
-  const publicAssetOrigins = providerReferences[0]!.publicAssetOrigins;
   if (
-    providerReferences.some((reference) =>
-      canonicalJson(reference.publicAssetOrigins) !==
-        canonicalJson(publicAssetOrigins)) ||
     providerReferences.some((reference) =>
       reference.governingHashes.confidencePolicyHash !==
         providerReferences[0]!.governingHashes.confidencePolicyHash)

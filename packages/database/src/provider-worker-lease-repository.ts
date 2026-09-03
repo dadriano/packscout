@@ -12,6 +12,54 @@ const TRANSACTION_OPTIONS = Object.freeze({
 });
 const ownerPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 
+export interface ProviderWorkerLeaseTransactionDeadline {
+  readonly deadlineAt: number;
+}
+
+function transactionOptions(
+  deadline?: ProviderWorkerLeaseTransactionDeadline,
+) {
+  if (deadline === undefined) return TRANSACTION_OPTIONS;
+  const available = Math.floor(deadline.deadlineAt - Date.now() - 50);
+  const maxWait = Math.min(
+    TRANSACTION_OPTIONS.maxWait,
+    Math.max(1, Math.floor(available / 5)),
+  );
+  const timeout = Math.min(
+    TRANSACTION_OPTIONS.timeout,
+    available - maxWait,
+  );
+  if (timeout < 1) {
+    throw Object.assign(new Error("Provider worker lease deadline reached."), {
+      code: "PROVIDER_WORKER_LEASE_DEADLINE",
+    });
+  }
+  return { ...TRANSACTION_OPTIONS, maxWait, timeout };
+}
+
+function transactionExpired(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && (error.code === "P2024" || error.code === "P2028");
+}
+
+async function withWorkerLeaseDeadline<T>(
+  deadline: ProviderWorkerLeaseTransactionDeadline | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (deadline !== undefined && transactionExpired(error)) {
+      throw Object.assign(new Error("Provider worker lease deadline reached."), {
+        code: "PROVIDER_WORKER_LEASE_DEADLINE",
+      });
+    }
+    throw error;
+  }
+}
+
 export type ProviderWorkerRole = "import" | "promotion";
 
 export interface ProviderWorkerLease {
@@ -153,14 +201,24 @@ export async function acquireProviderWorkerLease(transaction: ProviderTransactio
 export class PrismaProviderWorkerLeaseRepository {
   constructor(private readonly database: ProviderPrismaClient) {}
 
-  async acquire(input: AcquireProviderWorkerLeaseInput): Promise<AcquireProviderWorkerLeaseResult> {
+  async acquire(
+    input: AcquireProviderWorkerLeaseInput,
+    deadline?: ProviderWorkerLeaseTransactionDeadline,
+  ): Promise<
+    AcquireProviderWorkerLeaseResult
+  > {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return runDrainedDatabaseTransaction<
-      AcquireProviderWorkerLeaseResult,
-      ProviderTransactionClient
-    >(
-      callback => this.database.$transaction(callback, TRANSACTION_OPTIONS),
-      transaction => acquireProviderWorkerLease(transaction, input),
+    return withWorkerLeaseDeadline(deadline, () =>
+      runDrainedDatabaseTransaction<
+        AcquireProviderWorkerLeaseResult,
+        ProviderTransactionClient
+      >(
+        callback => this.database.$transaction(
+          callback,
+          transactionOptions(deadline),
+        ),
+        transaction => acquireProviderWorkerLease(transaction, input),
+      )
     );
   }
 
@@ -169,9 +227,12 @@ export class PrismaProviderWorkerLeaseRepository {
     readonly owner: string;
     readonly fence: bigint;
     readonly leaseMilliseconds: number;
-  }): Promise<ProviderWorkerLease | null> {
+  }, deadline?: ProviderWorkerLeaseTransactionDeadline): Promise<
+    ProviderWorkerLease | null
+  > {
     requireLeaseDuration(input.owner, input.leaseMilliseconds);
-    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
+    return withWorkerLeaseDeadline(deadline, () =>
+      runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, transactionOptions(deadline)), async (transaction: ProviderTransactionClient) => {
       let row = await lockProviderWorkerLease(transaction, input.role);
       if (!providerWorkerLeaseIsLive(row, {
         owner: input.owner,
@@ -198,16 +259,18 @@ export class PrismaProviderWorkerLeaseRepository {
       if (updated.count !== 1) return null;
       row = await lockProviderWorkerLease(transaction, input.role);
       return leaseFrom(row);
-    });
+      })
+    );
   }
 
   async release(input: {
     readonly role: ProviderWorkerRole;
     readonly owner: string;
     readonly fence: bigint;
-  }): Promise<boolean> {
+  }, deadline?: ProviderWorkerLeaseTransactionDeadline): Promise<boolean> {
     if (!ownerPattern.test(input.owner)) throw new TypeError("Provider worker owner is invalid.");
-    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
+    return withWorkerLeaseDeadline(deadline, () =>
+      runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, transactionOptions(deadline)), async (transaction: ProviderTransactionClient) => {
       const row = await lockProviderWorkerLease(transaction, input.role);
       if (row.lease_owner === null) return true;
       if (row.lease_owner !== input.owner || row.lease_fence !== input.fence) return false;
@@ -227,6 +290,7 @@ export class PrismaProviderWorkerLeaseRepository {
         },
       });
       return updated.count === 1;
-    });
+      })
+    );
   }
 }

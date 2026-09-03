@@ -1,0 +1,598 @@
+/* Read-only distributed promotion dispatch board. */
+
+.promotion-page {
+  min-width: 0;
+}
+
+.promotion-readonly-note,
+.promotion-evaluator,
+.promotion-manifest,
+.promotion-roster,
+.promotion-history,
+.promotion-empty-roster,
+.promotion-detail-lead,
+.promotion-detail-facts,
+.promotion-attempts {
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, var(--admin-surface-sheen), var(--admin-card-bg));
+  box-shadow: var(--admin-shadow);
+}
+
+.promotion-readonly-note {
+  display: grid;
+  grid-template-columns: minmax(9rem, auto) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  border-color: var(--admin-primary-bg-subtle);
+  background: var(--admin-primary-bg-muted);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.promotion-readonly-note strong,
+.promotion-evaluator strong,
+.promotion-roster > header > strong,
+.promotion-history > header > strong,
+.promotion-attempts > header > strong {
+  color: var(--admin-text-secondary);
+}
+
+.promotion-readonly-note p,
+.promotion-manifest header p,
+.promotion-roster header p,
+.promotion-history header p,
+.promotion-evaluator p {
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.promotion-evaluator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding: 1rem 1.2rem;
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.promotion-evaluator > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.promotion-evaluator dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(7rem, auto));
+  gap: 1rem;
+  margin: 0;
+}
+
+.promotion-evaluator dl div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.promotion-evaluator dt,
+.promotion-manifest-metrics dt,
+.promotion-release-card dt,
+.promotion-detail-facts dt,
+.promotion-attempt-facts dt {
+  color: var(--admin-text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.promotion-evaluator dd,
+.promotion-manifest-metrics dd,
+.promotion-release-card dd,
+.promotion-detail-facts dd,
+.promotion-attempt-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-text-secondary);
+  font-size: 0.84rem;
+}
+
+.promotion-evaluator--attention {
+  border-color: var(--admin-warning-border);
+  background: var(--admin-warning-bg-light);
+}
+
+.promotion-evaluator--attention p,
+.promotion-evaluator--attention strong {
+  color: var(--admin-warning-text);
+}
+
+.promotion-manifest,
+.promotion-roster,
+.promotion-history,
+.promotion-empty-roster,
+.promotion-detail-facts,
+.promotion-attempts {
+  padding: 1.35rem;
+}
+
+.promotion-manifest > header,
+.promotion-roster > header,
+.promotion-history > header,
+.promotion-attempts > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.promotion-manifest h2,
+.promotion-roster h2,
+.promotion-history h2,
+.promotion-empty-roster h2,
+.promotion-detail-facts h2,
+.promotion-attempts h2 {
+  margin-top: 0.25rem;
+}
+
+.promotion-manifest header p,
+.promotion-roster header p,
+.promotion-history header p,
+.promotion-empty-roster p {
+  margin-top: 0.35rem;
+}
+
+.promotion-status-stack,
+.promotion-cell-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.promotion-inline-alert,
+.promotion-invalid-filter {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--admin-danger-border);
+  border-radius: 0.9rem;
+  background: var(--admin-danger-bg-light);
+  color: var(--admin-danger-text);
+  font-size: 0.86rem;
+}
+
+.promotion-invalid-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.promotion-invalid-filter ul {
+  margin: 0.4rem 0;
+  padding-left: 1.2rem;
+}
+
+.promotion-invalid-filter p {
+  color: inherit;
+}
+
+.promotion-manifest-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(7rem, 1fr));
+  gap: 0;
+  margin: 1rem 0 0;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.9rem;
+  overflow: hidden;
+}
+
+.promotion-manifest-metrics > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+  padding: 0.85rem;
+  border-right: 1px solid var(--admin-table-border);
+}
+
+.promotion-manifest-metrics > div:last-child {
+  border-right: 0;
+}
+
+.promotion-gate-focus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--admin-warning-border);
+  border-radius: 0.9rem;
+  background: var(--admin-warning-bg-light);
+}
+
+.promotion-gate-focus > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.promotion-gate-focus strong,
+.promotion-gate-focus p {
+  color: var(--admin-warning-text);
+}
+
+.promotion-gate-focus--quiet {
+  border-color: var(--admin-border);
+  background: var(--admin-bg-secondary);
+}
+
+.promotion-gate-focus--quiet strong {
+  color: var(--admin-text-secondary);
+}
+
+.promotion-release-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.promotion-release-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.9rem;
+  background: var(--admin-bg-secondary);
+}
+
+.promotion-release-card > span,
+.promotion-latest-job > span,
+.promotion-attempt-digest > span {
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.promotion-release-card > strong {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--admin-text-secondary);
+}
+
+.promotion-release-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0.7rem 0 0;
+}
+
+.promotion-release-card dl div,
+.promotion-attempt-facts div {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.promotion-latest-job {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--admin-border);
+}
+
+.promotion-table-region {
+  max-width: 100%;
+  margin-top: 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.9rem;
+  background: var(--admin-card-bg);
+}
+
+.promotion-provider-table,
+.promotion-history-table,
+.promotion-operation-table {
+  min-width: 60rem;
+}
+
+.promotion-provider-table th[scope="row"],
+.promotion-history-table th[scope="row"] {
+  background: transparent;
+  color: var(--admin-text-secondary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.promotion-provider-table th[scope="row"] > a,
+.promotion-provider-table th[scope="row"] > code,
+.promotion-provider-table th[scope="row"] > small,
+.promotion-history-table th[scope="row"] > a,
+.promotion-history-table th[scope="row"] > small,
+.promotion-provider-table td > span,
+.promotion-provider-table td > small,
+.promotion-provider-table td > code,
+.promotion-history-table td > span,
+.promotion-history-table td > small {
+  display: block;
+}
+
+.promotion-provider-table th[scope="row"] > code,
+.promotion-provider-table td > code,
+.promotion-history-table td > code,
+.promotion-history-table th[scope="row"] > small,
+.promotion-provider-table td > small,
+.promotion-provider-table td span > small,
+.promotion-history-table td > small {
+  margin-top: 0.3rem;
+  color: var(--admin-text-muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+.promotion-provider-table .promotion-cell-badges {
+  display: flex;
+  margin-top: 0.45rem;
+}
+
+.promotion-provider-table th,
+.promotion-provider-table td,
+.promotion-history-table th,
+.promotion-history-table td,
+.promotion-operation-table th,
+.promotion-operation-table td {
+  vertical-align: top;
+}
+
+.promotion-provider-table td,
+.promotion-history-table td,
+.promotion-operation-table td {
+  font-size: 0.82rem;
+}
+
+.promotion-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(10rem, 1fr)) auto;
+  align-items: end;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.9rem;
+  background: var(--admin-bg-secondary);
+}
+
+.promotion-history .ops-pagination {
+  margin-top: 1rem;
+}
+
+.promotion-empty-roster {
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.promotion-refreshing {
+  align-self: flex-end;
+  color: var(--admin-text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.promotion-digest {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--admin-text-muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.promotion-detail-lead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.35rem;
+}
+
+.promotion-detail-lead h2 {
+  margin-top: 0.25rem;
+}
+
+.promotion-detail-lead p {
+  margin-top: 0.35rem;
+  font-size: 0.88rem;
+}
+
+.promotion-detail-facts dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 0;
+}
+
+.promotion-detail-facts dl div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.promotion-bounds-note {
+  margin-top: 0.7rem;
+  font-size: 0.84rem;
+}
+
+.promotion-attempt-digest {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.8rem;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--admin-bg-secondary);
+}
+
+.promotion-attempt-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.promotion-attempt {
+  border: 1px solid var(--admin-border);
+  border-radius: 0.9rem;
+  background: var(--admin-bg-secondary);
+  overflow: hidden;
+}
+
+.promotion-attempt summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.promotion-attempt summary > span:first-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.promotion-attempt summary small {
+  color: var(--admin-text-muted);
+  font-size: 0.78rem;
+}
+
+.promotion-attempt[open] summary {
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.promotion-attempt-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem 1rem;
+  margin: 0;
+  padding: 1rem;
+}
+
+.promotion-attempt > .promotion-bounds-note {
+  padding: 0 1rem;
+}
+
+.promotion-attempt > .promotion-table-region {
+  margin: 1rem;
+}
+
+.promotion-digest-stack {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.promotion-empty-copy {
+  margin-top: 1rem;
+}
+
+@media (max-width: 1180px) {
+  .promotion-manifest-metrics {
+    grid-template-columns: repeat(3, minmax(8rem, 1fr));
+  }
+
+  .promotion-manifest-metrics > div:nth-child(3) {
+    border-right: 0;
+  }
+
+  .promotion-manifest-metrics > div:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--admin-table-border);
+  }
+
+  .promotion-detail-facts dl,
+  .promotion-attempt-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .promotion-readonly-note,
+  .promotion-evaluator,
+  .promotion-manifest > header,
+  .promotion-roster > header,
+  .promotion-history > header,
+  .promotion-attempts > header,
+  .promotion-detail-lead,
+  .promotion-invalid-filter {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .promotion-evaluator dl,
+  .promotion-release-grid,
+  .promotion-filters {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .promotion-manifest-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .promotion-manifest-metrics > div,
+  .promotion-manifest-metrics > div:nth-child(3) {
+    border-right: 1px solid var(--admin-table-border);
+    border-bottom: 1px solid var(--admin-table-border);
+  }
+
+  .promotion-manifest-metrics > div:nth-child(even) {
+    border-right: 0;
+  }
+
+  .promotion-manifest-metrics > div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .promotion-filters .admin-button,
+  .promotion-invalid-filter .admin-button {
+    width: 100%;
+  }
+
+  .promotion-detail-facts dl,
+  .promotion-attempt-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .promotion-manifest,
+  .promotion-roster,
+  .promotion-history,
+  .promotion-empty-roster,
+  .promotion-detail-facts,
+  .promotion-attempts {
+    padding: 1rem;
+  }
+
+  .promotion-manifest-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .promotion-manifest-metrics > div,
+  .promotion-manifest-metrics > div:nth-child(even),
+  .promotion-manifest-metrics > div:nth-last-child(-n + 2) {
+    border-right: 0;
+    border-bottom: 1px solid var(--admin-table-border);
+  }
+
+  .promotion-manifest-metrics > div:last-child {
+    border-bottom: 0;
+  }
+
+  .promotion-gate-focus,
+  .promotion-latest-job,
+  .promotion-attempt summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

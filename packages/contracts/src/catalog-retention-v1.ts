@@ -26,6 +26,9 @@ import {
   sha256Schema,
   timestampSchema,
 } from "./data-release-v2-values.ts";
+import {
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+} from "./global-catalog-manifest-v1.ts";
 export { PRODUCTION_CATALOG_RETENTION_PATHS } from "./catalog-retention-v1-paths.ts";
 
 export const CATALOG_RETENTION_SCHEMA_VERSION =
@@ -36,6 +39,8 @@ export const CATALOG_RETENTION_RECEIPT_HASH_DOMAIN =
   "packscout.catalog-retention.receipt.v1" as const;
 
 export const MAX_CATALOG_RETENTION_HTTP_BODY_BYTES = 256 * 1_024;
+export const MAX_CATALOG_RETENTION_HTTP_RESPONSE_BYTES =
+  MAX_CATALOG_RETENTION_HTTP_BODY_BYTES + 4_096;
 export const MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES = 240 * 1_024;
 export const MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS = 90;
 export const MIN_CATALOG_RETENTION_MANIFEST_DOCUMENTS = 9;
@@ -49,12 +54,17 @@ export const CATALOG_RETENTION_COMPLETE_MILLISECONDS =
 export const CATALOG_RETENTION_ABANDONED_MILLISECONDS =
   24 * 60 * 60 * 1_000;
 export const MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE = 3;
-export const MAX_CATALOG_RETENTION_PLATFORM_COUNT = 8;
+export const MAX_CATALOG_RETENTION_PLATFORM_COUNT =
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES;
 export const MAX_CATALOG_RETENTION_EXTERNAL_MANIFEST_PROTECTIONS = 32;
 export const MAX_CATALOG_RETENTION_EXTERNAL_PROVIDER_PROTECTIONS = 32;
 export const MAX_CATALOG_RETENTION_PROTECTED_MANIFESTS = 40;
 export const MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES_PER_PLATFORM =
   80;
+// Keep the prior eight-platform aggregate while allowing the configured
+// platform roster to grow to the manifest limit. This bounds both Convex graph
+// reads and the signed receipt carried by the retention HTTP response.
+export const MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES = 640;
 
 const nonNegativeSafeIntegerSchema = z.number().int().safe().min(0);
 const positiveSnapshotSequenceSchema = z.string().regex(/^[1-9][0-9]*$/u);
@@ -494,6 +504,20 @@ export const catalogRetentionProtectionSetSchema = z.object({
       message: "catalog_retention.protected_platforms_not_canonical",
     });
   }
+  const protectedProviderReleaseCount = set.providerReleasesByPlatform.reduce(
+    (count, group) => count + group.releases.length,
+    0,
+  );
+  if (
+    protectedProviderReleaseCount >
+      MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["providerReleasesByPlatform"],
+      message: "catalog_retention.protected_provider_release_aggregate_too_large",
+    });
+  }
 });
 
 const selectedManifestSchema = z.object({
@@ -574,6 +598,15 @@ function validateReceiptBase(
   }>,
   context: z.RefinementCtx,
 ): void {
+  if (
+    new TextEncoder().encode(canonicalJson(receipt)).byteLength >
+      MAX_CATALOG_RETENTION_HTTP_BODY_BYTES
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "catalog_retention.receipt_too_large",
+    });
+  }
   if (
     receipt.retentionGeneration !==
       receipt.expectedRetentionGeneration + 1 ||

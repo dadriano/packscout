@@ -7,6 +7,13 @@
 **Estimated effort:** 5–7 days for one builder, including stable snapshots, deterministic projections, and compatibility validation
 **Status:** done
 
+## Completion
+
+The provider-local repository and assembly service are ported behind the
+current split central/provider clients and active Convex-facing contracts.
+Focused unit, migrated PostgreSQL, Convex, typecheck, lint, schema, and
+framework-suite verification covers the current implementation.
+
 ## Start Here
 
 Build one expected release descriptor from a stable provider fixture and one complete global catalog version, listing every public entity, excluded entity, reference, count, and hash before implementing release assembly.

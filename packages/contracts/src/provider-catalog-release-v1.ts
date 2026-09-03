@@ -59,6 +59,14 @@ export const MAX_PROVIDER_CATALOG_RELEASE_BATCH_RECORDS = 100;
 export const MAX_PROVIDER_CATALOG_RELEASE_BATCH_BYTES = 48 * 1_024;
 export const MAX_PROVIDER_CATALOG_RELEASE_HTTP_BODY_BYTES = 128 * 1_024;
 export const MAX_PROVIDER_CATALOG_RELEASE_BATCH_COUNT = 4_096;
+export const MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES = 100_000;
+/**
+ * Maximum serialized provider-plan bytes admitted into one in-memory
+ * publication or manifest-composition boundary. Storage may retain larger
+ * artifacts, but callers must not hydrate them without a streaming design.
+ */
+export const MAX_PROVIDER_PROMOTION_AGGREGATE_PLAN_BYTES =
+  32 * 1_024 * 1_024;
 
 const MAX_SIGNED_INT64 = BigInt("9223372036854775807");
 const nonNegativeSafeIntegerSchema = z.number().int().safe().min(0);
@@ -156,7 +164,9 @@ export const providerCatalogReleaseCountsV1Schema = z
   .object({
     vendors: z.literal(1),
     categories: nonNegativeSafeIntegerSchema.max(4_096),
-    collectibles: nonNegativeSafeIntegerSchema.max(100_000),
+    collectibles: nonNegativeSafeIntegerSchema.max(
+      MAX_PROVIDER_CATALOG_RELEASE_COLLECTIBLES,
+    ),
     repacks: nonNegativeSafeIntegerSchema.max(MAX_PUBLIC_REPACKS_PER_RELEASE),
     repackChases: nonNegativeSafeIntegerSchema.max(250_000),
     searchShards: nonNegativeSafeIntegerSchema.max(MAX_REPACK_SEARCH_SHARDS),

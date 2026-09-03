@@ -5,10 +5,6 @@ import {
 } from "@packscout/contracts";
 import type { HeatPromotionWorkerConfiguration } from
   "./heat-promotion-worker-config.ts";
-import type {
-  PromotionV2Credential,
-  PromotionV2WorkerConfiguration,
-} from "./promotion-v2-worker-config.ts";
 
 export type CatalogRetentionWorkerConfigurationErrorCode =
   | "CATALOG_RETENTION_CONTINUATION_INTERVAL_INVALID"
@@ -75,7 +71,10 @@ function retentionSecret(value: string | undefined): Uint8Array {
   return new Uint8Array(decoded);
 }
 
-type RoleCredential = Pick<PromotionV2Credential, "keyId" | "secret">;
+interface RoleCredential {
+  readonly keyId: string;
+  readonly secret: Uint8Array;
+}
 
 function credentialIdentity(credential: RoleCredential): string {
   return Buffer.from(credential.secret).toString("base64");
@@ -83,14 +82,10 @@ function credentialIdentity(credential: RoleCredential): string {
 
 /** Key IDs and signing bytes are both authorities and must be pairwise unique. */
 export function assertCatalogRetentionCredentialRoleIsolation(input: Readonly<{
-  promotion: PromotionV2WorkerConfiguration;
   heat: Pick<HeatPromotionWorkerConfiguration, "keyId" | "secret">;
   retention: Pick<CatalogRetentionWorkerConfiguration, "keyId" | "secret">;
 }>): void {
   const credentials: readonly RoleCredential[] = [
-    ...input.promotion.providerCredentials,
-    input.promotion.manifestPublishCredential,
-    input.promotion.manifestClearCredential,
     input.heat,
     input.retention,
   ];
@@ -109,8 +104,8 @@ export function assertCatalogRetentionCredentialRoleIsolation(input: Readonly<{
 /** Reads the dedicated retain credential and independent bounded cadence. */
 export function readCatalogRetentionWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
-  promotion: Pick<
-    PromotionV2WorkerConfiguration,
+  heat: Pick<
+    HeatPromotionWorkerConfiguration,
     "convexBaseUrl" | "deploymentKey" | "requestTimeoutMilliseconds"
   >,
 ): CatalogRetentionWorkerConfiguration {
@@ -136,13 +131,13 @@ export function readCatalogRetentionWorkerConfiguration(
     return refuse("CATALOG_RETENTION_CONTINUATION_INTERVAL_INVALID");
   }
   return Object.freeze({
-    convexBaseUrl: promotion.convexBaseUrl,
-    deploymentKey: promotion.deploymentKey,
+    convexBaseUrl: heat.convexBaseUrl,
+    deploymentKey: heat.deploymentKey,
     keyId: keyId.data,
     secret: retentionSecret(
       environment.PACKSCOUT_CATALOG_RETENTION_SECRET_BASE64,
     ),
-    requestTimeoutMilliseconds: promotion.requestTimeoutMilliseconds,
+    requestTimeoutMilliseconds: heat.requestTimeoutMilliseconds,
     intervalMilliseconds,
     continuationIntervalMilliseconds,
     maximumDocuments: boundedInteger(

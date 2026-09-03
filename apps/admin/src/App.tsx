@@ -30,6 +30,8 @@ import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { SourceConfigurationPage } from "./pages/SourceConfigurationPage";
 import { WorkerFleetPage } from "./pages/WorkerFleetPage";
+import { PromotionJobDetailPage } from "./pages/PromotionJobDetailPage";
+import { PromotionJobsPage } from "./pages/PromotionJobsPage";
 import { useSession } from "./providers/session";
 import { MessageDetailPage } from "./pages/MessageDetailPage";
 import { MessagesPage } from "./pages/MessagesPage";
@@ -121,6 +123,8 @@ export const appRoutes = (
         <Route path="runs/:runId" element={<RunDetailPage />} />
         <Route path="background-work" element={<BackgroundWorkPage />} />
         <Route path="workers" element={<WorkerFleetPage />} />
+        <Route path="promotion-jobs" element={<PromotionJobsPage />} />
+        <Route path="promotion-jobs/:monitoringId" element={<PromotionJobDetailPage />} />
         <Route path="quarantine" element={<QuarantinePage />} />
         <Route path="quarantine/:quarantineId" element={<QuarantineDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />

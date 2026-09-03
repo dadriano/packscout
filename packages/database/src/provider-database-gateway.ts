@@ -407,13 +407,21 @@ export class BoundedProviderDatabaseGateway {
   }
 
   async runWithAdminProviderDatabase<T>(
-    input: { readonly organizationId: string; readonly providerId: string },
+    input: {
+      readonly organizationId: string;
+      readonly providerId: string;
+      /** Optional caller-wide deadline shared across multiple bounded reads. */
+      readonly deadlineAt?: number;
+    },
     operation: (database: ProviderPrismaClient) => Promise<T>,
   ): Promise<ProviderDatabaseOperationResult<T>> {
     if (this.#closed) {
       return unavailable(input.providerId, this.#now(), "database_unreachable");
     }
-    const deadline = Date.now() + this.#operationTimeoutMs;
+    const deadline = Math.min(
+      Date.now() + this.#operationTimeoutMs,
+      input.deadlineAt ?? Number.POSITIVE_INFINITY,
+    );
     this.evictIdle();
     const started = await settleBefore(
       Promise.resolve().then(() => this.options.central.start()),

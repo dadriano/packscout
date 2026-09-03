@@ -39,6 +39,7 @@ const AUTHORITATIVE_API_MOUNTS: readonly ApiMount[] = [
   },
   { path: "/api/operators", target: "createOperatorsRouter" },
   { path: "/api/product-users", target: "createProductUsersRouter" },
+  { path: "/api/promotion-jobs", target: "createPromotionJobsRouter" },
   {
     path: "/api/provider-source-operations",
     target: "createProviderSourceOperationsRouter",

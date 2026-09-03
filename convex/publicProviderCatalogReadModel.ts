@@ -1,4 +1,5 @@
 import {
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   MAX_REPACK_CHASES_PER_COLLECTIBLE,
   MAX_REPACK_SEARCH_SHARDS,
   MAX_ROWS_PER_REPACK_SEARCH_SHARD,
@@ -255,7 +256,12 @@ export async function loadPublicProviderCatalog(
     readonly repackCount: number;
   },
 ): Promise<PublicProviderCatalog | null> {
-  if (providers.length < 1 || providers.length > 8) return null;
+  if (
+    providers.length < 1 ||
+    providers.length > MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES
+  ) {
+    return null;
+  }
   const platformKeys = providers.map(({ platformKey }) => platformKey);
   if (
     new Set(platformKeys).size !== platformKeys.length ||

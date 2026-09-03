@@ -102,6 +102,13 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     permission: "providers:view",
   },
   {
+    segment: "promotion-jobs",
+    navLabel: "Promotion Jobs",
+    title: "Convex Promotion Jobs",
+    section: "pipeline",
+    permission: "providers:view",
+  },
+  {
     segment: "alerts",
     navLabel: "Alerts",
     title: "Operational Alerts",
@@ -168,6 +175,8 @@ export const ROUTABLE_PATTERNS: readonly string[] = [
   "/runs/:runId",
   "/background-work",
   "/workers",
+  "/promotion-jobs",
+  "/promotion-jobs/:monitoringId",
   "/quarantine",
   "/quarantine/:quarantineId",
   "/alerts",

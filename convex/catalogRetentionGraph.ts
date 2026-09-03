@@ -2,6 +2,7 @@ import {
   MAX_CATALOG_RETENTION_ADDITIONAL_COMPLETE,
   MAX_CATALOG_RETENTION_EXTERNAL_MANIFEST_PROTECTIONS,
   MAX_CATALOG_RETENTION_PROTECTED_MANIFESTS,
+  MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
   MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES_PER_PLATFORM,
   MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   canonicalJson,
@@ -984,6 +985,12 @@ function protectionSet(
     ReadonlyMap<Id<"providerCatalogReleases">, ProviderEntry>
   >,
 ): CatalogRetentionProtectionSet {
+  assertCatalogRetentionProtectedProviderReleaseCount(
+    [...providers.values()].reduce(
+      (count, entries) => count + entries.size,
+      0,
+    ),
+  );
   return catalogRetentionProtectionSetSchema.parse({
     authoritativeEvaluationTime: now,
     postgresProofSnapshotId: proof.snapshotId,
@@ -1020,6 +1027,14 @@ function protectionSet(
         compareCodeUnits(left.platformKey, right.platformKey)
       ),
   });
+}
+
+export function assertCatalogRetentionProtectedProviderReleaseCount(
+  count: number,
+): void {
+  if (count > MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES) {
+    refuseCatalogRetention("CATALOG_RETENTION_RETENTION_UNSAFE");
+  }
 }
 
 export async function buildCatalogRetentionGraph(

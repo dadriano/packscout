@@ -180,9 +180,6 @@ function knownRecordFailure(error: unknown): {
     error instanceof ProviderPrisma.PrismaClientKnownRequestError
     && RECORD_LOCAL_PRISMA_CODES.has(error.code)
   ) return { reasonCode: "CANONICAL_CONSTRAINT_FAILED", fieldPath: null };
-  if (error instanceof ProviderPrisma.PrismaClientValidationError) {
-    return { reasonCode: "CANONICAL_INPUT_INVALID", fieldPath: null };
-  }
   return null;
 }
 

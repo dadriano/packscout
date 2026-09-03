@@ -110,6 +110,18 @@ test("both operator roles reach the worker fleet under the pipeline view permiss
   }
 });
 
+test("both operator roles receive the read-only promotion jobs navigation", () => {
+  for (const role of ["admin", "data_operator"] as const) {
+    const html = renderRoute("/promotion-jobs", session(role));
+
+    assert.match(html, /href="\/promotion-jobs"/);
+    assert.match(html, /Convex promotion jobs/);
+    assert.match(html, /This view observes the scheduler; it does not control it/);
+    assert.doesNotMatch(html, />Run job</);
+    assert.doesNotMatch(html, />Retry job</);
+  }
+});
+
 test("message-delivery navigation is administrator-only", () => {
   const adminHtml = renderRoute("/messages", session("admin"));
   assert.match(adminHtml, /href="\/messages"/);

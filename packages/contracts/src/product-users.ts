@@ -312,6 +312,7 @@ export type ProductUserRepackAvailability = PublicPackAvailability;
 export const productUserCollectibleTypes = [
   "card",
   "watch",
+  "art",
   "coin",
   "sealed_product",
   "memorabilia",

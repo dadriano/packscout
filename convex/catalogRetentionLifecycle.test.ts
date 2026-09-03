@@ -5,6 +5,8 @@ import {
   CATALOG_RETENTION_SCHEMA_VERSION,
   MAX_CATALOG_RETENTION_DOCUMENTS_PER_MUTATION,
   MAX_CATALOG_RETENTION_OPERATION_RECEIPTS,
+  MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
+  MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
   EMPTY_PRODUCTION_HEAT_SIGNAL_SET_HASH,
   REPACK_HEAT_AGGREGATION_VERSION,
   REPACK_HEAT_POLICY_VERSION,
@@ -35,7 +37,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { ensureImmutableCatalogManifest } from "./catalogManifestActivate";
+import { CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE } from
+  "./catalogManifestRetentionReferences";
 import { loadActiveCatalogManifestState } from "./catalogManifestState";
+import {
+  assertCatalogRetentionProtectedProviderReleaseCount,
+} from "./catalogRetentionGraph";
 import {
   buildCatalogManifestFromProviderPlans,
   seedProviderCatalogPublishPlanGraph,
@@ -47,6 +54,7 @@ import {
   emptyProviderHead,
   providerBodyDigest,
   providerOperationEnvelope,
+  providerReleaseProof,
   providerReleaseContext,
 } from "./providerReleaseSecurity.test-support";
 import schema from "./schema";
@@ -334,6 +342,108 @@ afterEach(() => {
 });
 
 describe("catalog retention lifecycle", () => {
+  test("maps aggregate protected-release overflow to an unsafe retention refusal", () => {
+    expect(() => assertCatalogRetentionProtectedProviderReleaseCount(
+      MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
+    )).not.toThrow();
+    try {
+      assertCatalogRetentionProtectedProviderReleaseCount(
+        MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES + 1,
+      );
+      throw new Error("Expected aggregate retention refusal.");
+    } catch (error) {
+      expect(error).toMatchObject({
+        data: { code: "CATALOG_RETENTION_RETENTION_UNSAFE" },
+      });
+    }
+  });
+
+  test("accepts 640 protected releases and safely refuses 641 through retainManifests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const platformKeys = Array.from(
+      { length: MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES },
+      (_, index) => `provider-${index.toString().padStart(2, "0")}`,
+    );
+    const plans = await Promise.all(Array.from(
+      { length: MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES + 1 },
+      (_, index) => buildProviderPublishPlan({
+        platformKey: platformKeys[index % platformKeys.length]!,
+        publicVendorId:
+          `10000000-0000-5000-8000-${(index + 1).toString().padStart(12, "0")}`,
+        vendorDisplayName: `Retention boundary vendor ${index + 1}`,
+      }),
+    ));
+    configure(plans[0]!.governingHashes.originSetHash);
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(Object.fromEntries(platformKeys.map((platformKey, index) =>
+        [`provider-boundary-${index.toString().padStart(2, "0")}-v1`, platformKey]
+      ))),
+    );
+    const t = createTest();
+    const retentionEligibleAt = "2026-08-17T12:00:00.000Z";
+    await t.run(async (ctx) => {
+      for (const plan of plans.slice(
+        0,
+        MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
+      )) {
+        await ctx.db.insert("providerCatalogReleases", {
+          ...providerReleaseProof(plan),
+          lifecycle: "staging",
+          createdAt: SERVER_TIME,
+          completedAt: null,
+          completionOperationId: null,
+          completionReceiptSha256: null,
+          retentionEligibleAt,
+        });
+      }
+    });
+
+    const maximumReceipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:protected-release-boundary:640",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(maximumReceipt.details.protectionSet.providerReleasesByPlatform.reduce(
+      (count: number, group: { releases: readonly unknown[] }) =>
+        count + group.releases.length,
+      0,
+    )).toBe(MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES);
+
+    await t.run((ctx) =>
+      ctx.db.insert("providerCatalogReleases", {
+        ...providerReleaseProof(plans.at(-1)!),
+        lifecycle: "staging",
+        createdAt: SERVER_TIME,
+        completedAt: null,
+        completionOperationId: null,
+        completionReceiptSha256: null,
+        retentionEligibleAt,
+      })
+    );
+    try {
+      await execute(
+        t,
+        internal.catalogRetention.retainManifests,
+        await manifestRequest(t, {
+          operationId: "retention:protected-release-boundary:641",
+          generation: maximumReceipt.retentionGeneration,
+          sequence: 2,
+        }),
+      );
+      throw new Error("Expected aggregate retention refusal.");
+    } catch (error) {
+      expect(error).toMatchObject({
+        data: { code: "CATALOG_RETENTION_RETENTION_UNSAFE" },
+      });
+    }
+  }, 30_000);
+
   test("retains an old manifest until its staged Heat publication is gone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(SERVER_TIME);
@@ -486,8 +596,10 @@ describe("catalog retention lifecycle", () => {
     const completed = await t.run((ctx) =>
       seedProviderCatalogPublishPlanGraph(ctx, plan, OLD_TIME)
     );
+    const manifestCount = CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE +
+      MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 2;
     const manifests = await Promise.all(
-      Array.from({ length: 42 }, (_, index) =>
+      Array.from({ length: manifestCount }, (_, index) =>
         buildCatalogManifestFromProviderPlans(
           [plan],
           `retention-backlog-${index.toString().padStart(2, "0")}`,
@@ -507,9 +619,9 @@ describe("catalog retention lifecycle", () => {
     const duplicate = await t.run(async (ctx) => {
       const ordered = await ctx.db.query("globalCatalogManifests")
         .withIndex("by_public_release_id")
-        .take(33);
-      const previous = ordered[31];
-      const boundary = ordered[32];
+        .take(CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE + 1);
+      const previous = ordered[CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE - 1];
+      const boundary = ordered[CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE];
       if (previous === undefined || boundary === undefined) {
         throw new Error("Expected a full manifest audit page.");
       }
@@ -549,7 +661,7 @@ describe("catalog retention lifecycle", () => {
     });
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
+    )).toHaveLength(manifestCount);
 
     const corrupted = await t.run(async (ctx) => {
       const state = await ctx.db.query("catalogRetentionState").unique();
@@ -587,52 +699,63 @@ describe("catalog retention lifecycle", () => {
     )).rejects.toThrow("CATALOG_RETENTION_REFERENCE_INVALID");
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
+    )).toHaveLength(manifestCount);
 
     await t.run((ctx) =>
       ctx.db.patch("catalogManifestProviderReferences", corrupted.id, {
         platformKey: corrupted.platformKey,
       })
     );
-    const secondAudit = await execute(
-      t,
-      internal.catalogRetention.retainManifests,
-      await manifestRequest(t, {
-        operationId: "retention:backlog:audit-page-2",
-        generation: 1,
-        sequence: 1,
-      }),
-    );
-    expect(secondAudit.details).toMatchObject({
-      deletedManifestCount: 0,
-      deletedManifestReferenceCount: 0,
-      hasMore: true,
-    });
-    expect(await t.run((ctx) =>
-      ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(42);
-
-    const deletion = await execute(
-      t,
-      internal.catalogRetention.retainManifests,
-      await manifestRequest(t, {
-        operationId: "retention:backlog:edge-page-2",
-        generation: 2,
-        sequence: 1,
-      }),
-    );
-    expect(deletion.details).toMatchObject({
+    let generation = first.retentionGeneration;
+    let sawIncompleteEdgeAudit = false;
+    let completionReceipt: any = null;
+    const maximumAuditCalls = Math.ceil(
+      manifestCount / CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE,
+    ) + 2;
+    for (let index = 0; index < maximumAuditCalls; index += 1) {
+      const receipt = await execute(
+        t,
+        internal.catalogRetention.retainManifests,
+        await manifestRequest(t, {
+          operationId: `retention:backlog:audit-page-${index + 2}`,
+          generation,
+          sequence: 1,
+        }),
+      );
+      generation = receipt.retentionGeneration;
+      const state = await t.run((ctx) =>
+        ctx.db.query("catalogRetentionState").unique()
+      );
+      if (state === null) throw new Error("Expected retention state.");
+      if (state.referenceAuditComplete) {
+        completionReceipt = receipt;
+        break;
+      }
+      if (state.referenceAuditPhase === "edges") {
+        sawIncompleteEdgeAudit = true;
+      }
+      expect(receipt.details).toMatchObject({
+        deletedManifestCount: 0,
+        deletedManifestReferenceCount: 0,
+        hasMore: true,
+      });
+      expect(await t.run((ctx) =>
+        ctx.db.query("globalCatalogManifests").collect()
+      )).toHaveLength(manifestCount);
+    }
+    expect(sawIncompleteEdgeAudit).toBe(true);
+    expect(completionReceipt?.details).toMatchObject({
       deletedManifestCount: 1,
       deletedManifestReferenceCount: 1,
       hasMore: true,
     });
     expect(await t.run((ctx) =>
       ctx.db.query("globalCatalogManifests").collect()
-    )).toHaveLength(41);
+    )).toHaveLength(manifestCount - 1);
     expect(await t.run((ctx) =>
       ctx.db.query("catalogRetentionState").unique()
     )).toMatchObject({
-      generation: 3,
+      generation,
       referenceAuditComplete: true,
       manifestPhaseComplete: false,
     });
@@ -720,7 +843,59 @@ describe("catalog retention lifecycle", () => {
     )).not.toContain(null);
   });
 
-  test("keeps the maximum platform graph below Convex query limits", async () => {
+  test("retains a minimal graph at the 64-provider configuration limit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER_TIME);
+    const platformKeys = Array.from(
+      { length: MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES },
+      (_, index) => `provider-${index.toString().padStart(2, "0")}`,
+    );
+    const plans = await Promise.all(platformKeys.map((platformKey, index) =>
+      buildProviderPublishPlan({
+        platformKey,
+        publicVendorId:
+          `10000000-0000-5000-8000-${(index + 1).toString().padStart(12, "0")}`,
+        vendorDisplayName: `Retention vendor ${platformKey}`,
+      })
+    ));
+    configure(plans[0]!.governingHashes.originSetHash);
+    vi.stubEnv(
+      "PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS",
+      canonicalJson(Object.fromEntries(platformKeys.map((platformKey, index) =>
+        [`provider-scale-${index.toString().padStart(2, "0")}-v1`, platformKey]
+      ))),
+    );
+    const t = createTest();
+    for (const plan of plans) {
+      await t.run((ctx) =>
+        seedProviderCatalogPublishPlanGraph(ctx, plan, SERVER_TIME)
+      );
+    }
+
+    const receipt = await execute(
+      t,
+      internal.catalogRetention.retainManifests,
+      await manifestRequest(t, {
+        operationId: "retention:platform-limit:64",
+        generation: 0,
+        sequence: 1,
+      }),
+    );
+    expect(receipt.details).toMatchObject({
+      selectedManifest: null,
+      deletedManifestCount: 0,
+      hasMore: false,
+    });
+    expect(receipt.details.protectionSet.providerReleasesByPlatform)
+      .toHaveLength(MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES);
+    expect(receipt.details.protectionSet.providerReleasesByPlatform.reduce(
+      (count: number, group: { releases: readonly unknown[] }) =>
+        count + group.releases.length,
+      0,
+    )).toBe(MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES);
+  }, 30_000);
+
+  test("keeps the eight-provider, 21-manifest graph below Convex query limits", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(SERVER_TIME);
     const platformKeys = [

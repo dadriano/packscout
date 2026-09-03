@@ -44,6 +44,21 @@ test("existing single-segment destinations are unaffected", () => {
   assert.equal(pageTitleForPath("/nowhere"), "Not found");
 });
 
+test("promotion jobs share one title across overview and opaque detail", () => {
+  assert.equal(pageTitleForPath("/promotion-jobs"), "Convex Promotion Jobs");
+  assert.equal(
+    pageTitleForPath("/promotion-jobs/pj_6HY8d6A1RXq4A1l68cnXPgEVxk0Z_r6g"),
+    "Convex Promotion Jobs",
+  );
+  const pipeline = navigationSections(["providers:view"]).find(
+    (section) => section.id === "pipeline",
+  );
+  assert.equal(
+    pipeline?.items.some((item) => item.to === "/promotion-jobs"),
+    true,
+  );
+});
+
 test("breadcrumbs label the Data prefix and its nested destination", () => {
   // The prefix is not a destination; it is labelled as a literal so the trail
   // reads "Data / Canonical Data" rather than repeating a raw segment.

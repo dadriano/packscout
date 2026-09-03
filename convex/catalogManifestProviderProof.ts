@@ -199,9 +199,7 @@ export async function validateCatalogManifestProviders(
     if (
       selection.platformKey !== reference.platformKey ||
       selection.publicProviderReleaseId !==
-        reference.publicProviderReleaseId ||
-      canonicalJson(reference.sharedConfigurationEpoch) !==
-        canonicalJson(manifest.sharedConfigurationEpoch)
+        reference.publicProviderReleaseId
     ) {
       refuseCatalogManifest("CATALOG_MANIFEST_PROVIDER_REFERENCE_MISMATCH");
     }
@@ -218,6 +216,7 @@ export async function assertCatalogManifestSelectionPolicy(
   manifest: GlobalCatalogManifestV1,
   observation: GlobalCatalogAggregateObservationV1,
   expectedManifest: GlobalCatalogManifestV1 | null,
+  independentProviderGate = false,
 ): Promise<ValidatedCatalogManifestProviders> {
   // The publish role attests the settled PostgreSQL eligibility snapshot and
   // bounded composition proof produced by Task 011. Convex deliberately keeps
@@ -229,20 +228,49 @@ export async function assertCatalogManifestSelectionPolicy(
     manifest,
     observation,
   );
+  if (expectedManifest !== null && independentProviderGate) {
+    const previousReferences = new Map(expectedManifest.providerReferences.map(
+      (reference) => [reference.platformKey, reference] as const,
+    ));
+    const nextReferences = new Map(manifest.providerReferences.map(
+      (reference) => [reference.platformKey, reference] as const,
+    ));
+    const platformKeys = new Set([
+      ...previousReferences.keys(),
+      ...nextReferences.keys(),
+    ]);
+    let changedProviderCount = 0;
+    for (const platformKey of platformKeys) {
+      const previous = previousReferences.get(platformKey);
+      const next = nextReferences.get(platformKey);
+      if (
+        previous === undefined || next === undefined ||
+        canonicalJson(previous) !== canonicalJson(next)
+      ) changedProviderCount += 1;
+    }
+    if (changedProviderCount !== 1) {
+      refuseCatalogManifest("CATALOG_MANIFEST_PREDECESSOR_CONFLICT");
+    }
+  }
   for (let index = 0; index < manifest.providerReferences.length; index += 1) {
     const reference = manifest.providerReferences[index]!;
     const selection = observation.providerSelections[index]!;
     const release = validated.providerReleases[index]!;
     const head = await loadCompletedHead(ctx, reference.platformKey);
-    if (!selectionLatestFactsCoverHead(selection, head)) {
-      refuseCatalogManifest("CATALOG_MANIFEST_FRESHNESS_INVALID");
-    }
     const previousReference = expectedManifest?.providerReferences.find(
       (candidate) => candidate.platformKey === reference.platformKey,
     ) ?? null;
     const isRetainedReference = previousReference !== null &&
       canonicalJson(previousReference) === canonicalJson(reference);
+    const isIndependentlyRetainedReference = isRetainedReference &&
+      independentProviderGate;
     const mustMatchLatestHead = expectedManifest === null || !isRetainedReference;
+    if (
+      !isIndependentlyRetainedReference &&
+      !selectionLatestFactsCoverHead(selection, head)
+    ) {
+      refuseCatalogManifest("CATALOG_MANIFEST_FRESHNESS_INVALID");
+    }
     if (
       (mustMatchLatestHead &&
         !catalogSelectionMatchesCompletedHead(selection, release, head)) ||

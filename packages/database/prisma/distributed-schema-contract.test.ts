@@ -27,6 +27,7 @@ const CENTRAL_TABLES = [
   "provider_database_nodes",
   "provider_connection_tests",
   "provider_activity_events",
+  "provider_completion_publish_plans",
   "global_activity_events",
   "provider_health",
   "admin_alerts",
@@ -50,7 +51,20 @@ const CENTRAL_TABLES = [
   "catalog_publication_operations",
   "manifest_activation_state",
   "manifest_activation_operations",
+  "manifest_activation_status_observations",
+  "manifest_activation_state_observations",
   "artifact_retention_executions",
+  "manifest_reconciliation_job_wake",
+  "manifest_reconciliation_job_schedule",
+  "promotion_job_liveness_evaluator_state",
+  "promotion_job_liveness_observations",
+  "promotion_job_liveness_conditions",
+  "manifest_reconciliation_job_invocations",
+  "manifest_reconciliation_job_delivery_tombstones",
+  "manifest_reconciliation_invocation_details",
+  "manifest_gate_intents",
+  "provider_promotion_invocation_projections",
+  "provider_promotion_projection_retention_state",
 ] as const;
 
 const PROVIDER_TABLES = [
@@ -84,8 +98,15 @@ const PROVIDER_TABLES = [
   "provider_releases",
   "provider_release_batches",
   "provider_publication_operations",
+  "provider_publication_batch_evidence",
   "provider_publication_receipts",
   "provider_publication_state",
+  "provider_promotion_job_wake",
+  "provider_promotion_job_schedule",
+  "provider_promotion_job_invocations",
+  "provider_promotion_projection_outbox",
+  "provider_promotion_job_delivery_tombstones",
+  "provider_promotion_invocation_details",
 ] as const;
 
 const CENTRAL_ENUMS = {
@@ -222,6 +243,9 @@ const CENTRAL_SOFT_REFERENCES = [
   "worker_instances.activity_run_id",
   "provider_activity_events.local_run_id",
   "provider_activity_events.local_quarantine_id",
+  "provider_completion_publish_plans.provider_release_id",
+  "provider_completion_publish_plans.public_provider_release_id",
+  "provider_completion_publish_plans.artifact_attempt_id",
   "admin_alerts.run_id",
   "admin_alerts.quarantine_id",
   "provider_category_correlations.local_category_id",
@@ -232,6 +256,11 @@ const CENTRAL_SOFT_REFERENCES = [
   "manifest_activation_state.previous_manifest_id",
   "manifest_activation_operations.expected_manifest_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_gate_intents.target_provider_release_id",
+  "manifest_gate_intents.target_catalog_version_id",
+  "manifest_gate_intents.requested_by_operator_id",
+  "manifest_reconciliation_job_invocations.result_public_release_id",
+  "provider_promotion_projection_retention_state.after_provider_id",
 ] as const;
 
 const PROVIDER_SOFT_REFERENCES = [
@@ -258,6 +287,9 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "worker_instances.activity_run_id",
   "provider_activity_events.local_run_id",
   "provider_activity_events.local_quarantine_id",
+  "provider_completion_publish_plans.provider_release_id",
+  "provider_completion_publish_plans.public_provider_release_id",
+  "provider_completion_publish_plans.artifact_attempt_id",
   "admin_alerts.run_id",
   "admin_alerts.quarantine_id",
   "provider_category_correlations.local_category_id",
@@ -266,6 +298,13 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
   "catalog_promotion_changes.entity_id",
   "provider_invalidation_checkpoints.confirmed_provider_release_id",
   "manifest_activation_operations.target_provider_release_id",
+  "manifest_gate_intents.requested_by_operator_id",
+  "manifest_gate_intents.target_catalog_version_id",
+  "manifest_gate_intents.target_provider_release_id",
+  "manifest_reconciliation_job_invocations.result_public_release_id",
+  "manifest_reconciliation_job_invocations.run_id",
+  "provider_promotion_projection_retention_state.after_provider_id",
+  "promotion_job_liveness_conditions.delivery_event_id",
 ] as const;
 
 const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
@@ -287,6 +326,7 @@ const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
   "provider_releases.public_provider_id",
   "provider_releases.catalog_version_id",
   "provider_releases.public_profile_version_id",
+  "provider_promotion_job_invocations.run_id",
 ] as const;
 
 const FORBIDDEN_MODEL_PATTERNS = [
@@ -501,8 +541,8 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
 
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
-  assert.equal(centralModels.size, 42);
-  assert.equal(providerModels.size, 32);
+  assert.equal(centralModels.size, 56);
+  assert.equal(providerModels.size, 39);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 
@@ -547,6 +587,58 @@ test("cross-authority identifiers stay soft while every local UUID reference is 
     [...PROVIDER_ALLOWED_UNBOUND_UUIDS].sort(),
     "provider UUID identifiers without local Prisma relations drifted",
   );
+});
+
+test("central provider promotion history is tenant-keyed and globally ordered", () => {
+  const centralSource = readFileSync(centralSchemaPath, "utf8");
+  const projections = modelMap(centralSource).get(
+    "provider_promotion_invocation_projections",
+  );
+  assert.ok(projections);
+  assert.match(
+    fieldsIn(projections).get("organization_id") ?? "",
+    /^organization_id\s+String\s+@db\.Uuid$/u,
+  );
+  assert.match(
+    projections.body,
+    /provider\s+providers\s+@relation\(fields:\s*\[provider_id,\s*organization_id\],\s*references:\s*\[id,\s*organization_id\][^)]*map:\s*"provider_promotion_invocation_projections_provider_org_fk"\)/u,
+  );
+  assert.match(
+    projections.body,
+    /@@index\(\[organization_id,\s*started_at\(sort:\s*Desc\),\s*monitoring_order_key\(sort:\s*Desc\)\],\s*map:\s*"provider_promotion_invocation_projections_org_history_idx"\)/u,
+  );
+
+  const migration = migrationContents(
+    "central",
+    "20260902120000_provider_promotion_org_history",
+  );
+  assert.match(
+    migration,
+    /ADD COLUMN "organization_id" UUID/u,
+  );
+  assert.match(
+    migration,
+    /DISABLE TRIGGER "guard_provider_promotion_invocation_projection"[\s\S]*UPDATE "provider_promotion_invocation_projections" AS projection[\s\S]*SET "organization_id" = provider\."organization_id"[\s\S]*FROM "providers" AS provider[\s\S]*ENABLE TRIGGER "guard_provider_promotion_invocation_projection"/u,
+  );
+  assert.match(
+    migration,
+    /ALTER COLUMN "organization_id" SET NOT NULL/u,
+  );
+  assert.match(
+    migration,
+    /FOREIGN KEY \("provider_id", "organization_id"\)\s+REFERENCES "providers" \("id", "organization_id"\)/u,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "provider_promotion_invocation_projections_org_history_idx"\s+ON "provider_promotion_invocation_projections"\s+\("organization_id", "started_at" DESC, "monitoring_order_key" DESC\)/u,
+  );
+  assert.ok(
+    migration.indexOf("SET \"organization_id\" = provider.\"organization_id\"") <
+      migration.indexOf('ALTER COLUMN "organization_id" SET NOT NULL'),
+    "the authoritative provider backfill must precede the not-null constraint",
+  );
+  assert.match(migration, /^BEGIN;/u);
+  assert.match(migration, /COMMIT;\s*$/u);
 });
 
 test("provider facts preserve source identities while local relationships resolve monotonically", () => {

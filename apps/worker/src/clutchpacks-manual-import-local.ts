@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
   BoundedProviderDatabaseGateway,
+  PrismaManifestPromotionImmediateDeliveryRepository,
   PrismaProviderSourceRequestAuditRepository,
   ProviderDatabaseDestinationPolicy,
   createCentralDatabaseLifecycle,
@@ -157,6 +158,10 @@ async function runWithCentralAuthority(): Promise<Awaited<ReturnType<
             maximumProviders: 100,
             maximumConcurrentProviders: 2,
             providerId: process.env.PACKSCOUT_PROVIDER_ID,
+            immediateDelivery:
+              new PrismaManifestPromotionImmediateDeliveryRepository(
+                central.client,
+              ),
           }).runCycle();
           if (result.failures > 0 || result.unreachable > 0) {
             throw new Error("Provider activity relay did not complete.");

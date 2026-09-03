@@ -14,7 +14,7 @@ import {
 } from "./providerReleaseProof";
 
 type ReadCtx = MutationCtx | QueryCtx;
-const RETENTION_REFERENCE_AUDIT_PAGE_SIZE = 32;
+export const CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE = 32;
 
 async function expectedReference(
   manifest: Doc<"globalCatalogManifests">,
@@ -185,7 +185,7 @@ export async function auditCatalogManifestProviderReferencePage(
       .withIndex("by_public_release_id", (index) =>
         cursor === null ? index : index.gt("publicReleaseId", cursor)
       )
-      .take(RETENTION_REFERENCE_AUDIT_PAGE_SIZE + 1);
+      .take(CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE + 1);
     for (let index = 1; index < manifests.length; index += 1) {
       if (
         manifests[index - 1]!.publicReleaseId >=
@@ -197,7 +197,7 @@ export async function auditCatalogManifestProviderReferencePage(
         refuseCatalogManifest("CATALOG_MANIFEST_STATE_CONFLICT");
       }
     }
-    const page = manifests.slice(0, RETENTION_REFERENCE_AUDIT_PAGE_SIZE);
+    const page = manifests.slice(0, CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE);
     for (const manifest of page) {
       let verified;
       try {
@@ -215,7 +215,7 @@ export async function auditCatalogManifestProviderReferencePage(
       }
       await assertExactCatalogManifestProviderReferences(ctx, manifest);
     }
-    if (manifests.length > RETENTION_REFERENCE_AUDIT_PAGE_SIZE) {
+    if (manifests.length > CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE) {
       return {
         phase: "manifests",
         complete: false,
@@ -226,7 +226,7 @@ export async function auditCatalogManifestProviderReferencePage(
     phase = "edges";
     cursor = null;
   }
-  const edgeReadLimit = RETENTION_REFERENCE_AUDIT_PAGE_SIZE +
+  const edgeReadLimit = CATALOG_RETENTION_REFERENCE_AUDIT_PAGE_SIZE +
     MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 1;
   const references = await ctx.db
     .query("catalogManifestProviderReferences")

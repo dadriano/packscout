@@ -8,12 +8,24 @@ import {
 import {
   assertProviderActivityEvent,
   assertProviderHealthObservation,
+  assertProviderReleaseCompletedActivity,
   providerActivityEventDigest,
   sanitizeProviderActivityEvidence,
   type ProviderActivityEvidenceValue,
   type ProviderActivityEvent,
   type ProviderLocalHealthObservation,
 } from "./provider-activity-contract.ts";
+import { PrismaManifestGateIntentRepository } from
+  "./manifest-gate-intent-repository.ts";
+import { PrismaManifestReconciliationJobRepository } from
+  "./manifest-reconciliation-job-repository.ts";
+import {
+  verifyProviderCompletedPublishPlanRelayProof,
+  type ProviderCompletedPublishPlanRelayProof,
+  type VerifiedProviderCompletedPublishPlanRelayProof,
+} from "./provider-completion-plan-contract.ts";
+import { PrismaProviderCompletionPublishPlanRepository } from
+  "./provider-completion-publish-plan-repository.ts";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -43,6 +55,15 @@ export interface ProviderActivityObservationReceipt {
   readonly eventId: string;
   readonly alertIds: readonly string[];
   readonly receivedAt: Date;
+  readonly completionGate: Readonly<{
+    readonly providerId: string;
+    readonly observedCompletionGeneration: bigint;
+    readonly requestedGeneration: bigint;
+    readonly acknowledgedGeneration: bigint;
+    readonly manifestWakeGeneration: bigint;
+    readonly evidenceDigest: string;
+    readonly pending: boolean;
+  }> | null;
 }
 
 export type ProviderLocalReferenceResolution =
@@ -70,6 +91,75 @@ async function assertProviderOwnership(
   if (provider === null) {
     throw new Error("Provider activity target is not registered.");
   }
+}
+
+async function assertCompletionGenerationConsistent(
+  transaction: CentralQueryClient,
+  input: Readonly<{
+    organizationId: string;
+    providerId: string;
+    eventId: string;
+    eventDigest: string;
+    completedThroughChangeSequence: string;
+  }>,
+): Promise<void> {
+  const [lockedProvider] = await transaction.$queryRaw<readonly {
+    id: string;
+  }[]>(CentralPrisma.sql`
+    select id::text as id
+    from providers
+    where id = ${input.providerId}::uuid
+      and organization_id = ${input.organizationId}::uuid
+    for update
+  `);
+  if (!lockedProvider) {
+    throw new Error("Provider activity target is not registered.");
+  }
+  const [existing] = await transaction.$queryRaw<readonly {
+    id: string;
+    event_digest: string;
+  }[]>(CentralPrisma.sql`
+    select id::text as id, event_digest
+    from provider_activity_events
+    where provider_id = ${input.providerId}::uuid
+      and event_type = 'provider_release_completed'
+      and evidence ->> 'completedThroughChangeSequence' =
+        ${input.completedThroughChangeSequence}
+    order by received_at, id
+    limit 1
+  `);
+  if (
+    existing
+    && (
+      existing.id !== input.eventId
+      || existing.event_digest !== input.eventDigest
+    )
+  ) {
+    throw new Error("Provider completion generation is inconsistent.");
+  }
+}
+
+function completionProofMatchesEvent(input: Readonly<{
+  providerId: string;
+  completion: ReturnType<typeof assertProviderReleaseCompletedActivity>;
+  proof: VerifiedProviderCompletedPublishPlanRelayProof;
+}>): boolean {
+  const { completion, proof } = input;
+  return proof.providerId === input.providerId.toLowerCase() &&
+    proof.providerReleaseId === completion.providerReleaseId.toLowerCase() &&
+    proof.publicProviderReleaseId ===
+      completion.publicProviderReleaseId.toLowerCase() &&
+    proof.providerReleaseFingerprint ===
+      completion.providerReleaseFingerprint &&
+    proof.catalogVersionId === completion.catalogVersionId.toLowerCase() &&
+    proof.catalogContentHash === completion.catalogContentHash &&
+    proof.providerReleaseContentHash ===
+      completion.providerReleaseContentHash &&
+    proof.completedThroughChangeSequence ===
+      BigInt(completion.completedThroughChangeSequence) &&
+    proof.terminalReceiptSha256 === completion.terminalReceiptSha256 &&
+    proof.terminalOperationKind ===
+      (completion.state === "complete" ? "finalize" : "confirmReuse");
 }
 
 async function observeHealth(
@@ -460,6 +550,7 @@ export class CentralProviderObservationRepository {
     event: ProviderActivityEvent;
     health: ProviderLocalHealthObservation;
     receivedAt: Date;
+    completionProof?: ProviderCompletedPublishPlanRelayProof;
   }>): Promise<ProviderActivityObservationReceipt> {
     requireUuid(input.organizationId, "Organization ID");
     requireUuid(input.providerId, "Provider ID");
@@ -468,12 +559,51 @@ export class CentralProviderObservationRepository {
     }
     const event = assertProviderActivityEvent(input.event);
     const health = assertProviderHealthObservation(input.health);
+    const completion = event.eventType === "provider_release_completed"
+      ? assertProviderReleaseCompletedActivity(event)
+      : null;
+    const completionGeneration = completion === null
+      ? null
+      : BigInt(completion.completedThroughChangeSequence);
+    if ((completion === null) !== (input.completionProof === undefined)) {
+      throw new Error("Provider completion publish-plan proof is required exactly once.");
+    }
+    const completionProof = input.completionProof === undefined
+      ? null
+      : await verifyProviderCompletedPublishPlanRelayProof(
+          input.completionProof,
+        );
+    if (
+      completion !== null && completionProof !== null &&
+      !completionProofMatchesEvent({
+        providerId: input.providerId,
+        completion,
+        proof: completionProof,
+      })
+    ) throw new Error("Provider completion publish-plan proof is inconsistent.");
+    const gateRepository = new PrismaManifestGateIntentRepository(this.central);
+    const manifestJobs = new PrismaManifestReconciliationJobRepository(
+      this.central,
+    );
+    const planRepository = new PrismaProviderCompletionPublishPlanRepository(
+      this.central,
+    );
     return this.central.$transaction(async (transaction) => {
       await assertProviderOwnership(
         transaction,
         input.organizationId,
         input.providerId,
       );
+      if (completion !== null) {
+        await assertCompletionGenerationConsistent(transaction, {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          eventId: event.id,
+          eventDigest: event.eventDigest,
+          completedThroughChangeSequence:
+            completion.completedThroughChangeSequence,
+        });
+      }
       const storedAt = new Date(
         Math.max(input.receivedAt.getTime(), event.eventAt.getTime()),
       );
@@ -511,6 +641,14 @@ export class CentralProviderObservationRepository {
           throw new Error("Provider activity immutable identity conflict.");
         }
       }
+      if (completionProof !== null) {
+        await planRepository.persistAcceptedCompletion({
+          eventId: event.id,
+          evidenceDigest: event.eventDigest,
+          verifiedAt: storedAt,
+          proof: completionProof,
+        }, transaction);
+      }
       await observeHealth(transaction, {
         organizationId: input.organizationId,
         providerId: input.providerId,
@@ -518,11 +656,51 @@ export class CentralProviderObservationRepository {
         lastActivityEventId: event.id,
         lastActivityAt: event.eventAt,
       });
+      const gateCoalescing = completion === null
+        ? null
+        : await gateRepository.coalesceProviderSource({
+            providerId: input.providerId,
+            sourceGeneration: completionGeneration!,
+            cause: "provider_completion",
+            evidenceDigest: event.eventDigest,
+            requestedAt: event.eventAt,
+          }, transaction);
+      const manifestWake = gateCoalescing === null
+        ? null
+        : gateCoalescing.advanced
+          ? await manifestJobs.requestNextWake({
+              cause: "provider_completion",
+              requestedAt: event.eventAt,
+            }, transaction)
+          : await manifestJobs.loadWakeIntent(transaction);
+      let completionGate: ProviderActivityObservationReceipt["completionGate"] =
+        null;
+      if (gateCoalescing !== null) {
+        const retainedGate = gateCoalescing.intent;
+        if (
+          manifestWake === null || completionGeneration === null ||
+          retainedGate.requestedGeneration <
+            gateCoalescing.sourceGateGeneration ||
+          gateCoalescing.sourceEvidenceDigest.length !== 64
+        ) throw new Error(
+          "Provider completion gate did not retain its evidence.",
+        );
+        completionGate = {
+          providerId: retainedGate.providerId,
+          observedCompletionGeneration: completionGeneration,
+          requestedGeneration: retainedGate.requestedGeneration,
+          acknowledgedGeneration: retainedGate.acknowledgedGeneration,
+          manifestWakeGeneration: manifestWake.requestedGeneration,
+          evidenceDigest: gateCoalescing.sourceEvidenceDigest,
+          pending: retainedGate.pending,
+        };
+      }
       return {
         state: isNew ? "accepted" : "deduplicated",
         eventId: event.id,
         alertIds: [],
         receivedAt: storedAt,
+        completionGate,
       };
     }, CENTRAL_TRANSACTION_OPTIONS);
   }

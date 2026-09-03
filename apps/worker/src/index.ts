@@ -10,12 +10,6 @@ import {
   JsonConsoleProviderWorkerLogger,
 } from "./provider-worker-runtime.ts";
 import {
-  PromotionV2WorkerConfigurationError,
-  readPromotionV2WorkerConfiguration,
-} from "./promotion-v2-worker-config.ts";
-import { JsonConsolePromotionV2WorkerLogger } from
-  "./promotion-v2-worker-runtime.ts";
-import {
   HeatPromotionWorkerConfigurationError,
   readHeatPromotionWorkerConfiguration,
 } from "./heat-promotion-worker-config.ts";
@@ -65,22 +59,16 @@ async function runProviderWorker(): Promise<void> {
       }),
     );
   }
-  const promotionConfiguration = readPromotionV2WorkerConfiguration(process.env);
-  const heatConfiguration = readHeatPromotionWorkerConfiguration(
-    process.env,
-    promotionConfiguration,
-  );
+  const heatConfiguration = readHeatPromotionWorkerConfiguration(process.env);
   const retentionConfiguration = readCatalogRetentionWorkerConfiguration(
     process.env,
-    promotionConfiguration,
+    heatConfiguration,
   );
   assertCatalogRetentionCredentialRoleIsolation({
-    promotion: promotionConfiguration,
     heat: heatConfiguration,
     retention: retentionConfiguration,
   });
   const logger = new JsonConsoleProviderWorkerLogger();
-  const promotionLogger = new JsonConsolePromotionV2WorkerLogger();
   const heatLogger = new JsonConsoleHeatPromotionWorkerLogger();
   const retentionLogger = new JsonConsoleCatalogRetentionWorkerLogger();
   const databaseLifecycle = createPrismaClientLifecycle({
@@ -93,12 +81,10 @@ async function runProviderWorker(): Promise<void> {
     );
     const runtime = createProductionWorkerRuntime({
       provider: configuration,
-      promotion: promotionConfiguration,
       heat: heatConfiguration,
       retention: retentionConfiguration,
       database: databaseLifecycle.client,
       providerLogger: logger,
-      promotionLogger,
       heatLogger,
       retentionLogger,
       observability,
@@ -121,8 +107,6 @@ runProviderWorker().catch((error: unknown) => {
   const failureCode =
     error instanceof ProviderWorkerConfigurationError
       ? error.code
-      : error instanceof PromotionV2WorkerConfigurationError
-        ? error.code
       : error instanceof HeatPromotionWorkerConfigurationError
         ? error.code
       : error instanceof CatalogRetentionWorkerConfigurationError

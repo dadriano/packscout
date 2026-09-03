@@ -14,6 +14,10 @@ const deferredRelationshipsMigrationPath = fileURLToPath(new URL(
   "./migrations/20260829120000_provider_fact_deferred_relationships/migration.sql",
   import.meta.url,
 ));
+const compactPublicationEvidenceMigrationPath = fileURLToPath(new URL(
+  "./migrations/20260902010000_provider_publication_compact_batch_evidence/migration.sql",
+  import.meta.url,
+));
 const adminDatabaseUrl = process.env.PACKSCOUT_TEST_ADMIN_DATABASE_URL
   ?? `postgresql://${encodeURIComponent(userInfo().username)}@127.0.0.1:5432/postgres`;
 const providerId = "92000000-0000-4000-8000-000000000001";
@@ -72,6 +76,9 @@ async function createMigratedProviderDatabase(
     await db.query(await readFile(baselineMigrationPath, "utf8"));
     if (through === "latest") {
       await db.query(await readFile(deferredRelationshipsMigrationPath, "utf8"));
+      await db.query(
+        await readFile(compactPublicationEvidenceMigrationPath, "utf8"),
+      );
     }
   } catch (error) {
     await db.end().catch(() => undefined);
@@ -570,6 +577,266 @@ test("provider writes are promotion-coupled, immutable, receipt-gated, and lease
     `);
     assert.equal(fenceFunctions.rowCount, 2);
     for (const row of fenceFunctions.rows) assert.match(row.definition, /FOR UPDATE/i);
+  } finally {
+    await harness.stop();
+  }
+});
+
+test("provider publication batch evidence is bounded, immutable, and required", { concurrency: false }, async () => {
+  const harness = await createMigratedProviderDatabase();
+  const { db, providerKey } = harness;
+  const localReleaseId = "95000000-0000-4000-8000-000000000001";
+  const operationId = "95000000-0000-4000-8000-000000000002";
+  const receiptId = "95000000-0000-4000-8000-000000000003";
+  const missingOperationId = "95000000-0000-4000-8000-000000000004";
+  const missingReceiptId = "95000000-0000-4000-8000-000000000005";
+  const directAcceptedOperationId = "95000000-0000-4000-8000-000000000006";
+  try {
+    await db.query(
+      "select initialize_provider_database_identity($1::uuid, $2::text)",
+      [providerId, providerKey],
+    );
+    await db.query(`
+      update provider_worker_states
+      set lease_owner = 'compact-proof-worker', lease_fence = 1,
+          heartbeat_at = now(),
+          lease_expires_at = now() + interval '10 minutes', row_version = 2
+      where worker_role = 'promotion';
+      insert into provider_releases (
+        id, provider_id, provider_key, public_provider_id,
+        through_change_sequence, catalog_version_id, catalog_content_hash,
+        central_schema_version, correlation_event_sequence,
+        correlation_snapshot_hash, public_profile_version_id,
+        public_profile_hash, provider_schema_version, public_schema_version,
+        category_count, repack_count, collectible_reference_count, chase_count,
+        retired_repack_count, batch_count, content_hash, index_hash,
+        last_successful_observation_at, data_as_of, stale_at, freshness
+      ) values (
+        '${localReleaseId}', '${providerId}', '${providerKey}', gen_random_uuid(),
+        1, gen_random_uuid(), '${hashA}', 'distributed-central-v1', 1,
+        '${hashA}', gen_random_uuid(), '${hashA}',
+        'distributed-provider-v1', 'public-v1',
+        0, 0, 0, 0, 0, 1, '${hashA}', '${hashB}',
+        now() - interval '2 minutes', now() - interval '1 minute',
+        now() + interval '1 hour', 'fresh'
+      );
+      insert into provider_publication_operations (
+        id, provider_release_id, operation_kind, batch_index,
+        idempotency_key, request_digest, request_bytes, body_hash,
+        lease_fence, requested_at
+      ) values (
+        '${operationId}', '${localReleaseId}', 'applyBatch', 0,
+        'compact-batch-0', '${hashA}', '{}'::bytea, '${hashA}', 1, now()
+      );
+      begin;
+      update provider_publication_operations
+      set state = 'accepted', attempt_count = 1,
+          last_attempted_at = now(), completed_at = now()
+      where id = '${operationId}';
+      insert into provider_publication_receipts (
+        id, operation_id, provider_release_id, remote_receipt_id, outcome,
+        response_digest, response_bytes, accepted_content_hash,
+        accepted_record_count, received_at
+      ) values (
+        '${receiptId}', '${operationId}', '${localReleaseId}',
+        'compact-receipt-0', 'accepted', '${hashB}', '{}'::bytea,
+        '${hashA}', 1, now()
+      );
+      insert into provider_publication_batch_evidence (
+        operation_id, provider_release_id, batch_index, batch_kind,
+        batch_hash, record_count, byte_count, release_context_hash,
+        search_shard_descriptors
+      ) values (
+        '${operationId}', '${localReleaseId}', 0, 'vendors',
+        '${hashA}', 1, 2, '${hashB}', '[]'::jsonb
+      );
+      commit;
+    `);
+
+    await expectDatabaseError(
+      db.query(`
+        update provider_publication_batch_evidence
+        set byte_count = 3 where operation_id = '${operationId}'
+      `),
+      /provider_publication_batch_evidence_immutable/,
+    );
+    await expectDatabaseError(
+      db.query(`
+        delete from provider_publication_batch_evidence
+        where operation_id = '${operationId}'
+      `),
+      /provider_publication_batch_evidence_immutable/,
+    );
+
+    await db.query(`
+      create temporary table provider_publication_batch_evidence_probe
+        (like provider_publication_batch_evidence including constraints including defaults)
+    `);
+    for (const malformed of [
+      [{ shardNumber: null, rowCount: 1, byteCount: 2, contentHash: hashA }],
+      [{ shardNumber: 0, rowCount: 1, byteCount: 2, contentHash: null }],
+    ]) {
+      await expectDatabaseError(
+        db.query(`
+          insert into provider_publication_batch_evidence_probe (
+            operation_id, provider_release_id, batch_index, batch_kind,
+            batch_hash, record_count, byte_count, release_context_hash,
+            search_shard_descriptors
+          ) values (
+            gen_random_uuid(), '${localReleaseId}', 0, 'search_shards',
+            '${hashA}', 1, 2, '${hashB}', $1::jsonb
+          )
+        `, [JSON.stringify(malformed)]),
+        /provider_publication_batch_evidence_shape_check/,
+      );
+    }
+
+    await db.query(`
+      insert into provider_publication_operations (
+        id, provider_release_id, operation_kind, batch_index,
+        idempotency_key, request_digest, request_bytes, body_hash,
+        lease_fence, requested_at
+      ) values (
+        '${missingOperationId}', '${localReleaseId}', 'applyBatch', 1,
+        'compact-batch-missing', '${hashB}', '{}'::bytea, '${hashB}', 1, now()
+      );
+      begin;
+      update provider_publication_operations
+      set state = 'accepted', attempt_count = 1,
+          last_attempted_at = now(), completed_at = now()
+      where id = '${missingOperationId}';
+      insert into provider_publication_receipts (
+        id, operation_id, provider_release_id, remote_receipt_id, outcome,
+        response_digest, response_bytes, accepted_content_hash,
+        accepted_record_count, received_at
+      ) values (
+        '${missingReceiptId}', '${missingOperationId}', '${localReleaseId}',
+        'compact-receipt-missing', 'accepted', '${hashA}', '{}'::bytea,
+        '${hashB}', 1, now()
+      );
+    `);
+    await expectDatabaseError(
+      db.query("commit"),
+      /provider_publication_batch_evidence_mismatch/,
+    );
+    await db.query("rollback");
+
+    await db.query("begin");
+    await db.query(`
+      insert into provider_publication_operations (
+        id, provider_release_id, operation_kind, batch_index,
+        idempotency_key, request_digest, request_bytes, body_hash,
+        lease_fence, state, attempt_count, last_attempted_at,
+        requested_at, completed_at
+      ) values (
+        '${directAcceptedOperationId}', '${localReleaseId}', 'applyBatch', 1,
+        'compact-batch-direct-accepted', '${hashB}', '{}'::bytea, '${hashB}',
+        1, 'accepted', 1, now(), now(), now()
+      )
+    `);
+    await expectDatabaseError(
+      db.query("commit"),
+      /provider_publication_batch_evidence_mismatch/,
+    );
+    await db.query("rollback");
+  } finally {
+    await harness.stop();
+  }
+});
+
+test("compact publication evidence migration refuses an in-flight legacy batch", { concurrency: false }, async () => {
+  const harness = await createMigratedProviderDatabase("baseline");
+  const { db, providerKey } = harness;
+  const localReleaseId = "96000000-0000-4000-8000-000000000001";
+  const operationId = "96000000-0000-4000-8000-000000000002";
+  const receiptId = "96000000-0000-4000-8000-000000000003";
+  try {
+    const migration = await readFile(
+      compactPublicationEvidenceMigrationPath,
+      "utf8",
+    );
+    const operationLock = migration.indexOf(
+      'LOCK TABLE "provider_publication_operations" IN SHARE ROW EXCLUSIVE MODE',
+    );
+    const precheck = migration.indexOf("DO $$");
+    const acceptanceTrigger = migration.indexOf(
+      'CREATE CONSTRAINT TRIGGER "provider_publication_operations_batch_evidence_trigger"',
+    );
+    assert.ok(operationLock >= 0 && operationLock < precheck);
+    assert.ok(acceptanceTrigger > precheck);
+    await db.query(await readFile(deferredRelationshipsMigrationPath, "utf8"));
+    await db.query(
+      "select initialize_provider_database_identity($1::uuid, $2::text)",
+      [providerId, providerKey],
+    );
+    await db.query(`
+      update provider_worker_states
+      set lease_owner = 'legacy-publication-worker', lease_fence = 1,
+          heartbeat_at = now(),
+          lease_expires_at = now() + interval '10 minutes', row_version = 2
+      where worker_role = 'promotion';
+      insert into provider_releases (
+        id, provider_id, provider_key, public_provider_id,
+        through_change_sequence, catalog_version_id, catalog_content_hash,
+        central_schema_version, correlation_event_sequence,
+        correlation_snapshot_hash, public_profile_version_id,
+        public_profile_hash, provider_schema_version, public_schema_version,
+        category_count, repack_count, collectible_reference_count, chase_count,
+        retired_repack_count, batch_count, content_hash, index_hash,
+        last_successful_observation_at, data_as_of, stale_at, freshness
+      ) values (
+        '${localReleaseId}', '${providerId}', '${providerKey}', gen_random_uuid(),
+        1, gen_random_uuid(), '${hashA}', 'distributed-central-v1', 1,
+        '${hashA}', gen_random_uuid(), '${hashA}',
+        'distributed-provider-v1', 'public-v1',
+        0, 0, 0, 0, 0, 1, '${hashA}', '${hashB}',
+        now() - interval '2 minutes', now() - interval '1 minute',
+        now() + interval '1 hour', 'fresh'
+      );
+      insert into provider_release_batches (
+        provider_release_id, batch_kind, batch_index, payload,
+        record_count, byte_count, body_hash
+      ) values ('${localReleaseId}', 'provider', 0, '{}', 1, 2, '${hashA}');
+      update provider_releases
+      set lifecycle = 'assembled', assembled_at = now()
+      where id = '${localReleaseId}';
+      update provider_releases
+      set lifecycle = 'publishing'
+      where id = '${localReleaseId}';
+      insert into provider_publication_operations (
+        id, provider_release_id, operation_kind, batch_index,
+        idempotency_key, request_digest, request_bytes, body_hash,
+        lease_fence, requested_at
+      ) values (
+        '${operationId}', '${localReleaseId}', 'applyBatch', 0,
+        'legacy-accepted-batch', '${hashA}', '{}'::bytea, '${hashA}', 1, now()
+      );
+      begin;
+      update provider_publication_operations
+      set state = 'accepted', attempt_count = 1,
+          last_attempted_at = now(), completed_at = now()
+      where id = '${operationId}';
+      insert into provider_publication_receipts (
+        id, operation_id, provider_release_id, remote_receipt_id, outcome,
+        response_digest, response_bytes, accepted_content_hash,
+        accepted_record_count, received_at
+      ) values (
+        '${receiptId}', '${operationId}', '${localReleaseId}',
+        'legacy-accepted-receipt', 'accepted', '${hashB}', '{}'::bytea,
+        '${hashA}', 1, now()
+      );
+      commit;
+    `);
+
+    await expectDatabaseError(
+      db.query(migration),
+      /provider_publication_compact_evidence_inflight_release/,
+    );
+    await db.query("rollback");
+    assert.equal((await db.query<{ table_name: string | null }>(`
+      select to_regclass('provider_publication_batch_evidence')::text
+        as table_name
+    `)).rows[0]?.table_name, null);
   } finally {
     await harness.stop();
   }

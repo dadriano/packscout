@@ -6,7 +6,9 @@ Open task `distributed-canonical-warehouse/022` and port the authoritative
 port-5101 `apps/admin` baseline to the new central/provider ownership model.
 Do not use the simplified distributed-branch shell as compatibility evidence.
 
-**Progress:** 9/23 tasks complete; the live provider/publication checkpoint is in progress
+**Progress:** 12/23 tasks complete; distributed publication foundations are
+complete while Admin parity, provider imports, and rollout certification remain
+in progress
 
 ## Current Build Checkpoint
 
@@ -185,7 +187,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 007 | Complete one mixed-response provider run | large | 4–6 days | in progress | 005 |
 | 008 | Operate provider runs from admin | large | 3–5 days | in progress | 002, 003, 005, 007 |
 | 009 | Diagnose and recover provider work | large | 3–5 days | done | 005, 007, 008 |
-| 010 | Observe provider health and alerts | large | 3–5 days | in progress | 002, 003, 005, 007 |
+| 010 | Observe provider health and alerts | large | 3–5 days | done | 005 |
 
 ### Diagnostics and publication
 
@@ -194,8 +196,8 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 011 | Exclude the obsolete Data Feed Lab | small | <1 day | done | 002, 003 |
 | 012 | Publish shared catalog versions safely | large | 3–5 days | done | 006 |
 | 013 | Assemble immutable provider releases | large | 5–7 days | done | 006, 007, 012 |
-| 014 | Publish provider releases safely | large | 4–6 days | in progress | 013 |
-| 015 | Advance provider manifest gates independently | large | 4–6 days | not started | 012, 014 |
+| 014 | Publish provider releases safely | large | 4–6 days | done | 013 |
+| 015 | Advance provider manifest gates independently | large | 4–6 days | done | 012, 014 |
 
 ### Delivery and proof
 
@@ -205,7 +207,7 @@ This feature is a clean pre-launch implementation. It does not migrate or dual-r
 | 017 | Reconcile and retain publication state | large | 3–5 days | not started | 012, 014, 015 |
 | 018 | Prove distributed security and failure isolation | large | 3–5 days | not started | 005, 006, 012, 014, 015 |
 | 019 | Publish the system overview and ERDs | medium | 2–3 days | not started | 006, 015, 016, 018 |
-| 020 | Certify the distributed warehouse | large | 5–8 days | not started | 008, 009, 010, 011, 016, 017, 018, 019 |
+| 020 | Certify the distributed warehouse | large | 5–8 days | not started | 008, 009, 010, 011, 016, 017, 018, 019, convex-promotion-jobs/009 |
 
 ### Authoritative admin compatibility
 

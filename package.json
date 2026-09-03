@@ -146,6 +146,9 @@
     "cutover:preflight:fresh-convex:preproduction": "node scripts/preproduction/verify-fresh-convex-target.mjs",
     "cutover:reset:preproduction": "node scripts/preproduction/reset-postgres-convex-promotion-cutover.mjs",
     "cutover:certify:preproduction": "node scripts/preproduction/certify-provider-manifest-readiness.mjs",
+    "preflight:distributed-promotion-cutover:preproduction": "node --import tsx scripts/preproduction/preflight-distributed-promotion-cutover.mts",
+    "issue:distributed-promotion-manual-command:preproduction": "node --import tsx scripts/preproduction/issue-distributed-promotion-manual-command.mts",
+    "inspect:promotion-job-evaluator-watchdog:live": "npm run run:promotion-job-evaluator-watchdog:production --workspace=@packscout/worker",
     "seed:mock-data-release:local": "node scripts/local/seed-convex-mock-data-release.mjs",
     "migrate:convex-last-known-ev:local": "node --import tsx scripts/local/migrate-convex-last-known-ev.mts",
     "simulate:mock-heat:local": "node --import tsx scripts/local/simulate-convex-repack-heat.mjs",
@@ -159,7 +162,8 @@
     "start:source-supervisor:local": "npm run start:source-supervisor:local --workspace=@packscout/worker",
     "start:worker:production": "npm run start:production --workspace=@packscout/worker",
     "start:admin:embedded:local": "tsx scripts/local/start-admin-embedded.ts",
-    "start:admin-operations-fixture:local": "node --import tsx scripts/local/start-admin-operations-browser-fixture.mts"
+    "start:admin-operations-fixture:local": "node --import tsx scripts/local/start-admin-operations-browser-fixture.mts",
+    "start:admin-promotion-jobs-fixture:local": "node --import tsx scripts/local/start-admin-promotion-jobs-browser-fixture.mts"
   },
   "devDependencies": {
     "@edge-runtime/vm": "5.0.0",

@@ -13,6 +13,7 @@ import {
   normalizeJsonObject,
   type CanonicalJsonObject,
 } from "./provider-canonical-contract.ts";
+import { runDrainedDatabaseTransaction } from "./drained-database-transaction.ts";
 import {
   appendProviderActivityOutbox,
   appendProviderLocalAudit,
@@ -406,7 +407,7 @@ export class PrismaProviderRuntimeRepository {
       requireUuid(input.actorOperatorId, "actorOperatorId");
     }
     const reason = normalizedReason(input.to, input.reason);
-    return this.database.$transaction(async (transaction) => {
+    return runDrainedDatabaseTransaction(callback => this.database.$transaction(callback, TRANSACTION_OPTIONS), async (transaction: ProviderTransactionClient) => {
       let row = await lockRuntime(transaction);
       if (row.state_generation !== input.expectedGeneration) {
         return {
@@ -483,6 +484,6 @@ export class PrismaProviderRuntimeRepository {
         kind: "transitioned" as const,
         runtime: await projectSnapshot(transaction, row, input.occurredAt),
       };
-    }, TRANSACTION_OPTIONS);
+    });
   }
 }

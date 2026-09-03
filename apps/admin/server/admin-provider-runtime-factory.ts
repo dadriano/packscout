@@ -28,6 +28,8 @@ import {
 } from "./runtime-config.ts";
 import { createDistributedCanonicalInspectionRuntime } from
   "./distributed-canonical-inspection-runtime.ts";
+import { createPromotionJobMonitoringRuntime } from
+  "./promotion-job-monitoring-runtime.ts";
 import type {
   AdminProviderRuntimeFactory,
   AdminProviderRuntimeFactoryContext,
@@ -89,6 +91,15 @@ export const createAdminProviderRuntimeFactory: AdminProviderRuntimeFactory =
       central: context.central,
       gateway,
     });
+    const promotionJobs = createPromotionJobMonitoringRuntime({
+      central: context.central,
+      gateway,
+      deployment: context.catalogDeploymentKey
+        ?? (context.environment.NODE_ENV === "production"
+          ? "production"
+          : "development"),
+      secret: context.actorPseudonymKey,
+    });
     return {
       app: {
         canonical: createDistributedCanonicalInspectionRuntime({
@@ -100,6 +111,7 @@ export const createAdminProviderRuntimeFactory: AdminProviderRuntimeFactory =
           gateway,
           manualImports,
         }),
+        promotionJobs: { reads: promotionJobs },
         providerSourceOperations:
           createDistributedProviderSourceOperationsRuntime({
             central: context.central,

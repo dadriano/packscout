@@ -1,47 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PromotionV2WorkerConfiguration } from
-  "./promotion-v2-worker-config.ts";
 import {
   HeatPromotionWorkerConfigurationError,
   readHeatPromotionWorkerConfiguration,
 } from "./heat-promotion-worker-config.ts";
 
-const promotion: PromotionV2WorkerConfiguration = {
-  convexBaseUrl: "https://convex.example",
-  deploymentKey: "production-us",
-  providerCredentials: [{
-    platformKey: "alpha",
-    keyId: "provider-alpha.v1",
-    secret: new Uint8Array(32).fill(1),
-  }],
-  manifestPublishCredential: {
-    keyId: "manifest-publish.v1",
-    secret: new Uint8Array(32).fill(2),
-  },
-  manifestClearCredential: {
-    keyId: "manifest-clear.v1",
-    secret: new Uint8Array(32).fill(3),
-  },
-  pollIntervalMilliseconds: 5_000,
-  requestTimeoutMilliseconds: 10_000,
-};
-
 const heatEnvironment = {
+  PACKSCOUT_CONVEX_PUBLICATION_BASE_URL: "https://convex.example",
+  PACKSCOUT_CATALOG_DEPLOYMENT_KEY: "production-us",
   PACKSCOUT_CONVEX_PUBLICATION_KEY_ID: "heat-publisher.v1",
   PACKSCOUT_CONVEX_PUBLICATION_SECRET_BASE64:
     Buffer.from(new Uint8Array(32).fill(7)).toString("base64"),
 };
 
-test("Heat shares Promotion V2 deployment but owns auth and cadence", () => {
-  const config = readHeatPromotionWorkerConfiguration(
-    heatEnvironment,
-    promotion,
-  );
-  assert.equal(config.convexBaseUrl, promotion.convexBaseUrl);
-  assert.equal(config.deploymentKey, promotion.deploymentKey);
+test("Heat owns the shared Convex target, auth, and cadence", () => {
+  const config = readHeatPromotionWorkerConfiguration(heatEnvironment);
+  assert.equal(config.convexBaseUrl, "https://convex.example");
+  assert.equal(config.deploymentKey, "production-us");
   assert.equal(config.keyId, "heat-publisher.v1");
   assert.deepEqual(config.secret, new Uint8Array(32).fill(7));
+  assert.equal(config.requestTimeoutMilliseconds, 10_000);
   assert.equal(config.retentionBatchSize, 500);
   assert.equal(config.retentionMaximumBatchesPerCycle, 4);
   assert.equal("pollIntervalMilliseconds" in config, false);
@@ -52,7 +30,7 @@ test("Heat retention configuration is bounded independently", () => {
     ...heatEnvironment,
     PACKSCOUT_HEAT_RETENTION_BATCH_SIZE: "1000",
     PACKSCOUT_HEAT_RETENTION_MAX_BATCHES_PER_CYCLE: "20",
-  }, promotion);
+  });
   assert.equal(config.retentionBatchSize, 1_000);
   assert.equal(config.retentionMaximumBatchesPerCycle, 20);
   for (const [name, value, code] of [
@@ -65,15 +43,27 @@ test("Heat retention configuration is bounded independently", () => {
       () => readHeatPromotionWorkerConfiguration({
         ...heatEnvironment,
         [name]: value,
-      }, promotion),
+      }),
       (error: unknown) => error instanceof HeatPromotionWorkerConfigurationError &&
         error.code === code,
     );
   }
 });
 
-test("Heat requires its own bounded canonical credential", () => {
+test("Heat requires a bounded canonical target and credential", () => {
   for (const [environment, code] of [
+    [{
+      ...heatEnvironment,
+      PACKSCOUT_CONVEX_PUBLICATION_BASE_URL: "http://convex.example",
+    }, "HEAT_PUBLICATION_URL_INVALID"],
+    [{
+      ...heatEnvironment,
+      PACKSCOUT_CATALOG_DEPLOYMENT_KEY: "bad key",
+    }, "HEAT_DEPLOYMENT_KEY_INVALID"],
+    [{
+      ...heatEnvironment,
+      PACKSCOUT_CONVEX_PUBLICATION_TIMEOUT_MS: "30001",
+    }, "HEAT_REQUEST_TIMEOUT_INVALID"],
     [{
       ...heatEnvironment,
       PACKSCOUT_CONVEX_PUBLICATION_KEY_ID: "bad key",
@@ -89,7 +79,7 @@ test("Heat requires its own bounded canonical credential", () => {
     }, "HEAT_PUBLICATION_SECRET_INVALID"],
   ] as const) {
     assert.throws(
-      () => readHeatPromotionWorkerConfiguration(environment, promotion),
+      () => readHeatPromotionWorkerConfiguration(environment),
       (error: unknown) =>
         error instanceof HeatPromotionWorkerConfigurationError &&
         error.code === code,

@@ -5,21 +5,30 @@ import {
   CATALOG_RETENTION_SCHEMA_VERSION,
   MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS,
   MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  MAX_CATALOG_RETENTION_HTTP_RESPONSE_BYTES,
+  MAX_CATALOG_RETENTION_PLATFORM_COUNT,
   MAX_CATALOG_RETENTION_POSTGRES_PROOF_BYTES,
+  MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
   catalogRetentionManifestOperationProofSchema,
   catalogRetentionManifestReceiptSchema,
   catalogRetentionManifestRequestSchema,
   catalogRetentionPostgresProofSnapshotSchema,
+  catalogRetentionProtectionSetSchema,
   catalogRetentionProviderOperationProofSchema,
   catalogRetentionPostgresProofSnapshotDigest,
   catalogRetentionProviderRequestSchema,
   catalogRetentionReceiptDigest,
+  catalogRetentionSignedReceiptEnvelopeSchema,
   catalogRetentionStatusTargetSchema,
   catalogRetentionTerminalReceiptSha256,
   containsProtectedCatalogRetentionField,
   parseCatalogRetentionPublicationJson,
   type CatalogRetentionPostgresProofSnapshot,
 } from "./catalog-retention-v1.ts";
+import { PRODUCTION_AUTH_SIGNATURE_VERSION } from
+  "./data-release-v2-publication-auth.ts";
+import { MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES } from
+  "./global-catalog-manifest-v1.ts";
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
@@ -77,6 +86,236 @@ async function postgresProof(
     ),
   } as CatalogRetentionPostgresProofSnapshot;
 }
+
+function retentionPlatformKeys(count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_, index) => `provider-${index.toString().padStart(2, "0")}`,
+  );
+}
+
+function emptyCompletedHead(platformKey: string) {
+  return {
+    platformKey,
+    completedHead: {
+      platformKey,
+      publicProviderReleaseId: null,
+      sharedConfigurationEpoch: null,
+      providerCheckpoint: { settledSequence: "0" as const, settledAt: null },
+      observation: null,
+      terminalReceiptSha256: null,
+    },
+    terminalOperationId: null,
+  } as const;
+}
+
+function protectedProviderRelease(index: number) {
+  const value = index.toString(16).padStart(12, "0");
+  return {
+    publicProviderReleaseId:
+      `${value.slice(4)}-0000-5000-8000-${value}`,
+    providerReleaseFingerprint: SHA_A,
+    lifecycle: "complete" as const,
+    reasons: ["completed_head" as const],
+  };
+}
+
+function retentionProtectionSet(input: Readonly<{
+  snapshotSequence?: string;
+  providerReleaseCount?: number;
+}> = {}) {
+  const platformKeys = retentionPlatformKeys(
+    MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+  );
+  const providerReleaseCount = input.providerReleaseCount ?? 0;
+  return {
+    authoritativeEvaluationTime: "2026-08-16T12:00:01.000Z",
+    postgresProofSnapshotId: "retention:snapshot:bounded-receipt",
+    postgresProofSnapshotSequence: input.snapshotSequence ?? "1",
+    postgresProofSnapshotDigest: SHA_A,
+    manifests: [],
+    providerReleasesByPlatform: platformKeys.map((platformKey, index) => {
+      const start = Math.floor(providerReleaseCount * index /
+        platformKeys.length);
+      const end = Math.floor(providerReleaseCount * (index + 1) /
+        platformKeys.length);
+      return {
+        platformKey,
+        releases: Array.from(
+          { length: end - start },
+          (_, releaseIndex) => protectedProviderRelease(releaseIndex),
+        ),
+      };
+    }),
+  };
+}
+
+async function boundedManifestReceipt(snapshotSequence: string) {
+  const withoutDigest = {
+    schemaVersion: CATALOG_RETENTION_SCHEMA_VERSION,
+    operationKind: "retainManifests" as const,
+    operationId: "retention:manifest:bounded-receipt",
+    idempotencyKey: "retention:manifest:bounded-receipt",
+    terminalState: "complete" as const,
+    result: "retained" as const,
+    serverTime: "2026-08-16T12:00:01.000Z",
+    requestDigest: SHA_A,
+    expectedRetentionGeneration: 0,
+    retentionGeneration: 1,
+    phase: "manifests" as const,
+    platformKey: null,
+    details: {
+      maximumDocuments: MAX_CATALOG_RETENTION_ARTIFACT_DOCUMENTS,
+      deletedDocumentCount: 0,
+      deletedRetentionOperationCount: 0,
+      hasMore: false,
+      protectionSet: retentionProtectionSet({ snapshotSequence }),
+      selectedManifest: null,
+      deletedManifestCount: 0,
+      deletedManifestReferenceCount: 0,
+    },
+  };
+  return {
+    ...withoutDigest,
+    receiptDigest: await catalogRetentionReceiptDigest(withoutDigest),
+  };
+}
+
+test("retention proof and result bounds match the 64-provider manifest limit", async () => {
+  assert.equal(
+    MAX_CATALOG_RETENTION_PLATFORM_COUNT,
+    MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES,
+  );
+  for (const count of [9, MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES]) {
+    const platformKeys = retentionPlatformKeys(count);
+    const proof = await postgresProof({
+      completedHeads: platformKeys.map(emptyCompletedHead),
+      providerProtectionsByPlatform: platformKeys.map((platformKey) => ({
+        platformKey,
+        releases: [],
+      })),
+    });
+    assert.equal(
+      catalogRetentionPostgresProofSnapshotSchema.safeParse(proof).success,
+      true,
+    );
+    assert.equal(catalogRetentionProtectionSetSchema.safeParse({
+      authoritativeEvaluationTime: "2026-08-16T12:00:01.000Z",
+      postgresProofSnapshotId: proof.snapshotId,
+      postgresProofSnapshotSequence: proof.snapshotSequence,
+      postgresProofSnapshotDigest: proof.snapshotDigest,
+      manifests: [],
+      providerReleasesByPlatform: platformKeys.map((platformKey) => ({
+        platformKey,
+        releases: [],
+      })),
+    }).success, true);
+  }
+
+  const overflowKeys = retentionPlatformKeys(
+    MAX_GLOBAL_CATALOG_PROVIDER_REFERENCES + 1,
+  );
+  assert.equal(catalogRetentionPostgresProofSnapshotSchema.safeParse(
+    await postgresProof({
+      completedHeads: overflowKeys.map(emptyCompletedHead),
+      providerProtectionsByPlatform: [],
+    }),
+  ).success, false);
+  assert.equal(catalogRetentionPostgresProofSnapshotSchema.safeParse(
+    await postgresProof({
+      completedHeads: [],
+      providerProtectionsByPlatform: overflowKeys.map((platformKey) => ({
+        platformKey,
+        releases: [],
+      })),
+    }),
+  ).success, false);
+  assert.equal(catalogRetentionProtectionSetSchema.safeParse({
+    authoritativeEvaluationTime: "2026-08-16T12:00:01.000Z",
+    postgresProofSnapshotId: "retention:snapshot:overflow",
+    postgresProofSnapshotSequence: "1",
+    postgresProofSnapshotDigest: SHA_A,
+    manifests: [],
+    providerReleasesByPlatform: overflowKeys.map((platformKey) => ({
+      platformKey,
+      releases: [],
+    })),
+  }).success, false);
+});
+
+test("retention receipts bound the aggregate provider graph and signed response bytes", async () => {
+  const maximumProtectionSet = retentionProtectionSet({
+    providerReleaseCount: MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
+  });
+  assert.equal(
+    maximumProtectionSet.providerReleasesByPlatform.reduce(
+      (count, group) => count + group.releases.length,
+      0,
+    ),
+    MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES,
+  );
+  assert.equal(
+    catalogRetentionProtectionSetSchema.safeParse(maximumProtectionSet)
+      .success,
+    true,
+  );
+  assert.equal(
+    catalogRetentionProtectionSetSchema.safeParse(retentionProtectionSet({
+      providerReleaseCount:
+        MAX_CATALOG_RETENTION_PROTECTED_PROVIDER_RELEASES + 1,
+    })).success,
+    false,
+  );
+
+  const minimalReceipt = await boundedManifestReceipt("1");
+  const minimumBytes = new TextEncoder().encode(
+    canonicalJson(minimalReceipt),
+  ).byteLength;
+  const maximumSequence = "1".repeat(
+    1 + MAX_CATALOG_RETENTION_HTTP_BODY_BYTES - minimumBytes,
+  );
+  const maximumReceipt = await boundedManifestReceipt(maximumSequence);
+  assert.equal(
+    new TextEncoder().encode(canonicalJson(maximumReceipt)).byteLength,
+    MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
+  );
+  assert.equal(
+    catalogRetentionManifestReceiptSchema.safeParse(maximumReceipt).success,
+    true,
+  );
+
+  const signedEnvelope = {
+    ok: true as const,
+    receipt: maximumReceipt,
+    responseAuth: {
+      signatureVersion: PRODUCTION_AUTH_SIGNATURE_VERSION,
+      keyId: "retention-publisher.v1",
+      receiptDigest: maximumReceipt.receiptDigest,
+      signature: SHA_B,
+    },
+  };
+  assert.equal(
+    catalogRetentionSignedReceiptEnvelopeSchema.safeParse(signedEnvelope)
+      .success,
+    true,
+  );
+  assert.ok(
+    new TextEncoder().encode(canonicalJson(signedEnvelope)).byteLength <=
+      MAX_CATALOG_RETENTION_HTTP_RESPONSE_BYTES,
+  );
+
+  const oversizedReceipt = await boundedManifestReceipt(
+    `${maximumSequence}1`,
+  );
+  assert.equal(
+    new TextEncoder().encode(canonicalJson(oversizedReceipt)).byteLength,
+    MAX_CATALOG_RETENTION_HTTP_BODY_BYTES + 1,
+  );
+  assert.equal(
+    catalogRetentionManifestReceiptSchema.safeParse(oversizedReceipt).success,
+    false,
+  );
+});
 
 test("retention requests accept only canonical proof snapshots and no candidate allow-list", async () => {
   const request = {

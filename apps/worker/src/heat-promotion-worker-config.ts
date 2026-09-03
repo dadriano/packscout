@@ -3,12 +3,13 @@ import {
   MIN_PRODUCTION_AUTH_SECRET_BYTES,
   productionAuthKeyIdSchema,
 } from "@packscout/contracts";
-import type { PromotionV2WorkerConfiguration } from
-  "./promotion-v2-worker-config.ts";
 
 export type HeatPromotionWorkerConfigurationErrorCode =
+  | "HEAT_DEPLOYMENT_KEY_INVALID"
   | "HEAT_PUBLICATION_KEY_ID_INVALID"
   | "HEAT_PUBLICATION_SECRET_INVALID"
+  | "HEAT_PUBLICATION_URL_INVALID"
+  | "HEAT_REQUEST_TIMEOUT_INVALID"
   | "HEAT_RETENTION_BATCH_SIZE_INVALID"
   | "HEAT_RETENTION_MAXIMUM_BATCHES_INVALID";
 
@@ -49,6 +50,36 @@ function boundedInteger(
 
 const canonicalBase64Pattern =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const deploymentKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/u;
+
+function convexBaseUrl(value: string | undefined): string {
+  if (!value || value.length > 2_048 || /[\r\n]/u.test(value)) {
+    throw new HeatPromotionWorkerConfigurationError(
+      "HEAT_PUBLICATION_URL_INVALID",
+    );
+  }
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" || !parsed.hostname || parsed.username ||
+      parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash
+    ) throw new Error("invalid");
+    return parsed.origin;
+  } catch {
+    throw new HeatPromotionWorkerConfigurationError(
+      "HEAT_PUBLICATION_URL_INVALID",
+    );
+  }
+}
+
+function deploymentKey(value: string | undefined): string {
+  if (!value || !deploymentKeyPattern.test(value)) {
+    throw new HeatPromotionWorkerConfigurationError(
+      "HEAT_DEPLOYMENT_KEY_INVALID",
+    );
+  }
+  return value;
+}
 
 function heatSecret(value: string | undefined): Uint8Array {
   if (!value || !canonicalBase64Pattern.test(value)) {
@@ -69,13 +100,9 @@ function heatSecret(value: string | undefined): Uint8Array {
   return new Uint8Array(decoded);
 }
 
-/** Heat shares Promotion V2's Convex deployment but owns its credential/cadence. */
+/** Heat owns the default worker's shared Convex target and its own authority. */
 export function readHeatPromotionWorkerConfiguration(
   environment: NodeJS.ProcessEnv,
-  promotion: Pick<
-    PromotionV2WorkerConfiguration,
-    "convexBaseUrl" | "deploymentKey" | "requestTimeoutMilliseconds"
-  >,
 ): HeatPromotionWorkerConfiguration {
   const keyId = productionAuthKeyIdSchema.safeParse(
     environment.PACKSCOUT_CONVEX_PUBLICATION_KEY_ID,
@@ -86,10 +113,18 @@ export function readHeatPromotionWorkerConfiguration(
     );
   }
   return Object.freeze({
-    convexBaseUrl: promotion.convexBaseUrl,
-    deploymentKey: promotion.deploymentKey,
+    convexBaseUrl: convexBaseUrl(
+      environment.PACKSCOUT_CONVEX_PUBLICATION_BASE_URL,
+    ),
+    deploymentKey: deploymentKey(environment.PACKSCOUT_CATALOG_DEPLOYMENT_KEY),
     keyId: keyId.data,
-    requestTimeoutMilliseconds: promotion.requestTimeoutMilliseconds,
+    requestTimeoutMilliseconds: boundedInteger(
+      environment.PACKSCOUT_CONVEX_PUBLICATION_TIMEOUT_MS,
+      10_000,
+      100,
+      30_000,
+      "HEAT_REQUEST_TIMEOUT_INVALID",
+    ),
     retentionBatchSize: boundedInteger(
       environment.PACKSCOUT_HEAT_RETENTION_BATCH_SIZE,
       500,
