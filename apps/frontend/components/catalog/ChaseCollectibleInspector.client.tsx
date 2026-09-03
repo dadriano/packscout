@@ -79,6 +79,7 @@ export function ChaseInspectProvider({ children }: { readonly children: ReactNod
       {children}
       {request ? (
         <ChaseCollectibleInspector
+          key={request.publicCollectibleId}
           onClose={close}
           onSelectPack={(publicRepackId, trigger) => {
             const opener = packOpenerRef.current;
@@ -120,7 +121,6 @@ function ChaseCollectibleInspector({
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoad({ status: "loading" });
     void fetch(
       `/api/collectibles/${encodeURIComponent(request.publicCollectibleId)}/repacks`,
       {
