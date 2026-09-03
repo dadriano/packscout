@@ -565,6 +565,82 @@ describe("data_release_v3 public reads", () => {
     expect((unsupported as { code?: string }).code).toBe("INVALID_QUERY");
   });
 
+  test.each(["phygitals", "courtyard", "collector_crypt"])(
+    "%s displayed EV sorts mix signed source values with independent values while confidence stays independent",
+    async (vendorKey) => {
+      const t = convexTest(schema, modules);
+      const sourceEstimates = (minorUnits: number) => ({
+        packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+        vendorReported: {
+          status: "available" as const,
+          sourceMoney: { minorUnits, currency: "USD" },
+          usdComparison: { status: "available" as const, value: { minorUnits, currency: "USD" as const } },
+          observedAt: V3_OBSERVED_AT,
+        },
+      });
+      const positiveId = "00000000-0000-5000-8000-000000000307";
+      const neutralId = "00000000-0000-5000-8000-000000000308";
+      const price = (minorUnits: number) => ({ displayMoney: { minorUnits, currency: "USD" as const },
+        usdComparison: { status: "available" as const, value: { minorUnits, currency: "USD" as const } } });
+      await publishFixture(t, [
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_A, vendorKey, price: price(4_000),
+          buyback: { kind: "uniform_rate", rateBasisPoints: 2_500 }, evEstimates: sourceEstimates(20_000) }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_B, vendorKey,
+          buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 }, evEstimates: sourceEstimates(10_421) }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_C, vendorKey, evEstimates: {
+          packScout: buildV3CurrentEv(8_500), vendorReported: sourceEstimates(50_000).vendorReported } }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_D, vendorKey,
+          buyback: { kind: "not_documented" }, evEstimates: sourceEstimates(40_000) }),
+        buildV3SoldOutDetail({ publicRepackId: V3_REPACK_ID_E, vendorKey,
+          evEstimates: sourceEstimates(100_000) }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_F, vendorKey,
+          buyback: { kind: "uniform_rate", rateBasisPoints: 0 }, evEstimates: sourceEstimates(20_000) }),
+        buildV3Detail({ publicRepackId: positiveId, vendorKey, price: price(20_000),
+          buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 }, evEstimates: sourceEstimates(24_000) }),
+        buildV3Detail({ publicRepackId: neutralId, vendorKey,
+          buyback: { kind: "uniform_rate", rateBasisPoints: 10_000 }, evEstimates: sourceEstimates(10_000) }),
+      ]);
+      const sortedIds = async (sort: string, direction: "asc" | "desc") => {
+        const result = await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+          filters: { availability: "all" }, sort, direction, currentTime: NOW,
+        }) as AnyResult;
+        expect(result.ok).toBe(true);
+        return (result.data as { rows: { publicRepackId: string }[] }).rows.map(row => row.publicRepackId);
+      };
+      // Raw source EV has A above B; buyback-adjusted dollars put B ($93.79)
+      // above independent C ($85) above A ($50). Zero is distinct from missing.
+      // Sold-out E has the highest source value but keeps the historical null
+      // rank in either direction, matching existing independent sold-out EV.
+      expect(await sortedIds("packscout_gross_ev", "desc")).toEqual([
+        positiveId, neutralId, V3_REPACK_ID_B, V3_REPACK_ID_C, V3_REPACK_ID_A, V3_REPACK_ID_F, V3_REPACK_ID_D, V3_REPACK_ID_E,
+      ]);
+      expect(await sortedIds("packscout_gross_ev", "asc")).toEqual([
+        V3_REPACK_ID_F, V3_REPACK_ID_A, V3_REPACK_ID_C, V3_REPACK_ID_B, neutralId, positiveId, V3_REPACK_ID_D, V3_REPACK_ID_E,
+      ]);
+      // A has the highest return (+25%) while the $200 pack has the highest
+      // dollar margin (+$16). The $100 neutral pack is distinct from null.
+      for (const sort of ["packscout_ev_dollars", "packscout_ev_percent"]) {
+        const positive = sort === "packscout_ev_dollars" ? [positiveId, V3_REPACK_ID_A] : [V3_REPACK_ID_A, positiveId];
+        const valued = [...positive, neutralId, V3_REPACK_ID_B, V3_REPACK_ID_C, V3_REPACK_ID_F];
+        expect(await sortedIds(sort, "desc")).toEqual([...valued, V3_REPACK_ID_D, V3_REPACK_ID_E]);
+        expect(await sortedIds(sort, "asc")).toEqual([...valued.reverse(), V3_REPACK_ID_D, V3_REPACK_ID_E]);
+      }
+      expect(await sortedIds("packscout_confidence", "desc")).toEqual([
+        V3_REPACK_ID_C, V3_REPACK_ID_A, V3_REPACK_ID_B, V3_REPACK_ID_D, V3_REPACK_ID_E, V3_REPACK_ID_F, positiveId, neutralId,
+      ]);
+      // Sorting works against existing immutable shards whose independently
+      // calculated Gross EV is still null; no release regeneration is needed.
+      await t.run(async (ctx) => {
+        const shards = await ctx.db.query("dataReleaseV3SearchShards").take(2);
+        const row = shards.flatMap(shard => shard.rows).find(row => row.publicRepackId === V3_REPACK_ID_B)!;
+        expect(row.packScoutGrossEvMinor).toBeNull();
+        expect(row.packScoutEvDollarsMinor).toBeNull();
+        expect(row.packScoutConfidenceBasisPoints).toBeNull();
+        expect(row.vendorReportedEvUsdMinor).toBe(10_421);
+      });
+    },
+  );
+
   test("the availability filter admits only available packs and keeps the other three states discoverable", async () => {
     const t = convexTest(schema, modules);
     // Every non-available pack here carries a *current* PackScout estimate, so

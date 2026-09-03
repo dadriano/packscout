@@ -89,6 +89,32 @@ function renderInspector(detail = buildV3ViewDetail()): string {
 
 const EXPECTED_METRIC_VALUES = ["$85.00", "85.00%", "-$15.00", "-15.00%"] as const;
 
+test("table, mobile cards, and detail show source-derived Gross EV with platform attribution", () => {
+  for (const [vendorKey, vendorDisplayName] of [
+    ["phygitals", "Phygitals"], ["collector_crypt", "Collector Crypt"], ["courtyard", "Courtyard"],
+  ]) {
+    const detail = buildV3ViewDetail({ vendorKey, vendorDisplayName,
+      buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
+      evEstimates: {
+        packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+        vendorReported: { status: "available", sourceMoney: { minorUnits: 10_421, currency: "USD" },
+          usdComparison: { status: "available", value: { minorUnits: 10_421, currency: "USD" } },
+          observedAt: "2026-08-19T10:00:00.000Z" },
+      },
+    });
+    for (const markup of [renderAllRepacksTable([detail]), renderAllRepacksCards([detail]), renderInspector(detail)]) {
+      assert.ok(markup.includes("$93.79"), vendorKey);
+      assert.ok(markup.includes("93.79%"), vendorKey);
+      assert.ok(markup.includes("-$6.21"), vendorKey);
+      assert.ok(markup.includes("-6.21%"), vendorKey);
+      assert.ok(markup.includes(`Calculated from ${vendorDisplayName}-reported EV × buyback.`), vendorKey);
+      assert.ok(markup.includes("EV confidence"), vendorKey);
+      assert.equal(markup.includes("High · 100%"), false, vendorKey);
+    }
+    assert.ok(renderInspector(detail).includes('aria-label="EV from platform data"'));
+  }
+});
+
 test("all four catalog surfaces render the same values from the shared boundary", () => {
   const detail = buildV3ViewDetail();
   const surfaces = {

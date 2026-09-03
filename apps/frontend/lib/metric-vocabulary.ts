@@ -28,7 +28,7 @@ export const METRIC_TRUST_COPY = Object.freeze({
   longRunExplanation:
     "EV estimates the average guaranteed buyback payout across many packs. It does not predict what one pack will contain.",
   sourceExplanation:
-    "Vendor-reported EV is the vendor’s own number. PackScout shows it separately and never averages or substitutes it into PackScout Gross EV.",
+    "Vendor-reported EV is the platform’s own number. For supported platforms, platform-derived Gross EV applies the uniform buyback rate to that reported underlying EV. Independent PackScout estimates and confidence remain separate.",
   confidenceExplanation:
     "Confidence measures how solid and recent the evidence behind an estimate is, not how likely a profit is. It drops as source data ages past 60 minutes, while the last-known EV stays visible.",
   unavailableExplanation:
@@ -144,7 +144,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "grossEv",
     label: "Gross EV $",
     definition:
-      "The average guaranteed buyback payout for one pack, weighting each outcome by its odds.",
+      "The average buyback value of a pack. For supported platform reports, Gross EV $ is reported underlying EV × Buyback %.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
@@ -184,7 +184,7 @@ export const COMPARISON_GLOSSARY = Object.freeze([
     key: "vendorReportedEv",
     label: "Vendor-reported EV",
     definition:
-      "The vendor’s own EV number, shown for comparison only. PackScout never blends it into PackScout Gross EV.",
+      "The platform’s own EV. Where its basis is supported, Gross EV applies Buyback %; independent PackScout estimates stay separate.",
     enabledByDefault: true,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },

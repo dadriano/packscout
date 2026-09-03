@@ -46,10 +46,10 @@ test("defines all repack comparison fields with buyback-adjusted wording", () =>
   assert.ok(COMPARISON_GLOSSARY.every(({ enabledByDefault }) => enabledByDefault));
 });
 
-test("gross EV is defined as the expected guaranteed buyback payout", () => {
+test("gross EV explains the platform reported value and buyback calculation", () => {
   assert.match(
     getGlossaryDefinition("grossEv").definition,
-    /average guaranteed buyback payout/,
+    /reported underlying EV × Buyback %/,
   );
   assert.match(
     getGlossaryDefinition("grossEvPercent").definition,
@@ -69,7 +69,7 @@ test("gross EV is defined as the expected guaranteed buyback payout", () => {
   );
   assert.match(
     getGlossaryDefinition("vendorReportedEv").definition,
-    /never blends it into/,
+    /independent PackScout estimates stay separate/,
   );
   assert.match(
     getGlossaryDefinition("buybackPercent").definition,
@@ -217,7 +217,8 @@ test("keeps the required source, advice, and bounded-summary language canonical"
   assert.equal(METRIC_TRUST_COPY.adviceLine, "Not financial or gambling advice");
   assert.equal(METRIC_TRUST_COPY.estimateLabel, "PackScout Gross EV");
   assert.match(METRIC_TRUST_COPY.longRunExplanation, /guaranteed buyback payout/);
-  assert.match(METRIC_TRUST_COPY.sourceExplanation, /never averages or substitutes/);
+  assert.match(METRIC_TRUST_COPY.sourceExplanation, /uniform buyback rate/);
+  assert.match(METRIC_TRUST_COPY.sourceExplanation, /Independent PackScout estimates and confidence remain separate/);
   assert.match(METRIC_TRUST_COPY.confidenceExplanation, /not how likely a profit is/);
   assert.match(
     METRIC_TRUST_COPY.unavailableExplanation,

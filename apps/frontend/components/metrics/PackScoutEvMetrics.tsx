@@ -1,4 +1,4 @@
-import type { PackScoutEvV3Presentation } from "@/lib/packscout-ev-presentation";
+import type { GrossEvV3Presentation, PackScoutEvV3Presentation } from "@/lib/packscout-ev-presentation";
 import {
   EXPECTED_VALUE_ARTICLE_HREF,
   METRIC_TRUST_COPY,
@@ -10,6 +10,7 @@ import styles from "./PackScoutEvMetrics.module.css";
 
 type PackScoutEvMetricsProps = Readonly<{
   presentation: PackScoutEvV3Presentation;
+  grossEvPresentation?: GrossEvV3Presentation;
   compact?: boolean;
   showFreshness?: boolean;
   showRepackPrice?: boolean;
@@ -30,6 +31,7 @@ type PackScoutEvMetricsProps = Readonly<{
  */
 export function PackScoutEvMetrics({
   presentation,
+  grossEvPresentation,
   compact = false,
   showFreshness = true,
   showRepackPrice = true,
@@ -48,9 +50,25 @@ export function PackScoutEvMetrics({
       data-state={presentation.semanticState}
       data-status={presentation.status}
     >
+      {grossEvPresentation?.source === "vendor_reported" ? (
+        <section aria-label="EV from platform data" className={styles.root}>
+          <h3 className={styles.heading}>Expected value</h3>
+          <div className={styles.metrics}>
+            <MetricValue compact={compact} metric={grossEvPresentation.grossEvDollars} />
+            <MetricValue compact={compact} metric={grossEvPresentation.grossEvPercent} />
+            <MetricValue compact={compact} metric={grossEvPresentation.evDollars} showSemanticState={false} />
+            <MetricValue compact={compact} metric={grossEvPresentation.evPercent} showSemanticState={false} />
+          </div>
+          <p className={styles.note}>{grossEvPresentation.sourceNote}</p>
+          <p className={styles.note}>{grossEvPresentation.observedLabel}</p>
+          <p className={styles.note}>Platform-reported EV does not establish an independent confidence score.</p>
+        </section>
+      ) : null}
       <div className={styles.header}>
         <h3 className={styles.heading}>
-          {METRIC_TRUST_COPY.estimateLabel}
+          {grossEvPresentation?.source === "vendor_reported"
+            ? "Independent PackScout estimate"
+            : METRIC_TRUST_COPY.estimateLabel}
           <GlossaryHint content={headingHint} field="evPercent" />
         </h3>
         <span className={styles.statusChip} data-status={presentation.status}>
@@ -79,30 +97,34 @@ export function PackScoutEvMetrics({
       </div>
 
       <div className={styles.metrics}>
-        <MetricValue
-          compact={compact}
-          metric={presentation.grossEvDollars}
-          showReason={false}
-          showSemanticState={false}
-        />
-        <MetricValue
-          compact={compact}
-          metric={presentation.grossEvPercent}
-          showReason={false}
-          showSemanticState={false}
-        />
-        <MetricValue
-          compact={compact}
-          metric={presentation.evDollars}
-          showReason={false}
-          showSemanticState={false}
-        />
-        <MetricValue
-          compact={compact}
-          metric={presentation.evPercent}
-          showReason={false}
-          showSemanticState={false}
-        />
+        {grossEvPresentation?.source !== "vendor_reported" ? (
+          <>
+            <MetricValue
+              compact={compact}
+              metric={presentation.grossEvDollars}
+              showReason={false}
+              showSemanticState={false}
+            />
+            <MetricValue
+              compact={compact}
+              metric={presentation.grossEvPercent}
+              showReason={false}
+              showSemanticState={false}
+            />
+            <MetricValue
+              compact={compact}
+              metric={presentation.evDollars}
+              showReason={false}
+              showSemanticState={false}
+            />
+            <MetricValue
+              compact={compact}
+              metric={presentation.evPercent}
+              showReason={false}
+              showSemanticState={false}
+            />
+          </>
+        ) : null}
         {showRepackPrice ? (
           <MetricValue
             compact={compact}

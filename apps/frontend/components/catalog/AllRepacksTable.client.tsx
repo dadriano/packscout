@@ -11,6 +11,7 @@ import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
   presentBuybackSummaryV3,
+  presentGrossEvV3,
   presentPackScoutEvV3,
   presentRepackPrice,
   presentTopChaseValue,
@@ -97,6 +98,7 @@ function RepackRow({
   const vendorEstimate = presentVendorReportedEvV3(
     repack.evEstimates.vendorReported,
   );
+  const grossEv = presentGrossEvV3(repack, estimate);
   const buyback = presentBuybackSummaryV3(repack.buyback);
   const packPrice = presentRepackPrice(repack.price);
   const displayedChase = desiredSearchActive ? desiredChase : repack.topChase;
@@ -144,16 +146,17 @@ function RepackRow({
         <MetricValue compact metric={packPrice} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        {grossEv.sourceNote ? <span className={styles.chaseEvidence} title={grossEv.sourceNote}>{grossEv.sourceLabel}</span> : null}
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={estimate.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
         <CatalogConfidenceEvidence

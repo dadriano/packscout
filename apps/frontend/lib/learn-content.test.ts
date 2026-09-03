@@ -281,7 +281,8 @@ test("the EV article explains evidence rules and model non-goals", () => {
   // Pulls, vendor separation, and excluded economics.
   assert.match(evCopy, /deterministically update verified remaining inventory/);
   assert.match(evCopy, /hot or cold streak does not estimate future odds/);
-  assert.match(evCopy, /never filled from the other source/);
+  assert.match(evCopy, /reported underlying EV × buyback rate/);
+  assert.match(evCopy, /does not create an independent PackScout estimate or confidence score/);
   assert.match(evCopy, /Liquidity and resale friction/);
   assert.match(evCopy, /Shipping, resale fees, and taxes/);
   assert.match(evCopy, /Personalized prices/);

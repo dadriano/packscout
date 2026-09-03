@@ -2,7 +2,8 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
-import { buildV3Detail, V3_FIXTURE_NOW } from "./dataReleaseV3Fixture.test-support";
+import { buildV3CurrentEv, buildV3Detail, buildV3SoldOutDetail, buildV3UnavailableEv, V3_FIXTURE_NOW,
+  V3_OBSERVED_AT, V3_REPACK_ID_A, V3_REPACK_ID_B, V3_REPACK_ID_C } from "./dataReleaseV3Fixture.test-support";
 import { activateRetentionRelease, removeDerivedRetentionForLegacyTest, retentionReleaseId,
   stageRetentionRelease, unavailableRetentionDetail, type RetentionTest } from "./dataReleaseV3Retention.test-support";
 import schema from "./schema";
@@ -104,6 +105,53 @@ describe("explicit legacy EV reader cutover", () => {
     await expect(migration(t)).rejects.toThrow();
     for (const response of await publicViews(t, 1)) expect(response).toMatchObject({ ok: false, code: "RELEASE_UNAVAILABLE" });
   });
+
+  test.each(["phygitals", "courtyard", "collector_crypt"])(
+    "%s legacy available snapshots sort source gross and signed EV without initializing retention",
+    async (vendorKey) => {
+      const t = convexTest(schema, modules);
+      const sourceEstimates = (minorUnits: number) => ({
+        packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+        vendorReported: {
+          status: "available" as const,
+          sourceMoney: { minorUnits, currency: "USD" },
+          usdComparison: { status: "available" as const, value: { minorUnits, currency: "USD" as const } },
+          observedAt: V3_OBSERVED_AT,
+        },
+      });
+      const soldOutId = "00000000-0000-5000-8000-000000000304";
+      const zeroId = "00000000-0000-5000-8000-000000000305";
+      await activateRetentionRelease(t, await stageRetentionRelease(t, 1, [
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_A, vendorKey, evEstimates: {
+          packScout: buildV3CurrentEv(8_500), vendorReported: sourceEstimates(50_000).vendorReported } }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_B, vendorKey,
+          buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 }, evEstimates: sourceEstimates(10_421) }),
+        buildV3Detail({ publicRepackId: V3_REPACK_ID_C,
+          publicVendorId: "00000000-0000-5000-8000-000000000002", evEstimates: sourceEstimates(50_000) }),
+        buildV3SoldOutDetail({ publicRepackId: soldOutId, vendorKey, evEstimates: sourceEstimates(100_000) }),
+        buildV3Detail({ publicRepackId: zeroId, vendorKey,
+          buyback: { kind: "uniform_rate", rateBasisPoints: 0 }, evEstimates: sourceEstimates(20_000) }),
+      ]), null);
+      await removeDerivedRetentionForLegacyTest(t);
+      await clearFacts(t);
+      expect((await migration(t)).initialized).toBe(false);
+      for (const sort of ["packscout_gross_ev", "packscout_ev_dollars", "packscout_ev_percent"]) {
+        for (const direction of ["asc", "desc"] as const) {
+          const response = await t.query(internal.publicRepacksV3.listPublicRepacksV3AtTime, {
+            filters: { availability: "all" }, sort, direction, currentTime: V3_FIXTURE_NOW,
+          }) as { ok: boolean; data: { rows: { publicRepackId: string }[] } };
+          expect(response.ok).toBe(true);
+          const available = direction === "asc"
+            ? [zeroId, V3_REPACK_ID_A, V3_REPACK_ID_B]
+            : [V3_REPACK_ID_B, V3_REPACK_ID_A, zeroId];
+          // Current independent EV wins; the unsupported provider and sold-out
+          // source estimate remain unranked for all displayed EV metrics.
+          expect(response.data.rows.map(row => row.publicRepackId)).toEqual([...available, V3_REPACK_ID_C, soldOutId]);
+        }
+      }
+      expect((await migration(t)).initialized).toBe(false);
+    },
+  );
 
   test("previous valid history beneath an unavailable active snapshot appears atomically at initialization", async () => {
     const t = convexTest(schema, modules);

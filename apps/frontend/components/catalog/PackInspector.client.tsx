@@ -20,6 +20,7 @@ import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
 import {
   presentBuybackSummaryV3,
+  presentGrossEvV3,
   presentPackScoutEvV3,
   presentReleaseDataAsOf,
   presentRepackPrice,
@@ -241,6 +242,7 @@ export function RepackInspector({
     repackName: repack.name,
   });
   const vendorEv = presentVendorReportedEvV3(repack.evEstimates.vendorReported);
+  const grossEv = presentGrossEvV3(repack, packScoutEv);
   const buyback = presentBuybackSummaryV3(repack.buyback);
   const releaseDataAsOf = presentReleaseDataAsOf(release);
   const coverage = presentEstimateCoverage(repack.contentSummary);
@@ -394,6 +396,7 @@ export function RepackInspector({
         <div className={styles.sectionBlock}>
           <PackScoutEvMetrics
             compact
+            grossEvPresentation={grossEv}
             presentation={packScoutEv}
             showProvenance={false}
             showRepackPrice={false}
