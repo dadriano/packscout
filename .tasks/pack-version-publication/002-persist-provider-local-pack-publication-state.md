@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -90,27 +90,27 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 ### Impact and readiness
 
-- [ ] Direct pack, contents, odds, lifecycle, and EV changes enqueue every and only owning packs.
-- [ ] A shared dependency delivery expands locally to every and only affected pack, including a non-top eligible collectible that becomes top chase.
-- [ ] Complete matched inputs produce `ready`; partial contents, invalid odds, stale dependencies, and technical EV failures cannot produce it.
-- [ ] Valid EV-unavailable work is ready, permanently invalid domain data is blocked, and a missing lifecycle baseline waits safely.
-- [ ] Pulls, Heat, health, activity, profiles outside sealed pack fields, saves, and user records produce no pack work.
+- [x] Direct pack, contents, odds, lifecycle, and EV changes enqueue every and only owning packs.
+- [x] A shared dependency delivery expands locally to every and only affected pack, including a non-top eligible collectible that becomes top chase.
+- [x] Complete matched inputs produce `ready`; partial contents, invalid odds, stale dependencies, and technical EV failures cannot produce it.
+- [x] Valid EV-unavailable work is ready, permanently invalid domain data is blocked, and a missing lifecycle baseline waits safely.
+- [x] Pulls, Heat, health, activity, profiles outside sealed pack fields, saves, and user records produce no pack work.
 
 ### Persistence and isolation
 
-- [ ] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
-- [ ] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
-- [ ] Same-pack claims serialize while two unrelated packs can be claimed concurrently.
-- [ ] Organization and provider mismatch tests directly refuse cross-provider access.
-- [ ] One unreachable provider leaves its delivery durable without preventing another provider's local planning.
+- [x] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
+- [x] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
+- [x] Same-pack claims serialize while two unrelated packs can be claimed concurrently.
+- [x] Organization and provider mismatch tests directly refuse cross-provider access.
+- [x] One unreachable provider leaves its delivery durable without preventing another provider's local planning.
 
 ### Recovery and bounded behavior
 
-- [ ] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
-- [ ] An expired claimant cannot mutate work after a newer fence is issued.
-- [ ] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
-- [ ] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
-- [ ] Records, logs, and errors stay within declared bounds and contain no protected data.
+- [x] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
+- [x] An expired claimant cannot mutate work after a newer fence is issued.
+- [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
+- [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
+- [x] Records, logs, and errors stay within declared bounds and contain no protected data.
 
 ## Verification
 
@@ -141,4 +141,10 @@ Intentional adaptations to `tech-002`, grounded in merged main:
 | 251-pack paged expansion, poison isolation, scope/source mismatches, stale shared delivery, expired lease, hold/epoch fencing and bounded retries | Same PostgreSQL integration suite |
 | Exact role inventory, scoped local references, immutable episode and progress guards | `packages/database/prisma/distributed-schema-contract.test.ts` plus real migrated provider databases |
 
-Full framework verification and publish metadata are recorded after the final gate completes. No browser acceptance surface exists in P02.
+### Verification result — 2026-09-03
+
+`npm run verify:framework` passed on implementation `a03129f5a8f84d5ccdb9930a840a4908206cdd8e`. The gate found an omitted local runtime grant list; the explicit ten-table list and publication sequence grant were added and the unweakened provisioning tests passed. The final run passed all product/tooling lanes and production builds.
+
+Main then included the independent frontend-only PR94. P02 was rebased onto `0d73ff3970aa2c8e4dec9dd4905caf6380997567`; `git range-diff` proved both implementation patches unchanged. Rebased implementation `0727718d6fde3e0da94382796b11a7d2c81da4de` passed `check:framework`, the standards ratchet, all workspace typechecks, all 521 frontend tests, and production builds again. The focused P02 readiness/crash matrix passed 29 checks, and the focused local provisioning suite passed 12.
+
+No browser acceptance surface exists in P02, and no environment was deployed or enabled. The phase-only implementation spans 23 authored files and 1,661 changed lines before final tracker metadata, with no generated diff.

@@ -2,9 +2,9 @@
 
 ## Start Here
 
-Build P02 with task 002 from merged P01. Prove provider-local planning, per-pack claims, and crash-safe artifact/intent persistence without enabling publication.
+Review P02's provider-local persistence PR, then build task 003 / P03, the deterministic snapshot assembler. No publication processor is enabled.
 
-**Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; 0/1 launch operations complete
+**Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
 ## Context
 
@@ -147,8 +147,9 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Rollback:** Leave new state unused and revert the disabled planner.
 - **Size exception:** The provider-local schema, impact plan, readiness decision, sequence allocation, and durable request form one transaction boundary; splitting them would leave an incomplete provider authority. Authored volume remains capped at the default threshold.
 - **Branch:** `codex/pack-version-publication-p02-state`.
-- **Verified parent:** not recorded.
-- **Verified implementation:** not recorded.
+- **Verified parent:** `0d73ff3970aa2c8e4dec9dd4905caf6380997567` (includes merged P01 and independent frontend PR94).
+- **Verified implementation:** `0727718d6fde3e0da94382796b11a7d2c81da4de`; unchanged patches from the passing full framework gate, with framework/ratchet/typecheck/frontend/build checks repeated after rebase.
+- **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** not opened.
 
 #### P03 — Deterministic assembler
@@ -247,7 +248,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | done | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
@@ -297,4 +298,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Complete and publish P02. P03–P05 remain independent sibling phases from merged P01.
+Publish the verified P02 branch for review. Next implementation is task 003 / P03; P03–P05 remain planned foundation phases and publication stays disabled until P06 and launch authorization.
