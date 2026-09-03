@@ -13,3 +13,12 @@ test("outside click aborts in-flight collectible search before applying matches"
   assert.match(source, /searchControllerRef\.current\?\.abort\(\)/);
   assert.match(source, /closeOnOutsidePress/);
 });
+
+test("choosing a found chase can inspect it without replacing catalog selection", () => {
+  assert.match(source, /onInspect\?:/);
+  assert.match(
+    source,
+    /onInspect\?\.\(option\.publicCollectibleId, trigger, option\)/,
+  );
+  assert.match(source, /View chase/);
+});

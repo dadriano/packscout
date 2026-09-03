@@ -38,6 +38,7 @@ type AllRepacksTableProps = Readonly<{
   onSort: (sort: PublicRepackSort, direction: CatalogSortDirection) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  onInspectChase?: (publicCollectibleId: string, trigger: HTMLButtonElement) => void;
   repackHrefById: ReadonlyMap<string, string>;
   controls?: ReactNode;
 }>;
@@ -71,6 +72,7 @@ function RepackRow({
   onSelect,
   onCopyPromo,
   onOpenRepack,
+  onInspectChase,
   repackHref,
   desiredChase,
   desiredSearchActive,
@@ -80,6 +82,7 @@ function RepackRow({
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
   onCopyPromo: (publicRepackId: string) => void;
   onOpenRepack: (publicRepackId: string) => void;
+  onInspectChase?: (publicCollectibleId: string, trigger: HTMLButtonElement) => void;
   repackHref: string | null;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
@@ -168,14 +171,35 @@ function RepackRow({
       </td>
       <td>
         {displayedChase ? (
-          <span className={styles.chaseMatch}>
-            <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
-            {desiredEvidence ? (
-              <small className={styles.chaseEvidence}>
-                {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
-              </small>
-            ) : null}
-          </span>
+          desiredSearchActive && onInspectChase ? (
+            <button
+              aria-label={`View chase ${displayedChase.collectible.name}`}
+              className={styles.chaseSelect}
+              onClick={(event) =>
+                onInspectChase(
+                  displayedChase.collectible.publicCollectibleId,
+                  event.currentTarget,
+                )
+              }
+              type="button"
+            >
+              <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
+              {desiredEvidence ? (
+                <small className={styles.chaseEvidence}>
+                  {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
+                </small>
+              ) : null}
+            </button>
+          ) : (
+            <span className={styles.chaseMatch}>
+              <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
+              {desiredEvidence ? (
+                <small className={styles.chaseEvidence}>
+                  {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
+                </small>
+              ) : null}
+            </span>
+          )
         ) : (
           <PlainUnavailable reason={
             desiredSearchActive
@@ -226,6 +250,7 @@ export function AllRepacksTable({
   onSort,
   onCopyPromo,
   onOpenRepack,
+  onInspectChase,
   repackHrefById,
   controls,
 }: AllRepacksTableProps) {
@@ -331,6 +356,7 @@ export function AllRepacksTable({
                 desiredChase={desiredChaseByRepackId.get(repack.publicRepackId) ?? null}
                 desiredSearchActive={page.desiredCollectible !== null}
                 onCopyPromo={onCopyPromo}
+                onInspectChase={onInspectChase}
                 onOpenRepack={onOpenRepack}
                 onSelect={onSelect}
                 repack={repack}

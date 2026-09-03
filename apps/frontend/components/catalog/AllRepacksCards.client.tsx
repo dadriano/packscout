@@ -25,6 +25,7 @@ type AllRepacksCardsProps = Readonly<{
   selectedPublicRepackId: string | null;
   controls: ReactNode;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
+  onInspectChase?: (publicCollectibleId: string, trigger: HTMLButtonElement) => void;
 }>;
 
 function RepackCard({
@@ -33,12 +34,14 @@ function RepackCard({
   desiredChase,
   desiredSearchActive,
   onSelect,
+  onInspectChase,
 }: Readonly<{
   repack: PublicRepackViewSummaryV3;
   selected: boolean;
   desiredChase: PublicRepackChase | null;
   desiredSearchActive: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
+  onInspectChase?: (publicCollectibleId: string, trigger: HTMLButtonElement) => void;
 }>) {
   const boundEstimate = useClockBoundPackScoutEv(repack.evEstimates.packScout, repack.price);
   const estimate = presentPackScoutEvV3({
@@ -108,7 +111,25 @@ function RepackCard({
         </div>
         <div>
           <dt>{desiredSearchActive ? "Desired chase" : "Top chase"}</dt>
-          <dd>{displayedChase?.collectible.name ?? "Unavailable"}</dd>
+          <dd>
+            {displayedChase && desiredSearchActive && onInspectChase ? (
+              <button
+                aria-label={`View chase ${displayedChase.collectible.name}`}
+                className={styles.chaseSelect}
+                onClick={(event) =>
+                  onInspectChase(
+                    displayedChase.collectible.publicCollectibleId,
+                    event.currentTarget,
+                  )
+                }
+                type="button"
+              >
+                {displayedChase.collectible.name}
+              </button>
+            ) : (
+              displayedChase?.collectible.name ?? "Unavailable"
+            )}
+          </dd>
         </div>
         <div>
           <dt>{desiredSearchActive ? "Desired chase value" : "Top chase value"}</dt>
@@ -124,6 +145,7 @@ export function AllRepacksCards({
   selectedPublicRepackId,
   controls,
   onSelect,
+  onInspectChase,
 }: AllRepacksCardsProps) {
   const desiredChaseByRepackId = new Map(
     page.desiredChaseMatches.map((match) => [match.publicRepackId, match.chase]),
@@ -151,6 +173,7 @@ export function AllRepacksCards({
             desiredChase={desiredChaseByRepackId.get(repack.publicRepackId) ?? null}
             desiredSearchActive={page.desiredCollectible !== null}
             key={repack.publicRepackId}
+            onInspectChase={onInspectChase}
             onSelect={onSelect}
             repack={repack}
             selected={repack.publicRepackId === selectedPublicRepackId}

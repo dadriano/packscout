@@ -25,6 +25,7 @@ import {
 import { allRepacksCatalogIsEmpty } from "@/lib/public-repacks-v3";
 import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 import { AllRepacksClient } from "./AllRepacksClient.client";
+import { ChaseInspectProvider } from "@/components/catalog/ChaseCollectibleInspector.client";
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
@@ -95,25 +96,27 @@ export default async function AllRepacksPage({
     <>
       <ShellSurfaceReporter mode="product" />
       <DataReleaseStatusReporter status={status} />
-      <DashboardPageHeader
-        activeView="all-repacks"
-        desiredChase={{
-          query: parsed.query,
-          selected: result.data.desiredCollectible,
-          layout,
-        }}
-      />
-      {allRepacksCatalogIsEmpty(result.data) ? (
-        <EmptyCatalog />
-      ) : (
-        <AllRepacksClient
-          details={result.data.details}
-          key={`${result.data.release.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
-          initialLayout={layout}
-          page={result.data}
-          query={parsed.query}
+      <ChaseInspectProvider>
+        <DashboardPageHeader
+          activeView="all-repacks"
+          desiredChase={{
+            query: parsed.query,
+            selected: result.data.desiredCollectible,
+            layout,
+          }}
         />
-      )}
+        {allRepacksCatalogIsEmpty(result.data) ? (
+          <EmptyCatalog />
+        ) : (
+          <AllRepacksClient
+            details={result.data.details}
+            key={`${result.data.release.publicReleaseId}:${result.data.range.start}:${result.data.queryFingerprint}`}
+            initialLayout={layout}
+            page={result.data}
+            query={parsed.query}
+          />
+        )}
+      </ChaseInspectProvider>
       <DashboardDisclaimer />
     </>
   );

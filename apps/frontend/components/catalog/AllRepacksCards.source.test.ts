@@ -23,3 +23,11 @@ test("cards delegate confidence evidence and keep explanations out of the layout
   assert.doesNotMatch(source, /className=\{styles\.evidence\}/);
   assert.doesNotMatch(source, /<dt>Estimate<\/dt>/);
 });
+
+test("desired chase names on cards open the chase inspector", () => {
+  assert.match(source, /onInspectChase\?:/);
+  assert.match(
+    source,
+    /aria-label=\{`View chase \$\{displayedChase\.collectible\.name\}`\}/,
+  );
+});

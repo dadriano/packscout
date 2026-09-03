@@ -8,6 +8,7 @@ import type {
   PublicCollectibleDisplay,
 } from "@packscout/contracts";
 import { DesiredCollectibleSearch } from "@/components/catalog/DesiredCollectibleSearch.client";
+import { useOptionalChaseInspect } from "@/components/catalog/ChaseCollectibleInspector.client";
 import {
   resetCatalogPagination,
   serializeCatalogViewState,
@@ -34,9 +35,11 @@ export function DashboardPageHeader({
 }: DashboardPageHeaderProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const chaseInspect = useOptionalChaseInspect();
 
   function selectDesiredChase(publicCollectibleId: string | null) {
     if (!desiredChase) return;
+    if (publicCollectibleId === null) chaseInspect?.close(false);
     const nextQuery = resetCatalogPagination(desiredChase.query, {
       desiredPublicCollectibleId: publicCollectibleId,
       ...(publicCollectibleId !== null && desiredChase.query.sort === "top_chase_value"
@@ -81,6 +84,16 @@ export function DashboardPageHeader({
       {desiredChase ? (
         <div className="dashboard-desired-chase">
           <DesiredCollectibleSearch
+            onInspect={
+              chaseInspect
+                ? (publicCollectibleId, trigger, identity) =>
+                    chaseInspect.open({
+                      publicCollectibleId,
+                      identity,
+                      trigger,
+                    })
+                : undefined
+            }
             onSelect={selectDesiredChase}
             pending={pending}
             selected={desiredChase.selected}
