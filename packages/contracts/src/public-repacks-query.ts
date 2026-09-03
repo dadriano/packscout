@@ -9,7 +9,7 @@ import {
   publicVendorKeySchema,
 } from "./data-release-v2.ts";
 
-export const PUBLIC_REPACK_PRICE_MIN_MINOR = 1_000 as const;
+export const PUBLIC_REPACK_PRICE_MIN_MINOR = 100 as const;
 export const PUBLIC_REPACK_PRICE_MAX_MINOR = 1_200_000 as const;
 export const PUBLIC_REPACK_DEFAULT_PAGE_SIZE = 25 as const;
 export const PUBLIC_REPACK_MAX_PAGE_SIZE = 50 as const;

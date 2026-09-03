@@ -433,7 +433,7 @@ export function buildV3ListPage(
           categories: [],
           collectibleTypes: [],
           availability: "all",
-          price: { mode: "full", minMinor: 1_000, maxMinor: 1_200_000 },
+          price: { mode: "full", minMinor: 100, maxMinor: 1_200_000 },
         },
         sort: "packscout_ev_dollars",
         direction: "desc",

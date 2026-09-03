@@ -4,11 +4,18 @@ import type { CategoryFacetOption } from "@packscout/contracts";
 import {
   PRICE_FILTER_MAX_DOLLARS,
   PRICE_FILTER_MIN_DOLLARS,
+  PRICE_FILTER_SEGMENTS,
+  PRICE_FILTER_SLIDER_MAX_INDEX,
+  PRICE_FILTER_SLIDER_VALUES,
   categoryFacetRows,
   clampPriceFilter,
   closerPriceThumb,
   formatFilterPrice,
   nestCategoryFacets,
+  priceSliderIndexFromValue,
+  priceSliderIndexFromKeyboard,
+  priceSliderPercent,
+  priceSliderValueFromIndex,
   roundPriceFilterDollars,
   sliderValueFromPointer,
 } from "./catalog-filters-presentation";
@@ -82,26 +89,97 @@ test("a subcategory whose parent is absent still appears as a root", () => {
   assert.equal(tree[0]?.children.length, 0);
 });
 
-test("price slider labels and clamps stay on the $10–$12,000 range", () => {
-  assert.equal(PRICE_FILTER_MIN_DOLLARS, 10);
+test("price slider labels and clamps stay on the $1–$12,000 range", () => {
+  assert.equal(PRICE_FILTER_MIN_DOLLARS, 1);
   assert.equal(PRICE_FILTER_MAX_DOLLARS, 12_000);
-  assert.equal(formatFilterPrice(10), "$10");
+  assert.equal(formatFilterPrice(1), "$1");
   assert.equal(formatFilterPrice(12_000), "$12,000");
   assert.equal(formatFilterPrice(613.28), "$613");
   assert.equal(roundPriceFilterDollars(613.28), 613);
   assert.equal(roundPriceFilterDollars(613.5), 614);
   assert.equal(roundPriceFilterDollars(3_153.75), 3_154);
   assert.equal(Number.isNaN(roundPriceFilterDollars(Number.NaN)), true);
-  assert.equal(clampPriceFilter(5, "min", 100), 10);
+  assert.equal(clampPriceFilter(-5, "min", 100), 1);
   assert.equal(clampPriceFilter(20_000, "max", 50), 12_000);
   assert.equal(clampPriceFilter(613.78, "min", 1_000), 614);
   assert.equal(clampPriceFilter(80, "min", 40), 40);
   assert.equal(clampPriceFilter(20, "max", 40), 40);
 });
 
-test("the closer slider thumb is the one under the pointer", () => {
-  assert.equal(closerPriceThumb(12, 10, 12_000), "min");
-  assert.equal(closerPriceThumb(11_900, 10, 12_000), "max");
-  assert.equal(sliderValueFromPointer(0, 0, 100), 10);
+test("the shared slider ladder applies every requested segment exactly once", () => {
+  assert.deepEqual(PRICE_FILTER_SEGMENTS, [
+    { minimum: 1, maximum: 5, step: 1 },
+    { minimum: 5, maximum: 100, step: 5 },
+    { minimum: 100, maximum: 500, step: 25 },
+    { minimum: 500, maximum: 1_000, step: 50 },
+    { minimum: 1_000, maximum: 5_000, step: 250 },
+    { minimum: 5_000, maximum: 12_000, step: 500 },
+  ]);
+
+  const expectedBands = [
+    { first: 1, last: 5, step: 1 },
+    { first: 10, last: 100, step: 5 },
+    { first: 125, last: 500, step: 25 },
+    { first: 550, last: 1_000, step: 50 },
+    { first: 1_250, last: 5_000, step: 250 },
+    { first: 5_500, last: 12_000, step: 500 },
+  ] as const;
+  const expectedValues = expectedBands.flatMap(({ first, last, step }) => {
+    const values: number[] = [];
+    for (let value = first; value <= last; value += step) values.push(value);
+    return values;
+  });
+
+  assert.deepEqual(PRICE_FILTER_SLIDER_VALUES, expectedValues);
+  assert.equal(new Set(PRICE_FILTER_SLIDER_VALUES).size, PRICE_FILTER_SLIDER_VALUES.length);
+  assert.equal(PRICE_FILTER_SLIDER_VALUES.length, 80);
+  assert.equal(PRICE_FILTER_SLIDER_MAX_INDEX, 79);
+});
+
+test("both slider handles round-trip every discrete price", () => {
+  PRICE_FILTER_SLIDER_VALUES.forEach((value, index) => {
+    assert.equal(priceSliderIndexFromValue(value), index, `index for $${value}`);
+    assert.equal(priceSliderValueFromIndex(index), value, `value at index ${index}`);
+  });
+  assert.equal(priceSliderValueFromIndex(-20), 1);
+  assert.equal(priceSliderValueFromIndex(200), 12_000);
+  assert.equal(priceSliderValueFromIndex(Number.NaN), 1);
+  assert.equal(priceSliderIndexFromValue(613), priceSliderIndexFromValue(600));
+  assert.equal(priceSliderIndexFromValue(625), priceSliderIndexFromValue(600));
+  assert.equal(priceSliderIndexFromValue(626), priceSliderIndexFromValue(650));
+});
+
+test("slider keyboard controls step the discrete ladder and honor its ends", () => {
+  assert.equal(priceSliderIndexFromKeyboard("ArrowRight", 0), 1);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowUp", 4), 5);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowLeft", 24), 23);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowDown", 79), 78);
+  assert.equal(priceSliderIndexFromKeyboard("Home", 52), 0);
+  assert.equal(priceSliderIndexFromKeyboard("End", 12), 79);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowLeft", 0), 0);
+  assert.equal(priceSliderIndexFromKeyboard("ArrowRight", 79), 79);
+  assert.equal(priceSliderIndexFromKeyboard("PageUp", 12), null);
+});
+
+test("pointer mapping gives low prices substantial track space", () => {
+  for (const value of [1, 5, 100, 500, 1_000, 5_000, 12_000]) {
+    const index = priceSliderIndexFromValue(value);
+    assert.equal(
+      sliderValueFromPointer((index / PRICE_FILTER_SLIDER_MAX_INDEX) * 100, 0, 100),
+      value,
+    );
+  }
+  assert.ok(priceSliderPercent(100) > 29);
+  assert.ok(priceSliderPercent(100) < 30);
+  assert.ok(priceSliderPercent(1_000) > 62);
+  assert.ok(priceSliderPercent(1_000) < 63);
+  assert.equal(sliderValueFromPointer(-10, 0, 100), 1);
   assert.equal(sliderValueFromPointer(100, 0, 100), 12_000);
+  assert.equal(sliderValueFromPointer(20, 0, 0), 1);
+});
+
+test("the closer slider thumb is selected in segmented track space", () => {
+  assert.equal(closerPriceThumb(2, 1, 12_000), "min");
+  assert.equal(closerPriceThumb(11_500, 1, 12_000), "max");
+  assert.equal(closerPriceThumb(100, 1, 500), "max");
 });

@@ -18,7 +18,7 @@ const publicParsers = await import("../../apps/frontend/lib/public-repacks-v3.ts
 const CLOCK = "2026-08-19T18:45:00.000Z";
 const FINGERPRINT = "a".repeat(64);
 const filters = { vendors: [], categories: [], collectibleTypes: [], availability: "all",
-  price: { mode: "full", minMinor: 1000, maxMinor: 1200000 } };
+  price: { mode: "full", minMinor: 100, maxMinor: 1200000 } };
 const facets = { vendors: [], categories: [], collectibleTypes: [] };
 const display = card => Object.fromEntries(["publicCollectibleId", "name", "collectibleType",
   "publicCategoryIds", "primaryImage", "valuation"].map(key => [key, card[key]]));

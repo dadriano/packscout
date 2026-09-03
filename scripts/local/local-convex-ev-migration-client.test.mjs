@@ -26,7 +26,7 @@ function publicReadback() {
     rows: page.rows.slice(0, 1), details: page.details.slice(0, 1),
     facets: { vendors: [], categories: [], collectibleTypes: [] },
     activeQuery: { search: "", filters: { vendors: [], categories: [], collectibleTypes: [],
-      price: { mode: "full", minMinor: 1_000, maxMinor: 1_200_000 }, availability: "all" }, sort: "packscout_ev_dollars", direction: "desc",
+      price: { mode: "full", minMinor: 100, maxMinor: 1_200_000 }, availability: "all" }, sort: "packscout_ev_dollars", direction: "desc",
     pageSize: 1, desiredPublicCollectibleId: null },
     queryFingerprint: "a".repeat(64), nextCursor: null, hasPrevious: false,
     range: { start: 1, end: 1, total: 1 }, paginationReset: null,
