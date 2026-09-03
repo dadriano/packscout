@@ -1690,6 +1690,10 @@ export default defineSchema({
     acceptedSearchRowSetHash: sha256Validator,
     lastBatchKind: nullableTextValidator,
     lastRecordKey: nullableTextValidator,
+    // Absent on releases completed before record-update aggregation existed.
+    // New releases start at null and applyBatch derives the maximum source
+    // timestamp from every collectible, repack, and chase it accepts.
+    latestCatalogRecordUpdatedAt: v.optional(nullableTimestampValidator),
     createdAt: timestampValidator,
     completedAt: nullableTimestampValidator,
   })

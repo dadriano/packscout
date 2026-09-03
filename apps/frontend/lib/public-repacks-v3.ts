@@ -6,6 +6,7 @@ import {
   dataReleaseV3IdentitySchema,
   desiredCollectibleRepackResultsV3Schema,
   publicCollectibleSchema,
+  publicCatalogRecordUpdateStatusV3Schema,
   publicDashboardBundleV3Schema,
   publicOpaqueCursorSchema,
   publicReadError,
@@ -22,6 +23,7 @@ import {
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
   type PublicCollectible,
+  type PublicCatalogRecordUpdateStatusV3,
   type PublicDashboardBundleV3,
   type PublicReadError,
   type PublicRepackFilters,
@@ -76,6 +78,8 @@ export type PublicCollectibleSearchResultsV3 = Readonly<{
 }>;
 
 export type GetPublicShellStatusV3Result = PublicResult<PublicShellStatusV3>;
+export type GetPublicCatalogRecordUpdateStatusV3Result =
+  PublicResult<PublicCatalogRecordUpdateStatusV3>;
 export type GetDashboardBundleV3Result = PublicResult<DashboardBundleV3>;
 export type ListPublicRepacksV3Result = PublicResult<ListPublicRepacksPageV3>;
 export type GetPublicRepackV3Result = PublicResult<PublicRepackViewDetailV3>;
@@ -238,6 +242,15 @@ export function parseGetPublicShellStatusV3Result(
   input: unknown,
 ): GetPublicShellStatusV3Result {
   return parsedResult(input, parseShellStatusV3);
+}
+
+export function parseGetPublicCatalogRecordUpdateStatusV3Result(
+  input: unknown,
+): GetPublicCatalogRecordUpdateStatusV3Result {
+  return parsedResult(input, (data) => {
+    const parsed = publicCatalogRecordUpdateStatusV3Schema.safeParse(data);
+    return parsed.success ? parsed.data : null;
+  });
 }
 
 export function parseGetDashboardBundleV3Result(

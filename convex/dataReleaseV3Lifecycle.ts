@@ -583,6 +583,7 @@ export const start = internalMutation({
       acceptedSearchRowSetHash: EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
       lastBatchKind: null,
       lastRecordKey: null,
+      latestCatalogRecordUpdatedAt: null,
       createdAt: serverTime,
       completedAt: null,
     });
@@ -617,6 +618,34 @@ function recordKey(
       return `${chase.publicRepackId}:${chase.publicCollectibleId}`;
     }
   }
+}
+
+function latestCatalogRecordUpdatedAtInBatch(
+  request: DataReleaseV3ApplyBatchRequest,
+): string | null {
+  if (request.kind === "categories") return null;
+  const timestamps = request.kind === "collectibles"
+    ? request.records.map((record) => record.dataAsOf)
+    : request.kind === "repacks"
+      ? request.records.map((record) => record.sourceUpdatedAt)
+      : request.records.map((record) => record.observedAt);
+  return timestamps.reduce<string | null>((latest, timestamp) => {
+    // Entity contracts accept valid ISO offsets, but the public status
+    // contract intentionally emits one canonical UTC representation.
+    const canonicalTimestamp = new Date(Date.parse(timestamp)).toISOString();
+    return latest === null || Date.parse(canonicalTimestamp) > Date.parse(latest)
+      ? canonicalTimestamp
+      : latest;
+  }, null);
+}
+
+function laterCatalogRecordTimestamp(
+  current: string | null | undefined,
+  candidate: string | null,
+): string | null {
+  if (candidate === null) return current ?? null;
+  if (current === null || current === undefined) return candidate;
+  return Date.parse(candidate) > Date.parse(current) ? candidate : current;
 }
 
 /**
@@ -917,9 +946,25 @@ export const applyBatch = internalMutation({
     if (newCount > release.expectedCounts[request.kind]) {
       refuse("PUBLICATION_RECONCILIATION_FAILED");
     }
+    const previouslyAcceptedTimestampedRecordCount =
+      release.acceptedCounts.collectibles +
+      release.acceptedCounts.repacks +
+      release.acceptedCounts.chases;
+    if (
+      release.latestCatalogRecordUpdatedAt === undefined &&
+      previouslyAcceptedTimestampedRecordCount > 0
+    ) {
+      // A release partially staged before this aggregate existed cannot be
+      // resumed without silently omitting timestamps from its earlier batches.
+      refuse("PUBLICATION_STATE_CONFLICT");
+    }
 
     const topChases = await assertStagedReferences(ctx, release._id, request);
     const { searchShard } = await insertBatchRecords(ctx, release, request);
+    const latestCatalogRecordUpdatedAt = laterCatalogRecordTimestamp(
+      release.latestCatalogRecordUpdatedAt,
+      latestCatalogRecordUpdatedAtInBatch(request),
+    );
 
     const acceptedBatchChainHash = await sha256CanonicalJson(
       DATA_RELEASE_V3_BATCH_CHAIN_HASH_DOMAIN,
@@ -973,6 +1018,7 @@ export const applyBatch = internalMutation({
       acceptedSearchRowSetHash,
       lastBatchKind: request.kind,
       lastRecordKey: keys[keys.length - 1]!,
+      latestCatalogRecordUpdatedAt,
     });
     const receipt = await buildReceipt({
       schemaVersion: DATA_RELEASE_V3_SCHEMA_VERSION,
@@ -1074,6 +1120,25 @@ export const finalize = internalMutation({
       release.acceptedBatchChainHash === release.expectedBatchChainHash &&
       release.acceptedSearchRowCount === release.expectedCounts.repacks;
     if (!reconciles) refuse("PUBLICATION_RECONCILIATION_FAILED");
+    const expectedTimestampedRecordCount =
+      release.expectedCounts.collectibles +
+      release.expectedCounts.repacks +
+      release.expectedCounts.chases;
+    if (
+      expectedTimestampedRecordCount > 0 &&
+      (release.latestCatalogRecordUpdatedAt === null ||
+        release.latestCatalogRecordUpdatedAt === undefined)
+    ) {
+      refuse("PUBLICATION_RECONCILIATION_FAILED");
+    }
+    if (
+      release.latestCatalogRecordUpdatedAt !== null &&
+      release.latestCatalogRecordUpdatedAt !== undefined &&
+      Date.parse(release.latestCatalogRecordUpdatedAt) >
+        Date.parse(release.dataAsOf)
+    ) {
+      refuse("PUBLICATION_RECONCILIATION_FAILED");
+    }
     const contentHash = await sha256CanonicalJson(
       DATA_RELEASE_V3_CONTENT_HASH_DOMAIN,
       {

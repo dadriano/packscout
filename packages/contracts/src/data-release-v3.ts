@@ -155,6 +155,29 @@ export const publicShellStatusV3Schema = z
     validateProviderHealthResponseClockV3(status, context);
   });
 
+/**
+ * The newest source timestamp carried by any timestamped record in the active
+ * public catalog. This is deliberately separate from release identity: a
+ * publisher completion clock describes when Convex accepted a release, while
+ * this value describes when the underlying catalog records last changed.
+ */
+export const publicCatalogRecordUpdateStatusV3Schema = z
+  .object({
+    schemaVersion: z.literal(DATA_RELEASE_V3_SCHEMA_VERSION),
+    publicReleaseId: z.uuid(),
+    latestCatalogRecordUpdatedAt: packScoutBuybackEvTimestampV1Schema,
+    evaluatedAt: packScoutBuybackEvTimestampV1Schema,
+  })
+  .strict()
+  .refine(
+    ({ latestCatalogRecordUpdatedAt, evaluatedAt }) =>
+      Date.parse(latestCatalogRecordUpdatedAt) <= Date.parse(evaluatedAt),
+    {
+      path: ["latestCatalogRecordUpdatedAt"],
+      message: "data_release_v3.record_update_after_evaluation",
+    },
+  );
+
 function validateProviderHealthResponseClockV3(
   response: {
     readonly confidenceEvaluatedAt: string;
@@ -422,6 +445,9 @@ export type PublicDashboardBundleV3 = z.infer<
   typeof publicDashboardBundleV3Schema
 >;
 export type PublicShellStatusV3 = z.infer<typeof publicShellStatusV3Schema>;
+export type PublicCatalogRecordUpdateStatusV3 = z.infer<
+  typeof publicCatalogRecordUpdateStatusV3Schema
+>;
 export type PublicRepackListPageV3 = z.infer<
   typeof publicRepackListPageV3Schema
 >;

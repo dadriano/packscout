@@ -31,6 +31,7 @@ import {
   V3_COLLECTIBLE_ID,
   V3_EXPIRES_AT,
   V3_FIXTURE_NOW,
+  V3_OBSERVED_AT,
   V3_REPACK_ID_A,
   V3_REPACK_ID_B,
   V3_REPACK_ID_C,
@@ -182,11 +183,17 @@ async function publishFixture(
   t: V3Test,
   details = fixtureDetails(),
   collectibles: readonly PublicCollectible[] = [buildV3Collectible()],
+  options: Readonly<{
+    dataAsOf?: string;
+    chases?: readonly PublicRepackChase[];
+  }> = {},
 ): Promise<V3FixturePlan> {
   const plan = await buildV3FixturePlan({
     publicReleaseId: RELEASE_ID_1,
+    dataAsOf: options.dataAsOf,
     details,
     collectibles,
+    chases: options.chases,
   });
   await t.mutation(
     internal.dataReleaseV3Lifecycle.start,
@@ -277,6 +284,143 @@ describe("data_release_v3 public reads", () => {
     expect(release.publicEvPolicyVersion).toBe(
       "packscout-public-ev-nonpositive-v1",
     );
+  });
+
+  test("record update status selects the newest collectible, repack, or chase timestamp", async () => {
+    const empty = convexTest(schema, modules);
+    const before = (await empty.query(
+      internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+      { currentTime: NOW },
+    )) as AnyResult;
+    expect(before.ok).toBe(false);
+
+    const latestRecordUpdatedAt = new Date(NOW - 60_000).toISOString();
+    const snapshotAt = new Date(NOW).toISOString();
+    const oldCollectible = publicCollectibleSchema.parse({
+      ...buildV3Collectible(),
+      dataAsOf: V3_OBSERVED_AT,
+    });
+    const oldChase = publicRepackChaseSchema.parse({
+      ...buildV3Chase(V3_REPACK_ID_A),
+      observedAt: V3_OBSERVED_AT,
+    });
+    const latestChase = publicRepackChaseSchema.parse({
+      ...oldChase,
+      observedAt: latestRecordUpdatedAt,
+    });
+    const cases = [
+      {
+        name: "collectible",
+        collectible: publicCollectibleSchema.parse({
+          ...oldCollectible,
+          dataAsOf: latestRecordUpdatedAt,
+        }),
+        detail: buildV3Detail({
+          sourceUpdatedAt: V3_OBSERVED_AT,
+          topChase: oldChase,
+        }),
+      },
+      {
+        name: "repack",
+        collectible: oldCollectible,
+        detail: buildV3Detail({
+          sourceUpdatedAt: latestRecordUpdatedAt,
+          topChase: oldChase,
+        }),
+      },
+      {
+        name: "chase",
+        collectible: oldCollectible,
+        detail: buildV3Detail({
+          sourceUpdatedAt: V3_OBSERVED_AT,
+          topChase: latestChase,
+        }),
+      },
+    ] as const;
+
+    for (const recordCase of cases) {
+      const t = convexTest(schema, modules);
+      await publishFixture(t, [recordCase.detail], [recordCase.collectible], {
+        dataAsOf: snapshotAt,
+      });
+      const after = (await t.query(
+        internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+        { currentTime: NOW },
+      )) as AnyResult;
+      expect(after.ok, recordCase.name).toBe(true);
+      expect(after.data, recordCase.name).toMatchObject({
+        schemaVersion: "data_release_v3",
+        publicReleaseId: RELEASE_ID_1,
+        latestCatalogRecordUpdatedAt: latestRecordUpdatedAt,
+        evaluatedAt: snapshotAt,
+      });
+    }
+
+    const offsetTimestamp = new Date(
+      Date.parse(latestRecordUpdatedAt) - 7 * 60 * 60_000,
+    ).toISOString().replace(/Z$/u, "-07:00");
+    const offset = convexTest(schema, modules);
+    await publishFixture(
+      offset,
+      [
+        buildV3Detail({
+          sourceUpdatedAt: V3_OBSERVED_AT,
+          topChase: oldChase,
+        }),
+      ],
+      [
+        publicCollectibleSchema.parse({
+          ...oldCollectible,
+          dataAsOf: offsetTimestamp,
+        }),
+      ],
+      { dataAsOf: snapshotAt },
+    );
+    const normalized = (await offset.query(
+      internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+      { currentTime: NOW },
+    )) as AnyResult;
+    expect(normalized.ok).toBe(true);
+    expect(normalized.data).toMatchObject({
+      latestCatalogRecordUpdatedAt: latestRecordUpdatedAt,
+    });
+  });
+
+  test("record update status fails closed for a legacy or category-only release", async () => {
+    const legacy = convexTest(schema, modules);
+    await publishFixture(legacy);
+    await legacy.run(async (ctx) => {
+      const release = await ctx.db
+        .query("dataReleaseV3Releases")
+        .withIndex("by_public_release_id", (index) =>
+          index.eq("publicReleaseId", RELEASE_ID_1),
+        )
+        .unique();
+      if (release === null) throw new Error("missing fixture release");
+      const {
+        _id,
+        _creationTime: _ignoredCreationTime,
+        latestCatalogRecordUpdatedAt: _ignoredUpdateTime,
+        ...legacyRelease
+      } = release;
+      await ctx.db.replace(_id, legacyRelease);
+    });
+    const legacyResult = await legacy.query(
+      internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+      { currentTime: NOW },
+    );
+    expect(legacyResult.ok).toBe(false);
+
+    const categoryOnly = convexTest(schema, modules);
+    await publishFixture(categoryOnly, [], [], {
+      dataAsOf: new Date(NOW).toISOString(),
+      chases: [],
+    });
+    const categoryOnlyResult = await categoryOnly.query(
+      internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+      { currentTime: NOW },
+    );
+    expect(categoryOnlyResult.ok).toBe(false);
   });
 
   test("dashboard ranks by signed EV dollars, excludes ineligible repacks, and aggregates with the same rules", async () => {

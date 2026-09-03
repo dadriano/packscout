@@ -91,9 +91,8 @@ function configureCredential(value: string) {
 
 /**
  * Publishes and activates one data_release_v3 release through the real
- * lifecycle mutations. The canonical watermark is pinned to the stubbed seed
- * clock because finalize refuses a release whose `dataAsOf` runs ahead of
- * server time.
+ * lifecycle mutations. The canonical watermark is pinned to the stubbed
+ * runtime clock so it bounds every source timestamp in the fixture.
  */
 async function publishActiveDataReleaseV3(t: CatalogAccessTest): Promise<void> {
   const detail = buildV3Detail({ publicRepackId: V3_REPACK_ID_A });
@@ -107,7 +106,7 @@ async function publishActiveDataReleaseV3(t: CatalogAccessTest): Promise<void> {
     expiresAt: new Date(Date.parse(SEED_TIME) + 60 * 60_000).toISOString() };
   const plan = await buildV3FixturePlan({
     publicReleaseId: V3_PUBLIC_RELEASE_ID,
-    dataAsOf: SEED_TIME,
+    dataAsOf: new Date(V3_FIXTURE_NOW).toISOString(),
     details: [detail],
   });
   await t.mutation(
@@ -233,6 +232,7 @@ const GATED_CATALOG_QUERIES = [
   "publicRepacks.searchPublicCollectibles",
   "publicRepacks.findRepacksByDesiredCollectible",
   "publicRepacksV3.getPublicShellStatusV3",
+  "publicRepacksV3.getPublicCatalogRecordUpdateStatusV3",
   "publicRepacksV3.getDashboardBundleV3",
   "publicRepacksV3.listPublicRepacksV3",
   "publicRepacksV3.getPublicRepackV3",
@@ -316,6 +316,15 @@ const CATALOG_QUERY_INVOCATIONS: Readonly<
     }),
   "publicRepacksV3.getPublicShellStatusV3": (reader, _seeded, extra) =>
     reader.action(api.publicRepacksV3.getPublicShellStatusV3, { ...extra }),
+  "publicRepacksV3.getPublicCatalogRecordUpdateStatusV3": (
+    reader,
+    _seeded,
+    extra,
+  ) =>
+    reader.action(
+      api.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3,
+      { ...extra },
+    ),
   "publicRepacksV3.getDashboardBundleV3": (reader, _seeded, extra) =>
     reader.action(api.publicRepacksV3.getDashboardBundleV3, { ...extra }),
   "publicRepacksV3.listPublicRepacksV3": (reader, _seeded, extra) =>

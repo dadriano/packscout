@@ -7,6 +7,7 @@ import {
 import {
   allRepacksCatalogIsEmpty,
   dashboardCatalogIsEmpty,
+  parseGetPublicCatalogRecordUpdateStatusV3Result,
   parseGetDashboardBundleV3Result,
   parseGetPublicRepackV3Result,
   parseGetPublicShellStatusV3Result,
@@ -21,6 +22,42 @@ import {
   buildV3ReleaseIdentity,
   buildV3ViewDetail,
 } from "./packscout-ev-fixtures.test-support";
+
+test("parses the active catalog record update status strictly", () => {
+  const parsed = parseGetPublicCatalogRecordUpdateStatusV3Result({
+    ok: true,
+    data: {
+      schemaVersion: "data_release_v3",
+      publicReleaseId: FIXTURE_RELEASE_ID,
+      latestCatalogRecordUpdatedAt: "2026-08-19T10:03:00.000Z",
+      evaluatedAt: FIXTURE_CURRENT_EVALUATED_AT,
+    },
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(
+    parsed.data.latestCatalogRecordUpdatedAt,
+    "2026-08-19T10:03:00.000Z",
+  );
+
+  const extraField = parseGetPublicCatalogRecordUpdateStatusV3Result({
+    ok: true,
+    data: {
+      ...parsed.data,
+      completedAt: "2026-08-19T10:04:00.000Z",
+    },
+  });
+  assert.equal(extraField.ok, false);
+
+  const futureUpdate = parseGetPublicCatalogRecordUpdateStatusV3Result({
+    ok: true,
+    data: {
+      ...parsed.data,
+      latestCatalogRecordUpdatedAt: "2026-08-19T10:16:00.000Z",
+    },
+  });
+  assert.equal(futureUpdate.ok, false);
+});
 
 const DEFAULT_FILTERS = {
   vendors: [],

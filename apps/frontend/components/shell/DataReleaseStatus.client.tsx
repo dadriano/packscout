@@ -6,13 +6,12 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
 import {
   presentDataReleaseStatus,
-  providerHealthRefreshDelayMilliseconds,
+  recordUpdateRefreshIntervalMilliseconds,
   DataReleaseStatusValue,
 } from "@/lib/data-release-status.client";
 
@@ -38,11 +37,7 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
   const context = useContext(DataReleaseStatusContext);
   const state = status.state;
   const updatedAt = "updatedAt" in status ? status.updatedAt : undefined;
-  const freshThrough = "freshThrough" in status ? status.freshThrough : undefined;
   const evaluatedAt = "evaluatedAt" in status ? status.evaluatedAt : undefined;
-  const nextHealthEvaluationAt = "nextHealthEvaluationAt" in status
-    ? status.nextHealthEvaluationAt
-    : undefined;
   const dataSource = "dataSource" in status ? status.dataSource : undefined;
 
   useEffect(() => {
@@ -51,8 +46,6 @@ export function DataReleaseStatusReporter({ status }: { status: DataReleaseStatu
     context,
     dataSource,
     evaluatedAt,
-    freshThrough,
-    nextHealthEvaluationAt,
     state,
     status,
     updatedAt,
@@ -65,40 +58,33 @@ export function DataReleaseStatus() {
   const context = useContext(DataReleaseStatusContext);
   const status = context?.status ?? { state: "loading" };
   const router = useRouter();
-  const refreshedBoundary = useRef<string | null>(null);
-  const [clockRevision, setClockRevision] = useState(0);
-  const refreshDelay = providerHealthRefreshDelayMilliseconds(status);
-  const refreshBoundary =
-    "evaluatedAt" in status &&
-      "nextHealthEvaluationAt" in status &&
-      status.evaluatedAt !== undefined &&
-      status.nextHealthEvaluationAt !== undefined &&
-      status.nextHealthEvaluationAt !== null
-      ? `${status.evaluatedAt}:${status.nextHealthEvaluationAt}`
-      : null;
+  const [clock, setClock] = useState<Readonly<{
+    evaluatedAt: string | null;
+    elapsedMilliseconds: number;
+  }>>({ evaluatedAt: null, elapsedMilliseconds: 0 });
+  const refreshInterval = recordUpdateRefreshIntervalMilliseconds(status);
+  const evaluatedAt = "evaluatedAt" in status ? status.evaluatedAt : null;
+  const updatedAt = "updatedAt" in status ? status.updatedAt : null;
 
   useEffect(() => {
-    if (
-      refreshDelay === null ||
-      refreshBoundary === null ||
-      refreshedBoundary.current === refreshBoundary
-    ) return;
-    const maximumDelay = 2_147_483_647;
-    const delay = Math.min(
-      maximumDelay,
-      refreshDelay + 25,
-    );
-    const timer = window.setTimeout(() => {
-      refreshedBoundary.current = refreshBoundary;
-      setClockRevision((revision) => revision + 1);
+    if (refreshInterval === null) return;
+    const startedAt = window.performance.now();
+    const timer = window.setInterval(() => {
+      if (evaluatedAt !== null) {
+        setClock({
+          evaluatedAt,
+          elapsedMilliseconds: Math.max(0, window.performance.now() - startedAt),
+        });
+      }
       router.refresh();
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [clockRevision, refreshBoundary, refreshDelay, router]);
+    }, refreshInterval);
+    return () => window.clearInterval(timer);
+  }, [evaluatedAt, refreshInterval, router, updatedAt]);
 
   const trustedPresentationTime =
-    "evaluatedAt" in status && status.evaluatedAt !== undefined
-    ? Date.parse(status.evaluatedAt)
+    evaluatedAt !== null
+    ? Date.parse(evaluatedAt) +
+      (clock.evaluatedAt === evaluatedAt ? clock.elapsedMilliseconds : 0)
     : Number.NaN;
   const presentation = presentDataReleaseStatus(
     status,

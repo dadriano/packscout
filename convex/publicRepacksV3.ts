@@ -6,6 +6,7 @@ import {
   normalizeDashboardQueryInput,
   normalizeListPublicRepacksInput,
   normalizePublicSearchText,
+  publicCatalogRecordUpdateStatusV3Schema,
   publicDashboardBundleV3Schema,
   publicReadError,
   publicRepackListPageV3Schema,
@@ -14,6 +15,7 @@ import {
   publicRepackViewDetailV3Schema,
   unavailableRepackHeat,
   type PackScoutDisplayedEvV3,
+  type PublicCatalogRecordUpdateStatusV3,
   publicRepackViewSummaryV3FromDetail,
   searchPublicCollectiblesInputSchema,
   type DashboardKpis,
@@ -770,6 +772,75 @@ export const getPublicShellStatusV3AtTime = internalQuery({
   },
 });
 
+export const getPublicCatalogRecordUpdateStatusV3AtTime = internalQuery({
+  args: { currentTime: v.number(), ...catalogReadTokenArg },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<PublicResult<PublicCatalogRecordUpdateStatusV3>> => {
+    if (!(await catalogReadAuthorized(ctx, args.catalogReadToken))) {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
+    if (!currentTimeIsValid(args.currentTime)) {
+      return publicReadError("INVALID_QUERY");
+    }
+    try {
+      const state = await loadActiveDataReleaseV3State(ctx);
+      if (
+        state === null ||
+        state.activeReleaseId === null ||
+        state.activeRelease === null
+      ) {
+        return publicReadError("RELEASE_UNAVAILABLE");
+      }
+      const release = await ctx.db.get(
+        "dataReleaseV3Releases",
+        state.activeReleaseId,
+      );
+      if (
+        release === null ||
+        release.lifecycle !== "complete" ||
+        release.completedAt === null ||
+        release.latestCatalogRecordUpdatedAt === null ||
+        release.latestCatalogRecordUpdatedAt === undefined ||
+        release.publicReleaseId !== state.activeRelease.publicReleaseId ||
+        release.releaseFingerprint !== state.activeRelease.releaseFingerprint ||
+        release.methodVersion !== state.activeRelease.methodVersion ||
+        release.confidencePolicyVersion !==
+          state.activeRelease.confidencePolicyVersion ||
+        release.publicEvPolicyVersion !==
+          PACKSCOUT_PUBLIC_EV_POLICY_VERSION_V3 ||
+        release.publicEvPolicyVersion !==
+          state.activeRelease.publicEvPolicyVersion ||
+        release.dataAsOf !== state.activeRelease.dataAsOf ||
+        release.completedAt !== state.activeRelease.completedAt ||
+        canonicalJson(release.expectedCounts) !==
+          canonicalJson(state.activeRelease.counts) ||
+        canonicalJson(release.acceptedCounts) !==
+          canonicalJson(release.expectedCounts) ||
+        canonicalJson(release.acceptedEntityChainHashes) !==
+          canonicalJson(release.expectedEntityChainHashes) ||
+        release.acceptedBatchCount !== release.expectedBatchCount ||
+        release.acceptedBatchChainHash !== release.expectedBatchChainHash ||
+        release.acceptedSearchRowCount !== release.expectedCounts.repacks
+      ) {
+        return publicReadError("RELEASE_UNAVAILABLE");
+      }
+      const status = publicCatalogRecordUpdateStatusV3Schema.safeParse({
+        schemaVersion: "data_release_v3",
+        publicReleaseId: release.publicReleaseId,
+        latestCatalogRecordUpdatedAt: release.latestCatalogRecordUpdatedAt,
+        evaluatedAt: new Date(args.currentTime).toISOString(),
+      });
+      return status.success
+        ? success(status.data)
+        : publicReadError("RELEASE_UNAVAILABLE");
+    } catch {
+      return publicReadError("RELEASE_UNAVAILABLE");
+    }
+  },
+});
+
 export const getDashboardBundleV3AtTime = internalQuery({
   args: {
     filters: v.optional(v.any()),
@@ -1243,6 +1314,19 @@ export const getPublicShellStatusV3 = action({
       ...args,
       currentTime: Date.now(),
     }),
+});
+
+export const getPublicCatalogRecordUpdateStatusV3 = action({
+  args: { ...catalogReadTokenArg },
+  returns: v.any(),
+  handler: async (ctx, args): Promise<unknown> =>
+    await ctx.runQuery(
+      internal.publicRepacksV3.getPublicCatalogRecordUpdateStatusV3AtTime,
+      {
+        ...args,
+        currentTime: Date.now(),
+      },
+    ),
 });
 
 export const getDashboardBundleV3 = action({

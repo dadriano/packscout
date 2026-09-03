@@ -1,48 +1,24 @@
 import type { DataReleaseStatusValue } from "./data-release-status.client";
-import type {
-  GetPublicShellStatusV3Result,
-  PublicShellStatusV3,
-} from "./public-repacks-v3";
+import type { GetPublicCatalogRecordUpdateStatusV3Result } from "./public-repacks-v3";
 
 /**
- * Maps the independently refreshed provider-health summary to the shell
- * status. Immutable release age and per-estimate evidence age are deliberately
- * not provider-health proxies.
+ * The shell reports the maximum source timestamp among every timestamped
+ * collectible, repack, and chase in the active public catalog.
  */
-export function dataReleaseStatusFromProviderHealth(
-  health: PublicShellStatusV3["providerHealthSummary"],
-  providerHealthEvaluatedAt: string,
+export function dataReleaseStatusFromRecordUpdateResult(
+  result: GetPublicCatalogRecordUpdateStatusV3Result,
+  expectedPublicReleaseId?: string,
 ): DataReleaseStatusValue {
   if (
-    health.state === "unavailable" ||
-    health.observedAt === null ||
-    health.freshThrough === null
+    !result.ok ||
+    (expectedPublicReleaseId !== undefined &&
+      result.data.publicReleaseId !== expectedPublicReleaseId)
   ) {
-    return health.nextHealthEvaluationAt === null
-      ? { state: "unavailable" }
-      : {
-          state: "unavailable",
-          evaluatedAt: providerHealthEvaluatedAt,
-          nextHealthEvaluationAt: health.nextHealthEvaluationAt,
-        };
+    return { state: "unavailable" };
   }
   return {
-    state: health.state === "healthy" ? "fresh" : "delayed",
-    updatedAt: health.observedAt,
-    freshThrough: health.freshThrough,
-    evaluatedAt: providerHealthEvaluatedAt,
-    nextHealthEvaluationAt: health.nextHealthEvaluationAt,
-    totalProviderCount: health.totalProviderCount,
-    delayedProviderCount: health.delayedProviderCount,
+    state: "available",
+    updatedAt: result.data.latestCatalogRecordUpdatedAt,
+    evaluatedAt: result.data.evaluatedAt,
   };
-}
-
-export function dataReleaseStatusFromPublicResult(
-  result: GetPublicShellStatusV3Result,
-): DataReleaseStatusValue {
-  if (!result.ok) return { state: "unavailable" };
-  return dataReleaseStatusFromProviderHealth(
-    result.data.providerHealthSummary,
-    result.data.providerHealthEvaluatedAt,
-  );
 }

@@ -18,9 +18,12 @@ import {
   type NextSearchParams,
 } from "@/lib/catalog-route-state.server";
 import { dashboardHrefFor } from "@/lib/provider-banner";
-import { readDashboardBundle } from "@/lib/public-repacks.server";
+import {
+  readDashboardBundle,
+  readPublicCatalogRecordUpdateStatus,
+} from "@/lib/public-repacks.server";
 import { dashboardCatalogIsEmpty } from "@/lib/public-repacks-v3";
-import { dataReleaseStatusFromProviderHealth } from "@/lib/public-release-status";
+import { dataReleaseStatusFromRecordUpdateResult } from "@/lib/public-release-status";
 import { DashboardOverviewClient } from "./DashboardOverviewClient.client";
 
 /**
@@ -80,12 +83,19 @@ export default async function DashboardOverviewPage({
     );
   }
 
-  const result = await readDashboardBundle(parsed.query);
+  const [result, recordUpdateResult] = await Promise.all([
+    readDashboardBundle(parsed.query),
+    readPublicCatalogRecordUpdateStatus(),
+  ]);
+  const status = dataReleaseStatusFromRecordUpdateResult(
+    recordUpdateResult,
+    result.ok ? result.data.release.publicReleaseId : undefined,
+  );
   if (!result.ok) {
     return (
       <>
         <ShellSurfaceReporter mode="product" />
-        <DataReleaseStatusReporter status={{ state: "unavailable" }} />
+        <DataReleaseStatusReporter status={status} />
         {providerBanner}
         <DashboardPageHeader activeView="overview" overviewHref={dashboardHref} />
         <CatalogResultRecovery
@@ -96,11 +106,6 @@ export default async function DashboardOverviewPage({
       </>
     );
   }
-
-  const status = dataReleaseStatusFromProviderHealth(
-    result.data.providerHealthSummary,
-    result.data.providerHealthEvaluatedAt,
-  );
 
   return (
     <>

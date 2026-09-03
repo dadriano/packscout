@@ -1,18 +1,10 @@
 export type DataReleaseStatusValue =
   | { readonly state: "loading" }
+  | { readonly state: "unavailable" }
   | {
-      readonly state: "unavailable";
-      readonly evaluatedAt?: string;
-      readonly nextHealthEvaluationAt?: string | null;
-    }
-  | {
-      readonly state: "fresh" | "delayed";
+      readonly state: "available";
       readonly updatedAt: string;
-      readonly freshThrough: string;
       readonly evaluatedAt: string;
-      readonly nextHealthEvaluationAt: string | null;
-      readonly totalProviderCount?: number;
-      readonly delayedProviderCount?: number;
       readonly dataSource?: "canonical" | "mock";
     };
 
@@ -22,27 +14,14 @@ export type DataReleaseStatusPresentation = Readonly<{
   visibleLabel: string;
 }>;
 
-/**
- * Uses two timestamps minted by the same trusted backend response so browser
- * clock skew cannot move the next provider-health status refresh boundary.
- * Aggregate health may already be delayed while another provider remains fresh.
- */
-export function providerHealthRefreshDelayMilliseconds(
+const RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS = 60_000;
+
+export function recordUpdateRefreshIntervalMilliseconds(
   status: DataReleaseStatusValue,
 ): number | null {
-  if (
-    !("evaluatedAt" in status) ||
-    !("nextHealthEvaluationAt" in status) ||
-    status.evaluatedAt === undefined ||
-    status.nextHealthEvaluationAt === undefined ||
-    status.nextHealthEvaluationAt === null
-  ) return null;
-  const evaluatedAt = Date.parse(status.evaluatedAt);
-  const nextHealthEvaluationAt = Date.parse(status.nextHealthEvaluationAt);
-  if (!Number.isFinite(evaluatedAt) || !Number.isFinite(nextHealthEvaluationAt)) {
-    return null;
-  }
-  return Math.max(0, nextHealthEvaluationAt - evaluatedAt);
+  return status.state === "available" || status.state === "unavailable"
+    ? RECORD_UPDATE_REFRESH_INTERVAL_MILLISECONDS
+    : null;
 }
 
 export function formatRelativeReleaseTime(
@@ -70,55 +49,40 @@ export function presentDataReleaseStatus(
 ): DataReleaseStatusPresentation {
   if (status.state === "loading") {
     return {
-      exactLabel: "Repack data freshness is loading",
+      exactLabel: "Latest catalog record update time is loading",
       state: status.state,
-      visibleLabel: "Checking repack data",
+      visibleLabel: "Checking latest record update",
     };
   }
 
   if (status.state === "unavailable") {
     return {
-      exactLabel: "Provider feed status is unavailable",
+      exactLabel: "Latest catalog record update time is unavailable",
       state: status.state,
-      visibleLabel: "Provider feed status unavailable",
+      visibleLabel: "Latest record update unavailable",
     };
   }
 
-  const freshThrough = Date.parse(status.freshThrough);
-  const effectiveState =
-    status.state === "delayed" ||
-      (Number.isFinite(freshThrough) && now >= freshThrough)
-      ? "delayed"
-      : "fresh";
   const relativeTime = formatRelativeReleaseTime(status.updatedAt, now);
-  const exactTime = new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "long",
-  }).format(new Date(status.updatedAt));
+  const updatedAt = Date.parse(status.updatedAt);
+  const exactTime = Number.isFinite(updatedAt)
+    ? new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium",
+        timeStyle: "long",
+      }).format(new Date(updatedAt))
+    : "recently";
 
   if (status.dataSource === "mock") {
     return {
-      exactLabel:
-        effectiveState === "delayed"
-          ? `Mock repack data is delayed. Last updated ${exactTime}`
-          : `Mock repack data updated ${exactTime}`,
-      state: effectiveState,
-      visibleLabel:
-        effectiveState === "delayed"
-          ? `Mock data delayed · ${relativeTime}`
-          : `Mock data · Updated ${relativeTime}`,
+      exactLabel: `Latest mock catalog record update ${exactTime}`,
+      state: status.state,
+      visibleLabel: `Latest mock record update · ${relativeTime}`,
     };
   }
 
   return {
-    exactLabel:
-      effectiveState === "delayed"
-        ? `Provider feeds are delayed. Last checked ${exactTime}`
-        : `Provider feeds are healthy. Last checked ${exactTime}`,
-    state: effectiveState,
-    visibleLabel:
-      effectiveState === "delayed"
-        ? `Provider feeds delayed · Checked ${relativeTime}`
-        : `Provider feeds healthy · Checked ${relativeTime}`,
+    exactLabel: `Latest catalog record update ${exactTime}`,
+    state: status.state,
+    visibleLabel: `Latest record update · ${relativeTime}`,
   };
 }

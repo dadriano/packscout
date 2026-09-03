@@ -369,14 +369,6 @@ a {
   background: var(--color-status-neutral);
 }
 
-.data-release-status[data-state="fresh"] .data-release-status__dot {
-  background: var(--color-positive);
-}
-
-.data-release-status[data-state="delayed"] .data-release-status__dot {
-  background: var(--color-warning);
-}
-
 .data-release-status[data-state="loading"] .data-release-status__dot {
   animation: status-breathe 1.6s ease-in-out infinite;
 }

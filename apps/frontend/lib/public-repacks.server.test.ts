@@ -8,6 +8,7 @@ import {
   catalogReadArguments,
   publicRepackReadsConfigured,
   readCatalogReadCredential,
+  readPublicCatalogRecordUpdateStatus,
   readPublicShellStatus,
 } from "./public-repacks.server";
 
@@ -138,8 +139,8 @@ test("every catalog request presents its arguments through the credential wrappe
   );
   assert.equal(
     actionCalls.length,
-    5,
-    "time-sensitive shell, dashboard, list, detail, and desired-match reads are trusted-clock actions",
+    6,
+    "record-update, shell, dashboard, list, detail, and desired-match reads are trusted-clock actions",
   );
   const wrapped = source.match(/catalogReadArguments\(\{/gu) ?? [];
   assert.equal(
@@ -169,6 +170,10 @@ test("a rendering path without a usable backend degrades to the existing unavail
       await readPublicShellStatus(),
       publicReadError("RELEASE_UNAVAILABLE"),
     );
+    assert.deepEqual(
+      await readPublicCatalogRecordUpdateStatus(),
+      publicReadError("RELEASE_UNAVAILABLE"),
+    );
 
     // A configured but unreachable backend — the same read with the
     // credential present — still resolves to the same bounded state.
@@ -176,6 +181,10 @@ test("a rendering path without a usable backend degrades to the existing unavail
     process.env.PACKSCOUT_CATALOG_READ_TOKEN = VALID_CREDENTIAL;
     assert.deepEqual(
       await readPublicShellStatus(),
+      publicReadError("RELEASE_UNAVAILABLE"),
+    );
+    assert.deepEqual(
+      await readPublicCatalogRecordUpdateStatus(),
       publicReadError("RELEASE_UNAVAILABLE"),
     );
   } finally {

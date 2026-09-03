@@ -8,6 +8,7 @@ import schema from "./schema";
 import { sha256CanonicalJson } from "./dataReleaseCanonicalHash";
 import { DATA_RELEASE_V3_BATCH_HASH_DOMAIN } from "./dataReleaseV3Lifecycle";
 import {
+  buildV3Collectible,
   buildV3Detail,
   buildV3FixturePlan,
   buildV3SoldOutDetail,
@@ -210,6 +211,52 @@ describe("data_release_v3 lifecycle", () => {
     };
     expect(state.generation).toBe(1);
     expect(state.activeRelease?.publicReleaseId).toBe(RELEASE_ID_1);
+  });
+
+  test("a pre-aggregate partial release cannot resume with an incomplete update clock", async () => {
+    const t = convexTest(schema, modules);
+    const plan = await buildV3FixturePlan({
+      publicReleaseId: RELEASE_ID_1,
+      details: [buildV3Detail({ publicRepackId: V3_REPACK_ID_A })],
+    });
+    await run(t, internal.dataReleaseV3Lifecycle.start, v3StartRequest(plan));
+    const collectibleBatchIndex = plan.batches.findIndex(
+      ({ kind }) => kind === "collectibles",
+    );
+    expect(collectibleBatchIndex).toBeGreaterThanOrEqual(0);
+    for (let index = 0; index <= collectibleBatchIndex; index += 1) {
+      await run(
+        t,
+        internal.dataReleaseV3Lifecycle.applyBatch,
+        v3BatchRequest(plan, plan.batches[index]!),
+      );
+    }
+    await t.run(async (ctx) => {
+      const release = await ctx.db
+        .query("dataReleaseV3Releases")
+        .withIndex("by_public_release_id", (index) =>
+          index.eq("publicReleaseId", RELEASE_ID_1),
+        )
+        .unique();
+      if (release === null) throw new Error("missing fixture release");
+      const {
+        _id,
+        _creationTime: _ignoredCreationTime,
+        latestCatalogRecordUpdatedAt: _ignoredUpdateTime,
+        ...legacyRelease
+      } = release;
+      await ctx.db.replace(_id, legacyRelease);
+    });
+    const nextBatch = plan.batches[collectibleBatchIndex + 1];
+    if (nextBatch === undefined) throw new Error("missing post-collectible batch");
+    await expectRefusal(
+      run(
+        t,
+        internal.dataReleaseV3Lifecycle.applyBatch,
+        v3BatchRequest(plan, nextBatch),
+      ),
+      "PUBLICATION_STATE_CONFLICT",
+    );
   });
 
   test("tampered batches, counts, references, versions, and protected fields fail closed", async () => {
@@ -690,12 +737,24 @@ describe("data_release_v3 lifecycle", () => {
       publicReleaseId: RELEASE_ID_1,
       details: threeRepackPlanDetails(),
     });
+    const olderDataAsOf = new Date(
+      Date.parse(newerPlan.manifest.dataAsOf) - 10 * 60_000,
+    ).toISOString();
+    const olderDetails = threeRepackPlanDetails().map((detail) => ({
+      ...detail,
+      sourceUpdatedAt: olderDataAsOf,
+      topChase:
+        detail.topChase === null
+          ? null
+          : { ...detail.topChase, observedAt: olderDataAsOf },
+    }));
     const olderPlan = await buildV3FixturePlan({
       publicReleaseId: RELEASE_ID_2,
-      dataAsOf: new Date(
-        Date.parse(newerPlan.manifest.dataAsOf) - 10 * 60_000,
-      ).toISOString(),
-      details: threeRepackPlanDetails(),
+      dataAsOf: olderDataAsOf,
+      details: olderDetails,
+      collectibles: [
+        { ...buildV3Collectible(), dataAsOf: olderDataAsOf },
+      ],
     });
     await stageComplete(t, newerPlan);
     await stageComplete(t, olderPlan);
