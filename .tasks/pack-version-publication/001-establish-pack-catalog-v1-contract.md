@@ -6,7 +6,7 @@
 **Delivery phase:** P01
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder, including executable contract fixtures and boundary verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -130,39 +130,47 @@ The `pack_catalog_v1` read surface exposes `getPublicShellStatus`, `getDashboard
 
 ### Snapshot integrity
 
-- [ ] Updating pack A changes only pack A's snapshot and head; pack B's bytes and head remain unchanged.
-- [ ] Summary, detail, contents, odds, chase, valuations, actions, and EV validate against one snapshot identity.
-- [ ] Missing contents, invalid probabilities, stale dependencies, mismatched EV inputs, and protected fields cannot produce a completed snapshot.
-- [ ] A valid EV-unavailable fixture completes without a numeric EV, while technical calculation failure remains non-publishable.
-- [ ] First pack activation requires every named initial profile head, and later profile publication changes no existing pack snapshot hash.
+- [x] Updating pack A changes only pack A's snapshot and head; pack B's bytes and head remain unchanged.
+- [x] Summary, detail, contents, odds, chase, valuations, actions, and EV validate against one snapshot identity.
+- [x] Missing contents, invalid probabilities, stale dependencies, mismatched EV inputs, and protected fields cannot produce a completed snapshot.
+- [x] A valid EV-unavailable fixture completes without a numeric EV, while technical calculation failure remains non-publishable.
+- [x] First pack activation requires every named initial profile head, and later profile publication changes no existing pack snapshot hash.
 
 ### Identity, lifecycle, and ordering
 
-- [ ] Stable native pack and collectible IDs remain unchanged through update, rollback, lifecycle changes, saves, and direct links.
-- [ ] Availability mapping and explicit retirement fixtures remain readable; source omission or outage cannot retire a pack.
-- [ ] Only active-plus-available packs expose enabled purchase or promotion actions.
-- [ ] Local publication sequences order one provider's pack work, while provider and shared evidence remain separate identities.
-- [ ] Byte-identical artifacts reuse one snapshot identity while separate activation episodes retain distinct intent identities.
+- [x] Stable native pack and collectible IDs remain unchanged through update, rollback, lifecycle changes, saves, and direct links.
+- [x] Availability mapping and explicit retirement fixtures remain readable; source omission or outage cannot retire a pack.
+- [x] Only active-plus-available packs expose enabled purchase or promotion actions.
+- [x] Local publication sequences order one provider's pack work, while provider and shared evidence remain separate identities.
+- [x] Byte-identical artifacts reuse one snapshot identity while separate activation episodes retain distinct intent identities.
 
 ### Query and security contract
 
-- [ ] All six catalog queries resolve each included pack from exactly one active head and one complete snapshot.
-- [ ] Retirement-active plus availability-available defaults and explicit all-state queries return the declared lifecycle sets.
-- [ ] A signed cursor works only for its bound query and returns `CURSOR_EXPIRED` when expired, malformed, tampered, or used with changed query parameters.
-- [ ] A two-page activation race preserves valid keyset behavior and the documented live traversal semantics.
-- [ ] Wrong-scope operations and changed-byte replays fail closed without exposing protected data.
+- [x] All six catalog queries resolve each included pack from exactly one active head and one complete snapshot.
+- [x] Retirement-active plus availability-available defaults and explicit all-state queries return the declared lifecycle sets.
+- [x] A signed cursor works only for its bound query and returns `CURSOR_EXPIRED` when expired, malformed, tampered, or used with changed query parameters.
+- [x] A two-page activation race preserves valid keyset behavior and the documented live traversal semantics.
+- [x] Wrong-scope operations and changed-byte replays fail closed without exposing protected data.
 
 ### Saved-item contract
 
-- [ ] Read and set operations derive one owner from authentication, use only stable public identities, and never store a snapshot identity.
-- [ ] Save, repeat, remove, missing-head, exact-capacity, stale-prune, invalid-ID, unauthenticated, and inconsistent-state fixtures return only the declared result or error shapes.
-- [ ] Pack and collectible save sets stay independently bounded to 250 and return canonical ascending identifiers.
+- [x] Read and set operations derive one owner from authentication, use only stable public identities, and never store a snapshot identity.
+- [x] Save, repeat, remove, missing-head, exact-capacity, stale-prune, invalid-ID, unauthenticated, and inconsistent-state fixtures return only the declared result or error shapes.
+- [x] Pack and collectible save sets stay independently bounded to 250 and return canonical ascending identifiers.
 
 ### Authorization contract
 
-- [ ] Active admins and data operators with `providers:view` can read only sanitized status for their organization.
-- [ ] Only active admins with the exact named permission can authorize recovery, launch, or pruning, and none of those mutations is reachable through Admin.
-- [ ] Trusted service identities cannot cross their environment, organization, provider/catalog, entity, operation, or expiry scope.
+- [x] Active admins and data operators with `providers:view` can read only sanitized status for their organization.
+- [x] Only active admins with the exact named permission can authorize recovery, launch, or pruning, and none of those mutations is reachable through Admin.
+- [x] Trusted service identities cannot cross their environment, organization, provider/catalog, entity, operation, or expiry scope.
+
+## Spec Compliance
+
+- **Related spec:** `pack-version-publication/tech-001`.
+- **Alignment:** P01 adds the sole V1 contract modules, strict canonicalization, deterministic two-pack fixture, and the exact query, save, state, reason, and authorization vocabularies.
+- **Divergences:** None. PR #66 remains an extraction ledger; no runtime source from it was ported in P01.
+- **Later owners:** P02–P10 retain persistence, assembly runtime, fan-out, public storage/API, publication/recovery, frontend, operations, retention, and launch.
+- **Evidence:** The named matrix, contracts suite, all workspace typechecks, framework ratchet, full test matrix, and production builds pass on the verified implementation.
 
 ## Verification
 

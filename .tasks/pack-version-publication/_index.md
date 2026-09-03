@@ -4,7 +4,7 @@
 
 Begin P01 with task 001. Write the executable two-pack contract fixture and prove that changing one pack cannot change the other pack's bytes or active head.
 
-**Progress:** 0/10 tasks complete; 0/9 implementation phases merged; 0/1 launch operations complete
+**Progress:** 1/10 tasks complete; 0/9 implementation phases merged; 0/1 launch operations complete
 
 ## Context
 
@@ -133,10 +133,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Browser-safe contracts and fixtures define the only allowed pack/profile/read behavior; no runtime changes.
 - **Review budget:** one task; 1–2 days; target at most 15 authored files and 1,500 authored lines.
 - **Rollback:** Revert unused contract additions and fixtures.
-- **Size exception:** none.
+- **Size exception:** One-time P01 exception: the phase includes the pre-existing 2,619-line canonical task/spec baseline required by the workflow plus the inseparable executable contract, fixture, and matrix; the total remains below the 5,000-line/40-file hard stop.
 - **Branch:** `codex/pack-version-publication-p01-contract`.
-- **Verified parent:** not recorded.
-- **Verified implementation:** not recorded.
+- **Verified parent:** `0b470fc7876e3e1c1b86f616bb382f5985c67fe8` (`origin/main`).
+- **Verified implementation:** `b6c64edb`.
 - **PR:** not opened.
 
 #### P02 — Provider-local publication state
@@ -244,7 +244,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
-| 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | in_progress | none |
+| 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
 | 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | todo | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
@@ -295,4 +295,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Run `/tasks-to-tech-specs .tasks/pack-version-publication` to ground the provider-database, shared-data, public-store, API, authentication, publication, and launch interfaces before implementation branch planning.
+Publish and review P01, then begin P02–P05 as independent sibling phases from the merged V1 contract.
