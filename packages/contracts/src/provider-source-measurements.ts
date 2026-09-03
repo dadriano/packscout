@@ -130,21 +130,25 @@ export const providerSourceMeasurementsSchema = z.object({
   records: recordsSchema,
   activity: activitySchema,
 }).strict().superRefine((measurements, context) => {
-  // Exactly one storage answer is reported, so no reader has to choose.
-  if (measurements.storage.state === "available" && measurements.storageEstimate !== undefined) {
-    context.addIssue({
-      code: "custom",
-      path: ["storageEstimate"],
-      message: "An exact storage count must not be accompanied by an estimate.",
-    });
-  }
-  if (measurements.storage.state === "unavailable"
-    && measurements.storage.reason === "count_exceeds_budget"
-    && measurements.storageEstimate === undefined) {
+  // Exactly one storage answer is reported, so no reader has to choose, and an
+  // estimate accompanies precisely the one reason that obliges it. Any other
+  // pairing would let a reader show an estimate over a real failure.
+  const deferredForBudget = measurements.storage.state === "unavailable"
+    && measurements.storage.reason === "count_exceeds_budget";
+  if (deferredForBudget && measurements.storageEstimate === undefined) {
     context.addIssue({
       code: "custom",
       path: ["storageEstimate"],
       message: "Rows left uncounted for budget must report an estimate.",
+    });
+  }
+  if (!deferredForBudget && measurements.storageEstimate !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["storageEstimate"],
+      message: measurements.storage.state === "available"
+        ? "An exact storage count must not be accompanied by an estimate."
+        : "A failed storage measurement must not be accompanied by an estimate.",
     });
   }
 });

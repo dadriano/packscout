@@ -89,6 +89,18 @@ test("an estimate never occupies the field that means an exact count", () => {
     storage: { state: "unavailable", reason: "count_exceeds_budget" },
     storageEstimate: { ...estimate, counts: { ...estimate.counts, total: 11 } },
   }).success, false);
+
+  // A measurement that actually failed must not carry an estimate either: a
+  // reader preferring the estimate would show it in place of the failure.
+  for (const reason of ["query_failed", "database_unreachable", "not_configured", "unsupported"] as const) {
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, storage: { state: "unavailable", reason }, storageEstimate: estimate,
+    }).success, false, `${reason} must not carry an estimate`);
+    // The same failure without an estimate stays valid.
+    assert.equal(providerSourceMeasurementsSchema.safeParse({
+      ...measured, storage: { state: "unavailable", reason },
+    }).success, true);
+  }
 });
 
 test("separate statements may report separate snapshot times", () => {
