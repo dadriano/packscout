@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Resolve main's existing frontend lint failure, rerun P02's full gate, then review its provider-local persistence PR. Task 003 / P03 is the next implementation. No publication processor is enabled.
+Verify P02's review corrections on the frontend fix from PR96, then build task 003 / P03 as a separate contract-consuming child of PR95. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -147,10 +147,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Rollback:** Leave new state unused and revert the disabled planner.
 - **Size exception:** The provider-local schema, impact plan, readiness decision, sequence allocation, and durable request form one transaction boundary; splitting them would leave an incomplete provider authority. Authored volume remains capped at the default threshold.
 - **Branch:** `codex/pack-version-publication-p02-state`.
-- **Current parent:** `3db9ba77d84ca7a828e513ff59955041bfb94175` (includes merged P01, PR94, and PR93).
-- **Implementation:** `1dc7fbde8c699cc0523c73c0de190a38e80b285d`; unchanged patches from the passing full framework gate on `a03129f5`. Current-parent full verification is blocked, not green.
-- **Current-base evidence:** Framework/Prisma/ratchet checks, non-frontend lint, all workspace typechecks, the 29-check P02 matrix, the tooling lane, and production builds passed. Only the unrelated frontend lint prevents full-gate completion.
-- **Delivery blocker:** `apps/frontend/components/catalog/ChaseCollectibleInspector.client.tsx:123`, introduced by PR94 and unchanged in P02, fails `react-hooks/set-state-in-effect`. The same failure is present in [main CI](https://github.com/dadriano/packscout/actions/runs/33808683512). Keep the PR draft until an upstream fix and a passing full gate.
+- **Direct base:** `codex/fix-chase-inspector-loading`, the separate frontend fix in https://github.com/dadriano/packscout/pull/96. Merge PR96 first, then retarget P02 to main.
+- **Current parent:** `90097845ba0b3078e24ff22e7317a2846c9ea452` (PR96; full framework verifier passed).
+- **Implementation:** `994ea17cf91e8248c98da6921cd7e6debe0845ea`; includes all three review corrections. The focused 32-check matrix, affected lint, and affected typechecks passed; the full framework gate is running on this parent.
+- **Delivery gate:** PR96 fixes main's prior frontend lint failure without a suppression. Keep P02 draft until its refreshed full gate completes.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95 (draft; delivery remains blocked, not published-ready).
 
@@ -300,4 +300,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Resolve the unrelated frontend lint failure on main, refresh P02's base, and rerun `npm run verify:framework` before making its draft PR ready. Next implementation is task 003 / P03; P03–P05 remain planned foundation phases and publication stays disabled until P06 and launch authorization.
+Complete P02's refreshed full framework gate and make PR95 ready on PR96's verified parent. Then build P03 against P02's captured-input contract in a separate child PR; publication stays disabled until P06 and launch authorization.
