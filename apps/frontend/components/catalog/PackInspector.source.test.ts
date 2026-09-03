@@ -4,10 +4,17 @@ import { test } from "node:test";
 
 const source = readFileSync(new URL("./PackInspector.client.tsx", import.meta.url), "utf8");
 
-test("inspector moves estimate detail into contextual info hints", () => {
-  assert.match(source, /definition: estimatedEvHint/);
-  assert.match(source, /definition: vendorReportedEvHint/);
-  assert.match(source, /definition: coverage/);
+test("inspector hints explain each term once instead of repeating visible detail", () => {
+  // The heading hint uses the shared one-definition default; the timestamps it
+  // used to append are already visible in the freshness block below it.
+  assert.equal(source.includes("estimatedEvHint"), false);
+  assert.equal(source.includes("headingHint="), false);
+  // Vendor observation time and evidence coverage ride along as hint details
+  // under the glossary definitions rather than replacing them.
+  assert.match(source, /field="vendorReportedEv"/);
+  assert.match(source, /details=\{vendorObservationDetails\}/);
+  assert.match(source, /glossaryDetails=\{\[coverage\]\}/);
+  assert.equal(source.includes("definition: coverage"), false);
   assert.equal(source.includes("className={styles.estimateContext}"), false);
   assert.equal(source.includes("className={styles.vendorEstimateContext}"), false);
 });

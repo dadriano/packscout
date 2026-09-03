@@ -363,11 +363,8 @@ test("confidence copy describes evidence reliability, never profit likelihood", 
   assert.equal(confidence.displayValue, "High · 100%");
   assert.equal(confidence.scoreBasisPoints, 10_000);
   assert.equal(confidence.tone, "positive");
-  assert.match(confidence.accessibleLabel, /reliable and fresh/);
-  assert.match(
-    confidence.accessibleLabel,
-    /not profit likelihood or whether EV is positive/,
-  );
+  assert.match(confidence.accessibleLabel, /solid and recent/);
+  assert.match(confidence.accessibleLabel, /not how likely a profit is/);
 });
 
 test("maps authoritative confidence bands to non-red tones", () => {
