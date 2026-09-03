@@ -1,11 +1,14 @@
 import {
   dataforrestClutchpacksDistributedSourceAdapterManifest,
   dataforrestCollectorCryptCatalogV2SourceAdapterManifest,
+  dataforrestCollectorCryptCatalogV3SourceAdapterManifest,
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
+  dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
+  dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
@@ -166,6 +169,22 @@ ProviderSourceIntegrationCapabilityRegistry {
     providerSourceIntegrationCapability(
       "phygitals",
       dataforrestPhygitalsCatalogSourceAdapterManifest.adapterVersion,
+    ),
+    // The pack-reading catalog versions. Without these tuples the admin
+    // admission gate refuses a run on an activated source with
+    // PROVIDER_SOURCE_ADAPTER_UNAVAILABLE, so they are admitted alongside the
+    // predecessors rather than after activation.
+    providerSourceIntegrationCapability(
+      "courtyard",
+      dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt",
+      dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion,
     ),
   ]);
 }
