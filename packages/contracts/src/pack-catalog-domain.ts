@@ -177,7 +177,7 @@ const lifecycleFreezeSchema = z.object({
   provenanceIdentity: packCatalogTextSchema(200),
 }).strict().nullable();
 
-const publicPackSnapshotPayloadBaseSchema = z.object({
+export const publicPackSnapshotPayloadBaseSchema = z.object({
   schemaVersion: z.literal(PACK_CATALOG_V1),
   snapshotKind: z.enum(["full", "lifecycle_only"]),
   providerId: packCatalogUuidSchema,
@@ -302,16 +302,66 @@ export const publicPackSnapshotPayloadSchema = publicPackSnapshotPayloadBaseSche
       value.category.publicCategoryId,
       ...value.contents.map(({ category }) => category.publicCategoryId),
     ])].sort(compareCanonicalStrings);
-    const expectedSearchText = normalizePackCatalogSearchText([
-      value.title,
-      ...value.contents.map(({ displayName }) => displayName),
-      ...value.searchProjection.aliases,
-    ].join(" "));
+    const expectedSearchText = packSearchText(value.title, value.searchProjection.aliases);
     if (value.searchProjection.normalizedText !== expectedSearchText ||
       packCatalogCanonicalJson(value.searchProjection.categoryIds) !== packCatalogCanonicalJson(expectedCategories)) {
       issue(["searchProjection"], "pack.search_projection_mismatch");
     }
   });
+
+/**
+ * Pack search text is pack-level: the title plus the assembler's aliases.
+ * Collectible names are not folded in — measured at 25 characters per name,
+ * 50 contents already exceed the 1,024-character bound and 8,000 contents
+ * exceed a Convex document. Collectible-driven discovery runs through
+ * `searchPublicCollectibles` and `findPacksByDesiredCollectible` instead.
+ */
+export function packSearchText(title: string, aliases: readonly string[]): string {
+  return normalizePackCatalogSearchText([title, ...aliases].join(" "));
+}
+
+/**
+ * The wire and storage header of one pack snapshot: the complete payload
+ * without `contents` and without the two vectors derived from them. The store
+ * rebuilds those vectors from the ordered batches, so a maximum-size pack
+ * never needs one request or one document larger than the P01 batch bound.
+ */
+export const publicPackSnapshotHeaderSchema = publicPackSnapshotPayloadBaseSchema
+  .omit({ contents: true, collectibleProfileSnapshotIds: true, valuationDependencyIdentities: true })
+  .superRefine((value, context) => {
+    const issue = (path: PropertyKey[], message: string) =>
+      context.addIssue({ code: "custom", path, message });
+    if (!isCanonicalAscending(value.actions.map(({ actionId }) => actionId))) {
+      issue(["actions"], "pack.actions_not_canonical");
+    }
+    const actionable = value.lifecycle.availability === "available" && value.lifecycle.retirement === "active";
+    const disabledReason = value.lifecycle.retirement === "retired" ? "PACK_RETIRED" : actionable ? null : "PACK_UNAVAILABLE";
+    if (value.actions.some((action) => action.enabled !== actionable || action.disabledReason !== disabledReason)) {
+      issue(["actions"], "pack.action_not_eligible");
+    }
+    const currencies = [
+      ...(value.topChase === null ? [] : [value.topChase.amount.currency]),
+      ...(value.ev.status === "available" ? [value.ev.amount.currency] : []),
+    ];
+    if (currencies.some((currency) => currency !== value.price.currency)) {
+      issue(["price", "currency"], "pack.currency_mismatch");
+    }
+    if (packCatalogCanonicalJson(publicPackSummaryCore(value)) !== packCatalogCanonicalJson(value.summaryProjection)) {
+      issue(["summaryProjection"], "pack.summary_projection_mismatch");
+    }
+    if (value.lifecycleFreeze !== null && value.lifecycleFreeze.retainedEconomicsSha256 !== value.economicsSha256) {
+      issue(["lifecycleFreeze"], "pack.lifecycle_economics_mismatch");
+    }
+    if ((value.snapshotKind === "lifecycle_only") !== (value.lifecycleFreeze !== null)) {
+      issue(["lifecycleFreeze"], "pack.lifecycle_freeze_required");
+    }
+    if (value.searchProjection.publicRepackId !== value.publicRepackId ||
+      value.searchProjection.normalizedText !== packSearchText(value.title, value.searchProjection.aliases) ||
+      !value.searchProjection.categoryIds.includes(value.category.publicCategoryId)) {
+      issue(["searchProjection"], "pack.search_projection_mismatch");
+    }
+  });
+export type PublicPackSnapshotHeader = z.infer<typeof publicPackSnapshotHeaderSchema>;
 
 export function normalizePublicPackSnapshotPayload(value: unknown): PublicPackSnapshotPayload {
   const record = typeof value === "object" && value !== null && !Array.isArray(value)

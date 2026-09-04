@@ -62,4 +62,5 @@ export * from "./pack-catalog-domain.ts";
 export * from "./pack-publication.ts";
 export * from "./pack-catalog-query.ts";
 export * from "./pack-catalog-operations.ts";
+export * from "./pack-catalog-publication-protocol.ts";
 export { providerPackListingUrl } from "./provider-pack-listing-url.ts";

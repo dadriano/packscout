@@ -302,7 +302,7 @@ test("Native pack catalog contract matrix", async (context) => {
     const packSummary = { ...headA.indexableSummary, publicPackSnapshotId: headA.activeSnapshot.publicPackSnapshotId, contentSha256: headA.activeSnapshot.contentSha256, headGeneration: headA.generation };
     const successCases = {
       getPublicShellStatus: { schemaVersion: PACK_CATALOG_V1, evaluatedAt: NOW, catalogAvailable: true, activeAvailablePackCount: 1 },
-      getDashboardBundle: { evaluatedAt: NOW, packs: [packSummary], totalMatchingPacks: 1 },
+      getDashboardBundle: { evaluatedAt: NOW, packs: [packSummary], totalMatchingPacks: 1, providerProfiles: [fixture.provider.profile] },
       listPublicPacks: fixture.query.firstPage,
       getPublicPack: {
         evaluatedAt: NOW,
@@ -324,9 +324,10 @@ test("Native pack catalog contract matrix", async (context) => {
         contents: fixture.packs.packA.snapshot.payload.contents,
         contentCount: 2,
         nextContentsCursor: null,
+        providerProfile: fixture.provider.profile,
       },
       searchPublicCollectibles: { evaluatedAt: NOW, items: [fixture.collectibles[0]!.profile], nextCursor: null },
-      findPacksByDesiredCollectible: { evaluatedAt: NOW, publicCollectibleId: packCatalogFixtureIds.collectibleA, items: [packSummary], nextCursor: null },
+      findPacksByDesiredCollectible: { evaluatedAt: NOW, publicCollectibleId: packCatalogFixtureIds.collectibleA, items: [packSummary], nextCursor: null, providerProfiles: [fixture.provider.profile] },
     } as const;
     for (const name of packCatalogQueryNames) {
       packCatalogV1QueryContracts[name].output.parse({ ok: true, data: successCases[name] });

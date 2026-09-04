@@ -5,6 +5,7 @@ import { PRODUCTION_PROVIDER_RELEASE_PATHS } from "./provider-release-publicatio
 import { PRODUCTION_CATALOG_MANIFEST_PATHS } from "./catalog-manifest-publication-v1.ts";
 import { PRODUCTION_CATALOG_RETENTION_PATHS } from "./catalog-retention-v1-paths.ts";
 import { PRODUCTION_DATA_RELEASE_V3_PATHS } from "./data-release-v3-publication-paths.ts";
+import { PRODUCTION_PACK_CATALOG_V1_PATHS } from "./pack-catalog-publication-protocol.ts";
 
 export const PRODUCTION_AUTH_SIGNATURE_VERSION = "v1" as const;
 export const PRODUCTION_AUTH_WINDOW_MILLISECONDS = 5 * 60 * 1_000;
@@ -141,6 +142,24 @@ export const productionDataReleaseV3PathSchema = z.enum([
   PRODUCTION_DATA_RELEASE_V3_PATHS.refreshProviderObservation,
 ]);
 
+export const productionPackCatalogPathSchema = z.enum([
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packStart,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packBatch,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packFinalize,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packActivate,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packStatus,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packBlock,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packHold,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packActivateRetained,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.packResume,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileStart,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileBatch,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileFinalize,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileActivate,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileStatus,
+  PRODUCTION_PACK_CATALOG_V1_PATHS.profileBlock,
+]);
+
 export const productionPublicationPathSchema = z.union([
   productionDataReleasePathSchema,
   productionRepackHeatPathSchema,
@@ -148,6 +167,7 @@ export const productionPublicationPathSchema = z.union([
   productionCatalogManifestPathSchema,
   productionCatalogRetentionPathSchema,
   productionDataReleaseV3PathSchema,
+  productionPackCatalogPathSchema,
 ]);
 
 export type ProductionDataReleasePath = z.infer<
@@ -167,6 +187,9 @@ export type ProductionCatalogRetentionPath = z.infer<
 >;
 export type ProductionDataReleaseV3Path = z.infer<
   typeof productionDataReleaseV3PathSchema
+>;
+export type ProductionPackCatalogPath = z.infer<
+  typeof productionPackCatalogPathSchema
 >;
 export type ProductionPublicationPath = z.infer<
   typeof productionPublicationPathSchema

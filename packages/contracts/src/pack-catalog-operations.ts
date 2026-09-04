@@ -35,11 +35,11 @@ export const packCatalogServiceOperations = [
   "prune_snapshots",
 ] as const;
 
-const operationScopeSchema = z.discriminatedUnion("scopeKind", [
+export const packCatalogOperationScopeSchema = z.discriminatedUnion("scopeKind", [
   z.object({ scopeKind: z.literal("provider"), providerId: packCatalogUuidSchema }).strict(),
   z.object({ scopeKind: z.literal("catalog"), catalog: z.literal(PACK_CATALOG_V1) }).strict(),
 ]);
-const operationEntitySchema = z.discriminatedUnion("entityKind", [
+export const packCatalogOperationEntitySchema = z.discriminatedUnion("entityKind", [
   z.object({ entityKind: z.literal("pack"), publicRepackId: packCatalogUuidSchema }).strict(),
   z.object({ entityKind: z.literal("provider_profile"), providerId: packCatalogUuidSchema }).strict(),
   z.object({ entityKind: z.literal("collectible_profile"), publicCollectibleId: packCatalogUuidSchema }).strict(),
@@ -50,8 +50,8 @@ export const trustedPackCatalogServiceIdentitySchema = z.object({
   serviceIdentityId: packCatalogUuidSchema,
   environment: z.enum(packCatalogEnvironments),
   organizationId: packCatalogUuidSchema,
-  scope: operationScopeSchema,
-  entity: operationEntitySchema,
+  scope: packCatalogOperationScopeSchema,
+  entity: packCatalogOperationEntitySchema,
   operations: z.array(z.enum(packCatalogServiceOperations)).min(1).max(packCatalogServiceOperations.length)
     .refine(isCanonicalAscending, "Service operations must be unique and sorted."),
   issuedAt: packCatalogTimestampSchema,
@@ -86,7 +86,7 @@ export function trustedPackCatalogServiceIdentityAllows(input: {
   const organizationId = packCatalogUuidSchema.safeParse(input.organizationId);
   if (!organizationId.success) return false;
   const now = packCatalogTimestampSchema.safeParse(input.now);
-  const entity = operationEntitySchema.safeParse(input.entity);
+  const entity = packCatalogOperationEntitySchema.safeParse(input.entity);
   if (!now.success || !entity.success) return false;
   if (identity.environment !== input.environment ||
     identity.organizationId !== organizationId.data ||
@@ -176,5 +176,5 @@ export const packCatalogOperationReceiptSchema = z.object({
 
 export type PackCatalogEnvironment = (typeof packCatalogEnvironments)[number];
 export type PackCatalogServiceOperation = (typeof packCatalogServiceOperations)[number];
-export type PackCatalogOperationEntity = z.infer<typeof operationEntitySchema>;
+export type PackCatalogOperationEntity = z.infer<typeof packCatalogOperationEntitySchema>;
 export type TrustedPackCatalogServiceIdentity = z.infer<typeof trustedPackCatalogServiceIdentitySchema>;

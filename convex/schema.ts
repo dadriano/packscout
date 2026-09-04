@@ -12,6 +12,21 @@ import { betaAllowlistEntryDocumentValidator } from "./betaAllowlistRecords";
 import { dataReleaseV3SearchRowValidator } from "./dataReleaseV3Search";
 import { productUserDocumentValidator } from "./productUserRecords";
 import {
+  collectibleProfileValidator,
+  packAvailabilityValidator,
+  packContentValidator,
+  packRetirementValidator,
+  packSnapshotDescriptorValidator,
+  packSnapshotHeaderValidator,
+  packSnapshotIdentityValidator,
+  packSnapshotStateValidator,
+  packSummaryCoreValidator,
+  profileSnapshotDescriptorValidator,
+  providerProfileValidator,
+  publicationReasonCodeValidator,
+  publicationWorkStateValidator,
+} from "./packCatalogValidators";
+import {
   publicPackAvailabilityValidator,
   storedPackAvailabilityValidator,
   storedRepackSearchRowValidator,
@@ -1861,4 +1876,181 @@ export default defineSchema({
     retainedEvTransitionDirection: v.optional(v.union(v.literal("forward"), v.literal("reverse"))),
     updatedAt: timestampValidator,
   }).index("by_key", ["key"]),
+  // pack_catalog_v1 (pack-version-publication/005): one immutable snapshot per
+  // sealed pack version, one atomic head per stable pack, independent profile
+  // snapshots and heads, and an exact-replay operation ledger. Staging rows are
+  // unreachable from every head; only heads are public reachability roots.
+  publicPackSnapshots: defineTable({
+    providerId: v.string(),
+    publicRepackId: v.string(),
+    publicPackSnapshotId: v.string(),
+    contentSha256: sha256Validator,
+    summarySha256: sha256Validator,
+    dataAsOf: timestampValidator,
+    evMethodIdentity: v.string(),
+    evPolicyIdentity: v.string(),
+    state: packSnapshotStateValidator,
+    blockReasonCode: v.union(publicationReasonCodeValidator, v.null()),
+    descriptor: packSnapshotDescriptorValidator,
+    header: packSnapshotHeaderValidator,
+    packPublicationSequence: v.string(),
+    evidence: v.object({
+      providerId: v.string(),
+      publicRepackId: v.string(),
+      packPublicationSequence: v.string(),
+      providerChangeIdentity: v.string(),
+      sourceRevisionIdentity: v.string(),
+      sharedDependencies: v.array(v.object({
+        kind: v.string(),
+        identity: v.string(),
+        contentSha256: sha256Validator,
+      })),
+    }),
+    receivedBatchCount: v.number(),
+    receivedContentCount: v.number(),
+    probabilityMicrosSum: v.number(),
+    lastPublicCollectibleId: nullableTextValidator,
+    topChaseCandidate: v.union(v.null(), v.object({
+      publicCollectibleId: v.string(),
+      valuationIdentity: sha256Validator,
+      amount: moneyValidator,
+    })),
+    categoryIdsSeen: v.array(v.string()),
+    initialProfileProof: v.object({
+      required: v.boolean(),
+      providerHeadVerified: v.boolean(),
+      collectibleHeadsVerified: v.number(),
+    }),
+    stagedAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+    deactivatedAt: nullableTimestampValidator,
+    displacedBy: v.union(v.literal("activation"), v.literal("rollback"), v.null()),
+    terminalAt: nullableTimestampValidator,
+  })
+    .index("by_public_pack_snapshot_id", ["publicPackSnapshotId"])
+    .index("by_public_repack_id_and_content_sha256", ["publicRepackId", "contentSha256"])
+    .index("by_state_and_terminal_at", ["state", "terminalAt"]),
+
+  publicPackSnapshotBatches: defineTable({
+    publicPackSnapshotId: v.string(),
+    batchIndex: v.number(),
+    recordCount: v.number(),
+    byteCount: v.number(),
+    batchSha256: sha256Validator,
+    records: v.array(packContentValidator),
+  }).index("by_public_pack_snapshot_id_and_batch_index", ["publicPackSnapshotId", "batchIndex"]),
+
+  publicPackSnapshotBatchDependencies: defineTable({
+    publicPackSnapshotId: v.string(),
+    batchIndex: v.number(),
+    collectibleProfileSnapshotIds: v.array(v.string()),
+    valuationDependencyIdentities: v.array(sha256Validator),
+    collectibleProfiles: v.array(v.object({
+      publicCollectibleId: v.string(),
+      collectibleProfileSnapshotId: v.string(),
+    })),
+  }).index("by_public_pack_snapshot_id_and_batch_index", ["publicPackSnapshotId", "batchIndex"]),
+
+  publicPackMemberships: defineTable({
+    publicCollectibleId: v.string(),
+    publicRepackId: v.string(),
+    publicPackSnapshotId: v.string(),
+    providerId: v.string(),
+  })
+    .index("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", [
+      "publicCollectibleId",
+      "publicRepackId",
+      "publicPackSnapshotId",
+    ])
+    .index("by_public_pack_snapshot_id", ["publicPackSnapshotId"]),
+
+  activePackHeads: defineTable({
+    providerId: v.string(),
+    publicRepackId: v.string(),
+    generation: v.number(),
+    publicationEpoch: v.number(),
+    held: v.boolean(),
+    holdReason: v.union(v.literal("OPERATOR_HOLD"), v.null()),
+    latestAcceptedPackPublicationSequence: v.string(),
+    activeSnapshot: packSnapshotIdentityValidator,
+    previousSnapshot: v.union(packSnapshotIdentityValidator, v.null()),
+    indexableSummary: packSummaryCoreValidator,
+    activatedAt: timestampValidator,
+    normalizedText: v.string(),
+    aliases: v.array(v.string()),
+    categoryIds: v.array(v.string()),
+    availability: packAvailabilityValidator,
+    retirement: packRetirementValidator,
+    sortTitle: v.string(),
+    sortPrice: v.number(),
+    sortEv: v.number(),
+    sortTopChase: v.number(),
+  })
+    .index("by_public_repack_id", ["publicRepackId"])
+    .index("by_provider_id", ["providerId"])
+    .index("by_sort_title_and_public_repack_id", ["sortTitle", "publicRepackId"])
+    .index("by_sort_price_and_public_repack_id", ["sortPrice", "publicRepackId"])
+    .index("by_sort_ev_and_public_repack_id", ["sortEv", "publicRepackId"])
+    .index("by_sort_top_chase_and_public_repack_id", ["sortTopChase", "publicRepackId"]),
+
+  activeProviderProfileHeads: defineTable({
+    providerId: v.string(),
+    generation: v.number(),
+    activeProfileSnapshotId: v.string(),
+    previousProfileSnapshotId: nullableTextValidator,
+    contentSha256: sha256Validator,
+    activatedAt: timestampValidator,
+  }).index("by_provider_id", ["providerId"]),
+
+  activeCollectibleProfileHeads: defineTable({
+    publicCollectibleId: v.string(),
+    generation: v.number(),
+    activeProfileSnapshotId: v.string(),
+    previousProfileSnapshotId: nullableTextValidator,
+    contentSha256: sha256Validator,
+    activatedAt: timestampValidator,
+    searchText: v.string(),
+    sortDisplayName: v.string(),
+    publicCategoryId: v.string(),
+  })
+    .index("by_public_collectible_id", ["publicCollectibleId"])
+    .index("by_sort_display_name_and_public_collectible_id", ["sortDisplayName", "publicCollectibleId"]),
+
+  publicProfileSnapshots: defineTable({
+    profileKind: v.union(v.literal("provider"), v.literal("collectible")),
+    entityId: v.string(),
+    publicProfileSnapshotId: v.string(),
+    contentSha256: sha256Validator,
+    sourceIdentity: v.string(),
+    dataAsOf: timestampValidator,
+    state: packSnapshotStateValidator,
+    blockReasonCode: v.union(publicationReasonCodeValidator, v.null()),
+    descriptor: profileSnapshotDescriptorValidator,
+    profile: v.union(providerProfileValidator, collectibleProfileValidator, v.null()),
+    stagedAt: timestampValidator,
+    completedAt: nullableTimestampValidator,
+    deactivatedAt: nullableTimestampValidator,
+    terminalAt: nullableTimestampValidator,
+  })
+    .index("by_public_profile_snapshot_id", ["publicProfileSnapshotId"])
+    .index("by_profile_kind_and_entity_id_and_content_sha256", ["profileKind", "entityId", "contentSha256"])
+    .index("by_state_and_terminal_at", ["state", "terminalAt"]),
+
+  packCatalogOperations: defineTable({
+    operationKind: v.string(),
+    operationId: v.string(),
+    idempotencyKey: v.string(),
+    authorizationScopeSha256: sha256Validator,
+    entityIdentity: v.string(),
+    snapshotIdentity: v.string(),
+    requestSha256: sha256Validator,
+    state: publicationWorkStateValidator,
+    receiptJson: v.string(),
+    receiptDigest: sha256Validator,
+    completedAt: timestampValidator,
+    expiresAt: timestampValidator,
+  })
+    .index("by_operation_id", ["operationId"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_expires_at", ["expiresAt"]),
 });

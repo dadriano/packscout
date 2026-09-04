@@ -4,6 +4,7 @@ import {
   PRODUCTION_CATALOG_MANIFEST_PATHS,
   PRODUCTION_CATALOG_RETENTION_PATHS,
   PRODUCTION_DATA_RELEASE_V3_PATHS,
+  PRODUCTION_PACK_CATALOG_V1_PATHS,
   PRODUCTION_PROVIDER_RELEASE_PATHS,
   PRODUCTION_REPACK_HEAT_PATHS,
 } from "@packscout/contracts";
@@ -14,6 +15,7 @@ import {
   handleAuthenticatedCatalogRetentionRequest,
   handleAuthenticatedDataReleaseV3Request,
   handleAuthenticatedHeatPublicationRequest,
+  handleAuthenticatedPackCatalogRequest,
   handleAuthenticatedProviderReleaseRequest,
 } from "./productionDataReleaseAuth";
 import {
@@ -1419,6 +1421,131 @@ http.route({
   path: "/admin/provider-catalog/chase-reconciliation",
   method: "POST",
   handler: readProviderCatalogChaseReconciliation,
+});
+
+/**
+ * pack_catalog_v1 store (pack-version-publication/005). Fifteen private,
+ * signed operations: nine per pack and six per profile. Merge exposes no buyer
+ * route; the publisher that calls these stays disabled until P06 and launch.
+ */
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packStart,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.start),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packBatch,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.applyBatch),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packFinalize,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.finalize),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packActivate,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.activate),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packStatus,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.status),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packBlock,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packSnapshotStore.blockSnapshot),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packHold,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packHeadRecovery.hold),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packActivateRetained,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packHeadRecovery.activateRetained),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.packResume,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.packHeadRecovery.resume),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileStart,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.start),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileBatch,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.applyBatch),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileFinalize,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.finalize),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileActivate,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.activate),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileStatus,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.status),
+  ),
+});
+
+http.route({
+  path: PRODUCTION_PACK_CATALOG_V1_PATHS.profileBlock,
+  method: "POST",
+  handler: httpAction((ctx, request) =>
+    handleAuthenticatedPackCatalogRequest(ctx, request, internal.profileSnapshotStore.blockSnapshot),
+  ),
 });
 
 export default http;

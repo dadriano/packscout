@@ -19,6 +19,10 @@ export default defineApp({
     PACKSCOUT_HEAT_PUBLICATION_KEY_IDS: v.optional(v.string()),
     PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS: v.optional(v.string()),
     PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES: v.optional(v.string()),
+    // pack_catalog_v1 store authority: a JSON map from signing key ID to
+    // { environment, organizationId, scope }. Absent by default, so every V1
+    // publication request fails closed until a deployment binds its keys.
+    PACKSCOUT_PACK_CATALOG_V1_PUBLICATION_KEYS: v.optional(v.string()),
     // Server-to-server secret for the admin's product-user integration —
     // directory reads and beta-allowlist management share it, because they are
     // one integration. Absent by default: the HTTP surface fails closed until
