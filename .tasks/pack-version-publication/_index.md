@@ -2,7 +2,7 @@
 
 ## Start Here
 
-All 78 P02 boundary checks and 30 schema checks pass, including independent readiness admission, recurring desired states, and lost-receipt reconciliation after authoritative head changes. PR96's dashboard response-fixture correction passes the entire tooling suite and both builds locally; its full CI retry remains pending. Full P02 certification is pending on that prerequisite. Merge order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
+PR96 is merged after its full CI gate passed. P02-only commits are now based on main and require fresh full local/PR certification before PR95 merges. The correction matrix passes 78 boundary checks and 30 schema checks; P03 remains a separate local implementation. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -147,10 +147,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Rollback:** Leave new state unused and revert the disabled planner.
 - **Size exception:** Boundary review permits 26 authored files (one over the 25-file target), remaining below 2,500 authored changed lines. The extra test module covers inseparable admission-to-outbox invariants and keeps the existing 469-line crash suite within the repository's file-size limit. Splitting those regressions from their fixes would leave the same transaction boundary uncertified; runtime scope is unchanged. No generated files are added.
 - **Branch:** `codex/pack-version-publication-p02-state`.
-- **Direct base:** `codex/fix-chase-inspector-loading`, the separate frontend fix in https://github.com/dadriano/packscout/pull/96. Merge PR96 first, then retarget P02 to main.
-- **Current parent:** `744bed7e124bce9ae36cd56a93bf70590a82d778` (PR96 regression/evidence/readback-fixture corrections on main `48627008`, including PR97/99/100/101).
+- **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
+- **Current parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (main with PR96 and independently merged PR103/104).
 - **Verified implementation:** Prior `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the full framework gate on parent `ca375cc4960e90ba1e6e316e073be5bffda000ee`. Newer corrections and the refreshed parent require a fresh full gate; this is not current-head approval.
-- **Delivery gate:** Both PRs remain unmerged. Require current-head green gates, merge PR96, then restack/retarget only P02-owned commits onto main before merging PR95.
+- **Delivery gate:** PR96 is merged. Require current-head full local and main-targeted CI gates before merging PR95; P03 stays separate.
 - **Current correction evidence:** All 78 contract/readiness/persistence checks and 30 schema checks pass, including independently derived readiness, full capture preservation, public identities, profile prerequisites, recurring desired states, authoritative head reconciliation, and 10,000 multibyte dependencies through shared progress, acknowledgment, and operation replay. Current-parent full verification remains pending; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95

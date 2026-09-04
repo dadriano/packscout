@@ -122,6 +122,10 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Prerequisite merged; main-based certification — 2026-09-03
+
+PR96's unchanged full CI gate passed on `744bed7e124bce9ae36cd56a93bf70590a82d778` (run `33827531502`, retry two). PR96 merged at `1e79ff9ca961b569ca4b191e617b60dc315cc390`. P02-only commits are now restacked onto that main commit, including independently merged PR103/104, without changing their phase diff. Current implementation checkpoint is `205a1e251420f87b1cac4058669f1cc5751ae74b`; full local and main-targeted PR certification remain required before PR95 merges. The stack no longer depends on an open prerequisite PR. No publication processor is activated.
+
 ### Episode recurrence and receipt reconciliation review — 2026-09-03
 
 Discussions `3930353110` and `3930353122` corrected episode identity and authoritative-head reconciliation. Coalescing now checks only the current latest request and compatible non-superseded episode; historical matching bytes can allocate a new sequence. The unmerged V1 migration no longer globally uniquifies a desired digest/epoch across all history. Existing pack/sequence uniqueness and head locking serialize allocation, and terminal rows remain immutable.
