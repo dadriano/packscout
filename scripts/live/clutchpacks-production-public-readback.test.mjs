@@ -82,6 +82,7 @@ function fixture({ unavailable = false, mutate = () => {}, mutateWitness = () =>
     } else if (name === "searchPublicCollectiblesV3") payload = { release, matches: [card] };
     else throw new Error("UNEXPECTED_PUBLIC_READ");
     const result = { ok: true, data: structuredClone(payload) };
+    if (name === "getDashboardBundleV3") result.evMedianSources = { overall: null, vendors: [], categories: [] };
     const parse = publicParsers[`parse${name[0].toUpperCase()}${name.slice(1)}Result`];
     assert.equal(parse(result).ok, true, `valid ${name} fixture before mutation`);
     mutate(name, result, args, { raw, view, cards });
@@ -170,6 +171,8 @@ test("missing list rows, changed chase evidence, parser failures, and changed en
     { mutate(name, result) { if (name === "findRepacksByDesiredCollectibleV3" && result.data.total > 0)
       result.data.matches[0].chase.evidenceKinds = ["historical_pull_inference"]; } },
     { mutate(name, result) { if (name === "getPublicShellStatusV3") result.data.providerHealthEvaluatedAt = "invalid"; } },
+    { mutate(name, result) { if (name === "getDashboardBundleV3") delete result.evMedianSources; } },
+    { mutate(name, result) { if (name === "getDashboardBundleV3") result.evMedianSources.overall = "packscout"; } },
     { mutateWitness(witness, count) { if (count === 2) witness.witnessSha256 = "e".repeat(64); } },
     { mutateWitness(witness) { witness.entries[0].activeFacts.availability = "sold_out"; } },
   ];

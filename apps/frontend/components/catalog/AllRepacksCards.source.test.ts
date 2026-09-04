@@ -7,8 +7,11 @@ const source = readFileSync(
   "utf8",
 );
 
-test("card layout keeps the selectable repack and core comparison metrics", () => {
+test("card layout keeps the selectable repack and gross/net comparison metrics", () => {
   assert.match(source, /onSelect\(repack\.publicRepackId, event\.currentTarget\)/);
+  assert.match(source, /const grossEv = presentGrossEvV3\(repack, estimate\)/);
+  assert.match(source, /metric=\{grossEv\.grossEvDollars\}/);
+  assert.match(source, /metric=\{grossEv\.grossEvPercent\}/);
   assert.match(source, /metric=\{grossEv\.evDollars\}/);
   assert.match(source, /metric=\{grossEv\.evPercent\}/);
   assert.match(source, /metric=\{buyback\}/);
