@@ -12,7 +12,7 @@ Packscout starts with two application surfaces, `frontend` and `admin`, and a ze
 | Application and runtime boundaries | [`scripts/check-boundaries.mjs`](../scripts/check-boundaries.mjs) rejects imports between the applications, imports between the admin browser and server zones, and server-only imports from browser code. |
 | Documentation integrity | [`scripts/check-docs.mjs`](../scripts/check-docs.mjs) requires the canonical documents, checks local Markdown links, and rejects copied product/path vocabulary and draft review markers. |
 | Script safety | [`scripts/check-scripts.mjs`](../scripts/check-scripts.mjs) rejects destructive or environment-specific package scripts that do not declare their scope. |
-| Workspace and dependency integrity | [`scripts/check-dependencies.mjs`](../scripts/check-dependencies.mjs) enforces Node/npm workspace metadata, one root lockfile, and explicit, owned, expiring vulnerability exceptions. |
+| Workspace and dependency integrity | [`scripts/check-dependencies.mjs`](../scripts/check-dependencies.mjs) enforces Node/npm workspace metadata, one root lockfile, and explicit, owned, expiring vulnerability exceptions. The advisory audit is cached against the lockfile hash; see [Advisory audit availability](#advisory-audit-availability). |
 | Test discovery | [`scripts/run-tests.mjs`](../scripts/run-tests.mjs) discovers tests by convention and fails on missing coverage lanes or malformed, duplicate, or stale quarantine entries. |
 | Architecture ratchet | [`scripts/scan-framework-standards.mjs`](../scripts/scan-framework-standards.mjs) reports boundary drift, oversized modules, inline-style hotspots, route-test gaps, missing BDD scenarios, workspace drift, and missing focused quality commands. |
 | Behavior planning | [The BDD standard](testing/shift-left-bdd.md) and [scenario template](../.tasks/_templates/bdd-scenario.feature.md) require acceptance criteria to map to automation or an explicit gap. |
@@ -53,3 +53,34 @@ npm run verify:framework
 ```
 
 This is the one canonical gate. It runs the framework checks and standards ratchet, then linting, type checks, convention-discovered tests, and production builds for both applications. Focused commands are encouraged during implementation, but they do not replace the full verifier.
+
+## Advisory audit availability
+
+`check:dependencies` calls `npm audit`, the only network dependency in the whole
+verifier. The npm bulk-advisory endpoint is intermittently unavailable: a call
+was measured hanging for 300 seconds before returning `503`, which stalled the
+gate for roughly six minutes and then failed it on infrastructure rather than on
+the change under review.
+
+The audit answer is a function of the dependency tree, so the report is cached
+under `node_modules/.cache/packscout/` keyed on the `package-lock.json` hash and
+re-fetched only when the lockfile changes or the cached report ages out.
+
+When the endpoint cannot be reached, behaviour differs by environment
+deliberately:
+
+- **CI** always fetches fresh advisory data and fails hard on any audit error.
+  CI remains the authoritative gate before merge.
+- **Local runs** fall back to the most recent cached report, or continue with a
+  loud warning and no advisory data when no cache exists. A registry outage is
+  infrastructure noise, and blocking local verification on it only trains people
+  to skip the gate entirely.
+
+Exception staleness is only evaluated when real advisory data was fetched, since
+without it every live exception would look unmatched.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PACKSCOUT_AUDIT_MAX_AGE_HOURS` | `24` | Cache lifetime. `0` always fetches. |
+| `PACKSCOUT_AUDIT_TIMEOUT_SECONDS` | `30` | Hard timeout on the audit call. |
+| `PACKSCOUT_SKIP_DEPENDENCY_AUDIT` | unset | `1` skips the audit locally. Refused in CI. |

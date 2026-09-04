@@ -49,6 +49,12 @@ jobs:
     timeout-minutes: 30
     env:
       PACKSCOUT_TEST_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      # CI is the authoritative advisory gate. Local runs may serve a cached
+      # audit report or degrade when the npm advisory endpoint is unavailable;
+      # CI always fetches fresh data and fails hard, with a longer timeout than
+      # a developer machine because nobody is waiting on it.
+      PACKSCOUT_AUDIT_MAX_AGE_HOURS: "0"
+      PACKSCOUT_AUDIT_TIMEOUT_SECONDS: "120"
 
     services:
       postgres:
