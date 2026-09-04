@@ -103,9 +103,9 @@ export class ProviderPackPublicationContext {
       const reconciliation = Prisma.sql`SELECT r.id FROM pack_activation_intents r
         WHERE r.public_repack_id = h.public_repack_id
           AND (r.intent_json #>> '{expectedHead,publicationEpoch}')::bigint = h.publication_epoch
-          AND r.state IN ('ready','publishing','retry_scheduled','waiting')
+          AND r.state IN ('ready','publishing','retry_scheduled','waiting','blocked')
           AND ((r.pack_publication_sequence = h.accepted_sequence AND r.public_pack_snapshot_id = h.active_snapshot_id)
-            OR (r.reason_code = 'RECEIPT_AMBIGUOUS' AND EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = r.id)))`;
+            OR EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = r.id))`;
       const latest = Prisma.sql`w.pack_publication_sequence = h.latest_sequence
         AND w.state IN ('ready','retry_scheduled','publishing') AND NOT EXISTS (${reconciliation})`;
       const eligible = kind === "activation" ? Prisma.sql`((${latest}) OR w.id IN (${reconciliation}))` : latest;
@@ -125,11 +125,14 @@ export class ProviderPackPublicationContext {
             lease_owner: null, lease_work_id: null, lease_kind: null, lease_expires_at: null, lease_fence: { increment: 1 } } });
           continue;
         }
-        // Expired owners cannot strand older publishing episodes when newer work wins.
-        for (const table of [packWorkTable("build"), packWorkTable("activation")]) {
-          await tx.$executeRaw(Prisma.sql`UPDATE ${table} SET state = 'superseded'
-            WHERE public_repack_id = ${row.public_repack_id}::uuid AND state = 'publishing'
-              AND pack_publication_sequence < ${row.pack_publication_sequence}`);
+        // Persisted operations survive a crash even before an ambiguity marker.
+        // Only explicit receipt/head reconciliation may retire those episodes.
+        for (const staleKind of ["build", "activation"] as const) {
+          const safe = staleKind === "activation"
+            ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = stale.id)` : Prisma.empty;
+          await tx.$executeRaw(Prisma.sql`UPDATE ${packWorkTable(staleKind)} stale SET state = 'superseded'
+            WHERE stale.public_repack_id = ${row.public_repack_id}::uuid AND stale.state = 'publishing'
+              AND stale.pack_publication_sequence < ${row.pack_publication_sequence} ${safe}`);
         }
         const expiresAt = new Date((await this.now(tx)).getTime() + leaseSeconds * 1000);
         const head = await tx.pack_publication_heads.update({ where: { public_repack_id: row.public_repack_id },
@@ -157,7 +160,9 @@ export class ProviderPackPublicationContext {
     await this.transaction(async tx => {
       const head = await this.lockLease(tx, claim, claim.kind);
       const reconciling = claim.kind === "activation" &&
-        (head.accepted_sequence === BigInt(claim.sequence) || reason === "RECEIPT_AMBIGUOUS");
+        (head.accepted_sequence === BigInt(claim.sequence) || reason === "RECEIPT_AMBIGUOUS" ||
+          await tx.pack_publication_operations.count({ where: { intent_id: claim.workId } }) > 0);
+      packInvariant(!reconciling || state !== "superseded");
       const nextState = head.latest_sequence > BigInt(claim.sequence) && !reconciling ? "superseded" : state;
       await tx.$executeRaw(Prisma.sql`UPDATE ${packWorkTable(claim.kind)} SET state = ${nextState}, reason_code = ${reason},
         available_at = clock_timestamp() + ${retrySeconds} * interval '1 second' WHERE id = ${claim.workId}::uuid`);

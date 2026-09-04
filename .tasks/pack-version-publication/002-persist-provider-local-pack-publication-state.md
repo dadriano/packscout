@@ -6,7 +6,15 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** blocked
+**Status:** in_progress
+
+## Recovery repair — 2026-09-04
+
+The user authorized unblocking 002/003. Work resumed on the existing P02 branch after saving `codex/p02-before-unblock-20260904` and rebasing onto main `86e2a142`. Both P1 crash/partial-expiry cases now have direct PostgreSQL regressions; focused recovery checks pass, but full certification and review resolution remain pending.
+
+Operation-bearing episodes survive enqueue, lease takeover, defer, and retry exhaustion even if no ambiguity marker was written. A blocked unresolved episode pauses only its pack. `retireReconciled` requires the current lease, an expired or superseded desired episode, and a receipt for every recorded operation; successful/unknown activation or an expired activation replay cannot authorize replacement. A definitive activation refusal/conflict can. Retirement preserves all operation/receipt bytes, replans only the still-latest expired capture, and rechecks EV readiness before artifact reuse. P06 supplies authenticated receipts/status evidence; no transport or processor is enabled here.
+
+The unrelated Watchlist gate is being repaired separately in `.worktrees/fix-watchlist-ev-vocabulary`, branch `codex/fix-watchlist-ev-vocabulary`; its response uses `displayedEv` with a strengthened vocabulary guard. Do not add an inventory exemption. P03 remains local and must be restacked/certified separately after P02 is merged. Earlier blocker notes below are historical context until final evidence replaces them.
 
 ## Start Here
 
@@ -110,10 +118,10 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 ### Recovery and bounded behavior
 
-- [ ] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
+- [x] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
 - [x] An expired claimant cannot mutate work after a newer fence is issued.
 - [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
-- [ ] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
+- [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
 - [x] Records, logs, and errors stay within declared bounds and contain no protected data.
 
 ## Verification
@@ -142,7 +150,7 @@ Full certification is blocked by the merged PR103 Watchlist change: the EV cutov
 - An expired intent with no persisted operation is retired and, only when still the latest desired work, creates a fresh request from preserved inputs. Still-valid evidence can reuse the artifact under a new intent; expired evidence waits for fresh inputs. Existing operation-bearing episodes remain available for receipt reconciliation, and older expiry never replaces newer desired work.
 - Scoped foreign keys, immutable operation/receipt evidence, fenced claims, bounded attempts, and explicit local runtime grants preserve provider/organization isolation. No transport, scheduler, or public activation is added.
 
-The latest fixes address discussions `3930457571`, `3930457576`, `3930457580`, and `3930580327`. Two new P1 findings remain unresolved: `3930633635` (crash after persisting an operation but before marking ambiguity, followed by newer desired work) and `3930633637` (expiry after partial remote execution). Recovery acceptance is reopened; the passing matrix does not yet cover these windows. Resolve them before merge, alongside the separate Watchlist gate. Chronological checkpoints and completed search-boundary evidence remain in Git history.
+The earlier fixes address discussions `3930457571`, `3930457576`, `3930457580`, and `3930580327`. The 2026-09-04 correction also covers `3930633635` (crash before an ambiguity marker) and `3930633637` (partial execution expiry), including deferred/blocked work, exact activation outcomes, retry exhaustion, and transactional replacement rollback. The 99-test cumulative matrix passed; a final additional rollback regression raises the recovery suite to 16 checks (100 combined). Schema checks (30), affected lint/typechecks, docs, and the zero-finding ratchet passed. Full certification and GitHub thread closure remain pending; do not infer merge readiness from the focused checks.
 
 ### Intentional adaptations and later owners
 

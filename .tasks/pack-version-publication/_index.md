@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged. P02 has 84 passing contract/boundary checks and 30 schema checks, but two new P1 crash/partial-expiry findings remain unresolved and merged PR103's Watchlist EV inventory mismatch blocks the full gate. Fix the recovery gaps and the separate upstream guard without an exemption, then refresh/reverify before merging PR95. P03 remains a separate local implementation; no publication processor is enabled.
+PR96 is merged. The P02 crash/partial-expiry repairs now pass focused regression checks, and the separate Watchlist vocabulary repair is in PR109 with full certification running. Finish and merge the prerequisite, refresh/reverify PR95, then restack and certify the existing P03 implementation. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR96 merged | Provider-local crash and isolation matrix | blocked |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR96 merged | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -145,13 +145,13 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Every provider database can durably plan affected packs and record ready or blocked desired state; no publisher is enabled.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Leave new state unused and revert the disabled planner.
-- **Size exception:** Boundary review permits 26 authored files (one over the 25-file target), remaining below 2,500 authored changed lines. The extra test module covers inseparable admission-to-outbox invariants and keeps the existing 469-line crash suite within the repository's file-size limit. Splitting those regressions from their fixes would leave the same transaction boundary uncertified; runtime scope is unchanged. No generated files are added.
+- **Size exception:** Boundary review permits 27 authored files and approximately 2,800 authored changed lines. The two boundary/recovery test modules certify inseparable admission-to-outbox and crash/expiry invariants while keeping the existing 469-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
-- **Current parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (main with PR96 and independently merged PR103/104).
+- **Current parent:** `86e2a142` (main with PR96 and PR103–105); a backup preserves pre-repair P02 `8409143c`.
 - **Implementation checkpoint:** `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
-- **Delivery gate:** PR96 is merged. New P1 discussions `3930633635` and `3930633637` reopen crash/partial-expiry recovery acceptance. Separately, CI `33830594805` and the current-head isolated guard fail on PR103's uninventoried EV tokens in `convex/savedItems.ts`. Resolve both recovery findings and the upstream gate before merging PR95; P03 stays separate.
-- **Current correction evidence:** All 84 contract/readiness/persistence checks and 30 schema checks pass, including complete capture/readiness authority, full shared evidence, recurring desired states, reconciliation below newer work, expiry recovery, and complete search-projection limits. Affected lint/typechecks and the zero-finding standards ratchet pass; no gate was weakened.
+- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637` pass. PR109 repairs the separate Watchlist vocabulary failure with a strengthened guard. Merge the verified prerequisite, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
+- **Current correction evidence:** The cumulative 99-check contract/readiness/persistence matrix passed, followed by one additional passing atomic-renewal rollback regression (100 combined, 16 in the new recovery suite). All 30 schema checks, affected lint/typechecks, docs, and the zero-finding standards ratchet pass; no gate was weakened. Full certification remains pending.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -251,7 +251,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | blocked | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
@@ -301,4 +301,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Fix the two new P1 recovery findings and resolve the separate upstream Watchlist gate, then refresh/reverify and merge PR95 before certifying/publishing P03. PR96 is already merged; publication stays disabled until P06 and launch authorization.
+Finish full certification and merge the separate Watchlist repair PR109, then refresh/reverify and merge PR95 before certifying/publishing P03. Recovery regressions pass; PR96 is already merged. Publication stays disabled until P06 and launch authorization.

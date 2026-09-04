@@ -107,9 +107,10 @@ export class ProviderPackBuildRequestRepository {
     await tx.$executeRaw`UPDATE pack_build_requests SET state = 'superseded'
       WHERE public_repack_id = ${publicRepackId}::uuid AND pack_publication_sequence < ${allocation!.sequence}
       AND state IN ('waiting','ready','retry_scheduled','blocked') AND id IS DISTINCT FROM ${head.lease_work_id}::uuid`;
-    await tx.$executeRaw`UPDATE pack_activation_intents SET state = 'superseded'
-      WHERE public_repack_id = ${publicRepackId}::uuid AND pack_publication_sequence < ${allocation!.sequence}
-      AND state IN ('waiting','ready','retry_scheduled','blocked') AND id IS DISTINCT FROM ${head.lease_work_id}::uuid`;
+    await tx.$executeRaw`UPDATE pack_activation_intents intent SET state = 'superseded'
+      WHERE intent.public_repack_id = ${publicRepackId}::uuid AND intent.pack_publication_sequence < ${allocation!.sequence}
+      AND intent.state IN ('waiting','ready','retry_scheduled','blocked') AND intent.id IS DISTINCT FROM ${head.lease_work_id}::uuid
+      AND NOT EXISTS (SELECT 1 FROM pack_publication_operations operation WHERE operation.intent_id = intent.id)`;
     await tx.pack_publication_heads.update({ where: { public_repack_id: publicRepackId }, data: { latest_sequence: allocation!.sequence } });
     return { publicRepackId, outcome: "change", sequence, requestId: id };
   }

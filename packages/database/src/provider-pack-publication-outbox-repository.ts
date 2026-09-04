@@ -7,6 +7,7 @@ import {
 } from "@packscout/contracts";
 import { ProviderPackPublicationContext, packInvariant, type PackWorkClaim } from "./provider-pack-publication-context.ts";
 import { ProviderPackBuildRequestRepository } from "./provider-pack-build-request-repository.ts";
+import type { ProviderTransactionClient } from "./provider-database.ts";
 
 const equal = (a: unknown, b: unknown) => packCatalogCanonicalJson(a) === packCatalogCanonicalJson(b);
 const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
@@ -39,20 +40,7 @@ export class ProviderPackPublicationOutboxRepository {
       if (existing) { packInvariant(existing.request_sha256 === digest && equal(existing.request_json, operation)); return digest; }
       const now = await this.context.now(tx);
       if (Date.parse(operation.intent.expiresAt) <= now.getTime()) {
-        // No persisted operation means no authorized remote attempt could exist.
-        // Retire this immutable episode; preserve any operation-bearing episode for reconciliation.
-        if (await tx.pack_publication_operations.count({ where: { intent_id: claim.workId } }) === 0) {
-          await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: { state: "superseded", reason_code: "OPERATION_EXPIRED" } });
-          await this.context.release(tx, claim);
-          if (head.latest_sequence === BigInt(claim.sequence) && head.publication_epoch === BigInt(operation.intent.expectedHead.publicationEpoch)) {
-            const source = await tx.pack_build_requests.findUniqueOrThrow({ where: { id: intent.build_request_id } });
-            const inputs = providerPackBuildInputsSchema.parse(source.inputs_json), digests = await deriveProviderPackInputDigests(inputs);
-            const readiness = { ...digests, ...await deriveProviderPackReadinessDecision(inputs, digests.evInputsSha256, now.toISOString()),
-              requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs) };
-            await new ProviderPackBuildRequestRepository(this.context).enqueueInTransaction(tx, {
-              inputs, readiness, boundaryIdentity: `renew:${claim.workId}` });
-          }
-        }
+        await this.retireInTransaction(tx, claim, head, now);
         return null;
       }
       packInvariant(!head.held && head.latest_sequence === BigInt(claim.sequence) &&
@@ -73,6 +61,49 @@ export class ProviderPackPublicationOutboxRepository {
     });
     packInvariant(recorded !== null);
     return recorded;
+  }
+  /** P06 persists authenticated receipts first. Unknown or successful activations cannot be retired. */
+  async retireReconciled(claim: PackWorkClaim): Promise<void> {
+    await this.context.transaction(async tx => {
+      const head = await this.context.lockLease(tx, claim, "activation");
+      packInvariant(await this.retireInTransaction(tx, claim, head, await this.context.now(tx)));
+    });
+  }
+  private async retireInTransaction(tx: ProviderTransactionClient, claim: PackWorkClaim,
+    head: Awaited<ReturnType<ProviderPackPublicationContext["lockLease"]>>, now: Date): Promise<boolean> {
+    const row = await tx.pack_activation_intents.findUniqueOrThrow({ where: { id: claim.workId } });
+    const intent = packActivationIntentSchema.parse(row.intent_json);
+    const expired = Date.parse(intent.expiresAt) <= now.getTime();
+    if ((!expired && head.latest_sequence <= BigInt(claim.sequence)) || head.held ||
+      head.publication_epoch !== BigInt(intent.expectedHead.publicationEpoch) || head.accepted_sequence === BigInt(claim.sequence)) return false;
+    // Select bounded receipt evidence, not up to 100 copies of the full captured intent.
+    const operations = await tx.$queryRaw<Array<{ kind: string; request_sha256: string; receipt_json: unknown }>>`
+      SELECT o.request_json->>'kind' AS kind, o.request_sha256, r.receipt_json
+      FROM pack_publication_operations o LEFT JOIN pack_publication_receipts r ON r.operation_id = o.id
+      WHERE o.intent_id = ${claim.workId}::uuid LIMIT ${packPublicationLimits.maximumOperations + 1}`;
+    packInvariant(operations.length <= packPublicationLimits.maximumOperations, "PACK_LIMIT_EXCEEDED");
+    for (const operation of operations) {
+      const receipt = packCatalogOperationReceiptSchema.safeParse(operation.receipt_json);
+      if (!receipt.success || receipt.data.requestSha256 !== operation.request_sha256) return false;
+      const { outcome, state, reasonCode } = receipt.data.result;
+      if (["published", "rolled_back"].includes(state)) return false;
+      // An expired replay record is not proof its activation never succeeded.
+      if (operation.kind === "activate_head" &&
+        (!["conflict", "refused"].includes(outcome) || !["blocked", "superseded"].includes(state) || reasonCode === null)) return false;
+      if (!["start_snapshot", "stage_batch", "finalize_snapshot", "activate_head"].includes(operation.kind)) return false;
+    }
+    await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: {
+      state: "superseded", reason_code: expired ? "OPERATION_EXPIRED" : "ACTIVATION_CONFLICT" } });
+    await this.context.release(tx, claim);
+    if (expired && head.latest_sequence === BigInt(claim.sequence)) {
+      const source = await tx.pack_build_requests.findUniqueOrThrow({ where: { id: row.build_request_id } });
+      const inputs = providerPackBuildInputsSchema.parse(source.inputs_json), digests = await deriveProviderPackInputDigests(inputs);
+      const readiness = { ...digests, ...await deriveProviderPackReadinessDecision(inputs, digests.evInputsSha256, now.toISOString()),
+        requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs) };
+      await new ProviderPackBuildRequestRepository(this.context).enqueueInTransaction(tx, {
+        inputs, readiness, boundaryIdentity: `renew:${claim.workId}` });
+    }
+    return true;
   }
   async recordReceipt(claim: PackWorkClaim, input: unknown): Promise<void> {
     await this.context.transaction(async tx => {
