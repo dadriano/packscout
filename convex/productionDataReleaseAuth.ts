@@ -5,6 +5,7 @@ import {
   MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES,
   MAX_CATALOG_RETENTION_HTTP_BODY_BYTES,
   MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES,
+  MAX_PACK_CATALOG_HTTP_BODY_BYTES,
   PRODUCTION_DATA_RELEASE_V3_PATHS,
   dataReleaseV3RetainedEvWitnessWithinByteLimit,
   PRODUCTION_AUTH_HEADER_NAMES,
@@ -20,6 +21,8 @@ import {
   catalogManifestReceiptDigest,
   catalogRetentionErrorCodeSchema,
   catalogRetentionReceiptDigest,
+  packCatalogErrorCodeSchema,
+  packCatalogReceiptDigest,
   providerReleaseErrorCodeSchema,
   providerReleaseReceiptDigest,
   productionDataReleaseErrorCodeSchema,
@@ -50,6 +53,7 @@ import {
   configuredPublicationKeySecret,
   dataReleaseV3PublicationKeyIsAuthorized,
   heatPublicationKeyIsAuthorized,
+  packCatalogPublicationKeyIsAuthorized,
   publicationAuthorityConfigurationIsIsolated,
 } from "./productionPublicationKeyConfig";
 import {
@@ -60,6 +64,10 @@ import {
   safeCatalogRetentionMessage,
   type CatalogRetentionErrorCode,
 } from "./catalogRetentionErrors";
+import {
+  safePackCatalogMessage,
+  type PackCatalogErrorCode,
+} from "./packCatalogErrors";
 
 type LegacyExecutionReference = FunctionReference<
   "mutation",
@@ -102,13 +110,15 @@ type PublicationErrorCode =
   | ProductionDataReleaseErrorCode
   | ProviderReleaseErrorCode
   | CatalogManifestErrorCode
-  | CatalogRetentionErrorCode;
+  | CatalogRetentionErrorCode
+  | PackCatalogErrorCode;
 type PublicationSurface =
   | "legacy"
   | "dataReleaseV3"
   | "provider"
   | "manifest"
-  | "retention";
+  | "retention"
+  | "packCatalog";
 
 /**
  * data_release_v3 shares the legacy PUBLICATION_* error codes, the legacy
@@ -129,12 +139,16 @@ function surfaceCode(
     ? "PROVIDER_RELEASE_"
     : surface === "manifest"
     ? "CATALOG_MANIFEST_"
+    : surface === "packCatalog"
+    ? "PACK_CATALOG_"
     : "CATALOG_RETENTION_";
   const mappedCode = legacyCode.replace(/^PUBLICATION_/u, prefix);
   const parsed = surface === "provider"
     ? providerReleaseErrorCodeSchema.safeParse(mappedCode)
     : surface === "manifest"
     ? catalogManifestErrorCodeSchema.safeParse(mappedCode)
+    : surface === "packCatalog"
+    ? packCatalogErrorCodeSchema.safeParse(mappedCode)
     : catalogRetentionErrorCodeSchema.safeParse(mappedCode);
   return parsed.success
     ? parsed.data
@@ -142,12 +156,15 @@ function surfaceCode(
     ? "PROVIDER_RELEASE_INTERNAL_ERROR"
     : surface === "manifest"
     ? "CATALOG_MANIFEST_INTERNAL_ERROR"
+    : surface === "packCatalog"
+    ? "PACK_CATALOG_INTERNAL_ERROR"
     : "CATALOG_RETENTION_INTERNAL_ERROR";
 }
 
 function maximumBodyBytes(surface: PublicationSurface): number {
   if (surface === "manifest") return MAX_CATALOG_MANIFEST_PUBLICATION_BODY_BYTES;
   if (surface === "retention") return MAX_CATALOG_RETENTION_HTTP_BODY_BYTES;
+  if (surface === "packCatalog") return MAX_PACK_CATALOG_HTTP_BODY_BYTES;
   if (surface === "dataReleaseV3") return MAX_DATA_RELEASE_V3_HTTP_BODY_BYTES;
   return MAX_PRODUCTION_HTTP_BODY_BYTES;
 }
@@ -275,7 +292,9 @@ async function authenticateRequest(
     { keyId, nonce },
   );
   await ctx.runMutation(
-    surface === "provider"
+    surface === "packCatalog"
+      ? internal.productionDataReleaseAuth.consumePackCatalogNonce
+      : surface === "provider"
       ? internal.productionDataReleaseAuth.consumeProviderNonce
       : surface === "manifest"
       ? internal.productionDataReleaseAuth.consumeCatalogManifestNonce
@@ -328,7 +347,17 @@ function errorCode(error: unknown): PublicationErrorCode | null {
   const manifest = catalogManifestErrorCodeSchema.safeParse(data.code);
   if (manifest.success) return manifest.data;
   const retention = catalogRetentionErrorCodeSchema.safeParse(data.code);
-  return retention.success ? retention.data : null;
+  if (retention.success) return retention.data;
+  const packCatalog = packCatalogErrorCodeSchema.safeParse(data.code);
+  return packCatalog.success ? packCatalog.data : null;
+}
+
+function nonLegacyStateConflict(surface: PublicationSurface): PublicationErrorCode {
+  return surface === "manifest"
+    ? "CATALOG_MANIFEST_STATE_CONFLICT"
+    : surface === "packCatalog"
+    ? "PACK_CATALOG_STATE_CONFLICT"
+    : "CATALOG_RETENTION_STATE_CONFLICT";
 }
 
 async function signReceipt(
@@ -352,9 +381,7 @@ async function signReceipt(
       refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
     }
     throw new HttpRefusal(
-      surface === "manifest"
-        ? "CATALOG_MANIFEST_STATE_CONFLICT"
-        : "CATALOG_RETENTION_STATE_CONFLICT",
+      nonLegacyStateConflict(surface),
       409,
     );
   }
@@ -367,6 +394,8 @@ async function signReceipt(
     ? await catalogManifestReceiptDigest(receipt)
     : surface === "retention"
     ? await catalogRetentionReceiptDigest(receipt)
+    : surface === "packCatalog"
+    ? await packCatalogReceiptDigest(receipt)
     : null;
   if (!usesLegacyProtocol(surface)) {
     if (
@@ -377,9 +406,7 @@ async function signReceipt(
         refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT");
       }
       throw new HttpRefusal(
-        surface === "manifest"
-          ? "CATALOG_MANIFEST_STATE_CONFLICT"
-          : "CATALOG_RETENTION_STATE_CONFLICT",
+        nonLegacyStateConflict(surface),
         409,
       );
     }
@@ -390,9 +417,7 @@ async function signReceipt(
         ? refuseProviderRelease("PROVIDER_RELEASE_STATE_CONFLICT")
         : (() => {
             throw new HttpRefusal(
-              surface === "manifest"
-                ? "CATALOG_MANIFEST_STATE_CONFLICT"
-                : "CATALOG_RETENTION_STATE_CONFLICT",
+              nonLegacyStateConflict(surface),
               409,
             );
           })())
@@ -470,6 +495,8 @@ async function handleAuthenticatedRequest(
     if (code === null) {
       const internalCode = surface === "provider"
         ? "PROVIDER_RELEASE_INTERNAL_ERROR"
+        : surface === "packCatalog"
+        ? "PACK_CATALOG_INTERNAL_ERROR"
         : surface === "manifest"
         ? "CATALOG_MANIFEST_INTERNAL_ERROR"
         : surface === "retention"
@@ -489,6 +516,8 @@ async function handleAuthenticatedRequest(
           ? safeProviderReleaseMessage(code as ProviderReleaseErrorCode)
           : catalogManifestErrorCodeSchema.safeParse(code).success
           ? safeCatalogManifestMessage(code as CatalogManifestErrorCode)
+          : packCatalogErrorCodeSchema.safeParse(code).success
+          ? safePackCatalogMessage(code as PackCatalogErrorCode)
           : catalogRetentionErrorCodeSchema.safeParse(code).success
           ? safeCatalogRetentionMessage(code as CatalogRetentionErrorCode)
           : safeProductionDataReleaseMessage(code as ProductionDataReleaseErrorCode),
@@ -577,6 +606,20 @@ export function handleAuthenticatedCatalogRetentionRequest(
   );
 }
 
+export function handleAuthenticatedPackCatalogRequest(
+  ctx: ActionCtx,
+  request: Request,
+  operation: ProviderExecutionReference,
+): Promise<Response> {
+  return handleAuthenticatedRequest(
+    ctx,
+    request,
+    operation,
+    "packCatalog",
+    packCatalogPublicationKeyIsAuthorized,
+  );
+}
+
 const NONCE_ARGS = {
   keyId: v.string(),
   nonceHash: v.string(),
@@ -608,6 +651,11 @@ async function consumeNonceForSurface(
     if (surface === "retention") {
       throw new ConvexError({
         code: surfaceCode(surface, code) as CatalogRetentionErrorCode,
+      });
+    }
+    if (surface === "packCatalog") {
+      throw new ConvexError({
+        code: surfaceCode(surface, code) as PackCatalogErrorCode,
       });
     }
     return refuseProductionDataRelease(code);
@@ -662,4 +710,10 @@ export const consumeCatalogRetentionNonce = internalMutation({
   args: NONCE_ARGS,
   returns: v.null(),
   handler: (ctx, args) => consumeNonceForSurface(ctx, args, "retention"),
+});
+
+export const consumePackCatalogNonce = internalMutation({
+  args: NONCE_ARGS,
+  returns: v.null(),
+  handler: (ctx, args) => consumeNonceForSurface(ctx, args, "packCatalog"),
 });

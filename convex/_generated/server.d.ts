@@ -34,6 +34,7 @@ type Env = {
   readonly PACKSCOUT_HEAT_PUBLICATION_KEY_IDS: string | undefined;
   readonly PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED: "1" | undefined;
   readonly PACKSCOUT_MOCK_HEAT_SIMULATION_ENABLED: "1" | undefined;
+  readonly PACKSCOUT_PACK_CATALOG_V1_PUBLICATION_KEYS: string | undefined;
   readonly PACKSCOUT_PROVIDER_RELEASE_KEY_PLATFORMS: string | undefined;
   readonly PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY: string | undefined;
   readonly PACKSCOUT_PUBLIC_ORIGIN_SET_HASH: string | undefined;

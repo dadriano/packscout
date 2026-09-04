@@ -6,7 +6,7 @@
 **Delivery phase:** P05
 **Estimated scope:** large
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including storage, authorization, concurrency, query, cursor, lifecycle, and saved-item verification
-**Status:** todo
+**Status:** in_progress
 
 ## Start Here
 

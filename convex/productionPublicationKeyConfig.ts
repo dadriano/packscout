@@ -4,7 +4,9 @@ import {
   PRODUCTION_AUTH_KEY_ID_PATTERN,
   canonicalJson,
   decodeProductionAuthSecretBase64,
+  packCatalogKeyAuthoritySchema,
   providerCatalogPlatformKeyV1Schema,
+  type PackCatalogKeyAuthority,
 } from "@packscout/contracts";
 import { env } from "./_generated/server";
 
@@ -23,6 +25,7 @@ const MAX_DATA_RELEASE_V3_PUBLICATION_KEYS = 4;
 const MAX_HEAT_PUBLICATION_KEYS = 4;
 const MAX_PROVIDER_PUBLICATION_KEYS = 16;
 const MAX_PRODUCTION_PUBLICATION_KEYS = 64;
+const MAX_PACK_CATALOG_PUBLICATION_KEYS = 32;
 const catalogManifestKeyRoleSet = new Set<string>(
   CATALOG_MANIFEST_KEY_ROLES,
 );
@@ -181,6 +184,45 @@ function configuredDataReleaseV3PublicationKeyIds(): ReadonlySet<string> | null 
   );
 }
 
+/**
+ * pack_catalog_v1 keys bind to one environment, organization, and scope. The
+ * map must be canonical JSON with sorted key IDs, every key ID must own a
+ * configured secret, and every authority must parse exactly.
+ */
+function configuredPackCatalogKeyAuthorities():
+  ReadonlyMap<string, PackCatalogKeyAuthority> | null {
+  const raw = env.PACKSCOUT_PACK_CATALOG_V1_PUBLICATION_KEYS;
+  if (raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isPlainRecord(parsed)) return null;
+    const entries = Object.entries(parsed);
+    if (entries.length === 0 || entries.length > MAX_PACK_CATALOG_PUBLICATION_KEYS) {
+      return null;
+    }
+    const resolved = new Map<string, PackCatalogKeyAuthority>();
+    for (const [keyId, authority] of entries) {
+      const parsedAuthority = packCatalogKeyAuthoritySchema.safeParse(authority);
+      if (
+        !PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId) ||
+        configuredPublicationKeySecret(keyId) === null ||
+        !parsedAuthority.success
+      ) {
+        return null;
+      }
+      resolved.set(keyId, parsedAuthority.data);
+    }
+    const keyIds = [...resolved.keys()];
+    if (keyIds.some((keyId, index) => index > 0 && keyIds[index - 1]! >= keyId)) {
+      return null;
+    }
+    if (raw !== canonicalJson(parsed)) return null;
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
 function equalSecret(left: Uint8Array, right: Uint8Array): boolean {
   if (left.byteLength !== right.byteLength) return false;
   let difference = 0;
@@ -205,6 +247,10 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
       ? new Set<string>()
       : configuredDataReleaseV3PublicationKeyIds();
   const providerKeyIds = configuredProviderPublicationKeyIds();
+  const packCatalogAuthorities =
+    env.PACKSCOUT_PACK_CATALOG_V1_PUBLICATION_KEYS === undefined
+      ? new Map<string, PackCatalogKeyAuthority>()
+      : configuredPackCatalogKeyAuthorities();
   const manifestRoleMap = env.PACKSCOUT_CATALOG_MANIFEST_KEY_ROLES === undefined
     ? {}
     : configuredCatalogManifestRoleMap();
@@ -213,7 +259,8 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
     heatKeyIds === null ||
     dataReleaseV3KeyIds === null ||
     providerKeyIds === null ||
-    manifestRoleMap === null
+    manifestRoleMap === null ||
+    packCatalogAuthorities === null
   ) {
     return false;
   }
@@ -227,6 +274,10 @@ export function publicationAuthorityConfigurationIsIsolated(): boolean {
     ...Object.keys(manifestRoleMap).map((keyId) => ({
       keyId,
       surface: "manifest",
+    })),
+    ...[...packCatalogAuthorities.keys()].map((keyId) => ({
+      keyId,
+      surface: "packCatalog",
     })),
   ];
   if (new Set(authorities.map(({ keyId }) => keyId)).size !== authorities.length) {
@@ -267,4 +318,17 @@ export function dataReleaseV3PublicationKeyIsAuthorized(keyId: string): boolean 
   if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return false;
   return publicationAuthorityConfigurationIsIsolated() &&
     configuredDataReleaseV3PublicationKeyIds()?.has(keyId) === true;
+}
+
+/** The pack_catalog_v1 authority bound to one configured, isolated signing key. */
+export function packCatalogPublicationKeyAuthority(
+  keyId: string,
+): PackCatalogKeyAuthority | null {
+  if (!PRODUCTION_AUTH_KEY_ID_PATTERN.test(keyId)) return null;
+  if (!publicationAuthorityConfigurationIsIsolated()) return null;
+  return configuredPackCatalogKeyAuthorities()?.get(keyId) ?? null;
+}
+
+export function packCatalogPublicationKeyIsAuthorized(keyId: string): boolean {
+  return packCatalogPublicationKeyAuthority(keyId) !== null;
 }

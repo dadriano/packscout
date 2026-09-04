@@ -201,7 +201,7 @@ async function makePackPayload(input: {
   };
   const summaryProjection = publicPackSummaryCore(base);
   const aliases = ["featured", "fixture"];
-  return { ...base, summaryProjection, searchProjection: { publicRepackId: input.id, normalizedText: normalizePackCatalogSearchText([input.title, ...records.map(({ displayName }) => displayName), ...aliases].join(" ")), aliases, categoryIds: [packCatalogFixtureIds.category] } } as PublicPackSnapshotPayload;
+  return { ...base, summaryProjection, searchProjection: { publicRepackId: input.id, normalizedText: normalizePackCatalogSearchText([input.title, ...aliases].join(" ")), aliases, categoryIds: [packCatalogFixtureIds.category] } } as PublicPackSnapshotPayload;
 }
 
 export async function sealFixturePack(payloadInput: unknown, batchSize = 250) {
