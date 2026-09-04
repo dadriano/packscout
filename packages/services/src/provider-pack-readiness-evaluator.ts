@@ -1,7 +1,7 @@
 import {
-  assertPublicPackCatalogBytes, compareCanonicalStrings, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites,
-  packCatalogCanonicalByteCount, packCatalogCanonicalJson,
-  packCatalogTimestampSchema, packPublicationLimits, providerPackBuildInputsSchema, preservesPackLifecycleBaseline,
+  assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites,
+  normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
+  packCatalogTimestampSchema, packPublicationLimits, preservesPackLifecycleBaseline,
   publicPackContentSchema, publicPackSnapshotSchema,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackSnapshot,
 } from "@packscout/contracts";
@@ -14,12 +14,8 @@ export class ProviderPackReadinessEvaluator {
     previousSnapshot?: PublicPackSnapshot | null;
     representedDigest?: string | null;
   }): Promise<{ inputs: ProviderPackBuildInputs; readiness: ProviderPackReadiness }> {
-    const inputs = providerPackBuildInputsSchema.parse(input.candidate);
+    const inputs = normalizeProviderPackBuildInputs(input.candidate, input.previousSnapshot);
     const now = Date.parse(packCatalogTimestampSchema.parse(input.evaluatedAt));
-    if (inputs.snapshotKind === "lifecycle_only") inputs.lifecycleBaseline = input.previousSnapshot ?? null;
-    inputs.contents.sort((a, b) => compareCanonicalStrings(a.publicCollectibleId, b.publicCollectibleId));
-    inputs.aliases.sort(compareCanonicalStrings);
-    inputs.actions.sort((a, b) => compareCanonicalStrings(a.actionId, b.actionId));
     assertPublicPackCatalogBytes(inputs);
     if (packCatalogCanonicalByteCount(inputs) > packPublicationLimits.maximumInputBytes) {
       throw new TypeError("pack.inputs_too_large");

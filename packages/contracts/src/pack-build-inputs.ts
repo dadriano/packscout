@@ -68,6 +68,17 @@ export type ProviderPackBuildInputs = z.infer<typeof providerPackBuildInputsSche
 export type ProviderPackReadiness = z.infer<typeof providerPackReadinessSchema>;
 export type PackPublicationScope = z.infer<typeof packPublicationScopeSchema>;
 
+/** The only allowed capture normalization: schema values, canonical ordering,
+ * and the baseline supplied by the stored active artifact. No pack data changes. */
+export function normalizeProviderPackBuildInputs(candidate: ProviderPackBuildInputs, previousSnapshot: PublicPackSnapshot | null = null): ProviderPackBuildInputs {
+  const inputs = providerPackBuildInputsSchema.parse(candidate);
+  if (inputs.snapshotKind === "lifecycle_only") inputs.lifecycleBaseline = previousSnapshot;
+  inputs.contents.sort((a, b) => compareCanonicalStrings(a.publicCollectibleId, b.publicCollectibleId));
+  inputs.aliases.sort(compareCanonicalStrings);
+  inputs.actions.sort((a, b) => compareCanonicalStrings(a.actionId, b.actionId));
+  return inputs;
+}
+
 export function deriveProviderPackProfilePrerequisites(inputs: ProviderPackBuildInputs): string[] {
   return [...new Set([inputs.providerProfileSnapshotId, ...inputs.contents.map(row => row.collectibleProfileSnapshotId)]
     .filter((id): id is string => id !== null))].sort(compareCanonicalStrings);

@@ -1,7 +1,7 @@
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogTextSchema, packCatalogUuidSchema,
   packPublicationLimits, sharedProviderChangeDeliverySchema, providerPackBuildInputsSchema,
-  assertPublicPackCatalogBytes, packCatalogCanonicalByteCount,
+  assertPublicPackCatalogBytes, normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type SharedProviderChangeDelivery,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -121,14 +121,19 @@ export class ProviderPackImpactRepository {
         assertDeliveredDependencies(candidate, delivery?.sharedDependencies ?? []);
         const head = await tx.pack_publication_heads.findUnique({ where: { public_repack_id: publicRepackId } });
         const previousArtifact = head?.active_snapshot_id ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
-        const result = await this.capture.evaluate({ candidate, evaluatedAt,
-          previousSnapshot: previousArtifact?.snapshot_json as unknown as import("@packscout/contracts").PublicPackSnapshot | null });
+        const previousSnapshot = (previousArtifact?.snapshot_json ?? null) as import("@packscout/contracts").PublicPackSnapshot | null;
+        // Preserve bytes before the callback can mutate the candidate or baseline.
+        const capturedJson = packCatalogCanonicalJson(normalizeProviderPackBuildInputs(candidate, previousSnapshot));
+        const result = await this.capture.evaluate({ candidate, evaluatedAt, previousSnapshot });
         // Callbacks may return replacements or mutate their argument. Bind the
         // result to the original page identity and unaliased delivery evidence.
         packInvariant(result.inputs.publicRepackId === publicRepackId && result.inputs.providerId === this.context.scope.providerId &&
           result.inputs.sourceRevisionIdentity === sourceRevisionIdentity, "PACK_SCOPE_MISMATCH");
-        assertDeliveredDependencies(result.inputs, delivery?.sharedDependencies ?? []);
-        outcomes.push(await this.#requests.enqueueInTransaction(tx, { ...result, boundaryIdentity }));
+        packInvariant(packCatalogCanonicalJson(result.inputs) === capturedJson, "PACK_INPUT_INVALID");
+        // Persist a private copy of the preserved capture, not callback-owned
+        // objects that could change during admission's database awaits.
+        outcomes.push(await this.#requests.enqueueInTransaction(tx, { readiness: result.readiness,
+          inputs: JSON.parse(capturedJson) as ProviderPackBuildInputs, boundaryIdentity }));
       }
       const acknowledgmentDigest = await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, { previousDigest: progress.result_sha256, outcomes });
       await tx.pack_publication_change_receipts.create({ data: { ...this.context.where,

@@ -99,6 +99,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 ### Persistence and isolation
 
 - [x] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
+- [x] Evaluation cannot replace transaction-captured data; only shared schema/order/stored-baseline normalization is allowed, and admission persists a private copy across awaits.
 - [x] Captured-input digests are recomputed at admission, and shared identities/sequences are validated against their actual database representations before planning.
 - [x] The exact sorted provider/member profile prerequisites are derived from captured inputs; substituted, missing, extra, and empty declarations refuse before writes.
 - [x] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
@@ -120,6 +121,12 @@ There is no direct user-facing change. The resulting state machine ensures that 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
 
 ## Implementation and Spec Compliance
+
+### Complete captured-input authority review — 2026-09-03
+
+Discussion `3930154949` broadened the identity-only callback guard to the complete capture. `normalizeProviderPackBuildInputs` now defines the shared schema, ordering, and stored-baseline normalization for readiness and planning. Planning records the canonical normalized bytes before evaluation, rejects any other returned data, and passes a private copy of those preserved bytes into admission. Callback-owned objects cannot change queued data during later database awaits.
+
+Red/green regressions cover title, price, member display, profile, and EV substitution even with matching newly derived evidence, plus delayed mutation during admission. Legitimate reordered inputs, lifecycle baselines, and full shared-delivery paging still succeed. The combined suite passes 56 checks with zero skips; affected contract/database/service lint and typechecks, documentation checks, and the zero-finding standards ratchet pass. Current full verification remains pending; PR96's latest CI reached tooling and exposed a PR101 dashboard response-fixture omission that is being fixed in its owning prerequisite.
 
 ### Profile prerequisite admission review — 2026-09-03
 

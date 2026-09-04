@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { packCatalogCanonicalByteCount, packPublicationLimits, type ProviderPackBuildInputs } from "@packscout/contracts";
+import { compareCanonicalStrings, deriveProviderPackInputDigests, packCatalogCanonicalByteCount, packPublicationLimits, type ProviderPackBuildInputs } from "@packscout/contracts";
 import {
   ProviderPackPublicationContext, ProviderPackBuildRequestRepository, ProviderPackImpactRepository,
   ProviderPackSnapshotRepository, ProviderPackPublicationOutboxRepository, appendPromotionRange,
@@ -30,11 +30,13 @@ test("Pack publication preserves captured authority and maximum dependency evide
     const evaluator = new ProviderPackReadinessEvaluator();
     const requests = new ProviderPackBuildRequestRepository(context);
     const capture: PackInputCapture = {
-      async capture(_tx, input) { return { ...structuredClone(fixture.inputs), publicRepackId: input.publicRepackId,
-        sourceRevisionIdentity: input.sourceRevisionIdentity, expectedDependencies: input.sharedDependencies, observedDependencies: input.sharedDependencies }; },
+      async capture(_tx, input) { const candidate = structuredClone(fixture.inputs);
+        candidate.contents.reverse(); candidate.actions.reverse(); candidate.aliases.reverse();
+        return { ...candidate, publicRepackId: input.publicRepackId, sourceRevisionIdentity: input.sourceRevisionIdentity,
+          expectedDependencies: input.sharedDependencies, observedDependencies: input.sharedDependencies }; },
       evaluate: input => evaluator.evaluate(input),
     };
-    await suite.test("evaluators cannot replace the pack, provider, source revision or delivered dependencies", async () => {
+    await suite.test("evaluators cannot replace any transaction-captured pack data", async () => {
       // Roll back unexpected acceptance too, so each red case starts at the same boundary.
       const guardedClient = client.$extends({ query: { pack_publication_change_receipts: { async create() {
         throw new Error("test expected evaluated boundary refusal");
@@ -44,10 +46,18 @@ test("Pack publication preserves captured authority and maximum dependency evide
         ["provider", inputs => { inputs.providerId = randomUUID(); }, "PACK_SCOPE_MISMATCH"],
         ["source", inputs => { inputs.sourceRevisionIdentity = "another:source"; }, "PACK_SCOPE_MISMATCH"],
         ["dependencies", inputs => { inputs.expectedDependencies.length = 0; inputs.observedDependencies.length = 0; }, "PACK_INPUT_INVALID"],
+        ["title", inputs => { inputs.title = "Not the captured title"; }, "PACK_INPUT_INVALID"],
+        ["price", inputs => { inputs.price.minorUnits += 1; }, "PACK_INPUT_INVALID"],
+        ["contents", inputs => { inputs.contents[0]!.displayName = "Not the captured member"; }, "PACK_INPUT_INVALID"],
+        ["profiles", inputs => { inputs.providerProfileSnapshotId = `ppfs_${"e".repeat(64)}`; }, "PACK_INPUT_INVALID"],
+        ["ev", inputs => { if (inputs.ev?.status === "available") inputs.ev.amount.minorUnits += 1; }, "PACK_INPUT_INVALID"],
       ];
       for (const [name, mutate, code] of mutations) {
         const planner = new ProviderPackImpactRepository(new ProviderPackPublicationContext(guardedClient, scope), {
-          ...capture, async evaluate(input) { mutate(input.candidate); return evaluator.evaluate(input); },
+          ...capture, async evaluate(input) { mutate(input.candidate);
+            input.candidate.contents.sort((a, b) => compareCanonicalStrings(a.publicCollectibleId, b.publicCollectibleId));
+            input.candidate.evInputsSha256 = (await deriveProviderPackInputDigests(input.candidate)).evInputsSha256;
+            return evaluator.evaluate(input); },
         });
         await assert.rejects(planner.plan({ kind: "shared", delivery: { ...scope, centralChangeIdentity: `mutated:${name}`,
           providerChangeSequence: "1", sharedDependencies: [{ kind: "ev_policy", identity: "policy:1", contentSha256: "a".repeat(64) }],
@@ -57,6 +67,29 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.equal(await client.pack_publication_impact_progress.count(), 0);
       assert.equal(await client.pack_publication_change_receipts.count(), 0);
       assert.equal((await client.pack_publication_scopes.findUniqueOrThrow({ where: { provider_id: providerId } })).shared_change_sequence, 0n);
+    });
+    await suite.test("later mutation of evaluator-owned objects cannot change admitted capture bytes", async () => {
+      let returnedInputs: ProviderPackBuildInputs | null = null;
+      let writes = 0;
+      const isolatedClient = client.$extends({ query: {
+        pack_publication_scopes: {
+          async findUnique({ args, query }) { const row = await query(args);
+            if (returnedInputs) { returnedInputs.title = "Changed during admission await"; returnedInputs = null; }
+            return row; },
+          async update() { throw new Error("rollback test after observing both captured requests"); },
+        },
+        pack_build_requests: { async create({ args, query }) {
+          assert.equal((args.data.inputs_json as unknown as ProviderPackBuildInputs).title, fixture.inputs.title);
+          writes += 1; return query(args);
+        } },
+      } }) as unknown as ProviderPrismaClient;
+      const planner = new ProviderPackImpactRepository(new ProviderPackPublicationContext(isolatedClient, scope), { ...capture,
+        async evaluate(input) { const result = await evaluator.evaluate(input); returnedInputs = result.inputs; return result; },
+      });
+      await assert.rejects(planner.plan({ kind: "provider" }), { code: "PACK_PERSISTENCE_FAILED" });
+      assert.equal(writes, 2);
+      assert.equal(await client.pack_build_requests.count(), 0);
+      assert.equal(await client.pack_publication_impact_progress.count(), 0);
     });
     await suite.test("caller-supplied lifecycle baseline without a stored active head remains unclaimable", async () => {
       const planner = new ProviderPackImpactRepository(context, { ...capture, async capture(tx, input) {
