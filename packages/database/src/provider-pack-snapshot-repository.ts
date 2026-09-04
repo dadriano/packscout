@@ -37,6 +37,11 @@ export class ProviderPackSnapshotRepository {
         payload.probabilityInputsSha256 === request.probabilityInputsSha256 && payload.valuationsSha256 === request.valuationInputsSha256 &&
         payload.evInputsSha256 === request.evInputsSha256 &&
         request.contentsSha256 === await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, payload.contents), "PACK_INPUT_INVALID");
+      packInvariant(payload.economicsSha256 === await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, {
+        price: payload.price, records: payload.contents, probabilityInputsSha256: payload.probabilityInputsSha256,
+        valuationsSha256: payload.valuationsSha256, topChase: payload.topChase,
+        evInputsSha256: payload.evInputsSha256, ev: payload.ev,
+      }), "PACK_INPUT_INVALID");
       if (inputs.snapshotKind === "lifecycle_only") {
         packInvariant(inputs.lifecycleBaseline?.identity.publicPackSnapshotId === head.active_snapshot_id, "PACK_INPUT_INVALID");
         packInvariant(payload.lifecycleFreeze?.previousSnapshotId === head.active_snapshot_id &&

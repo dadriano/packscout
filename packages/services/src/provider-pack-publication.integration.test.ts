@@ -7,7 +7,7 @@ import {
   type PackInputCapture, type ProviderPrismaClient, type ProviderTransactionClient,
 } from "@packscout/database";
 import { createProviderHarness } from "@packscout/database/test-support";
-import { providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
+import { derivePublicPackSnapshotId, packPublicationEnvelopeSchema, providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
 import { sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
@@ -114,6 +114,36 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       await assert.rejects(context.defer(build, "blocked", "INVALID_DOMAIN_DATA"), { code: "PACK_LEASE_LOST" });
       await assert.rejects(snapshots.sealAndEnqueueActivation(build, fixtures[0]!.built), { code: "PACK_LEASE_LOST" });
       build = replacement;
+    });
+    await suite.test("seal rejects coherently rehashed forged economics without writing or consuming the lease", async () => {
+      const built = structuredClone(fixtures[0]!.built);
+      built.snapshot.payload.economicsSha256 = "f".repeat(64);
+      built.descriptor.economicsSha256 = built.snapshot.payload.economicsSha256;
+      const { contents, ...header } = built.snapshot.payload;
+      assert.deepEqual(contents, built.batches.flatMap(batch => batch.records));
+      const contentSha256 = await publicationHash({ kind: "complete_pack", header,
+        batches: built.batches.map(({ batchIndex, recordCount, byteCount, batchSha256 }) => ({ batchIndex, recordCount, byteCount, batchSha256 })) });
+      const publicPackSnapshotId = derivePublicPackSnapshotId(contentSha256);
+      built.snapshot.identity = { ...built.snapshot.identity, contentSha256, publicPackSnapshotId };
+      built.descriptor.identity = built.snapshot.identity;
+      for (const batch of [...built.batches, ...built.descriptor.batches]) batch.publicPackSnapshotId = publicPackSnapshotId;
+      const { request } = await requests.load(build);
+      // All declared digests, identities and batch proofs agree; only the
+      // economics digest is untrue. The persistence boundary must detect that.
+      await packPublicationEnvelopeSchema.parseAsync({ ...built,
+        payloadSha256: await publicationHash(built.snapshot.payload), authorizationScopeSha256: await publicationHash(scope),
+        intent: { intentId: randomUUID(), idempotencyKey: `activate:${request.requestId}`, snapshot: built.snapshot.identity,
+          packPublicationSequence: request.packPublicationSequence, evidence: request.evidence,
+          expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null }, operationDigest: "a".repeat(64),
+          createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString() } });
+      await assert.rejects(snapshots.sealAndEnqueueActivation(build, built), { code: "PACK_INPUT_INVALID" });
+      assert.equal(await client.pack_snapshot_artifacts.count(), 0);
+      assert.equal(await client.pack_snapshot_batches.count(), 0);
+      assert.equal(await client.pack_activation_intents.count(), 0);
+      assert.equal(await client.pack_publication_operations.count(), 0);
+      assert.equal(await client.pack_publication_receipts.count(), 0);
+      assert.equal((await requests.load(build)).request.requestId, request.requestId);
+      assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: ids[0] } })).active_snapshot_id, null);
     });
     await suite.test("seal/artifact/batch/intent failures roll back all writes and retain the lease", async () => {
       for (const failure of ["pack_snapshot_artifacts.create", "pack_snapshot_batches.createMany", "pack_activation_intents.create", "pack_build_requests.update"]) {

@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** done
+**Status:** in_progress
 
 ## Start Here
 
@@ -100,6 +100,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 - [x] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
 - [x] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
+- [x] Sealing recomputes the canonical economics digest and rejects a coherently rehashed artifact with forged economics evidence before any writes.
 - [x] Same-pack claims serialize while two unrelated packs can be claimed concurrently.
 - [x] Organization and provider mismatch tests directly refuse cross-provider access.
 - [x] One unreachable provider leaves its delivery durable without preventing another provider's local planning.
@@ -117,6 +118,8 @@ There is no direct user-facing change. The resulting state machine ensures that 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
 
 ## Implementation and Spec Compliance
+
+Review follow-up (2026-09-03): PR95 discussion `3929197632` identified that the seal boundary compared declared economics hashes but did not recompute the canonical economics tuple. The new regression first failed with `Missing expected rejection`, despite passing the complete publication-envelope validator. The seal now recomputes the V1 tuple (price, full records, probability/valuation/EV-input digests, chase, and EV) before any writes. All 33 readiness/persistence checks pass, including zero artifact/batch/intent/operation/receipt writes, an unchanged inactive head, and a reusable lease after rejection. Prior full-gate evidence below is historical; current delivery remains pending restacking and current-head verification.
 
 Review corrections (2026-09-03): lifecycle-only admission and seal now share a complete baseline-preservation rule, captured aliases use the public 120-character/unique constraint, and shared boundary keys hash the full external identity before adding their namespace. The focused matrix passes 32 checks, including direct seal refusal of forged lifecycle metadata and replay of a 200-character shared identity. `npm run verify:framework` passed in full on implementation `994ea17cf91e8248c98da6921cd7e6debe0845ea`, with direct parent `90097845ba0b3078e24ff22e7317a2846c9ea452` (PR96). The earlier upstream lint blocker below is resolved on this stack; no check was weakened.
 
