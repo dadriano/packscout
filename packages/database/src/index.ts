@@ -121,3 +121,8 @@ export * from "./worker-fleet-read-repository.ts";
 export * from "./worker-presence-repository.ts";
 export * from "./alert-email-read-repository.ts";
 export * from "./email-link-token-repository.ts";
+export * from "./provider-pack-publication-context.ts";
+export * from "./provider-pack-build-request-repository.ts";
+export * from "./provider-pack-impact-repository.ts";
+export * from "./provider-pack-snapshot-repository.ts";
+export * from "./provider-pack-publication-outbox-repository.ts";

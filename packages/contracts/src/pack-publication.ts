@@ -95,11 +95,12 @@ export function isTerminalPublicationWork(state: PublicationWorkState, permanent
     (state === "blocked" && permanentlyInvalid);
 }
 
-const dependencySchema = z.object({
-  kind: z.enum(["provider_profile", "collectible_profile", "category", "valuation", "ev_policy"]),
-  identity: packCatalogTextSchema(200),
-  contentSha256: packCatalogSha256Schema,
-}).strict();
+const dependencySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.enum(["collectible_profile", "category", "valuation"]),
+    identity: packCatalogUuidSchema, contentSha256: packCatalogSha256Schema }).strict(),
+  z.object({ kind: z.enum(["provider_profile", "ev_policy"]),
+    identity: packCatalogTextSchema(200), contentSha256: packCatalogSha256Schema }).strict(),
+]);
 const dependenciesSchema = z.array(dependencySchema).max(10_000).refine(
   (values) => isCanonicalAscending(values.map(({ kind, identity }) => `${kind}:${identity}`)),
   "Dependencies must be unique and sorted.",
@@ -284,7 +285,9 @@ export const sharedProviderChangeDeliverySchema = z.object({
   organizationId: packCatalogUuidSchema,
   providerId: packCatalogUuidSchema,
   centralChangeIdentity: packCatalogTextSchema(200),
-  providerChangeSequence: packCatalogSequenceSchema,
+  providerChangeSequence: packCatalogSequenceSchema.refine(value => value.length < 19 ||
+    (value.length === 19 && value <= "9223372036854775807"),
+    "pack.shared_sequence_exceeds_int64"),
   sharedDependencies: dependenciesSchema,
   payloadSha256: packCatalogSha256Schema,
   leaseIdentity: packCatalogUuidSchema,

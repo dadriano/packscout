@@ -134,10 +134,21 @@ const PROVIDER_RUNTIME_TABLES = Object.freeze([
   "provider_publication_operations",
   "provider_publication_receipts",
   "provider_publication_state",
+  "pack_publication_scopes",
+  "pack_publication_heads",
+  "pack_build_requests",
+  "pack_publication_change_receipts",
+  "pack_publication_impact_progress",
+  "pack_snapshot_artifacts",
+  "pack_snapshot_batches",
+  "pack_activation_intents",
+  "pack_publication_operations",
+  "pack_publication_receipts",
 ]);
 const PROVIDER_RUNTIME_SEQUENCES = Object.freeze([
   "provider_state_events_sequence_seq",
   "local_audit_events_sequence_seq",
+  "pack_build_requests_pack_publication_sequence_seq",
 ]);
 
 function refuse(code: string): never {

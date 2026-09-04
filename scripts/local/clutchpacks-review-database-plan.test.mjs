@@ -416,6 +416,7 @@ test("executor pins initdb and pg_ctl, proves live identities, and grants explic
   const grantList = /const PROVIDER_RUNTIME_TABLES = Object\.freeze\(\[([\s\S]*?)\]\);/u.exec(executor);
   assert.ok(grantList, "provider runtime grants must remain an explicit table allowlist");
   assert.deepEqual([...grantList[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]).sort(), providerTables);
+  assert.match(executor, /"pack_build_requests_pack_publication_sequence_seq"/u);
   assert.match(executor, /grant delete on table \$\{qualifiedTables\(CENTRAL_DELETE_TABLES\)\}/u);
   assert.match(executor, /deterministicProvisionUuid/u);
   assert.match(executor, /CENTRAL_REGISTRATION_STATE_UNEXPECTED/u);
