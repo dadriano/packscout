@@ -88,6 +88,20 @@ test("Provider-local planning and persistence crash matrix", async suite => {
         assert.equal(await client.pack_publication_heads.count(), 0);
       }
     });
+    await suite.test("profile prerequisites are derived from the captured provider and members", async () => {
+      const value = await evaluator.evaluate({ candidate: fixtures[0]!.inputs, evaluatedAt: new Date().toISOString() });
+      const wrong = `ppfs_${"f".repeat(64)}`;
+      for (const requiredProfileSnapshotIds of [[wrong], [], value.readiness.requiredProfileSnapshotIds.slice(1),
+        [...value.readiness.requiredProfileSnapshotIds, wrong].sort()]) {
+        await assert.rejects(context.transaction(async tx => {
+          await requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: "forged:profiles",
+            readiness: { ...value.readiness, requiredProfileSnapshotIds } });
+          throw new Error("test expected profile prerequisite refusal");
+        }), { code: "PACK_INPUT_INVALID" });
+        assert.equal(await client.pack_build_requests.count(), 0);
+        assert.equal(await client.pack_publication_heads.count(), 0);
+      }
+    });
     await suite.test("planning crash before/after enqueue or checkpoint never loses a boundary", async () => {
       for (const failure of ["pack_build_requests.create", "pack_publication_change_receipts.create", "pack_publication_scopes.update"]) {
         const broken = new ProviderPackImpactRepository(new ProviderPackPublicationContext(faultClient(client, failure), scope), capture);

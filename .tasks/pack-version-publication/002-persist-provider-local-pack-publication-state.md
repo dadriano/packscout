@@ -100,6 +100,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 - [x] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
 - [x] Captured-input digests are recomputed at admission, and shared identities/sequences are validated against their actual database representations before planning.
+- [x] The exact sorted provider/member profile prerequisites are derived from captured inputs; substituted, missing, extra, and empty declarations refuse before writes.
 - [x] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
 - [x] Sealing recomputes the canonical economics digest and rejects a coherently rehashed artifact with forged economics evidence before any writes.
 - [x] Same-pack claims serialize while two unrelated packs can be claimed concurrently.
@@ -119,6 +120,12 @@ There is no direct user-facing change. The resulting state machine ensures that 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
 
 ## Implementation and Spec Compliance
+
+### Profile prerequisite admission review — 2026-09-03
+
+Discussion `3930112517` showed that declared profile prerequisites needed the same captured-input binding as digests. `deriveProviderPackProfilePrerequisites` is now shared by readiness and durable admission. Admission validates the exact deduplicated, sorted provider/member profile IDs before allocation and builds the request from that derived set. The regression first failed and now refuses unrelated, empty, missing, and extra prerequisites with no request/head writes. The combined focused suite passes 55 checks, zero skipped. No profile publisher, activation behavior, or second contract is added.
+
+The normal-settings full verifier passed audit again, then was stopped before edits to incorporate this newly reported invariant on a stable checkout. Current-head full verification must run again; no incomplete run is reported as a pass.
 
 ### Captured authority and evidence capacity review — 2026-09-03
 
@@ -140,7 +147,7 @@ Discussions `3929802770`, `3929802774`, and `3929904797` are covered by red/gree
 
 The combined P01 contract, shared-boundary, readiness, and PostgreSQL matrix passes 50 checks with zero skips; affected contract/database/service lint and typechecks plus the standards ratchet pass. The audit endpoint subsequently responded successfully and a fresh full `npm run verify:framework` is in progress. Task completion and merge approval are still pending that full result and current PR96 CI. The older blocker/evidence records below remain historical, not current approval.
 
-### Current merge blocker — 2026-09-03
+### Historical merge blocker — 2026-09-03
 
 The economics-digest correction is committed and pushed in `2ab594fef399495793cba9bb7127b98ef593c8a3` and its review thread has a fix reply. All 33 focused checks, database/service lint and typechecks, docs, and the zero-finding standards ratchet pass on parent `5198bd4ad7b79bf61a383b7bf159cb30dca638be`. No new automated review findings were reported for that correction.
 

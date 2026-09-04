@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
 import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
@@ -67,6 +67,11 @@ export const packPublicationLimits = Object.freeze({
 export type ProviderPackBuildInputs = z.infer<typeof providerPackBuildInputsSchema>;
 export type ProviderPackReadiness = z.infer<typeof providerPackReadinessSchema>;
 export type PackPublicationScope = z.infer<typeof packPublicationScopeSchema>;
+
+export function deriveProviderPackProfilePrerequisites(inputs: ProviderPackBuildInputs): string[] {
+  return [...new Set([inputs.providerProfileSnapshotId, ...inputs.contents.map(row => row.collectibleProfileSnapshotId)]
+    .filter((id): id is string => id !== null))].sort(compareCanonicalStrings);
+}
 
 /** Derive evidence from captured bytes, never from a caller's declared digests.
  * Readiness evaluation and durable admission share this V1 hash definition. */

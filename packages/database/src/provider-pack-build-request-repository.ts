@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   PACK_CATALOG_V1, PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packBuildRequestSchema,
   providerPackBuildInputsSchema, providerPackReadinessSchema, packCatalogTextSchema, packCatalogUuidSchema,
-  assertPublicPackCatalogBytes, deriveProviderPackInputDigests, packCatalogCanonicalByteCount, packPublicationLimits,
+  assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, packCatalogCanonicalByteCount, packPublicationLimits,
   type PackBuildRequest, type ProviderPackBuildInputs, type ProviderPackReadiness,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -32,6 +32,9 @@ export class ProviderPackBuildRequestRepository {
     for (const key of ["desiredStateSha256", "contentsSha256", "probabilityInputsSha256", "valuationInputsSha256", "evInputsSha256"] as const) {
       packInvariant(readiness[key] === digests[key], "PACK_INPUT_INVALID");
     }
+    const requiredProfileSnapshotIds = deriveProviderPackProfilePrerequisites(inputs);
+    packInvariant(requiredProfileSnapshotIds.length === readiness.requiredProfileSnapshotIds.length &&
+      requiredProfileSnapshotIds.every((id, index) => id === readiness.requiredProfileSnapshotIds[index]), "PACK_INPUT_INVALID");
     return this.persist(tx, { publicRepackId: inputs.publicRepackId, digest: readiness.desiredStateSha256,
       state: readiness.outcome, reasonCode: readiness.reasonCode, inputsJson: inputs,
       request: async (head, id, sequence) => {
@@ -44,7 +47,7 @@ export class ProviderPackBuildRequestRepository {
           contentsSha256: readiness.contentsSha256, probabilityInputsSha256: readiness.probabilityInputsSha256,
           valuationInputsSha256: readiness.valuationInputsSha256, evInputsSha256: readiness.evInputsSha256,
           profilePrerequisiteMode: head.generation === 0n ? "initial_heads_required" : "existing_heads_accepted",
-          requiredProfileSnapshotIds: readiness.requiredProfileSnapshotIds, expectedPublicationEpoch: Number(head.publication_epoch),
+          requiredProfileSnapshotIds, expectedPublicationEpoch: Number(head.publication_epoch),
           evidence, requestedAt: (await this.context.now(tx)).toISOString(),
         }) : null;
       } });

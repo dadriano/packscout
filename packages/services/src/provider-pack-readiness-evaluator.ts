@@ -1,5 +1,5 @@
 import {
-  assertPublicPackCatalogBytes, compareCanonicalStrings, deriveProviderPackInputDigests,
+  assertPublicPackCatalogBytes, compareCanonicalStrings, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites,
   packCatalogCanonicalByteCount, packCatalogCanonicalJson,
   packCatalogTimestampSchema, packPublicationLimits, providerPackBuildInputsSchema, preservesPackLifecycleBaseline,
   publicPackContentSchema, publicPackSnapshotSchema,
@@ -27,8 +27,7 @@ export class ProviderPackReadinessEvaluator {
     const readiness: ProviderPackReadiness = {
       outcome: "ready", reasonCode: null,
       ...await deriveProviderPackInputDigests(inputs),
-      requiredProfileSnapshotIds: [...new Set([inputs.providerProfileSnapshotId,
-        ...inputs.contents.map(row => row.collectibleProfileSnapshotId)].filter((id): id is string => id !== null))].sort(compareCanonicalStrings),
+      requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs),
     };
     const result = (outcome: ProviderPackReadiness["outcome"], reasonCode: ProviderPackReadiness["reasonCode"]) =>
       ({ inputs, readiness: { ...readiness, outcome, reasonCode } });
