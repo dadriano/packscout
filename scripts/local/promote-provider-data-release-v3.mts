@@ -86,7 +86,7 @@ import {
   summarizePlan,
 } from "./promote-provider-data-release-v3-plan.mjs";
 import { readProviderPackContents, projectProviderPackContents, mergePromotedCollectibles,
-  type ProviderContentSnapshot } from "./provider-pack-content-promotion.mts";
+  type ProviderContentProofCatalog } from "./provider-pack-content-promotion.mts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -300,7 +300,7 @@ interface ProviderSnapshot {
   readonly packs: readonly Record<string, unknown>[];
   readonly categories: readonly Record<string, unknown>[];
   readonly collectibleTypes: readonly string[];
-  readonly contents: ProviderContentSnapshot;
+  readonly contents: ProviderContentProofCatalog;
 }
 
 async function readProviderSnapshot(

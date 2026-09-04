@@ -3,6 +3,7 @@ import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 const { packscoutPublicIdentityUuid, provisionalCollectiblePublicId, PACKSCOUT_BUYBACK_EV_METHOD_VERSION,
   PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION } = await tsImport("@packscout/contracts", import.meta.url);
+const { providerPackContentSnapshotDigest } = await tsImport("@packscout/database", import.meta.url);
 import { repackDetailFromPack } from "./promote-provider-data-release-v3-plan.mjs";
 const { mergePromotedCollectibles, projectProviderPackContents, readProviderPackContents } =
   await tsImport("./provider-pack-content-promotion.mts", import.meta.url);
@@ -20,8 +21,8 @@ const pack = { id: packId, pack_key: "pack:pokemon_1000", row_version: "1", disp
 const detail = repackDetailFromPack({ pack, platform: { platformKey: "collector_crypt", publicVendorId: providerId,
   displayName: "Collector Crypt", logoUrl: null }, readAt, identity, categoryChain: [], collectibleTypes: ["card"],
   versions: { methodVersion: PACKSCOUT_BUYBACK_EV_METHOD_VERSION, confidencePolicyVersion: PACKSCOUT_BUYBACK_EV_CONFIDENCE_POLICY_VERSION } });
-const contents = {
-  evidence: new Map([[packId, "partial"]]), instances: [],
+const contents = withSnapshot({
+  instances: [],
   collectibles: [{ id: cardId, rowVersion: 1n, collectibleKey: "card:mint", collectibleType: "card",
     displayName: "Shining Mewtwo", aliases: [], year: null, brand: null, setOrSeries: null, cardNumber: null,
     referenceNumber: null, subject: null, grade: null, grader: null, primaryImageUrl: null, primaryImageAlt: null,
@@ -31,7 +32,24 @@ const contents = {
     collectibleInstanceId: null, totalQuantity: null, availableQuantity: null, contentRole: "featured_chase",
     probability: null, statedValueAmount: "45000", statedValueCurrency: "USDC", evidenceKinds: ["vendor_featured_chase"],
     matchConfidenceBasisPoints: 10000, matchConfidenceBand: "high", observedAt, displayOrder: 0 }],
-};
+});
+
+function withSnapshot(catalog, completeness = "partial") {
+  const sourceSnapshotId = "50000000-0000-5000-8000-000000000001";
+  const body = { schemaVersion: "provider_pack_content_snapshot_v1", providerId, packKey: pack.pack_key,
+    sourceKey: "collector_crypt:featured_nfts:v1", sourceAdapterVersion: "featured-v1", mapperVersion: "featured-v1",
+    effectiveAt: observedAt.toISOString(), effectiveAtBasis: "response_observed_at", collectedAt: observedAt.toISOString(), completeness,
+    items: catalog.memberships.map(row => ({ collectibleKey: catalog.collectibles.find(card => card.id === row.collectibleId).collectibleKey,
+      collectibleInstanceKey: null, status: "present", totalQuantity: row.totalQuantity?.toString() ?? null,
+      availableQuantity: row.availableQuantity?.toString() ?? null, contentRole: row.contentRole, probability: row.probability,
+      statedValueAmount: row.statedValueAmount, statedValueCurrency: row.statedValueCurrency,
+      evidenceKinds: row.evidenceKinds, matchConfidenceBasisPoints: row.matchConfidenceBasisPoints, displayOrder: row.displayOrder })),
+  };
+  return { ...catalog, memberships: catalog.memberships.map(row => ({ ...row, sourceSnapshotId })), snapshots: [{
+    id: sourceSnapshotId, packId, sourceKey: body.sourceKey, effectiveAt: observedAt, effectiveAtBasis: body.effectiveAtBasis,
+    collectedAt: observedAt, snapshotDigest: providerPackContentSnapshotDigest(body), completeness, normalizedSnapshot: body, createdAt: observedAt,
+  }] };
+}
 
 test("promotion connects only canonical members to V3 packs and preserves EV", () => {
   const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
@@ -51,10 +69,46 @@ test("promotion connects only canonical members to V3 packs and preserves EV", (
 
 test("no membership leaves packs without fabricated chases", () => {
   const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
-    publicAssetOrigins: [], packs: [pack], repacks: [detail], identity, contents: { ...contents, memberships: [] } });
+    publicAssetOrigins: [], packs: [pack], repacks: [detail], identity, contents: { ...contents, memberships: [], collectibles: [], snapshots: [] } });
   assert.equal(result.repacks[0].topChase, null);
   assert.deepEqual(result.collectibles, []);
 });
+
+for (const completeness of ["partial", "complete"]) {
+  test(`an accepted empty ${completeness} snapshot preserves its evidence without inventing chases`, () => {
+    const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
+      publicAssetOrigins: [], packs: [pack], repacks: [detail], identity,
+      contents: withSnapshot({ memberships: [], collectibles: [], instances: [] }, completeness) });
+    assert.equal(result.repacks[0].contentSummary.evidenceCompleteness, completeness);
+    assert.equal(result.repacks[0].contentSummary.knownCollectibleCount, 0);
+    assert.equal(result.repacks[0].topChase, null);
+    assert.deepEqual(result.repackChases, []);
+    assert.deepEqual(result.repacks[0].evEstimates, detail.evEstimates);
+  });
+}
+
+for (const [field, value] of [["contentRole", "top_chase"], ["statedValueAmount", "999999"],
+  ["probability", "0.5"], ["evidenceKinds", ["vendor_inventory"]], ["matchConfidenceBasisPoints", 5000]]) {
+  test(`mutable ${field} cannot disagree with the retained source item`, () => {
+    const drifted = structuredClone(contents);
+    drifted.memberships[0][field] = value;
+    assert.throws(() => projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
+      publicAssetOrigins: [], packs: [pack], repacks: [detail], identity, contents: drifted }), /PROVIDER_CONTENT_SNAPSHOT_INVALID/u);
+  });
+}
+
+for (const [name, mutate] of [
+  ["digest", catalog => { catalog.snapshots[0].snapshotDigest = "0".repeat(64); }],
+  ["provider identity", catalog => { catalog.snapshots[0].normalizedSnapshot.providerId = "10000000-0000-5000-8000-000000000099"; }],
+  ["source metadata", catalog => { catalog.snapshots[0].sourceKey = "untrusted:source"; }],
+  ["missing item", catalog => { catalog.snapshots[0].normalizedSnapshot.items = []; catalog.snapshots[0].snapshotDigest = providerPackContentSnapshotDigest(catalog.snapshots[0].normalizedSnapshot); }],
+]) {
+  test(`retained snapshot ${name} drift refuses publication`, () => {
+    const drifted = structuredClone(contents); mutate(drifted);
+    assert.throws(() => projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
+      publicAssetOrigins: [], packs: [pack], repacks: [detail], identity, contents: drifted }));
+  });
+}
 
 test("V3 chooses the higher USDC insured value even alongside unvalued members", () => {
   const idFor = localCollectibleId => provisionalCollectiblePublicId({ providerId, localCollectibleId });
@@ -71,7 +125,7 @@ test("V3 chooses the higher USDC insured value even alongside unvalued members",
     collectibleId: unknown.id, statedValueAmount: null, statedValueCurrency: null, displayOrder: 2 };
   const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
     publicAssetOrigins: [], packs: [pack], repacks: [detail], identity,
-    contents: { ...contents, collectibles: [unknown, low, ...contents.collectibles], memberships: [unknownMembership, lowMembership, ...contents.memberships] } });
+    contents: withSnapshot({ ...contents, collectibles: [unknown, low, ...contents.collectibles], memberships: [unknownMembership, lowMembership, ...contents.memberships] }) });
   assert.equal(result.repacks[0].topChase.publicCollectibleId, idFor(cardId));
   assert.deepEqual(result.repacks[0].topChase.collectible.valuation.displayMoney, { minorUnits: 4500000, currency: "USDC" });
   assert.deepEqual(result.repacks[0].topChase.collectible.valuation.usdComparison,
@@ -79,7 +133,7 @@ test("V3 chooses the higher USDC insured value even alongside unvalued members",
 });
 
 test("membership without its retained snapshot refuses promotion", async () => {
-  const client = { query: async () => ({ rows: [{ snapshotId: null }] }) };
+  const client = { query: async () => ({ rows: [{ sourceSnapshotId: null }] }) };
   await assert.rejects(readProviderPackContents(client, [packId]),
     /PROVIDER_CONTENT_SNAPSHOT_INVALID/u);
 });
@@ -91,6 +145,6 @@ test("USDC source values do not replace an available USD-only comparison", () =>
     collectibleId: usdOnly.id, statedValueAmount: null, statedValueCurrency: null, displayOrder: 1 };
   const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
     publicAssetOrigins: [], packs: [pack], repacks: [detail], identity,
-    contents: { ...contents, collectibles: [...contents.collectibles, usdOnly], memberships: [...contents.memberships, member] } });
+    contents: withSnapshot({ ...contents, collectibles: [...contents.collectibles, usdOnly], memberships: [...contents.memberships, member] }) });
   assert.equal(result.repacks[0].topChase.publicCollectibleId, provisionalCollectiblePublicId({ providerId, localCollectibleId: usdOnly.id }));
 });

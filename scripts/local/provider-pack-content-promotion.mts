@@ -2,37 +2,31 @@ import type { Client } from "pg";
 import type { PublicCollectible, PublicRepackDetailV3 } from "@packscout/contracts";
 import {
   projectProvisionalProviderPackContentsV3,
-  type DistributedProviderCollectibleRow,
-  type DistributedProviderCollectibleInstanceRow,
   type DistributedProviderPackContentRow,
 } from "@packscout/services";
+import { validateProviderContentCatalog, type ProviderContentProofCatalog } from "./provider-pack-content-proof.mts";
 
-export interface ProviderContentSnapshot {
-  memberships: DistributedProviderPackContentRow[];
-  collectibles: DistributedProviderCollectibleRow[];
-  instances: DistributedProviderCollectibleInstanceRow[];
-  evidence: Map<string, "complete" | "partial">;
-}
+export type { ProviderContentProofCatalog } from "./provider-pack-content-proof.mts";
 
 /** The caller supplies its existing repeatable, read-only provider transaction. */
-export async function readProviderPackContents(client: Client, packIds: readonly string[]): Promise<ProviderContentSnapshot> {
+export async function readProviderPackContents(client: Client, packIds: readonly string[]): Promise<ProviderContentProofCatalog> {
   const memberships = await client.query(`select pc.id, pc.row_version::text as "rowVersion",
     pc.pack_id as "packId", pc.collectible_id as "collectibleId", pc.collectible_instance_id as "collectibleInstanceId",
     pc.total_quantity::text as "totalQuantity", pc.available_quantity::text as "availableQuantity",
     pc.content_role as "contentRole", pc.probability::text, pc.stated_value_amount::text as "statedValueAmount",
     pc.stated_value_currency as "statedValueCurrency", pc.evidence_kinds as "evidenceKinds",
     pc.match_confidence_basis_points as "matchConfidenceBasisPoints", pc.match_confidence_band as "matchConfidenceBand",
-    pc.observed_at as "observedAt", pc.display_order as "displayOrder", ps.id as "snapshotId"
-    from pack_contents pc left join pack_content_snapshots ps on ps.id=pc.source_snapshot_id and ps.pack_id=pc.pack_id
+    pc.observed_at as "observedAt", pc.display_order as "displayOrder", pc.source_snapshot_id as "sourceSnapshotId"
+    from pack_contents pc
     where pc.lifecycle='active' and pc.pack_id=any($1::uuid[]) order by pc.id limit 50001`, [packIds]);
-  if (memberships.rows.length > 50000 || memberships.rows.some(row => row.snapshotId === null)) {
+  if (memberships.rows.length > 50000 || memberships.rows.some(row => row.sourceSnapshotId === null)) {
     throw new Error("PROVIDER_CONTENT_SNAPSHOT_INVALID");
   }
-  const content = memberships.rows.map(({ snapshotId: _snapshotId, ...row }) => ({
+  const content = memberships.rows.map(row => ({
     ...row, rowVersion: BigInt(row.rowVersion),
     totalQuantity: row.totalQuantity === null ? null : BigInt(row.totalQuantity),
     availableQuantity: row.availableQuantity === null ? null : BigInt(row.availableQuantity),
-  })) as DistributedProviderPackContentRow[];
+  })) as (DistributedProviderPackContentRow & { sourceSnapshotId: string | null })[];
   const ids = [...new Set(content.map(row => row.collectibleId))];
   const cards = await client.query(`select c.id, c.row_version::text as "rowVersion", c.collectible_key as "collectibleKey",
     c.collectible_type as "collectibleType", c.display_name as "displayName", c.year,c.brand,c.set_or_series as "setOrSeries",
@@ -47,36 +41,44 @@ export async function readProviderPackContents(client: Client, packIds: readonly
   const instances = await client.query(`select id,row_version::text as "rowVersion",collectible_id as "collectibleId",
     instance_key as "instanceKey",certifier,certification_number as "certificationNumber"
     from collectible_instances where lifecycle='active' and id=any($1::uuid[]) order by id`, [instanceIds]);
-  const evidence = await client.query(`select distinct on (pack_id) pack_id,completeness
-    from pack_content_snapshots where pack_id=any($1::uuid[]) order by pack_id,effective_at desc`, [packIds]);
+  const snapshotIds = [...new Set(content.flatMap(row => row.sourceSnapshotId === null ? [] : [row.sourceSnapshotId]))];
+  const snapshots = await client.query(`with latest as (
+    select distinct on (pack_id) id from pack_content_snapshots
+    where pack_id=any($1::uuid[]) order by pack_id,effective_at desc
+  ) select id,pack_id as "packId",source_key as "sourceKey",effective_at as "effectiveAt",
+    effective_at_basis as "effectiveAtBasis",collected_at as "collectedAt",snapshot_digest as "snapshotDigest",
+    completeness,normalized_snapshot as "normalizedSnapshot",created_at as "createdAt"
+    from pack_content_snapshots where id=any($2::uuid[]) or id in (select id from latest) order by id`, [packIds, snapshotIds]);
   return {
     memberships: content,
     collectibles: cards.rows.map(row => ({ ...row, rowVersion: BigInt(row.rowVersion),
       valuationUnavailableReason: row.valuationUnavailableReason === "source_unavailable" ? "VALUATION_UNAVAILABLE" : row.valuationUnavailableReason,
     })),
     instances: instances.rows.map(row => ({ ...row, rowVersion: BigInt(row.rowVersion) })),
-    evidence: new Map(evidence.rows.map(row => [row.pack_id, row.completeness])),
+    snapshots: snapshots.rows,
   };
 }
 
 export function projectProviderPackContents(input: {
   providerId: string; platformKey: string; readAt: string; publicAssetOrigins: readonly string[];
   packs: readonly { id: string; pack_key: string; row_version: string }[];
-  repacks: readonly PublicRepackDetailV3[]; identity(name: string): string; contents: ProviderContentSnapshot;
+  repacks: readonly PublicRepackDetailV3[]; identity(name: string): string; contents: ProviderContentProofCatalog;
 }) {
+  const evidence = validateProviderContentCatalog({ providerId: input.providerId, settledAt: new Date(input.readAt),
+    packs: input.packs.map(row => ({ id: row.id, packKey: row.pack_key })), catalog: input.contents });
   const byPublicId = new Map(input.repacks.map(row => [row.publicRepackId, row]));
   const allPacks = input.packs.flatMap(row => {
     const detail = byPublicId.get(input.identity(`repack:${input.platformKey}:${row.pack_key}`));
     return detail === undefined ? [] : [{ id: row.id, rowVersion: BigInt(row.row_version), packKey: row.pack_key, detail,
-      evidenceCompleteness: input.contents.evidence.get(row.id) ?? "unknown" as const }];
+      evidenceCompleteness: evidence.get(row.id) ?? "unknown" as const }];
   });
-  if (allPacks.length === 0 || input.contents.memberships.length === 0) {
+  if (allPacks.length === 0) {
     return { repacks: input.repacks, collectibles: [], repackChases: [] };
   }
   const packIds = new Set(allPacks.map(row => row.id));
   const memberships = input.contents.memberships.filter(row => packIds.has(row.packId));
   const memberPackIds = new Set(memberships.map(row => row.packId));
-  const packs = allPacks.filter(row => memberPackIds.has(row.id));
+  const packs = allPacks.filter(row => memberPackIds.has(row.id) || evidence.has(row.id));
   if (packs.length === 0) return { repacks: input.repacks, collectibles: [], repackChases: [] };
   const cardIds = new Set(memberships.map(row => row.collectibleId));
   const instanceIds = new Set(memberships.map(row => row.collectibleInstanceId));

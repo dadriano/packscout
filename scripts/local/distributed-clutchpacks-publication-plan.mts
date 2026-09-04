@@ -26,9 +26,9 @@ import {
 } from "@packscout/services";
 import {
   stableClutchpacksContentCatalog,
-  validateClutchpacksContentCatalog,
   type DistributedClutchpacksContentCatalog,
 } from "./distributed-clutchpacks-content-snapshot.mts";
+import { validateProviderContentCatalog } from "./provider-pack-content-proof.mts";
 
 export const DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY = "clutchpacks" as const;
 export const LOCAL_PUBLIC_CONFIGURATION_KEY =
@@ -266,7 +266,7 @@ export function assertDistributedClutchpacksStableSnapshot(
     input.staleAfterSeconds < 60 ||
     input.packs.some((pack) => pack.sourceUpdatedAt.getTime() > finishedAt)
   ) return refuse("CLUTCHPACKS_SNAPSHOT_INELIGIBLE");
-  validateClutchpacksContentCatalog({ providerId: input.providerId, settledAt: input.catalogSettledAt,
+  validateProviderContentCatalog({ providerId: input.providerId, settledAt: input.catalogSettledAt,
     packs: input.packs, catalog: input.contentCatalog });
   const checkpoint: ProviderCatalogReleaseSnapshotCheckpoint = {
     platformKey: DISTRIBUTED_CLUTCHPACKS_PLATFORM_KEY,
@@ -529,7 +529,7 @@ export async function buildDistributedClutchpacksPublicationArtifacts(
   if (new Set(packs.map(({ packKey }) => packKey)).size !== packs.length) {
     return refuse("PUBLIC_REPACK_INVALID");
   }
-  const evidence = validateClutchpacksContentCatalog({ providerId: facts.providerId, settledAt: facts.catalogSettledAt,
+  const evidence = validateProviderContentCatalog({ providerId: facts.providerId, settledAt: facts.catalogSettledAt,
     packs, catalog: facts.contentCatalog });
   const contents = projectProvisionalProviderPackContentsV1({
     identityPolicy: "provider_provisional_v1", providerId: facts.providerId,

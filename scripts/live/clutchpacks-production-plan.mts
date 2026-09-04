@@ -11,7 +11,7 @@ import {
   buybackV2, decimalTextToScaledInteger, money, vendorEvV2, v3Product,
   type DistributedClutchpacksSnapshotFacts,
 } from "../local/distributed-clutchpacks-publication-plan.mts";
-import { validateClutchpacksContentCatalog } from "../local/distributed-clutchpacks-content-snapshot.mts";
+import { validateProviderContentCatalog } from "../local/provider-pack-content-proof.mts";
 import { clutchpacksCategoryConfiguration, uuidV5 } from "../local/generate-clutchpacks-v3-public-catalog-candidate.mts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
@@ -109,7 +109,7 @@ export async function buildClutchpacksProductionPlan(input: {
     !Number.isFinite(Date.parse(input.readAt)) || Date.parse(input.readAt) < facts.catalogSettledAt.getTime()) return refuse();
   const platform = configuration.platforms[0]!;
   const packs = [...facts.packs].sort((a, b) => a.packKey.localeCompare(b.packKey));
-  const evidence = validateClutchpacksContentCatalog({ providerId: facts.providerId,
+  const evidence = validateProviderContentCatalog({ providerId: facts.providerId,
     settledAt: facts.catalogSettledAt, packs, catalog: facts.contentCatalog });
   const details = packs.map(pack => {
     const identity = configuration.repacks.find(row => row.packExternalId === pack.packKey);
