@@ -2,6 +2,7 @@ import {
   canonicalJson,
   publicCollectibleIdSchema,
   publicRepackIdSchema,
+  type PackScoutDisplayedEvV3,
 } from "@packscout/contracts";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -12,7 +13,6 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
-import { loadActiveDataReleaseV3Release } from "./dataReleaseV3Lifecycle";
 import {
   PRODUCT_USER_READ_CAPABILITY,
   PRODUCT_USER_WRITE_CAPABILITY,
@@ -23,6 +23,10 @@ import {
   normalizeLegacyPackAvailability,
   publicPackAvailabilityValidator,
 } from "./publicRepackValidation";
+import {
+  loadActiveDataReleaseV3,
+  type ActiveDataReleaseV3,
+} from "./publicRepacksV3";
 
 export const MAX_SAVED_ITEMS_PER_KIND = 250;
 
@@ -120,10 +124,6 @@ const ownerWatchlistValidator = v.object({
 });
 
 type OwnerWatchlist = Infer<typeof ownerWatchlistValidator>;
-type ActiveV3Catalog = Readonly<{
-  available: boolean;
-  releaseId: Id<"dataReleaseV3Releases"> | null;
-}>;
 
 function refuse(code: SavedItemsErrorCode): never {
   const message =
@@ -287,28 +287,12 @@ async function firstUnavailableSavedCollectible(
   return null;
 }
 
-async function loadActiveCatalogForWatchlist(
-  ctx: QueryCtx,
-): Promise<ActiveV3Catalog> {
-  let release: Doc<"dataReleaseV3Releases"> | null;
-  try {
-    release = await loadActiveDataReleaseV3Release(ctx);
-  } catch (error) {
-    if (!(error instanceof ConvexError)) throw error;
-    refuse("SAVED_RESOURCE_UNAVAILABLE");
-  }
-  return release === null
-    ? { available: false, releaseId: null }
-    : { available: true, releaseId: release._id };
-}
-
 async function findActiveRepackForWatchlist(
   ctx: QueryCtx,
-  catalog: ActiveV3Catalog,
+  catalog: ActiveDataReleaseV3,
   publicRepackId: string,
 ): Promise<Doc<"dataReleaseV3Repacks"> | null> {
-  const releaseId = catalog.releaseId;
-  if (releaseId === null) return null;
+  const releaseId = catalog.releaseDocument._id;
   const matches = await ctx.db
     .query("dataReleaseV3Repacks")
     .withIndex("by_release_id_and_public_repack_id", (index) =>
@@ -330,11 +314,10 @@ async function findActiveRepackForWatchlist(
 
 async function findActiveCollectibleForWatchlist(
   ctx: QueryCtx,
-  catalog: ActiveV3Catalog,
+  catalog: ActiveDataReleaseV3,
   publicCollectibleId: string,
 ): Promise<Doc<"dataReleaseV3Collectibles"> | null> {
-  const releaseId = catalog.releaseId;
-  if (releaseId === null) return null;
+  const releaseId = catalog.releaseDocument._id;
   const matches = await ctx.db
     .query("dataReleaseV3Collectibles")
     .withIndex("by_release_id_and_public_collectible_id", (index) =>
@@ -372,22 +355,36 @@ function newestSavedFirst<TRow>(
   );
 }
 
+function displayWatchlistEstimatedEv(
+  estimate: PackScoutDisplayedEvV3 | undefined,
+) {
+  if (
+    estimate === undefined ||
+    estimate.metrics === null ||
+    estimate.confidence === null
+  ) {
+    return null;
+  }
+  return {
+    evDollarsMinorUnits: estimate.metrics.evDollars.minorUnits,
+    grossReturnBasisPoints: estimate.metrics.grossReturnBasisPoints,
+    confidenceBand: estimate.confidence.band,
+  };
+}
+
 function displayWatchlistRepack(
   detail: Doc<"dataReleaseV3Repacks">["detail"],
+  catalog: ActiveDataReleaseV3,
 ) {
-  const packScout = detail.evEstimates.packScout;
   return {
     name: detail.name,
     vendorDisplayName: detail.vendorDisplayName,
     availability: normalizeLegacyPackAvailability(detail.availability),
-    estimatedEv:
-      packScout.metrics === null || packScout.confidence === null
-        ? null
-        : {
-            evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
-            grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
-            confidenceBand: packScout.confidence.band,
-          },
+    estimatedEv: displayWatchlistEstimatedEv(
+      catalog.legacyEvSnapshot
+        ? detail.evEstimates.packScout
+        : catalog.evByPublicId.get(detail.publicRepackId),
+    ),
   };
 }
 
@@ -459,8 +456,9 @@ export const getSavedItemIds = query({
 });
 
 /**
- * The caller's Watchlist: both saved collections resolved against the active
- * V3 catalog, newest first, with per-tab counts. Watchlist is a save-gated
+ * The caller's Watchlist: both saved collections resolved against the same
+ * active V3 catalog the public site serves, including its displayed EV
+ * projection, newest first, with per-tab counts. Watchlist is a save-gated
  * destination, so it uses the same standing policy as saving: a suspended
  * account cannot load it, even while the closed beta is off. Missing V3
  * catalog references stay in the payload as unavailable, not-openable rows.
@@ -495,8 +493,10 @@ export const getOwnerWatchlist = query({
       refuse("SAVED_ITEMS_STATE_CONFLICT");
     }
 
-    const catalog = await loadActiveCatalogForWatchlist(ctx);
-    if (!catalog.available) refuse("SAVED_RESOURCE_UNAVAILABLE");
+    const catalog = await loadActiveDataReleaseV3(ctx, Date.now());
+    if (catalog === null) {
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
+    }
 
     const resolvedRepacks = [];
     for (const row of newestSavedFirst(
@@ -516,7 +516,9 @@ export const getOwnerWatchlist = query({
           document === null ? ("unavailable" as const) : ("resolved" as const),
         openable: document !== null,
         repack:
-          document === null ? null : displayWatchlistRepack(document.detail),
+          document === null
+            ? null
+            : displayWatchlistRepack(document.detail, catalog),
       });
     }
 

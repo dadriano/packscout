@@ -9,6 +9,7 @@ import {
   buildV3Detail,
   buildV3FixturePlan,
   buildV3SoldOutDetail,
+  buildV3UnavailableEv,
   v3ActivateRequest,
   v3BatchRequest,
   v3Body,
@@ -501,5 +502,67 @@ describe("owner watchlist read", () => {
       t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
+  });
+
+  test("refuses when the active V3 release fails the public catalog validation", async () => {
+    const t = createTest();
+    await seed(t);
+    await t.run(async (ctx) => {
+      const release = (await ctx.db.query("dataReleaseV3Releases").collect())[0];
+      if (release === undefined) {
+        throw new Error("Expected the seeded V3 release.");
+      }
+      await ctx.db.patch(release._id, {
+        acceptedBatchCount: release.acceptedBatchCount + 1,
+      });
+    });
+    await expectErrorCode(
+      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      "SAVED_RESOURCE_UNAVAILABLE",
+    );
+  });
+
+  test("returns the catalog displayed EV when stored detail reports unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await saver.repacks(USER_A.tokenIdentifier, [availableRepack.publicRepackId]);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Repacks").collect()).find(
+        (document) => document.publicRepackId === availableRepack.publicRepackId,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 repack.");
+      }
+      await ctx.db.patch(source._id, {
+        detail: {
+          ...source.detail,
+          evEstimates: {
+            ...source.detail.evEstimates,
+            packScout: buildV3UnavailableEv(),
+          },
+        },
+      });
+    });
+
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .query(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedRepacks).toEqual([
+      {
+        publicRepackId: availableRepack.publicRepackId,
+        savedAt: savedAt(1),
+        catalogStatus: "resolved",
+        openable: true,
+        repack: {
+          name: availableRepack.name,
+          vendorDisplayName: availableRepack.vendorDisplayName,
+          availability: "available",
+          estimatedEv: watchlistEstimatedEv(
+            availableRepack.evEstimates.packScout,
+          ),
+        },
+      },
+    ]);
   });
 });

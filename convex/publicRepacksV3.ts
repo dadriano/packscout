@@ -141,7 +141,7 @@ export type ActiveDataReleaseV3 = Readonly<{
   }>[];
 }>;
 
-async function loadActiveDataReleaseV3(
+export async function loadActiveDataReleaseV3(
   ctx: QueryCtx,
   currentTime?: number,
 ): Promise<ActiveDataReleaseV3 | null> {
