@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { tsImport } from "tsx/esm/api";
+import test, { after } from "node:test";
+import { register } from "tsx/esm/api";
+const loader = register({ namespace: import.meta.url });
+const tsImport = loader.import;
+after(() => loader.unregister());
 import { pins, residentFixture } from "./provider-resident-test-fixture.mjs";
 const { superviseResidentBootstrap, ContinuousReadUnavailableError } = await tsImport("./provider-resident-policy.mts", import.meta.url);
 const { readBackfillView } = await tsImport("./run-provider-backfill-supervisor.mts", import.meta.url);
 const { superviseProviderBackfill } = await tsImport("./provider-backfill-supervisor.mts", import.meta.url);
 const { persistResidentHandoff, residentContinuousPins } = await tsImport("./provider-resident-handoff.mts", import.meta.url);
-const { continuousDecision } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
+const { continuousDecision, isProviderUnavailableRefusal } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
 const { ProviderBackfillSupervisorError } = await tsImport("./provider-backfill-supervisor-policy.mts", import.meta.url);
 async function ready() {
   const f = residentFixture(); const backfill = await readBackfillView(f.database, pins, f.authority);
@@ -121,23 +124,25 @@ test("proven live child waits across terminal head until release; pause interrup
   }
 });
 async function pendingBackfill() {
-  const state = await ready(); Object.assign(state.backfill.snapshot, { state: "error" });
+  const state = await ready(), head = structuredClone(state.backfill.snapshot);
+  Object.assign(state.backfill.snapshot, { state: "error" });
   Object.assign(state.backfill.snapshot.run, { state: "failed", reachedHead: false, failureCode: "PROVIDER_DATAFORREST_REQUEST_TIMEOUT",
     requestedHash: "b".repeat(64) }); state.backfill.snapshot.lastPage.continuation = "more";
-  return state;
+  return { ...state, head };
 }
 const unavailable = () => new ProviderBackfillSupervisorError("BACKFILL_PROVIDER_DATABASE_UNAVAILABLE");
 test("provider-database refusal during backfill execution waits with backoff, then resumes from the intact checkpoint", async () => {
-  const { f, backfill, view } = await pendingBackfill(); const head = structuredClone(backfill.snapshot);
+  const { f, backfill, view, head } = await pendingBackfill();
+  assert.equal(isProviderUnavailableRefusal(unavailable()), true, "test errors must share the supervisor's module identity");
   // Production: the parent's first query after a long child run was refused
   // (a pooled connection left read-only); the checkpoint was intact and a hand
   // restart resumed at once. The resident must do that itself.
-  let executions = 0; const waits = []; const events = []; let handoff;
+  let executions = 0; const waits = []; const events = []; let handoff; const stop = new AbortController();
   const result = await superviseResidentBootstrap({ read: async () => handoff ? { handoff, backfill: null } : view,
     persist: async observed => { handoff = await persistResidentHandoff(f.database, pins, f.authority, observed); return handoff; },
     execute: async () => { if (++executions <= 3) throw unavailable(); backfill.snapshot = head; return "head"; },
-    wait: async ms => { waits.push(ms); }, emit: event => events.push(event) }, new AbortController().signal);
-  assert.deepEqual(result, residentContinuousPins(handoff)); assert.equal(executions, 4);
+    wait: async ms => { waits.push(ms); }, emit: event => { events.push(event); if (events.length > 10) stop.abort(); } }, stop.signal);
+  assert.ok(handoff, JSON.stringify(events)); assert.deepEqual(result, residentContinuousPins(handoff)); assert.equal(executions, 4);
   assert.deepEqual(waits, [15000, 30000, 60000]);
   assert.deepEqual(events.filter(event => event.state === "provider_unavailable").map(event => event.retry), [1, 2, 3]);
   assert.equal(events.every(event => event.code === undefined || event.code === "BACKFILL_PROVIDER_DATABASE_UNAVAILABLE"), true);
