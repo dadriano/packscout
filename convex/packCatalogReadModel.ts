@@ -18,10 +18,16 @@ import { configuredDataReleaseV3CursorSigningKey } from "./dataReleaseV3Paginati
  * ever scanning without limit.
  */
 
-/** Heads examined per request across every list, dashboard, and status read. */
+/** Heads examined per list request before a live cursor continues the scan. */
 export const PACK_CATALOG_HEAD_SCAN_LIMIT = 2_000;
-/** Membership rows examined per desired-collectible lookup. */
-export const PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT = 5_000;
+/**
+ * The catalog-wide ceiling for exact counts (shell status, dashboard totals).
+ * Mirrors the V2 release maximum; crossing it is an invariant failure that
+ * fails closed rather than reporting a capped number as exact.
+ */
+export const PACK_CATALOG_MAX_ACTIVE_HEADS = 8_000;
+/** Distinct packs examined per desired-collectible lookup before failing closed. */
+export const PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT = 2_000;
 
 export type PackSort = "title" | "price" | "ev" | "top_chase";
 export type Direction = "asc" | "desc";

@@ -12,6 +12,7 @@ import { convexTest } from "convex-test";
 import type { z } from "zod";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
+import { PACK_CATALOG_MAX_ACTIVE_HEADS } from "./packCatalogReadModel";
 import {
   activatePack,
   configurePackCatalogAuthority,
@@ -132,6 +133,8 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
     expect(await run(t, "listPublicPacks", { pageSize: 500 })).toMatchObject({ ok: false, code: "INVALID_QUERY" });
     expect(await run(t, "listPublicPacks", { heat: "hot" })).toMatchObject({ ok: false, code: "INVALID_QUERY" });
     expect(await run(t, "getPublicShellStatus", {}, { currentTime: -1 })).toMatchObject({ ok: false, code: "INVALID_QUERY" });
+    expect(await run(t, "getPublicPack", { publicRepackId: packCatalogFixtureIds.packA, contentsCursor: "a.a" })).toMatchObject({ ok: false, code: "CURSOR_EXPIRED", retryable: false });
+    expect(await run(t, "getPublicPack", { publicRepackId: packCatalogFixtureIds.packA, contentsCursor: "abcde.ffff" })).toMatchObject({ ok: false, code: "CURSOR_EXPIRED" });
     vi.stubEnv("PACKSCOUT_CLOSED_BETA", "1");
     vi.stubEnv("PACKSCOUT_CATALOG_READ_TOKEN", "packscout-catalog-read-token-for-tests-0001");
     expect(await run(t, "listPublicPacks", {})).toMatchObject({ ok: false, code: "CATALOG_UNAVAILABLE", retryable: true });
@@ -247,7 +250,58 @@ describe("Atomic store and six-journey catalog contract (scan budget continuatio
     const second = ok(await run(t, "listPublicPacks", { ...request, cursor: first.nextCursor }));
     expect(second.items.map((item) => item.title)).toEqual(["Zebra Needle"]);
     expect(second.nextCursor).toBeNull();
+    // Exact counts stay exact below the catalog maximum.
+    expect(ok(await run(t, "getPublicShellStatus", {})).activeAvailablePackCount).toBe(2_052);
+    expect(ok(await run(t, "getDashboardBundle", {})).totalMatchingPacks).toBe(2_052);
     void fixture;
+  });
+
+  test("desired-collectible discovery follows distinct packs, not retained snapshot versions", async () => {
+    const t = createTest();
+    await seed(t);
+    for (let chunk = 0; chunk < 3; chunk += 1) {
+      await t.run(async (ctx) => {
+        for (let index = 0; index < 2_000; index += 1) {
+          await ctx.db.insert("publicPackMemberships", {
+            publicCollectibleId: packCatalogFixtureIds.collectibleB,
+            publicRepackId: packCatalogFixtureIds.packA,
+            publicPackSnapshotId: `pps_${(chunk * 2_000 + index).toString(16).padStart(64, "0")}`,
+            providerId: packCatalogFixtureIds.providerId,
+          });
+        }
+      });
+    }
+    const found = ok(await run(t, "findPacksByDesiredCollectible", { publicCollectibleId: packCatalogFixtureIds.collectibleB, lifecycle: ALL_STATES, sort: "title", direction: "asc" }));
+    expect(found.items.map((item) => item.publicRepackId)).toEqual([packCatalogFixtureIds.packA, packCatalogFixtureIds.packB]);
+  });
+
+  test("shell status and dashboard fail closed instead of reporting a capped count beyond the catalog maximum", async () => {
+    const t = createTest();
+    await seed(t);
+    const template = await t.run(async (ctx) => (await ctx.db.query("activePackHeads").withIndex("by_public_repack_id", (index) => index.eq("publicRepackId", packCatalogFixtureIds.packA)).take(1))[0]!);
+    const { _id, _creationTime, ...fields } = template;
+    void _id;
+    void _creationTime;
+    for (let chunk = 0; chunk < 4; chunk += 1) {
+      await t.run(async (ctx) => {
+        for (let index = 0; index < PACK_CATALOG_MAX_ACTIVE_HEADS / 4; index += 1) {
+          const publicRepackId = `32000000-0000-4000-8000-${(chunk * 2_000 + index).toString(16).padStart(12, "0")}`;
+          await ctx.db.insert("activePackHeads", {
+            ...fields,
+            publicRepackId,
+            activeSnapshot: { ...fields.activeSnapshot, publicRepackId },
+            indexableSummary: { ...fields.indexableSummary, publicRepackId, title: `Bulk ${index}` },
+            normalizedText: `bulk ${index}`,
+            sortTitle: `bulk ${String(chunk * 2_000 + index).padStart(5, "0")}`,
+          });
+        }
+      });
+    }
+    expect(await run(t, "getPublicShellStatus", {})).toMatchObject({ ok: false, code: "CATALOG_UNAVAILABLE" });
+    expect(await run(t, "getDashboardBundle", {})).toMatchObject({ ok: false, code: "CATALOG_UNAVAILABLE" });
+    const list = ok(await run(t, "listPublicPacks", { pageSize: 50 }));
+    expect(list.items).toHaveLength(50);
+    expect(list.nextCursor).not.toBeNull();
   });
 
   test("a sparse collectible search over more heads than one scan budget continues from the last scanned profile", async () => {

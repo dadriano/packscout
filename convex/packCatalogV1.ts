@@ -1,4 +1,5 @@
 import {
+  PACK_CATALOG_LIST_MAX_ITEMS,
   PACK_CATALOG_V1,
   PackCatalogCursorError,
   compareCanonicalStrings,
@@ -15,6 +16,7 @@ import { action, internalQuery, type QueryCtx } from "./_generated/server";
 import { isDataReleaseV3EvaluationTime } from "./dataReleaseV3Pagination";
 import {
   PACK_CATALOG_HEAD_SCAN_LIMIT,
+  PACK_CATALOG_MAX_ACTIVE_HEADS,
   PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT,
   comparePackHeads,
   cursorSigningKeyBytes,
@@ -151,8 +153,9 @@ export const getPublicShellStatusAtTime = internalQuery({
     for await (const head of ctx.db.query("activePackHeads").withIndex("by_sort_title_and_public_repack_id")) {
       reachable = true;
       scanned += 1;
+      // The count is exact or the read fails closed; a capped number is never reported as exact.
+      if (scanned > PACK_CATALOG_MAX_ACTIVE_HEADS) return readError("CATALOG_UNAVAILABLE");
       if (head.availability === "available" && head.retirement === "active") activeAvailablePackCount += 1;
-      if (scanned >= PACK_CATALOG_HEAD_SCAN_LIMIT) break;
     }
     return { ok: true, data: { schemaVersion: PACK_CATALOG_V1, evaluatedAt: ready.evaluatedAt, catalogAvailable: reachable, activeAvailablePackCount } };
   },
@@ -163,12 +166,17 @@ export const getDashboardBundleAtTime = internalQuery({
   handler: async (ctx, args): Promise<Result<unknown>> => {
     const ready = await prelude(ctx, args, (value) => packCatalogV1QueryContracts.getDashboardBundle.input.safeParse(value));
     if (!ready.ok) return ready.error;
-    const scan = await scanPackHeads(ctx, {
-      sort: "ev", direction: "desc", position: null, pageSize: PACK_CATALOG_HEAD_SCAN_LIMIT,
-      matches: (head) => lifecycleMatches(head, ready.input.lifecycle),
-    });
-    const packs = scan.items.slice(0, 50).map(packSummaryOf);
-    return { ok: true, data: { evaluatedAt: ready.evaluatedAt, packs, totalMatchingPacks: scan.items.length } };
+    const packs: ReturnType<typeof packSummaryOf>[] = [];
+    let totalMatchingPacks = 0;
+    let scanned = 0;
+    for await (const head of ctx.db.query("activePackHeads").withIndex("by_sort_ev_and_public_repack_id").order("desc")) {
+      scanned += 1;
+      if (scanned > PACK_CATALOG_MAX_ACTIVE_HEADS) return readError("CATALOG_UNAVAILABLE");
+      if (!lifecycleMatches(head, ready.input.lifecycle)) continue;
+      totalMatchingPacks += 1;
+      if (packs.length < PACK_CATALOG_LIST_MAX_ITEMS) packs.push(packSummaryOf(head));
+    }
+    return { ok: true, data: { evaluatedAt: ready.evaluatedAt, packs, totalMatchingPacks } };
   },
 });
 
@@ -215,9 +223,9 @@ export const getPublicPackAtTime = internalQuery({
         snapshotId = probe.publicPackSnapshotId!;
         offset = Number(probe.lastSortKey);
         if (!Number.isSafeInteger(offset) || offset < 1) throw new PackCatalogCursorError();
-      } catch (error) {
-        if (error instanceof PackCatalogCursorError || error instanceof SyntaxError) return readError("CURSOR_EXPIRED");
-        throw error;
+      } catch {
+        // Everything inside is cursor decoding: a signature, shape, or base64 defect is one bounded outcome.
+        return readError("CURSOR_EXPIRED");
       }
     }
     const root = await loadPackSnapshot(ctx, snapshotId);
@@ -351,26 +359,31 @@ export const findPacksByDesiredCollectibleAtTime = internalQuery({
     if (!ready.ok) return ready.error;
     const input = ready.input;
     if (await loadCollectibleProfileHead(ctx, input.publicCollectibleId) === null) return readError("COLLECTIBLE_NOT_FOUND");
+    // Skip-scan the membership index one distinct pack at a time, so the cost
+    // follows the number of packs containing the collectible, not the number
+    // of retained snapshot versions; each pack counts only if its active
+    // snapshot still contains the collectible.
     const candidates: PackHead[] = [];
-    let lastPackId: string | null = null;
-    let scanned = 0;
-    for await (const membership of ctx.db.query("publicPackMemberships")
-      .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
-        index.eq("publicCollectibleId", input.publicCollectibleId))) {
-      scanned += 1;
-      if (membership.publicRepackId !== lastPackId) {
-        lastPackId = membership.publicRepackId;
-        const head = await loadPackHead(ctx, membership.publicRepackId);
-        if (head !== null) {
-          const active = await ctx.db.query("publicPackMemberships")
-            .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
-              index.eq("publicCollectibleId", input.publicCollectibleId).eq("publicRepackId", head.publicRepackId)
-                .eq("publicPackSnapshotId", head.activeSnapshot.publicPackSnapshotId))
-            .take(1);
-          if (active.length === 1) candidates.push(head);
-        }
-      }
-      if (scanned >= PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT) break;
+    let lastPackId = "";
+    let distinctPacks = 0;
+    for (;;) {
+      const next = await ctx.db.query("publicPackMemberships")
+        .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
+          index.eq("publicCollectibleId", input.publicCollectibleId).gt("publicRepackId", lastPackId))
+        .take(1);
+      const membership = next[0];
+      if (membership === undefined) break;
+      distinctPacks += 1;
+      if (distinctPacks > PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT) return readError("CATALOG_UNAVAILABLE");
+      lastPackId = membership.publicRepackId;
+      const head = await loadPackHead(ctx, membership.publicRepackId);
+      if (head === null) continue;
+      const active = await ctx.db.query("publicPackMemberships")
+        .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
+          index.eq("publicCollectibleId", input.publicCollectibleId).eq("publicRepackId", head.publicRepackId)
+            .eq("publicPackSnapshotId", head.activeSnapshot.publicPackSnapshotId))
+        .take(1);
+      if (active.length === 1) candidates.push(head);
     }
     const page = await pagedHeads(ctx, {
       operation: "findPacksByDesiredCollectible",
