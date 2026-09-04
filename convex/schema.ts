@@ -1945,6 +1945,10 @@ export default defineSchema({
     batchIndex: v.number(),
     collectibleProfileSnapshotIds: v.array(v.string()),
     valuationDependencyIdentities: v.array(sha256Validator),
+    collectibleProfiles: v.array(v.object({
+      publicCollectibleId: v.string(),
+      collectibleProfileSnapshotId: v.string(),
+    })),
   }).index("by_public_pack_snapshot_id_and_batch_index", ["publicPackSnapshotId", "batchIndex"]),
 
   publicPackMemberships: defineTable({

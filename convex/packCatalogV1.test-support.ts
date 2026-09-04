@@ -207,8 +207,10 @@ export function activationIntent(pack: SealedPack, input: {
   readonly packPublicationSequence: string;
   readonly expectedHead: { generation: number; publicationEpoch: number; activeSnapshotId: string | null };
   readonly expiresAt?: string;
+  readonly createdAt?: string;
 }) {
-  const createdAt = new Date().toISOString();
+  // Inside the fixture's sealed EV validity window (dataAsOf 18:00Z, validUntil 19:00Z).
+  const createdAt = input.createdAt ?? "2026-09-03T18:30:00.000Z";
   return {
     intentId: nextUuid(),
     idempotencyKey: `activate:${nextUuid()}`,
@@ -218,7 +220,7 @@ export function activationIntent(pack: SealedPack, input: {
     expectedHead: input.expectedHead,
     operationDigest: "c".repeat(64),
     createdAt,
-    expiresAt: input.expiresAt ?? new Date(Date.parse(createdAt) + 10 * 60_000).toISOString(),
+    expiresAt: input.expiresAt ?? new Date(Date.now() + 10 * 60_000).toISOString(),
   };
 }
 

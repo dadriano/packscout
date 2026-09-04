@@ -111,13 +111,14 @@ export async function scanPackHeads(ctx: QueryCtx, input: {
   readonly pageSize: number;
   readonly matches: (head: PackHead) => boolean;
   readonly scanLimit?: number;
-}): Promise<{ readonly items: PackHead[]; readonly hasMore: boolean; readonly scanned: number }> {
+}): Promise<{ readonly items: PackHead[]; readonly hasMore: boolean; readonly scanned: number; readonly resume: KeysetPosition | null }> {
   const field = SORT_FIELD[input.sort];
   const indexName = SORT_INDEX[input.sort];
   const items: PackHead[] = [];
   let scanned = 0;
   let hasMore = false;
   const budget = input.scanLimit ?? PACK_CATALOG_HEAD_SCAN_LIMIT;
+  const positionOf = (head: PackHead): KeysetPosition => ({ sortKey: packSortKey(head, input.sort), publicRepackId: head.publicRepackId });
   const segments: Array<AsyncIterable<PackHead>> = [];
   const after = input.position;
   const forward = input.direction === "asc";
@@ -144,14 +145,16 @@ export async function scanPackHeads(ctx: QueryCtx, input: {
       if (input.matches(head)) {
         if (items.length === input.pageSize) {
           hasMore = true;
-          return { items, hasMore, scanned };
+          return { items, hasMore, scanned, resume: positionOf(items[items.length - 1]!) };
         }
         items.push(head);
       }
-      if (scanned >= budget) return { items, hasMore: true, scanned };
+      // The budget truncated the scan: continue after the last head examined,
+      // matched or not, so a sparse filter never hides later matches.
+      if (scanned >= budget) return { items, hasMore: true, scanned, resume: positionOf(head) };
     }
   }
-  return { items, hasMore, scanned };
+  return { items, hasMore, scanned, resume: null };
 }
 
 export async function issueListCursor(input: {

@@ -207,6 +207,71 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
   });
 });
 
+describe("Atomic store and six-journey catalog contract (scan budget continuation)", () => {
+  beforeEach(configurePackCatalogAuthority);
+  afterEach(() => vi.unstubAllEnvs());
+
+  test("a sparse filter over more heads than one scan budget continues from the last scanned position", async () => {
+    const t = createTest();
+    const fixture = await seed(t);
+    await t.run(async (ctx) => {
+      const template = (await ctx.db.query("activePackHeads").withIndex("by_public_repack_id", (index) => index.eq("publicRepackId", packCatalogFixtureIds.packA)).take(1))[0]!;
+      const { _id, _creationTime, ...fields } = template;
+      void _id;
+      void _creationTime;
+      for (let index = 0; index < 2_050; index += 1) {
+        const publicRepackId = `31000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+        await ctx.db.insert("activePackHeads", {
+          ...fields,
+          publicRepackId,
+          activeSnapshot: { ...fields.activeSnapshot, publicRepackId },
+          indexableSummary: { ...fields.indexableSummary, publicRepackId, title: `Filler ${index}` },
+          normalizedText: `filler ${index}`,
+          sortTitle: `filler ${String(index).padStart(5, "0")}`,
+        });
+      }
+      const target = `31000000-0000-4000-8000-${"f".repeat(12)}`;
+      await ctx.db.insert("activePackHeads", {
+        ...fields,
+        publicRepackId: target,
+        activeSnapshot: { ...fields.activeSnapshot, publicRepackId: target },
+        indexableSummary: { ...fields.indexableSummary, publicRepackId: target, title: "Zebra Needle" },
+        normalizedText: "zebra needle",
+        sortTitle: "zebra needle",
+      });
+    });
+    const request = { query: "needle", sort: "title", direction: "asc", pageSize: 5 };
+    const first = ok(await run(t, "listPublicPacks", request));
+    expect(first.items).toEqual([]);
+    expect(first.nextCursor).not.toBeNull();
+    const second = ok(await run(t, "listPublicPacks", { ...request, cursor: first.nextCursor }));
+    expect(second.items.map((item) => item.title)).toEqual(["Zebra Needle"]);
+    expect(second.nextCursor).toBeNull();
+    void fixture;
+  });
+
+  test("a sparse collectible search over more heads than one scan budget continues from the last scanned profile", async () => {
+    const t = createTest();
+    await seed(t);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 2_050; index += 1) {
+        const publicCollectibleId = `42000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+        await ctx.db.insert("activeCollectibleProfileHeads", {
+          publicCollectibleId, generation: 1, activeProfileSnapshotId: `ppfs_${index.toString(16).padStart(64, "0")}`,
+          previousProfileSnapshotId: null, contentSha256: index.toString(16).padStart(64, "0"), activatedAt: new Date(NOW).toISOString(),
+          searchText: `aaa filler ${index}`, sortDisplayName: `aaa filler ${String(index).padStart(5, "0")}`, publicCategoryId: packCatalogFixtureIds.category,
+        });
+      }
+    });
+    const first = ok(await run(t, "searchPublicCollectibles", { query: "gamma", pageSize: 5 }));
+    expect(first.items).toEqual([]);
+    expect(first.nextCursor).not.toBeNull();
+    const second = ok(await run(t, "searchPublicCollectibles", { query: "gamma", pageSize: 5, cursor: first.nextCursor }));
+    expect(second.items.map((item) => item.displayName)).toEqual(["Gamma Card"]);
+    expect(second.nextCursor).toBeNull();
+  });
+});
+
 describe("Atomic store and six-journey catalog contract (lifecycle states and dormant candidates)", () => {
   beforeEach(configurePackCatalogAuthority);
   afterEach(() => vi.unstubAllEnvs());

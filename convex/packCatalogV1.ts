@@ -25,6 +25,7 @@ import {
   packSummaryOf,
   readListCursor,
   scanPackHeads,
+  type KeysetPosition,
   type PackHead,
   type PackSort,
 } from "./packCatalogReadModel";
@@ -113,6 +114,7 @@ async function pagedHeads(ctx: QueryCtx, input: {
   }
   let items: PackHead[];
   let hasMore: boolean;
+  let resume: KeysetPosition | null = null;
   if (input.candidates !== undefined) {
     const compare = comparePackHeads(input.sort, input.direction);
     const sorted = input.candidates.filter(input.matches).sort(compare);
@@ -124,14 +126,16 @@ async function pagedHeads(ctx: QueryCtx, input: {
     });
     items = remaining.slice(0, input.pageSize);
     hasMore = remaining.length > input.pageSize;
+    const last = items[items.length - 1];
+    resume = last === undefined ? null : { sortKey: packSortKey(last, input.sort), publicRepackId: last.publicRepackId };
   } else {
     const scan = await scanPackHeads(ctx, { sort: input.sort, direction: input.direction, position, pageSize: input.pageSize, matches: input.matches });
     items = scan.items;
     hasMore = scan.hasMore;
+    resume = scan.resume;
   }
-  const last = items[items.length - 1];
-  const nextCursor = hasMore && last !== undefined
-    ? await issueListCursor({ binding, last: { sortKey: packSortKey(last, input.sort), publicRepackId: last.publicRepackId }, issuedAt: input.evaluatedAt, signingKey: input.signingKey })
+  const nextCursor = hasMore && resume !== null
+    ? await issueListCursor({ binding, last: resume, issuedAt: input.evaluatedAt, signingKey: input.signingKey })
     : null;
   return { ok: true, data: { items: items.map(packSummaryOf), nextCursor } };
 }
@@ -311,14 +315,16 @@ export const searchPublicCollectiblesAtTime = internalQuery({
     const heads: Doc<"activeCollectibleProfileHeads">[] = [];
     let hasMore = false;
     let scanned = 0;
+    let resume: Doc<"activeCollectibleProfileHeads"> | null = null;
     outer: for (const segment of segments) {
       for await (const head of segment) {
         scanned += 1;
         if (matches(head)) {
-          if (heads.length === input.pageSize) { hasMore = true; break outer; }
+          if (heads.length === input.pageSize) { hasMore = true; resume = heads[heads.length - 1]!; break outer; }
           heads.push(head);
         }
-        if (scanned >= PACK_CATALOG_HEAD_SCAN_LIMIT) { hasMore = true; break outer; }
+        // Budget truncation continues after the last head examined, matched or not.
+        if (scanned >= PACK_CATALOG_HEAD_SCAN_LIMIT) { hasMore = true; resume = head; break outer; }
       }
     }
     const items = [];
@@ -331,9 +337,8 @@ export const searchPublicCollectiblesAtTime = internalQuery({
       }
       items.push(parsed.data);
     }
-    const last = heads[heads.length - 1];
-    const nextCursor = hasMore && last !== undefined
-      ? await issuePackCatalogCursor({ binding, lastSortKey: last.sortDisplayName, lastStableId: last.publicCollectibleId, issuedAt: ready.evaluatedAt, signingKey: ready.signingKey })
+    const nextCursor = hasMore && resume !== null
+      ? await issuePackCatalogCursor({ binding, lastSortKey: resume.sortDisplayName, lastStableId: resume.publicCollectibleId, issuedAt: ready.evaluatedAt, signingKey: ready.signingKey })
       : null;
     return { ok: true, data: { evaluatedAt: ready.evaluatedAt, items, nextCursor } };
   },

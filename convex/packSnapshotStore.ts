@@ -94,6 +94,23 @@ async function block(ctx: MutationCtx, root: Doc<"publicPackSnapshots">, reasonC
   return { ...root, state: "blocked" as const, blockReasonCode: reasonCode, terminalAt: now };
 }
 
+/** First activation re-proves every referenced profile snapshot is the current head. */
+async function initialProfileReferencesHold(ctx: MutationCtx, root: Doc<"publicPackSnapshots">): Promise<boolean> {
+  const providerHead = await loadProviderProfileHead(ctx, root.providerId);
+  if (providerHead === null || providerHead.activeProfileSnapshotId !== root.header.providerProfileSnapshotId) return false;
+  const dependencies = await ctx.db.query("publicPackSnapshotBatchDependencies")
+    .withIndex("by_public_pack_snapshot_id_and_batch_index", (index) => index.eq("publicPackSnapshotId", root.publicPackSnapshotId))
+    .take(root.descriptor.batches.length + 1);
+  if (dependencies.length !== root.descriptor.batches.length) return false;
+  for (const dependency of dependencies) {
+    for (const reference of dependency.collectibleProfiles) {
+      const head = await loadCollectibleProfileHead(ctx, reference.publicCollectibleId);
+      if (head === null || head.activeProfileSnapshotId !== reference.collectibleProfileSnapshotId) return false;
+    }
+  }
+  return true;
+}
+
 export const start = internalMutation({
   args: EXECUTION_ARGS,
   returns: v.any(),
@@ -113,11 +130,24 @@ export const start = internalMutation({
       }
       const stored = { descriptor: existing.descriptor, header: existing.header };
       const same = packCatalogCanonicalJson(stored) === packCatalogCanonicalJson({ descriptor, header });
-      return { ...evidence(existing, head), result: same ? applied("already_applied", packSnapshotWorkState(existing, head)) : conflict(packSnapshotWorkState(existing, head)), store: same };
+      const state = packSnapshotWorkState(existing, head);
+      if (!same) return { ...evidence(existing, head), result: conflict(state), store: false };
+      const order = comparePublicationSequences(packPublicationSequence, existing.packPublicationSequence);
+      if (order < 0) return { ...evidence(existing, head), result: conflict(state), store: true };
+      if (order > 0) {
+        // The same bytes are desired again under a later sequence: record that
+        // declaration so activation can bind to it (byte reuse, distinct intent).
+        await ctx.db.patch("publicPackSnapshots", existing._id, { packPublicationSequence, evidence: sealEvidence });
+        return { ...evidence(existing, head), result: applied("applied", state), store: true };
+      }
+      return { ...evidence(existing, head), result: applied("already_applied", state), store: true };
     }
     const required = head === null;
-    if (required && await loadProviderProfileHead(ctx, header.providerId) === null) {
-      return { ...NO_EVIDENCE, result: refused("PROFILE_HEAD_MISSING"), store: true };
+    if (required) {
+      const providerHead = await loadProviderProfileHead(ctx, header.providerId);
+      if (providerHead === null || providerHead.activeProfileSnapshotId !== header.providerProfileSnapshotId) {
+        return { ...NO_EVIDENCE, result: refused("PROFILE_HEAD_MISSING"), store: true };
+      }
     }
     const rootId = await ctx.db.insert("publicPackSnapshots", {
       ...identity,
@@ -189,7 +219,8 @@ export const applyBatch = internalMutation({
     }
     if (root.initialProfileProof.required) {
       for (const record of batch.records) {
-        if (await loadCollectibleProfileHead(ctx, record.publicCollectibleId) === null) {
+        const profileHead = await loadCollectibleProfileHead(ctx, record.publicCollectibleId);
+        if (profileHead === null || profileHead.activeProfileSnapshotId !== record.collectibleProfileSnapshotId) {
           return { ...evidence(root, head), result: refused("PROFILE_HEAD_MISSING", "waiting"), store: true };
         }
       }
@@ -216,6 +247,7 @@ export const applyBatch = internalMutation({
       collectibleProfileSnapshotIds: batch.records.map(({ collectibleProfileSnapshotId }) => collectibleProfileSnapshotId).sort(compareCanonicalStrings),
       valuationDependencyIdentities: batch.records.filter(({ eligibleForChase }) => eligibleForChase)
         .map(({ valuation }) => valuation.valuationIdentity).sort(compareCanonicalStrings),
+      collectibleProfiles: batch.records.map(({ publicCollectibleId, collectibleProfileSnapshotId }) => ({ publicCollectibleId, collectibleProfileSnapshotId })),
     });
     for (const record of batch.records) {
       await ctx.db.insert("publicPackMemberships", {
@@ -313,13 +345,24 @@ export const activate = internalMutation({
     if (Date.parse(intent.expiresAt) <= Date.parse(now)) {
       return { ...evidence(root, head), result: refused("OPERATION_EXPIRED", state), store: true };
     }
+    // Activation binds to the desired state that staged (or re-declared) these
+    // exact bytes: the same provider-local sequence and the same evidence.
+    if (intent.packPublicationSequence !== root.packPublicationSequence ||
+      packCatalogCanonicalJson(intent.evidence) !== packCatalogCanonicalJson(root.evidence)) {
+      return { ...evidence(root, head), result: conflict(state), store: true };
+    }
+    // The sealed EV evidence must still be valid when the activation was created.
+    if (Date.parse(intent.createdAt) >= Date.parse(root.header.ev.validUntil)) {
+      return { ...evidence(root, head), result: refused("EV_INPUTS_PENDING", "waiting"), store: true };
+    }
     const expected = intent.expectedHead;
     if (head === null) {
       if (expected.generation !== 0 || expected.publicationEpoch !== 0 || expected.activeSnapshotId !== null) {
         return { ...evidence(root, head), result: conflict(state), store: true };
       }
       const proof = root.initialProfileProof;
-      if (!proof.required || !proof.providerHeadVerified || proof.collectibleHeadsVerified !== root.header.contentCount) {
+      if (!proof.required || !proof.providerHeadVerified || proof.collectibleHeadsVerified !== root.header.contentCount ||
+        !(await initialProfileReferencesHold(ctx, root))) {
         return { ...evidence(root, head), result: refused("PROFILE_HEAD_MISSING", "waiting"), store: true };
       }
     } else {

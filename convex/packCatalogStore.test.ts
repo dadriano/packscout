@@ -231,11 +231,21 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
     expect(loser.packHead?.generation).toBe(2);
     const stale = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "1", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId } });
     expect(stale.result.outcome).toBe("conflict");
+    const unbound = await activatePack(t, update, { packPublicationSequence: "3", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId } });
+    expect(unbound.result).toEqual({ outcome: "conflict", state: "published", reasonCode: "ACTIVATION_CONFLICT" });
+    const redeclared = await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(update, "3"), packEntity(packCatalogFixtureIds.packA)));
+    expect(redeclared.result).toEqual({ outcome: "applied", state: "published", reasonCode: null });
     const alreadyActive = await activatePack(t, update, { packPublicationSequence: "3", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId } });
     expect(alreadyActive.result).toEqual({ outcome: "already_active", state: "published", reasonCode: null });
     expect(alreadyActive.packHead).toMatchObject({ generation: 2, latestAcceptedPackPublicationSequence: "3" });
-    const expired = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "4", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId }, expiresAt: new Date(Date.now() + 1).toISOString() });
-    expect(expired.result.reasonCode === "OPERATION_EXPIRED" || expired.result.outcome === "applied").toBe(true);
+    expect((await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(fixture.packs.packA, "4"), packEntity(packCatalogFixtureIds.packA)))).result.outcome).toBe("applied");
+    const expired = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "4", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId }, expiresAt: "2026-09-03T18:31:00.000Z" });
+    expect(expired.result).toEqual({ outcome: "refused", state: "superseded", reasonCode: "OPERATION_EXPIRED" });
+    const staleEv = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "4", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId }, createdAt: "2026-09-03T19:00:00.000Z" });
+    expect(staleEv.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "EV_INPUTS_PENDING" });
+    const republished = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "4", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId } });
+    expect(republished.result).toEqual({ outcome: "applied", state: "published", reasonCode: null });
+    expect(republished.packHead).toMatchObject({ generation: 3, activeSnapshotId: first, previousSnapshotId: update.snapshot.identity.publicPackSnapshotId, latestAcceptedPackPublicationSequence: "4" });
   });
 
   test("hold fences prior epochs, retained activation selects only the previous snapshot, and resume is exact", async () => {
@@ -253,6 +263,7 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
     const held = await expectSignedReceipt(await postOperation(t, "hold_pack_head", { publicRepackId: packCatalogFixtureIds.packA, expectedGeneration: 2, expectedPublicationEpoch: 0 }, entity));
     expect(held.result.outcome).toBe("applied");
     expect(held.packHead).toMatchObject({ generation: 2, publicationEpoch: 1, held: true });
+    expect((await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(fixture.packs.packA, "3"), entity))).result.outcome).toBe("applied");
     const fenced = await activatePack(t, fixture.packs.packA, { packPublicationSequence: "3", expectedHead: { generation: 2, publicationEpoch: 0, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId } });
     expect(fenced.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "OPERATOR_HOLD" });
     const wrongTarget = await expectSignedReceipt(await postOperation(t, "activate_retained_pack_snapshot", { publicRepackId: packCatalogFixtureIds.packA, expectedGeneration: 2, expectedPublicationEpoch: 1, targetSnapshotId: update.snapshot.identity.publicPackSnapshotId }, entity));
@@ -272,11 +283,12 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
     const resumeReleased = await expectSignedReceipt(await postOperation(t, "resume_pack_head", { publicRepackId: packCatalogFixtureIds.packA, expectedGeneration: 3, expectedPublicationEpoch: 1 }, entity));
     expect(resumeReleased.result.outcome).toBe("conflict");
     expect(resumeReleased.packHead).toMatchObject({ generation: 3, publicationEpoch: 1, held: false });
-    const staleEpoch = await activatePack(t, update, { packPublicationSequence: "3", expectedHead: { generation: 3, publicationEpoch: 0, activeSnapshotId: first } });
+    expect((await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(update, "4"), entity))).result.outcome).toBe("applied");
+    const staleEpoch = await activatePack(t, update, { packPublicationSequence: "4", expectedHead: { generation: 3, publicationEpoch: 0, activeSnapshotId: first } });
     expect(staleEpoch.result.outcome).toBe("conflict");
-    const current = await activatePack(t, update, { packPublicationSequence: "3", expectedHead: { generation: 3, publicationEpoch: 1, activeSnapshotId: first } });
+    const current = await activatePack(t, update, { packPublicationSequence: "4", expectedHead: { generation: 3, publicationEpoch: 1, activeSnapshotId: first } });
     expect(current.result.outcome).toBe("applied");
-    expect(current.packHead).toMatchObject({ generation: 4, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId });
+    expect(current.packHead).toMatchObject({ generation: 4, activeSnapshotId: update.snapshot.identity.publicPackSnapshotId, latestAcceptedPackPublicationSequence: "4" });
     const displaced = await t.run(async (ctx) => (await ctx.db.query("publicPackSnapshots").withIndex("by_public_pack_snapshot_id", (index) => index.eq("publicPackSnapshotId", first)).take(1))[0]);
     expect(displaced?.state).toBe("complete");
     expect(displaced?.displacedBy).toBe("activation");
@@ -326,6 +338,25 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
     expect(stored.header.summaryProjection).toEqual(fixture.packs.packA.snapshot.payload.summaryProjection);
     const stale = await publishProfile(t, renamed, 1).catch((error: unknown) => error);
     expect(stale).toBeInstanceOf(Error);
+  });
+
+  test("a first publication names the exact profile snapshots that are active at staging and again at activation", async () => {
+    const t = createTest();
+    const fixture = await loadFixture();
+    await publishFixtureProfiles(t, fixture);
+    const renamedA = await resealCollectibleProfile(fixture.collectibles[0]!, "Alpha Card Renamed");
+    await publishProfile(t, renamedA, 1);
+    const entityA = packEntity(packCatalogFixtureIds.packA);
+    expect((await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(fixture.packs.packA, "1"), entityA))).result.outcome).toBe("applied");
+    const staleReference = await expectSignedReceipt(await postOperation(t, "apply_pack_snapshot_batch",
+      { publicRepackId: packCatalogFixtureIds.packA, publicPackSnapshotId: fixture.packs.packA.snapshot.identity.publicPackSnapshotId, batch: fixture.packs.packA.batches[0]! }, entityA));
+    expect(staleReference.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "PROFILE_HEAD_MISSING" });
+    for (const receipt of await stagePack(t, fixture.packs.packB, "1")) expect(receipt.result.outcome).toBe("applied");
+    const renamedB = await resealCollectibleProfile(fixture.collectibles[1]!, "Beta Card Renamed");
+    await publishProfile(t, renamedB, 1);
+    const movedHead = await activatePack(t, fixture.packs.packB, { packPublicationSequence: "1", expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null } });
+    expect(movedHead.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "PROFILE_HEAD_MISSING" });
+    expect(await t.run(async (ctx) => (await ctx.db.query("activePackHeads").take(1)).length)).toBe(0);
   });
 
   test("a maximum P01 batch stages, finalizes, and activates inside one transaction budget", async () => {
