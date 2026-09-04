@@ -379,7 +379,7 @@ export const findPacksByDesiredCollectibleAtTime = internalQuery({
     let distinctPacks = 0;
     for (;;) {
       const next = await ctx.db.query("publicPackMemberships")
-        .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
+        .withIndex("by_collectible_and_repack_and_snapshot", (index) =>
           index.eq("publicCollectibleId", input.publicCollectibleId).gt("publicRepackId", lastPackId))
         .take(1);
       const membership = next[0];
@@ -390,7 +390,7 @@ export const findPacksByDesiredCollectibleAtTime = internalQuery({
       const head = await loadPackHead(ctx, membership.publicRepackId);
       if (head === null) continue;
       const active = await ctx.db.query("publicPackMemberships")
-        .withIndex("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", (index) =>
+        .withIndex("by_collectible_and_repack_and_snapshot", (index) =>
           index.eq("publicCollectibleId", input.publicCollectibleId).eq("publicRepackId", head.publicRepackId)
             .eq("publicPackSnapshotId", head.activeSnapshot.publicPackSnapshotId))
         .take(1);

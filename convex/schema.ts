@@ -1957,7 +1957,7 @@ export default defineSchema({
     publicPackSnapshotId: v.string(),
     providerId: v.string(),
   })
-    .index("by_public_collectible_id_and_public_repack_id_and_public_pack_snapshot_id", [
+    .index("by_collectible_and_repack_and_snapshot", [
       "publicCollectibleId",
       "publicRepackId",
       "publicPackSnapshotId",
