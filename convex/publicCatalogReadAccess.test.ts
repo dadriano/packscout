@@ -216,6 +216,10 @@ const OPEN_PUBLIC_QUERIES: Readonly<Record<string, string>> = Object.freeze({
     "the authenticated saved-items capability; admission enforcement on it " +
     "belongs to closed-beta-access/004 and it returns only the caller's own " +
     "references",
+  "savedItems.getOwnerWatchlist":
+    "the authenticated owner Watchlist read; admission enforcement on it " +
+    "belongs to closed-beta-access/004 and it returns only the caller's own " +
+    "saved collections",
 });
 
 /**

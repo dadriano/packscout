@@ -3,15 +3,25 @@ import {
   publicCollectibleIdSchema,
   publicRepackIdSchema,
 } from "@packscout/contracts";
-import { ConvexError, v } from "convex/values";
+import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
 import {
   PRODUCT_USER_READ_CAPABILITY,
   PRODUCT_USER_WRITE_CAPABILITY,
   requireAdmittedProductUser,
 } from "./productUserCapabilityGate";
+import { productUserTimestamp } from "./productUserRecords";
+import {
+  normalizeLegacyPackAvailability,
+  publicPackAvailabilityValidator,
+} from "./publicRepackValidation";
 
 export const MAX_SAVED_ITEMS_PER_KIND = 250;
 
@@ -43,6 +53,76 @@ const setSavedResultValidator = v.object({
   saved: v.boolean(),
   prunedUnavailable: v.boolean(),
 });
+
+const catalogStatusValidator = v.union(
+  v.literal("resolved"),
+  v.literal("unavailable"),
+);
+const collectibleTypeValidator = v.union(
+  v.literal("card"),
+  v.literal("watch"),
+  v.literal("coin"),
+  v.literal("sealed_product"),
+  v.literal("memorabilia"),
+  v.literal("other"),
+);
+const estimatedEvValidator = v.object({
+  evDollarsMinorUnits: v.number(),
+  grossReturnBasisPoints: v.number(),
+  confidenceBand: v.union(
+    v.literal("low"),
+    v.literal("medium"),
+    v.literal("high"),
+  ),
+});
+const nullableTextValidator = v.union(v.string(), v.null());
+const ownerWatchlistRepackValidator = v.object({
+  publicRepackId: v.string(),
+  savedAt: v.string(),
+  catalogStatus: catalogStatusValidator,
+  openable: v.boolean(),
+  repack: v.union(
+    v.null(),
+    v.object({
+      name: v.string(),
+      vendorDisplayName: v.string(),
+      availability: publicPackAvailabilityValidator,
+      estimatedEv: v.union(v.null(), estimatedEvValidator),
+    }),
+  ),
+});
+const ownerWatchlistCollectibleValidator = v.object({
+  publicCollectibleId: v.string(),
+  savedAt: v.string(),
+  catalogStatus: catalogStatusValidator,
+  openable: v.boolean(),
+  collectible: v.union(
+    v.null(),
+    v.object({
+      name: v.string(),
+      collectibleType: collectibleTypeValidator,
+      year: v.union(v.number(), v.null()),
+      brand: nullableTextValidator,
+      setOrSeries: nullableTextValidator,
+      cardNumber: nullableTextValidator,
+      referenceNumber: nullableTextValidator,
+      grade: nullableTextValidator,
+      grader: nullableTextValidator,
+    }),
+  ),
+});
+const ownerWatchlistValidator = v.object({
+  savedRepacks: v.array(ownerWatchlistRepackValidator),
+  savedCollectibles: v.array(ownerWatchlistCollectibleValidator),
+  savedRepackCount: v.number(),
+  savedCollectibleCount: v.number(),
+});
+
+type OwnerWatchlist = Infer<typeof ownerWatchlistValidator>;
+type ActiveCatalog = Readonly<{
+  available: boolean;
+  releaseIds: readonly Id<"providerCatalogReleases">[];
+}>;
 
 function refuse(code: SavedItemsErrorCode): never {
   const message =
@@ -206,6 +286,112 @@ async function firstUnavailableSavedCollectible(
   return null;
 }
 
+async function loadActiveCatalogForWatchlist(
+  ctx: QueryCtx,
+): Promise<ActiveCatalog> {
+  let releaseIds: readonly Id<"providerCatalogReleases">[];
+  try {
+    const loaded = await loadValidatedCatalogManifest(ctx);
+    releaseIds =
+      loaded === null ? [] : loaded.providerReleases.map(({ _id }) => _id);
+  } catch (error) {
+    if (!(error instanceof ConvexError)) throw error;
+    refuse("SAVED_RESOURCE_UNAVAILABLE");
+  }
+  return { available: releaseIds.length > 0, releaseIds };
+}
+
+async function findActiveRepackForWatchlist(
+  ctx: QueryCtx,
+  catalog: ActiveCatalog,
+  publicRepackId: string,
+): Promise<Doc<"providerCatalogRepacks"> | null> {
+  for (const releaseId of catalog.releaseIds) {
+    const matches = await ctx.db
+      .query("providerCatalogRepacks")
+      .withIndex("by_release_id_and_public_repack_id", (index) =>
+        index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
+      )
+      .take(2);
+    if (matches.length > 1) refuse("SAVED_ITEMS_STATE_CONFLICT");
+    const match = matches[0];
+    if (match !== undefined) return match;
+  }
+  return null;
+}
+
+async function findActiveCollectibleForWatchlist(
+  ctx: QueryCtx,
+  catalog: ActiveCatalog,
+  publicCollectibleId: string,
+): Promise<Doc<"providerCatalogCollectibles"> | null> {
+  for (const releaseId of catalog.releaseIds) {
+    const matches = await ctx.db
+      .query("providerCatalogCollectibles")
+      .withIndex("by_release_id_and_public_collectible_id", (index) =>
+        index
+          .eq("releaseId", releaseId)
+          .eq("publicCollectibleId", publicCollectibleId),
+      )
+      .take(2);
+    if (matches.length > 1) refuse("SAVED_ITEMS_STATE_CONFLICT");
+    const match = matches[0];
+    if (match !== undefined) return match;
+  }
+  return null;
+}
+
+function newestSavedFirst<TRow>(
+  rows: readonly TRow[],
+  publicId: (row: TRow) => string,
+  creationTime: (row: TRow) => number,
+): TRow[] {
+  return [...rows].sort(
+    (left, right) =>
+      -compareSavedItemCandidateOrder(
+        creationTime(left),
+        publicId(left),
+        creationTime(right),
+        publicId(right),
+      ),
+  );
+}
+
+function displayWatchlistRepack(
+  detail: Doc<"providerCatalogRepacks">["detail"],
+) {
+  const packScout = detail.evEstimates.packScout;
+  return {
+    name: detail.name,
+    vendorDisplayName: detail.vendorDisplayName,
+    availability: normalizeLegacyPackAvailability(detail.availability),
+    estimatedEv:
+      packScout.status === "available"
+        ? {
+            evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
+            grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
+            confidenceBand: packScout.confidence.band,
+          }
+        : null,
+  };
+}
+
+function displayWatchlistCollectible(
+  detail: Doc<"providerCatalogCollectibles">["detail"],
+) {
+  return {
+    name: detail.name,
+    collectibleType: detail.collectibleType,
+    year: detail.year,
+    brand: detail.brand,
+    setOrSeries: detail.setOrSeries,
+    cardNumber: detail.cardNumber,
+    referenceNumber: detail.referenceNumber,
+    grade: detail.grade,
+    grader: detail.grader,
+  };
+}
+
 /**
  * The caller's own saved item IDs. Reading is an authenticated product
  * capability: while the closed beta is on, an unadmitted account is refused
@@ -253,6 +439,101 @@ export const getSavedItemIds = query({
       savedCollectibleIds: savedCollectibles
         .map(({ publicCollectibleId }) => publicCollectibleId)
         .sort(),
+    };
+  },
+});
+
+/**
+ * The caller's Watchlist: both saved collections resolved against the current
+ * catalog, newest first, with per-tab counts. This is the same owner-only
+ * read capability as `getSavedItemIds`; it adds display fields so later UI
+ * can render lists without a second store. Missing catalog references stay
+ * in the payload as unavailable, not-openable rows.
+ */
+export const getOwnerWatchlist = query({
+  args: {},
+  returns: ownerWatchlistValidator,
+  handler: async (ctx): Promise<OwnerWatchlist> => {
+    const ownerTokenIdentifier = await requireAdmittedProductUser(
+      ctx,
+      PRODUCT_USER_READ_CAPABILITY,
+    );
+    const [savedRepacks, savedCollectibles] = await Promise.all([
+      ctx.db
+        .query("savedRepacks")
+        .withIndex("by_owner_token_identifier_and_public_repack_id", (index) =>
+          index.eq("ownerTokenIdentifier", ownerTokenIdentifier),
+        )
+        .take(MAX_SAVED_ITEMS_PER_KIND + 1),
+      ctx.db
+        .query("savedCollectibles")
+        .withIndex(
+          "by_owner_token_identifier_and_public_collectible_id",
+          (index) => index.eq("ownerTokenIdentifier", ownerTokenIdentifier),
+        )
+        .take(MAX_SAVED_ITEMS_PER_KIND + 1),
+    ]);
+    if (
+      savedRepacks.length > MAX_SAVED_ITEMS_PER_KIND ||
+      savedCollectibles.length > MAX_SAVED_ITEMS_PER_KIND
+    ) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+
+    const catalog = await loadActiveCatalogForWatchlist(ctx);
+    if (!catalog.available) refuse("SAVED_RESOURCE_UNAVAILABLE");
+
+    const resolvedRepacks = [];
+    for (const row of newestSavedFirst(
+      savedRepacks,
+      ({ publicRepackId }) => publicRepackId,
+      ({ _creationTime }) => _creationTime,
+    )) {
+      const document = await findActiveRepackForWatchlist(
+        ctx,
+        catalog,
+        row.publicRepackId,
+      );
+      resolvedRepacks.push({
+        publicRepackId: row.publicRepackId,
+        savedAt: productUserTimestamp(row._creationTime),
+        catalogStatus:
+          document === null ? ("unavailable" as const) : ("resolved" as const),
+        openable: document !== null,
+        repack:
+          document === null ? null : displayWatchlistRepack(document.detail),
+      });
+    }
+
+    const resolvedCollectibles = [];
+    for (const row of newestSavedFirst(
+      savedCollectibles,
+      ({ publicCollectibleId }) => publicCollectibleId,
+      ({ _creationTime }) => _creationTime,
+    )) {
+      const document = await findActiveCollectibleForWatchlist(
+        ctx,
+        catalog,
+        row.publicCollectibleId,
+      );
+      resolvedCollectibles.push({
+        publicCollectibleId: row.publicCollectibleId,
+        savedAt: productUserTimestamp(row._creationTime),
+        catalogStatus:
+          document === null ? ("unavailable" as const) : ("resolved" as const),
+        openable: document !== null,
+        collectible:
+          document === null
+            ? null
+            : displayWatchlistCollectible(document.detail),
+      });
+    }
+
+    return {
+      savedRepacks: resolvedRepacks,
+      savedCollectibles: resolvedCollectibles,
+      savedRepackCount: resolvedRepacks.length,
+      savedCollectibleCount: resolvedCollectibles.length,
     };
   },
 });

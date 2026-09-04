@@ -95,6 +95,10 @@ describe("authenticated saved items", () => {
       "AUTH_REQUIRED",
     );
     await expectErrorCode(
+      t.query(api.savedItems.getOwnerWatchlist, {}),
+      "AUTH_REQUIRED",
+    );
+    await expectErrorCode(
       t.mutation(api.savedItems.setSavedRepack, {
         publicRepackId: fixture.repacks[0]!.publicRepackId,
         saved: true,

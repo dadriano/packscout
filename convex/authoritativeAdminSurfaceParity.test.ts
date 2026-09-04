@@ -23,6 +23,7 @@ import {
 } from "./productUserAccess";
 import { getMyStanding } from "./productUsers";
 import {
+  getOwnerWatchlist,
   getSavedItemIds,
   setSavedCollectible,
   setSavedRepack,
@@ -610,6 +611,7 @@ test("current product-user, saved-item, and Data Release V3 functions remain exp
     getGateStatus,
     getMyStanding,
     getSavedItemIds,
+    getOwnerWatchlist,
     setSavedRepack,
     setSavedCollectible,
     getPublicShellStatusV3,

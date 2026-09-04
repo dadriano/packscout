@@ -140,6 +140,7 @@ function capabilityCalls(
 ): ReadonlyArray<() => Promise<unknown>> {
   return [
     () => session.query(api.savedItems.getSavedItemIds, {}),
+    () => session.query(api.savedItems.getOwnerWatchlist, {}),
     () =>
       session.mutation(api.savedItems.setSavedRepack, {
         publicRepackId,
@@ -750,10 +751,11 @@ describe("authenticated entry-point enumeration", () => {
       }
     }
 
-    // Scanner liveness: the three shipped capabilities are discovered and
+    // Scanner liveness: the shipped saved-item capabilities are discovered and
     // gated. If the registration style ever changes, this fails loudly
     // instead of the scan going quietly blind.
     expect(gatedByModule.get("savedItems.ts")?.sort()).toEqual([
+      "getOwnerWatchlist",
       "getSavedItemIds",
       "setSavedCollectible",
       "setSavedRepack",
