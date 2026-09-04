@@ -103,14 +103,37 @@ test("URL parsing exposes protected query keys across normalized schemes and nes
   const fields = [(input: ProviderPackBuildInputs, url: string) => { input.imageUrl = url; },
     (input: ProviderPackBuildInputs, url: string) => { input.actions[0]!.url = url; },
     (input: ProviderPackBuildInputs, url: string) => { input.contents[0]!.imageUrl = url; }];
+  const signedQueries = ["%58-Amz-Signature=private-marker", "sv=1&se=expiry&sr=b&sp=r&%73ig=private-marker"];
   for (const prefix of ["HTTPS://", "  https://", "\tHtTpS://"]) {
     for (const setUrl of fields) {
-      const { input } = await assemblyFixture();
-      setUrl(input.inputs, `${prefix}example.com/image?size=large`);
-      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
-      setUrl(input.inputs, `${prefix}example.com/image?%58-Amz-Signature=private-marker`);
-      await reject(await requestFor(input.inputs));
+      for (const query of signedQueries) {
+        const { input } = await assemblyFixture();
+        setUrl(input.inputs, `${prefix}example.com/image?size=large`);
+        assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+        setUrl(input.inputs, `${prefix}example.com/image?${query}`);
+        await reject(await requestFor(input.inputs));
+      }
     }
+  }
+});
+
+test("credential-bearing public text is scanned after schema-equivalent normalization", async () => {
+  const { input: benign } = await assemblyFixture();
+  benign.inputs.title = "Padded title";
+  const padded = await requestFor(benign.inputs);
+  padded.inputs.title = "  Padded title\t";
+  assert.equal((await assembler.assemble(padded)).snapshot.payload.title, "Padded title");
+
+  const cases = [
+    { value: `Bearer ${"A".repeat(20)}`, set: (input: ProviderPackBuildInputs, value: string) => { input.title = value; } },
+    { value: "postgres://user:pass@host/database", set: (input: ProviderPackBuildInputs, value: string) => { input.contents[0]!.displayName = value; } },
+  ];
+  for (const { value, set } of cases) {
+    const { input } = await assemblyFixture();
+    set(input.inputs, value);
+    const pinned = await requestFor(input.inputs);
+    set(pinned.inputs, `  ${value}\t`);
+    await reject(pinned);
   }
 });
 

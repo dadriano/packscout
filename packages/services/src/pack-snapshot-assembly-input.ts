@@ -5,7 +5,7 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 
 const privateKeys = new Set(["account", "accountid", "authorization", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
-  "userid", "userdata", "rawsourceevidence", "xamzsignature", "signature"]);
+  "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
  * execute during capture. Unknown schema fields are rejected, never stripped. */
@@ -18,7 +18,8 @@ function preflight(value: unknown): void {
     if (typeof item === "string") {
       requireAssembly(item.length <= limits.maximumSnapshotBytes);
       bytes += encoder.encode(item).byteLength;
-      requireAssembly(!/^(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|Bearer [A-Za-z0-9._~-]{20,})/iu.test(item));
+      const normalizedText = item.trim().normalize("NFC");
+      requireAssembly(!/^(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|Bearer [A-Za-z0-9._~-]{20,})/iu.test(normalizedText));
       if (field === "url" || field === "imageUrl") {
         for (const key of new URL(item).searchParams.keys()) keys.add(key);
       }
