@@ -341,6 +341,18 @@ export function publicAvailabilityFromPack(pack) {
     : "unknown";
 }
 
+/** Reuse reviewed catalog identities to restore links on existing canonical rows. */
+export function withProviderPackListingUrls(platformKey, packs, resolveListingUrl) {
+  return packs.map((pack) => ({
+    ...pack,
+    listing_url: pack.listing_url ?? (
+      typeof pack.pack_key === "string" && pack.pack_key.startsWith("pack:")
+        ? resolveListingUrl(platformKey, pack.pack_key.slice(5))
+        : null
+    ),
+  }));
+}
+
 export function publicActionsFromPack(pack, availability) {
   const url = parsedHttpsUrl(pack.listing_url);
   if (availability !== "available" || url === null) return {};

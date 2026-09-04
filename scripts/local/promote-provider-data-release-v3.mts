@@ -69,6 +69,7 @@ import {
   publicCollectibleSchema,
   publicRepackChaseSchema,
   publicRepackDetailV3Schema,
+  providerPackListingUrl,
   sha256CanonicalJson,
 } from "@packscout/contracts";
 import {
@@ -76,6 +77,7 @@ import {
   PromoteProviderDataReleaseV3Error,
   assembleDataReleaseV3Plan,
   boundDataReleaseV3ActivationPort,
+  withProviderPackListingUrls,
   boundedText,
   carryForwardActiveRelease,
   parsePromoteProviderArguments,
@@ -350,7 +352,7 @@ async function readProviderSnapshot(
     );
     return {
       platform: access.platform,
-      packs: packs.rows,
+      packs: withProviderPackListingUrls(platformKey, packs.rows, providerPackListingUrl),
       categories: categories.rows,
       collectibleTypes: types.rows.map((row) => String(row.collectible_type)),
     };
