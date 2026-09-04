@@ -3,6 +3,22 @@
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
+import {
+  buildV3Chase,
+  buildV3Collectible,
+  buildV3Detail,
+  buildV3FixturePlan,
+  buildV3SoldOutDetail,
+  v3ActivateRequest,
+  v3BatchRequest,
+  v3Body,
+  v3FinalizeRequest,
+  v3StartRequest,
+  V3_COLLECTIBLE_ID,
+  V3_FIXTURE_NOW,
+  V3_REPACK_ID_A,
+  V3_REPACK_ID_B,
+} from "./dataReleaseV3Fixture.test-support";
 import { buildMockDataReleaseV2 } from "./mockDataReleaseFixture";
 import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
 import schema from "./schema";
@@ -28,18 +44,17 @@ const USER_B: TestIdentity = {
 
 const MISSING_REPACK_ID = "40000000-0000-5000-8000-000000000999";
 const MISSING_COLLECTIBLE_ID = "30000000-0000-5000-8000-000000000999";
-const CLOCK_BASE = Date.UTC(2026, 7, 19, 12, 0, 0);
+const V3_PUBLIC_RELEASE_ID = "20000000-0000-4000-8000-000000000001";
+const CLOCK_BASE = V3_FIXTURE_NOW;
 
-const fixture = buildMockDataReleaseV2();
-const availableRepack = fixture.repacks.find(
-  (repack) =>
-    repack.availability === "available" &&
-    repack.evEstimates.packScout.status === "available",
-)!;
-const soldOutRepack = fixture.repacks.find(
-  (repack) => repack.availability === "sold_out",
-)!;
-const firstCollectible = fixture.collectibles[0]!;
+const availableRepack = buildV3Detail();
+const soldOutRepack = buildV3SoldOutDetail({
+  publicRepackId: V3_REPACK_ID_B,
+  topChase: buildV3Chase(V3_REPACK_ID_B),
+});
+const firstCollectible = buildV3Collectible();
+const legacyFixture = buildMockDataReleaseV2();
+const legacyOnlyRepack = legacyFixture.repacks[0]!;
 
 function createTest() {
   vi.useFakeTimers();
@@ -47,10 +62,40 @@ function createTest() {
   return convexTest({ schema, modules, transactionLimits: true });
 }
 
-async function seed(t: WatchlistTest): Promise<void> {
+async function seedLegacy(t: WatchlistTest): Promise<void> {
   vi.stubEnv("PACKSCOUT_RUNTIME_ENVIRONMENT", "local");
   vi.stubEnv("PACKSCOUT_MOCK_DATA_RELEASE_SEED_ENABLED", "1");
   await t.mutation(internal.mockDataReleaseSeed.seed, {});
+}
+
+async function seedV3(t: WatchlistTest): Promise<void> {
+  const plan = await buildV3FixturePlan({
+    publicReleaseId: V3_PUBLIC_RELEASE_ID,
+    details: [availableRepack, soldOutRepack],
+    collectibles: [firstCollectible],
+  });
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.start,
+    await v3Body(v3StartRequest(plan)),
+  );
+  for (const batch of plan.batches) {
+    await t.mutation(
+      internal.dataReleaseV3Lifecycle.applyBatch,
+      await v3Body(v3BatchRequest(plan, batch)),
+    );
+  }
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.finalize,
+    await v3Body(v3FinalizeRequest(plan)),
+  );
+  await t.mutation(
+    internal.dataReleaseV3Lifecycle.activate,
+    await v3Body(v3ActivateRequest(plan, null)),
+  );
+}
+
+async function seed(t: WatchlistTest): Promise<void> {
+  await seedV3(t);
 }
 
 function savedAt(second: number): string {
@@ -111,6 +156,19 @@ function boundedPublicId(index: number): string {
   return `41000000-0000-5000-8000-${String(index).padStart(12, "0")}`;
 }
 
+function watchlistEstimatedEv(
+  packScout: typeof availableRepack.evEstimates.packScout,
+) {
+  if (packScout.metrics === null || packScout.confidence === null) {
+    throw new Error("Expected a presentable PackScout estimate.");
+  }
+  return {
+    evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
+    grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
+    confidenceBand: packScout.confidence.band,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.useRealTimers();
@@ -162,10 +220,6 @@ describe("owner watchlist read", () => {
       firstCollectible.publicCollectibleId,
     ]);
 
-    const packScout = availableRepack.evEstimates.packScout;
-    if (packScout.status !== "available") {
-      throw new Error("Expected an available PackScout EV fixture.");
-    }
     const watchlist = await t
       .withIdentity(USER_A)
       .query(api.savedItems.getOwnerWatchlist, {});
@@ -184,19 +238,7 @@ describe("owner watchlist read", () => {
           name: soldOutRepack.name,
           vendorDisplayName: soldOutRepack.vendorDisplayName,
           availability: "sold_out",
-          estimatedEv:
-            soldOutRepack.evEstimates.packScout.status === "available"
-              ? {
-                  evDollarsMinorUnits:
-                    soldOutRepack.evEstimates.packScout.metrics.evDollars
-                      .minorUnits,
-                  grossReturnBasisPoints:
-                    soldOutRepack.evEstimates.packScout.metrics
-                      .grossReturnBasisPoints,
-                  confidenceBand:
-                    soldOutRepack.evEstimates.packScout.confidence.band,
-                }
-              : null,
+          estimatedEv: watchlistEstimatedEv(soldOutRepack.evEstimates.packScout),
         },
       },
       {
@@ -208,11 +250,9 @@ describe("owner watchlist read", () => {
           name: availableRepack.name,
           vendorDisplayName: availableRepack.vendorDisplayName,
           availability: "available",
-          estimatedEv: {
-            evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
-            grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
-            confidenceBand: packScout.confidence.band,
-          },
+          estimatedEv: watchlistEstimatedEv(
+            availableRepack.evEstimates.packScout,
+          ),
         },
       },
     ]);
@@ -365,80 +405,98 @@ describe("owner watchlist read", () => {
     ).resolves.toEqual({ savedRepackIds: [], savedCollectibleIds: [] });
   });
 
-  test("refuses a saved public id that appears in two selected provider releases", async () => {
+  test("refuses when the legacy catalog is present but V3 is not activated", async () => {
+    const t = createTest();
+    await seedLegacy(t);
+    await expectErrorCode(
+      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      "SAVED_RESOURCE_UNAVAILABLE",
+    );
+  });
+
+  test("resolves against V3, not the legacy provider catalog, when the pointers diverge", async () => {
+    const t = createTest();
+    await seedLegacy(t);
+    await seedV3(t);
+    const saver = createSaver(t);
+    await saver.repacks(USER_A.tokenIdentifier, [
+      legacyOnlyRepack.publicRepackId,
+      V3_REPACK_ID_A,
+    ]);
+
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .query(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedRepacks).toEqual([
+      {
+        publicRepackId: V3_REPACK_ID_A,
+        savedAt: savedAt(2),
+        catalogStatus: "resolved",
+        openable: true,
+        repack: {
+          name: availableRepack.name,
+          vendorDisplayName: availableRepack.vendorDisplayName,
+          availability: "available",
+          estimatedEv: watchlistEstimatedEv(
+            availableRepack.evEstimates.packScout,
+          ),
+        },
+      },
+      {
+        publicRepackId: legacyOnlyRepack.publicRepackId,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        repack: null,
+      },
+    ]);
+  });
+
+  test("refuses a saved public id that is duplicated in the active V3 release", async () => {
     const t = createTest();
     await seed(t);
     const saver = createSaver(t);
-    const duplicated = await t.run(async (ctx) => {
-      const releaseIds = new Set(
-        (await ctx.db.query("providerCatalogReleases").collect()).map(
-          ({ _id }) => _id,
-        ),
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Repacks").collect()).find(
+        (document) => document.publicRepackId === V3_REPACK_ID_A,
       );
-      if (releaseIds.size < 2) {
-        throw new Error("Expected two selected provider releases.");
-      }
-      const source = (await ctx.db.query("providerCatalogRepacks").collect())[0];
       if (source === undefined) {
-        throw new Error("Expected a seeded repack.");
+        throw new Error("Expected the seeded V3 repack.");
       }
-      const otherReleaseId = [...releaseIds].find(
-        (releaseId) => releaseId !== source.releaseId,
-      );
-      if (otherReleaseId === undefined) {
-        throw new Error("Expected a second selected provider release.");
-      }
-      await ctx.db.insert("providerCatalogRepacks", {
-        releaseId: otherReleaseId,
+      await ctx.db.insert("dataReleaseV3Repacks", {
+        releaseId: source.releaseId,
         publicRepackId: source.publicRepackId,
-        vendorId: source.vendorId,
         detail: source.detail,
       });
-      return source.publicRepackId;
     });
-    await saver.repacks(USER_A.tokenIdentifier, [duplicated]);
+    await saver.repacks(USER_A.tokenIdentifier, [V3_REPACK_ID_A]);
     await expectErrorCode(
       t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
   });
 
-  test("refuses a saved collectible whose selected-provider copies disagree", async () => {
+  test("refuses a saved collectible that is duplicated in the active V3 release", async () => {
     const t = createTest();
     await seed(t);
     const saver = createSaver(t);
-    const duplicated = await t.run(async (ctx) => {
-      const releaseIds = new Set(
-        (await ctx.db.query("providerCatalogReleases").collect()).map(
-          ({ _id }) => _id,
-        ),
-      );
-      if (releaseIds.size < 2) {
-        throw new Error("Expected two selected provider releases.");
-      }
+    await t.run(async (ctx) => {
       const source = (
-        await ctx.db.query("providerCatalogCollectibles").collect()
-      )[0];
+        await ctx.db.query("dataReleaseV3Collectibles").collect()
+      ).find((document) => document.publicCollectibleId === V3_COLLECTIBLE_ID);
       if (source === undefined) {
-        throw new Error("Expected a seeded collectible.");
+        throw new Error("Expected the seeded V3 collectible.");
       }
-      const otherReleaseId = [...releaseIds].find(
-        (releaseId) => releaseId !== source.releaseId,
-      );
-      if (otherReleaseId === undefined) {
-        throw new Error("Expected a second selected provider release.");
-      }
-      await ctx.db.insert("providerCatalogCollectibles", {
-        releaseId: otherReleaseId,
+      await ctx.db.insert("dataReleaseV3Collectibles", {
+        releaseId: source.releaseId,
         publicCollectibleId: source.publicCollectibleId,
         collectibleType: source.collectibleType,
         normalizedName: source.normalizedName,
         searchText: source.searchText,
-        detail: { ...source.detail, name: `${source.detail.name} (copy)` },
+        detail: source.detail,
       });
-      return source.publicCollectibleId;
     });
-    await saver.collectibles(USER_A.tokenIdentifier, [duplicated]);
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
     await expectErrorCode(
       t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",

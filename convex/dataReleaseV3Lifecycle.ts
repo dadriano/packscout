@@ -420,6 +420,38 @@ export async function loadActiveDataReleaseV3State(
   return states[0] ?? null;
 }
 
+/**
+ * The complete V3 release the public catalog currently serves, or null when
+ * none is activated. Callers that need to resolve a public id against the
+ * product catalog should use this pointer rather than the legacy provider
+ * catalog tables.
+ */
+export async function loadActiveDataReleaseV3Release(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Doc<"dataReleaseV3Releases"> | null> {
+  const state = await loadActiveDataReleaseV3State(ctx);
+  if (
+    state === null ||
+    state.activeReleaseId === null ||
+    state.activeRelease === null
+  ) {
+    return null;
+  }
+  const release = await ctx.db.get(
+    "dataReleaseV3Releases",
+    state.activeReleaseId,
+  );
+  if (
+    release === null ||
+    release.lifecycle !== "complete" ||
+    release.publicReleaseId !== state.activeRelease.publicReleaseId ||
+    release.releaseFingerprint !== state.activeRelease.releaseFingerprint
+  ) {
+    return null;
+  }
+  return release;
+}
+
 function releasePointer(release: Doc<"dataReleaseV3Releases">): {
   publicReleaseId: string;
   releaseFingerprint: string;

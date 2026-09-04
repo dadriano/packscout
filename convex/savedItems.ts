@@ -12,6 +12,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
+import { loadActiveDataReleaseV3Release } from "./dataReleaseV3Lifecycle";
 import {
   PRODUCT_USER_READ_CAPABILITY,
   PRODUCT_USER_WRITE_CAPABILITY,
@@ -119,9 +120,9 @@ const ownerWatchlistValidator = v.object({
 });
 
 type OwnerWatchlist = Infer<typeof ownerWatchlistValidator>;
-type ActiveCatalog = Readonly<{
+type ActiveV3Catalog = Readonly<{
   available: boolean;
-  releaseIds: readonly Id<"providerCatalogReleases">[];
+  releaseId: Id<"dataReleaseV3Releases"> | null;
 }>;
 
 function refuse(code: SavedItemsErrorCode): never {
@@ -288,80 +289,71 @@ async function firstUnavailableSavedCollectible(
 
 async function loadActiveCatalogForWatchlist(
   ctx: QueryCtx,
-): Promise<ActiveCatalog> {
-  let releaseIds: readonly Id<"providerCatalogReleases">[];
+): Promise<ActiveV3Catalog> {
+  let release: Doc<"dataReleaseV3Releases"> | null;
   try {
-    const loaded = await loadValidatedCatalogManifest(ctx);
-    releaseIds =
-      loaded === null ? [] : loaded.providerReleases.map(({ _id }) => _id);
+    release = await loadActiveDataReleaseV3Release(ctx);
   } catch (error) {
     if (!(error instanceof ConvexError)) throw error;
     refuse("SAVED_RESOURCE_UNAVAILABLE");
   }
-  return { available: releaseIds.length > 0, releaseIds };
+  return release === null
+    ? { available: false, releaseId: null }
+    : { available: true, releaseId: release._id };
 }
 
 async function findActiveRepackForWatchlist(
   ctx: QueryCtx,
-  catalog: ActiveCatalog,
+  catalog: ActiveV3Catalog,
   publicRepackId: string,
-): Promise<Doc<"providerCatalogRepacks"> | null> {
-  let found: Doc<"providerCatalogRepacks"> | null = null;
-  for (const releaseId of catalog.releaseIds) {
-    const matches = await ctx.db
-      .query("providerCatalogRepacks")
-      .withIndex("by_release_id_and_public_repack_id", (index) =>
-        index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
-      )
-      .take(2);
-    const match = matches[0];
-    if (
-      matches.length > 1 ||
-      (match !== undefined &&
-        (match.releaseId !== releaseId ||
-          match.publicRepackId !== publicRepackId ||
-          match.detail.publicRepackId !== publicRepackId)) ||
-      (found !== null && match !== undefined)
-    ) {
-      refuse("SAVED_ITEMS_STATE_CONFLICT");
-    }
-    if (match !== undefined) found = match;
+): Promise<Doc<"dataReleaseV3Repacks"> | null> {
+  const releaseId = catalog.releaseId;
+  if (releaseId === null) return null;
+  const matches = await ctx.db
+    .query("dataReleaseV3Repacks")
+    .withIndex("by_release_id_and_public_repack_id", (index) =>
+      index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
+    )
+    .take(2);
+  const match = matches[0];
+  if (
+    matches.length > 1 ||
+    (match !== undefined &&
+      (match.releaseId !== releaseId ||
+        match.publicRepackId !== publicRepackId ||
+        match.detail.publicRepackId !== publicRepackId))
+  ) {
+    refuse("SAVED_ITEMS_STATE_CONFLICT");
   }
-  return found;
+  return match ?? null;
 }
 
 async function findActiveCollectibleForWatchlist(
   ctx: QueryCtx,
-  catalog: ActiveCatalog,
+  catalog: ActiveV3Catalog,
   publicCollectibleId: string,
-): Promise<Doc<"providerCatalogCollectibles"> | null> {
-  let found: Doc<"providerCatalogCollectibles"> | null = null;
-  let canonicalDetail: string | null = null;
-  for (const releaseId of catalog.releaseIds) {
-    const matches = await ctx.db
-      .query("providerCatalogCollectibles")
-      .withIndex("by_release_id_and_public_collectible_id", (index) =>
-        index
-          .eq("releaseId", releaseId)
-          .eq("publicCollectibleId", publicCollectibleId),
-      )
-      .take(2);
-    const match = matches[0];
-    const detail = match === undefined ? null : canonicalJson(match.detail);
-    if (
-      matches.length > 1 ||
-      (match !== undefined &&
-        (match.releaseId !== releaseId ||
-          match.publicCollectibleId !== publicCollectibleId ||
-          match.detail.publicCollectibleId !== publicCollectibleId ||
-          (canonicalDetail !== null && canonicalDetail !== detail)))
-    ) {
-      refuse("SAVED_ITEMS_STATE_CONFLICT");
-    }
-    if (match !== undefined) found = match;
-    if (detail !== null) canonicalDetail = detail;
+): Promise<Doc<"dataReleaseV3Collectibles"> | null> {
+  const releaseId = catalog.releaseId;
+  if (releaseId === null) return null;
+  const matches = await ctx.db
+    .query("dataReleaseV3Collectibles")
+    .withIndex("by_release_id_and_public_collectible_id", (index) =>
+      index
+        .eq("releaseId", releaseId)
+        .eq("publicCollectibleId", publicCollectibleId),
+    )
+    .take(2);
+  const match = matches[0];
+  if (
+    matches.length > 1 ||
+    (match !== undefined &&
+      (match.releaseId !== releaseId ||
+        match.publicCollectibleId !== publicCollectibleId ||
+        match.detail.publicCollectibleId !== publicCollectibleId))
+  ) {
+    refuse("SAVED_ITEMS_STATE_CONFLICT");
   }
-  return found;
+  return match ?? null;
 }
 
 function newestSavedFirst<TRow>(
@@ -381,7 +373,7 @@ function newestSavedFirst<TRow>(
 }
 
 function displayWatchlistRepack(
-  detail: Doc<"providerCatalogRepacks">["detail"],
+  detail: Doc<"dataReleaseV3Repacks">["detail"],
 ) {
   const packScout = detail.evEstimates.packScout;
   return {
@@ -389,18 +381,18 @@ function displayWatchlistRepack(
     vendorDisplayName: detail.vendorDisplayName,
     availability: normalizeLegacyPackAvailability(detail.availability),
     estimatedEv:
-      packScout.status === "available"
-        ? {
+      packScout.metrics === null || packScout.confidence === null
+        ? null
+        : {
             evDollarsMinorUnits: packScout.metrics.evDollars.minorUnits,
             grossReturnBasisPoints: packScout.metrics.grossReturnBasisPoints,
             confidenceBand: packScout.confidence.band,
-          }
-        : null,
+          },
   };
 }
 
 function displayWatchlistCollectible(
-  detail: Doc<"providerCatalogCollectibles">["detail"],
+  detail: Doc<"dataReleaseV3Collectibles">["detail"],
 ) {
   return {
     name: detail.name,
@@ -467,11 +459,11 @@ export const getSavedItemIds = query({
 });
 
 /**
- * The caller's Watchlist: both saved collections resolved against the current
- * catalog, newest first, with per-tab counts. Watchlist is a save-gated
+ * The caller's Watchlist: both saved collections resolved against the active
+ * V3 catalog, newest first, with per-tab counts. Watchlist is a save-gated
  * destination, so it uses the same standing policy as saving: a suspended
- * account cannot load it, even while the closed beta is off. Missing catalog
- * references stay in the payload as unavailable, not-openable rows.
+ * account cannot load it, even while the closed beta is off. Missing V3
+ * catalog references stay in the payload as unavailable, not-openable rows.
  */
 export const getOwnerWatchlist = query({
   args: {},
