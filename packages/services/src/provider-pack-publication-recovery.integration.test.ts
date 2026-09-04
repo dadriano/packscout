@@ -139,18 +139,72 @@ test("Persisted publication operations survive crashes and expire only with reco
       assert.deepEqual(await requests.claim(randomUUID()), []);
       const resumed = (await outbox.claim(randomUUID()))[0]!; assert.equal(resumed?.workId, claim.workId);
       await assert.rejects(outbox.readOperation(claim, activation.operationId), { code: "PACK_LEASE_LOST" });
-      assert.deepEqual((await outbox.readOperation(resumed, activation.operationId))?.operation, activation);
+      await assert.rejects(outbox.listOperations(claim), { code: "PACK_LEASE_LOST" });
+      const discovered = await outbox.listOperations(resumed);
+      assert.equal(discovered.length, 1);
+      // A new process has only its reclaimed lease, not the vanished process's random operation UUID.
+      const recovered = await outbox.readOperation(resumed, discovered[0]!.operationId);
+      assert.deepEqual(recovered?.operation, activation);
+      assert.equal(recovered?.requestSha256, discovered[0]!.requestSha256);
+      assert.equal(discovered[0]!.receiptRecorded, false);
+      assert.equal(await outbox.recordOperation(resumed, recovered!.operation), discovered[0]!.requestSha256);
       const independent = await prepare();
       await context.defer(independent.claim, "superseded", "ACTIVATION_CONFLICT");
       const requestSha256 = (await outbox.readOperation(resumed, activation.operationId))!.requestSha256;
       await outbox.recordReceipt(resumed, { operationId: activation.operationId, requestSha256,
         result: { outcome: "applied", state: "published", reasonCode: null }, completedAt: new Date().toISOString() });
+      assert.equal((await outbox.listOperations(resumed))[0]!.receiptRecorded, true);
       await outbox.complete(resumed, activation.operationId, { providerId, publicRepackId: id, generation: 1,
         publicationEpoch: 0, held: false, holdReason: null, latestAcceptedPackPublicationSequence: claim.sequence,
         activeSnapshot: intent.snapshot, previousSnapshot: null, indexableSummary: fixture.built.snapshot.payload.summaryProjection,
         activatedAt: new Date().toISOString() });
       const next = (await requests.claim(randomUUID()))[0]!; assert.equal(next.workId, newer.requestId);
       await context.defer(next, "superseded", "ACTIVATION_CONFLICT");
+    });
+    await suite.test("authenticated receipt timestamps tolerate bounded remote clock skew without weakening identity or replay", async () => {
+      const { id, claim, operation } = await prepare();
+      let fixedNow = await context.transaction(tx => context.now(tx));
+      const boundedContext = new ProviderPackPublicationContext(client, context.scope);
+      boundedContext.now = async () => fixedNow;
+      const boundedOutbox = new ProviderPackPublicationOutboxRepository(boundedContext);
+      const skew = 60_000;
+      for (const [kind, offset] of [["start_snapshot", -skew], ["stage_batch", skew]] as const) {
+        const command = await operation(kind), requestSha256 = await outbox.recordOperation(claim, command);
+        fixedNow = (await client.pack_publication_operations.findUniqueOrThrow({ where: { id: command.operationId } })).created_at;
+        const receipt = { operationId: command.operationId, requestSha256,
+          result: { outcome: "applied", state: "publishing", reasonCode: null } as const,
+          completedAt: new Date(fixedNow.getTime() + offset).toISOString() };
+        for (const invalidOffset of [-skew - 1, skew + 1]) await assert.rejects(boundedOutbox.recordReceipt(claim,
+          { ...receipt, completedAt: new Date(fixedNow.getTime() + invalidOffset).toISOString() }), { code: "PACK_INPUT_INVALID" });
+        await assert.rejects(boundedOutbox.recordReceipt(claim, { ...receipt, requestSha256: "f".repeat(64) }), { code: "PACK_INPUT_INVALID" });
+        await boundedOutbox.recordReceipt(claim, receipt);
+        await boundedOutbox.recordReceipt(claim, receipt);
+        assert.deepEqual((await outbox.readOperation(claim, command.operationId))?.receipt, receipt);
+        await assert.rejects(boundedOutbox.recordReceipt(claim, { ...receipt, completedAt: fixedNow.toISOString() }), { code: "PACK_STATE_CONFLICT" });
+      }
+      assert.equal(await client.pack_publication_receipts.count({ where: { public_repack_id: id } }), 2);
+      const independent = await prepare();
+      assert.deepEqual(await outbox.listOperations(independent.claim), []);
+      const foreign = new ProviderPackPublicationOutboxRepository(new ProviderPackPublicationContext(client,
+        { ...context.scope, organizationId: randomUUID() }));
+      await assert.rejects(foreign.listOperations(claim), { code: "PACK_SCOPE_MISMATCH" });
+      await context.defer(independent.claim, "superseded", "ACTIVATION_CONFLICT");
+      await context.defer(claim, "superseded", "ACTIVATION_CONFLICT");
+    });
+    await suite.test("operation discovery is deterministic metadata only at the durable operation limit", async () => {
+      const { claim, operation } = await prepare();
+      const ids: string[] = [];
+      for (let index = 0; index < packPublicationLimits.maximumOperations; index++) {
+        const command = { ...await operation("start_snapshot"), idempotencyKey: `${claim.workId}:${index}` };
+        await outbox.recordOperation(claim, command); ids.push(command.operationId);
+      }
+      const records = await outbox.listOperations(claim);
+      assert.deepEqual(records.map(row => row.operationId), ids.sort());
+      assert.ok(records.every(row => Object.keys(row).sort().join() === "operationId,receiptRecorded,requestSha256"));
+      assert.ok(Buffer.byteLength(JSON.stringify(records)) < 25_000);
+      await assert.rejects(outbox.recordOperation(claim, { ...await operation("start_snapshot"),
+        idempotencyKey: `${claim.workId}:overflow` }), { code: "PACK_LIMIT_EXCEEDED" });
+      await context.defer(claim, "blocked", "TRANSPORT_TIMEOUT");
     });
     for (const state of ["waiting", "retry_scheduled", "blocked"] as const) await suite.test(`new input preserves operation-bearing ${state} work`, async () => {
       const { fixture, id, claim, operation } = await prepare();

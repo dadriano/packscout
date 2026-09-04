@@ -100,12 +100,27 @@ export class ProviderPackPublicationOutboxRepository {
         public_repack_id: claim.publicRepackId, intent_id: claim.workId, id: receipt.operationId } });
       packInvariant(operation && operation.request_sha256 === receipt.requestSha256, "PACK_INPUT_INVALID");
       const completedAt = Date.parse(receipt.completedAt);
-      packInvariant(completedAt >= operation.created_at.getTime() && completedAt <= (await this.context.now(tx)).getTime(), "PACK_INPUT_INVALID");
+      const skew = packPublicationLimits.maximumReceiptClockSkewMilliseconds;
+      packInvariant(completedAt >= operation.created_at.getTime() - skew &&
+        completedAt <= (await this.context.now(tx)).getTime() + skew, "PACK_INPUT_INVALID");
       const digest = await hash(receipt);
       const previous = await tx.pack_publication_receipts.findUnique({ where: { operation_id: receipt.operationId } });
       if (previous) { packInvariant(previous.receipt_sha256 === digest && equal(previous.receipt_json, receipt)); return; }
       await tx.pack_publication_receipts.create({ data: { ...this.context.where, public_repack_id: claim.publicRepackId,
         intent_id: claim.workId, operation_id: receipt.operationId, receipt_sha256: digest, receipt_json: receipt } });
+    });
+  }
+  /** Reclaimed workers discover exact command IDs without retaining process memory.
+   * Metadata only: up to 100 bounded rows, never 100 copies of a full captured intent. */
+  async listOperations(claim: PackWorkClaim) {
+    return this.context.transaction(async tx => {
+      await this.context.lockLease(tx, claim, "activation");
+      const rows = await tx.pack_publication_operations.findMany({ where: { ...this.context.where,
+        public_repack_id: claim.publicRepackId, intent_id: claim.workId },
+        orderBy: { id: "asc" }, take: packPublicationLimits.maximumOperations + 1,
+        select: { id: true, request_sha256: true, receipt: { select: { operation_id: true } } } });
+      packInvariant(rows.length <= packPublicationLimits.maximumOperations, "PACK_LIMIT_EXCEEDED");
+      return rows.map(row => ({ operationId: row.id, requestSha256: row.request_sha256, receiptRecorded: row.receipt !== null }));
     });
   }
   async readOperation(claim: PackWorkClaim, operationId: string) {

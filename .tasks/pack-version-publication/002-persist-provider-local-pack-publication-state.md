@@ -182,3 +182,11 @@ On the latest implementation, **84** contract/readiness/PostgreSQL checks (72 pl
 Historical full verification on `f699d11b` does not certify later changes. The full attempt on `408e1ffc` reproduced the Watchlist inventory failure and was stopped after that failure before the latest search correction. Current-head full certification remains required; no audit exception, timeout, baseline, or verifier has been weakened.
 
 There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.
+
+### Latest review repair — 2026-09-04
+
+Discussions `3933953815` and `3933953820` are implemented locally while the separate PR109 release is certified. `listOperations(claim)` exposes at most 100 deterministically ordered metadata records (operation ID, request digest, receipt presence), protected by the current activation lease and tenant scope. P06 discovers these IDs after reclaim, reads each exact command through `readOperation`, and reconciles/replays its persisted bytes; it must not generate a replacement UUID for an existing command. Listing never materializes the potentially large captured intent per row.
+
+Authenticated remote receipts retain their exact completion timestamp with a documented ±60,000 ms cross-host skew allowance relative to operation creation/local receipt time. This does not relax request-digest binding, byte-exact receipt replay, lease ownership, or tenant isolation. Tests cover both exact skew boundaries, one millisecond outside each, changed digest/receipt rejection, stale/foreign leases, crash discovery without the original UUID, 100 bounded metadata rows, and overflow refusal.
+
+Current cumulative focused evidence: **108 passed, zero skips**, `/tmp/packscout-p02-discovery-skew-focused-20260904.log`; red reproduction `/tmp/packscout-p02-operation-discovery-skew-red-confirmed-20260904.log`. Contracts/database/services lint and typechecks pass. The initial skew fixture attempted to modify immutable operation creation time; it was corrected to read the stored timestamp without altering evidence before recording the genuine red reproduction. Full certification after PR109 merges is still required. This is not permission to merge P03 or activate publication.

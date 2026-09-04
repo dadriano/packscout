@@ -60,6 +60,8 @@ export const packPublicationLimits = Object.freeze({
   maximumLeaseSeconds: 300,
   maximumAttempts: 20,
   maximumOperations: 100,
+  // Authenticated remote completion is audit evidence; allow one minute of cross-host clock skew.
+  maximumReceiptClockSkewMilliseconds: 60_000,
   maximumRetrySeconds: 86_400,
   maximumInputBytes: 16_000_000,
 });
