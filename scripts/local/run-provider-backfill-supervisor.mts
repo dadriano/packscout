@@ -96,7 +96,10 @@ export async function runBackfillSupervisor(args: ReturnType<typeof parseBackfil
   const gateway = new BoundedProviderDatabaseGateway({ central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
     destinationPolicy: environment.runtimePolicy.destinationPolicy,
-    connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000 });
+    connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000,
+    // The only place the real rejection behind BACKFILL_PROVIDER_DATABASE_UNAVAILABLE survives.
+    diagnostics: event => process.stderr.write(`${JSON.stringify({ level: "warning",
+      event: `provider_database_${event.kind}`, providerKey: args.pins.providerKey, ...event })}\n`) });
   const owner = `local:backfill:${args.pins.operationId}:${randomUUID()}`;
   const withDatabase = async <T,>(operation: (db: ProviderPrismaClient, authority: BackfillAuthority, active: () => void) => Promise<T>): Promise<T> => {
     const authority = await readBackfillAuthority(central.client, cipher, args.pins, environment.runtimePolicy);

@@ -7,6 +7,7 @@ const { readBackfillView } = await tsImport("./run-provider-backfill-supervisor.
 const { superviseProviderBackfill } = await tsImport("./provider-backfill-supervisor.mts", import.meta.url);
 const { persistResidentHandoff, residentContinuousPins } = await tsImport("./provider-resident-handoff.mts", import.meta.url);
 const { continuousDecision } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
+const { ProviderBackfillSupervisorError } = await tsImport("./provider-backfill-supervisor-policy.mts", import.meta.url);
 async function ready() {
   const f = residentFixture(); const backfill = await readBackfillView(f.database, pins, f.authority);
   return { f, backfill, view: { backfill, handoff: null } };
@@ -118,4 +119,48 @@ test("proven live child waits across terminal head until release; pause interrup
       assert.equal(writes, 0);
     }
   }
+});
+async function pendingBackfill() {
+  const state = await ready(); Object.assign(state.backfill.snapshot, { state: "error" });
+  Object.assign(state.backfill.snapshot.run, { state: "failed", reachedHead: false, failureCode: "PROVIDER_DATAFORREST_REQUEST_TIMEOUT",
+    requestedHash: "b".repeat(64) }); state.backfill.snapshot.lastPage.continuation = "more";
+  return state;
+}
+const unavailable = () => new ProviderBackfillSupervisorError("BACKFILL_PROVIDER_DATABASE_UNAVAILABLE");
+test("provider-database refusal during backfill execution waits with backoff, then resumes from the intact checkpoint", async () => {
+  const { f, backfill, view } = await pendingBackfill(); const head = structuredClone(backfill.snapshot);
+  // Production: the parent's first query after a long child run was refused
+  // (a pooled connection left read-only); the checkpoint was intact and a hand
+  // restart resumed at once. The resident must do that itself.
+  let executions = 0; const waits = []; const events = []; let handoff;
+  const result = await superviseResidentBootstrap({ read: async () => handoff ? { handoff, backfill: null } : view,
+    persist: async observed => { handoff = await persistResidentHandoff(f.database, pins, f.authority, observed); return handoff; },
+    execute: async () => { if (++executions <= 3) throw unavailable(); backfill.snapshot = head; return "head"; },
+    wait: async ms => { waits.push(ms); }, emit: event => events.push(event) }, new AbortController().signal);
+  assert.deepEqual(result, residentContinuousPins(handoff)); assert.equal(executions, 4);
+  assert.deepEqual(waits, [15000, 30000, 60000]);
+  assert.deepEqual(events.filter(event => event.state === "provider_unavailable").map(event => event.retry), [1, 2, 3]);
+  assert.equal(events.every(event => event.code === undefined || event.code === "BACKFILL_PROVIDER_DATABASE_UNAVAILABLE"), true);
+  assert.equal(events.some(event => event.state === "blocked"), false);
+  assert.equal(events.filter(event => event.state === "backfilling").length, 4, "every retry is a fresh observe-verify-act pass");
+});
+test("a refusal that never clears latches blocked at the retry limit; any other execution refusal latches at once", async () => {
+  const { view } = await pendingBackfill(); const stop = new AbortController(); let executions = 0; const waits = []; const events = [];
+  await superviseResidentBootstrap({ read: async () => view, persist: async () => assert.fail(),
+    execute: async () => { executions++; throw unavailable(); },
+    wait: async ms => { waits.push(ms); if (waits.length === 27) stop.abort(); }, emit: event => events.push(event) }, stop.signal);
+  assert.equal(executions, 25, "24 retries, then the next refusal latches and nothing launches again");
+  assert.deepEqual(waits.slice(0, 6), [15000, 30000, 60000, 120000, 240000, 300000]);
+  assert.equal(waits.slice(6, 24).every(ms => ms === 300000), true); assert.deepEqual(waits.slice(24), [15000, 15000, 15000]);
+  assert.equal(events.filter(event => event.state === "provider_unavailable").length, 24);
+  const blocked = events.findIndex(event => event.state === "blocked");
+  assert.ok(blocked > 0); assert.equal(events[blocked].code, "BACKFILL_PROVIDER_DATABASE_UNAVAILABLE");
+  assert.equal(events.slice(blocked).every(event => event.state === "blocked" || event.state === "stopped"), true);
+
+  const other = await pendingBackfill(); const halt = new AbortController(); const states = []; let launches = 0;
+  await superviseResidentBootstrap({ read: async () => other.view, persist: async () => assert.fail(),
+    execute: async () => { launches++; throw new ProviderBackfillSupervisorError("BACKFILL_ACTIVE_RUN_CHANGED"); },
+    wait: async () => { if (states.filter(state => state === "blocked").length === 2) halt.abort(); },
+    emit: event => states.push(event.state) }, halt.signal);
+  assert.equal(launches, 1); assert.deepEqual(states, ["backfilling", "blocked", "blocked", "stopped"]);
 });

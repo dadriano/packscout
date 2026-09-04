@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { assertBackfillPins, backfillDigest, backfillId, backfillPinsSchema, classifyBackfillCheckpoint,
-  refuseBackfill, type BackfillPins, type BackfillSnapshot } from "./provider-backfill-supervisor-policy.mts";
+  ProviderBackfillSupervisorError, refuseBackfill, type BackfillPins, type BackfillSnapshot } from "./provider-backfill-supervisor-policy.mts";
 import { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
 import { residentFailureCode } from "./provider-resident-errors.mts";
 import { backfillHasOwnedExpiredHeadLease } from "./provider-backfill-supervisor.mts";
@@ -14,6 +14,24 @@ export { continuousSourceMinimumSeconds } from "./provider-continuous-cadence.mt
 // All integrations admitted by the existing closed DataForrest live registry use
 // dataforrestContinuation's 60-second poll_after contract. No source call is needed.
 export const continuousObservationMilliseconds = 15_000;
+/** A provider-database refusal means the gateway produced no outcome at all: the
+ * operation was rejected or abandoned before any result, so no supervisor
+ * decision was applied and nothing needs undoing. The next observation re-reads
+ * durable state and re-verifies pins and hashes before acting, exactly as an
+ * operator restart does, so retrying it is safe. The retry is bounded so a
+ * database that stays unreachable still latches under the same code instead of
+ * hiding behind indefinite waits. Production residents latched on this code with
+ * an intact checkpoint and needed a hand restart every time. */
+export const providerUnavailableRefusalCode = "BACKFILL_PROVIDER_DATABASE_UNAVAILABLE";
+export const providerUnavailableRetryLimit = 24;
+export function isProviderUnavailableRefusal(error: unknown): error is ProviderBackfillSupervisorError {
+  return error instanceof ProviderBackfillSupervisorError && error.code === providerUnavailableRefusalCode;
+}
+/** 15 seconds doubling to a 5-minute ceiling: about 1.7 hours across the limit. */
+export function providerUnavailableWaitMilliseconds(consecutive: number): number {
+  if (!Number.isSafeInteger(consecutive) || consecutive < 1) refuseBackfill("CONTINUOUS_RETRY_COUNT_INVALID");
+  return Math.min(300_000, continuousObservationMilliseconds * 2 ** Math.min(5, consecutive - 1));
+}
 /** Historical recovery evidence only; never an executable cadence-v2 receipt. */
 export const historicalContinuousCycleSchema = z.object({ pins: backfillPinsSchema,
   authorityDigest: z.string().regex(/^[a-f0-9]{64}$/u), parentRunId: z.string().uuid(),
@@ -131,12 +149,14 @@ export interface ContinuousPort {
   /** Read-only deployment checks immediately before admitting source work. */
   beforeSource?(): Promise<void>;
   wait(milliseconds: number): Promise<void>;
-  emit(event: { state: string; runId?: string; nextDueAt?: string; code?: string }): void;
+  emit(event: { state: string; runId?: string; nextDueAt?: string; code?: string; retry?: number }): void;
 }
-/** Only the nested backfill supervisor retries failures. Unknown/permanent errors
- * latch this resident observer blocked until an explicit operator restart. */
+/** Only the nested backfill supervisor retries source failures. Unknown/permanent
+ * errors latch this resident observer blocked until an explicit operator restart;
+ * typed read outages and bounded provider-database refusals are the exceptions. */
 export async function superviseContinuousProvider(port: ContinuousPort, signal: AbortSignal): Promise<"stopped"> {
   let blocked: string | null = null;
+  let unavailable = 0;
   let completedPostHead: string | null = null;
   while (!signal.aborted) {
     let reading = true;
@@ -184,10 +204,15 @@ export async function superviseContinuousProvider(port: ContinuousPort, signal: 
         const after = await port.read();
         if (after.snapshot.state !== "paused") break;
       }
+      unavailable = 0;
     } catch (error) {
       if (reading && error instanceof ContinuousReadUnavailableError) {
         port.emit({ state: blocked === null ? "read_unavailable" : "blocked", code: blocked ?? error.code });
         await port.wait(continuousObservationMilliseconds); continue;
+      }
+      if (blocked === null && isProviderUnavailableRefusal(error) && ++unavailable <= providerUnavailableRetryLimit) {
+        port.emit({ state: "provider_unavailable", code: error.code, retry: unavailable });
+        await port.wait(providerUnavailableWaitMilliseconds(unavailable)); continue;
       }
       blocked ??= residentFailureCode(error);
       port.emit({ state: "blocked", code: blocked });

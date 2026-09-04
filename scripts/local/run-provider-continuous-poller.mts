@@ -68,7 +68,10 @@ export async function runContinuousPoller(args: ReturnType<typeof parseContinuou
   const gateway = new BoundedProviderDatabaseGateway({ central,
     credentialResolver: new CipherProviderDatabaseCredentialResolver(cipher),
     destinationPolicy: environment.runtimePolicy.destinationPolicy,
-    connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000 });
+    connectionLimitPerProvider: 1, maximumCachedProviders: 1, operationTimeoutMs: 60_000,
+    // The only place the real rejection behind "database unreachable" survives.
+    diagnostics: event => process.stderr.write(`${JSON.stringify({ level: "warning",
+      event: `provider_database_${event.kind}`, providerKey: args.pins.providerKey, ...event })}\n`) });
   let effectiveIntervalSeconds: number | undefined;
   const readAuthority = async () => {
     const authority = await readBackfillAuthority(central.client, cipher, args.pins, environment.runtimePolicy);
