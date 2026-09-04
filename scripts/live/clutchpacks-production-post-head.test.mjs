@@ -10,7 +10,7 @@ import { tsImport } from "tsx/esm/api";
 process.env.NODE_ENV = "test";
 // Recovery requires an explicit temp-directory pin; Linux runners need not set
 // TMPDIR. Supply the fixture environment without relaxing the live policy.
-process.env.TMPDIR ??= os.tmpdir();
+process.env.TMPDIR ||= os.tmpdir();
 const { publishClutchpacksProductionPostHead: publish, clutchpacksProductionPostHeadSchema } =
   await tsImport("./clutchpacks-production-post-head.mts", import.meta.url);
 const recoveryModule = await tsImport("./clutchpacks-production-post-head-recovery.mts", import.meta.url);
