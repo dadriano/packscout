@@ -338,4 +338,110 @@ describe("owner watchlist read", () => {
       "SAVED_ITEMS_STATE_CONFLICT",
     );
   });
+
+  test("refuses a suspended account the same way saving does while the beta is off", async () => {
+    const t = createTest();
+    await seed(t);
+    const session = t.withIdentity(USER_A);
+    await session.mutation(api.productUsers.recordSignIn, {});
+    await t.mutation(internal.productUserDirectory.setDirectoryStanding, {
+      subject: USER_A.tokenIdentifier,
+      standing: "suspended",
+    });
+
+    await expectErrorCode(
+      session.query(api.savedItems.getOwnerWatchlist, {}),
+      "ACCOUNT_SUSPENDED",
+    );
+    await expectErrorCode(
+      session.mutation(api.savedItems.setSavedRepack, {
+        publicRepackId: availableRepack.publicRepackId,
+        saved: true,
+      }),
+      "ACCOUNT_SUSPENDED",
+    );
+    await expect(
+      session.query(api.savedItems.getSavedItemIds, {}),
+    ).resolves.toEqual({ savedRepackIds: [], savedCollectibleIds: [] });
+  });
+
+  test("refuses a saved public id that appears in two selected provider releases", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    const duplicated = await t.run(async (ctx) => {
+      const releaseIds = new Set(
+        (await ctx.db.query("providerCatalogReleases").collect()).map(
+          ({ _id }) => _id,
+        ),
+      );
+      if (releaseIds.size < 2) {
+        throw new Error("Expected two selected provider releases.");
+      }
+      const source = (await ctx.db.query("providerCatalogRepacks").collect())[0];
+      if (source === undefined) {
+        throw new Error("Expected a seeded repack.");
+      }
+      const otherReleaseId = [...releaseIds].find(
+        (releaseId) => releaseId !== source.releaseId,
+      );
+      if (otherReleaseId === undefined) {
+        throw new Error("Expected a second selected provider release.");
+      }
+      await ctx.db.insert("providerCatalogRepacks", {
+        releaseId: otherReleaseId,
+        publicRepackId: source.publicRepackId,
+        vendorId: source.vendorId,
+        detail: source.detail,
+      });
+      return source.publicRepackId;
+    });
+    await saver.repacks(USER_A.tokenIdentifier, [duplicated]);
+    await expectErrorCode(
+      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      "SAVED_ITEMS_STATE_CONFLICT",
+    );
+  });
+
+  test("refuses a saved collectible whose selected-provider copies disagree", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    const duplicated = await t.run(async (ctx) => {
+      const releaseIds = new Set(
+        (await ctx.db.query("providerCatalogReleases").collect()).map(
+          ({ _id }) => _id,
+        ),
+      );
+      if (releaseIds.size < 2) {
+        throw new Error("Expected two selected provider releases.");
+      }
+      const source = (
+        await ctx.db.query("providerCatalogCollectibles").collect()
+      )[0];
+      if (source === undefined) {
+        throw new Error("Expected a seeded collectible.");
+      }
+      const otherReleaseId = [...releaseIds].find(
+        (releaseId) => releaseId !== source.releaseId,
+      );
+      if (otherReleaseId === undefined) {
+        throw new Error("Expected a second selected provider release.");
+      }
+      await ctx.db.insert("providerCatalogCollectibles", {
+        releaseId: otherReleaseId,
+        publicCollectibleId: source.publicCollectibleId,
+        collectibleType: source.collectibleType,
+        normalizedName: source.normalizedName,
+        searchText: source.searchText,
+        detail: { ...source.detail, name: `${source.detail.name} (copy)` },
+      });
+      return source.publicCollectibleId;
+    });
+    await saver.collectibles(USER_A.tokenIdentifier, [duplicated]);
+    await expectErrorCode(
+      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      "SAVED_ITEMS_STATE_CONFLICT",
+    );
+  });
 });

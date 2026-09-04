@@ -84,12 +84,12 @@ Unauthenticated, invalid-identity, capability-refused, and catalog-unreadable fa
 
 Named scenario: **Owner watchlist read matrix** — two owners, empty collections, mixed resolved and unavailable rows, newest-first order, cap-sized collections, and unauthenticated refusal. Pass when counts match rows, unavailable saves remain, and no cross-owner leak occurs.
 
-Covered by `convex/ownerWatchlist.test.ts`. `npx vitest run convex/ownerWatchlist.test.ts convex/savedItems.test.ts convex/productUserCapabilityGate.test.ts convex/publicCatalogReadAccess.test.ts convex/authoritativeAdminSurfaceParity.test.ts` exited 0 (47 tests). `npm run typecheck:convex` and `npm run scan:framework-standards:ratchet` exited 0.
+Covered by `convex/ownerWatchlist.test.ts`. `npx vitest run convex/ownerWatchlist.test.ts convex/savedItems.test.ts convex/productUserCapabilityGate.test.ts convex/publicCatalogReadAccess.test.ts convex/authoritativeAdminSurfaceParity.test.ts` exited 0. `npm run typecheck:convex` and `npm run scan:framework-standards:ratchet` exited 0.
 
 ## Spec Compliance
 
 - Related specs reviewed: none
 - Alignment: implemented as specified
 - Divergences: none
-- Later sections: none
-- Verification: owner watchlist read matrix, capability-gate enumeration, public-query classification, Convex typecheck, framework ratchet
+- Later sections: Watchlist uses the save-equivalent standing policy (`PRODUCT_USER_WRITE_CAPABILITY`) so a suspended account cannot read it while the closed beta is off. Duplicate public ids across selected provider releases refuse `SAVED_ITEMS_STATE_CONFLICT`, matching the save path.
+- Verification: owner watchlist read matrix, suspended/beta-off refusal, cross-provider duplicate refusal, capability-gate enumeration, public-query classification, Convex typecheck, framework ratchet

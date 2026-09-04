@@ -484,13 +484,18 @@ describe("the beta switch off preserves today's behavior", () => {
       }),
       SUSPENDED_CODE,
     );
-    // The suspended account still sees what it owns while the beta is off.
+    // Identifier-only reads still show what the account owns. Watchlist is
+    // save-gated, so it refuses the same way the write does.
     await expect(
       session.query(api.savedItems.getSavedItemIds, {}),
     ).resolves.toEqual({
       savedRepackIds: [publicRepackId],
       savedCollectibleIds: [],
     });
+    await expectErrorCode(
+      session.query(api.savedItems.getOwnerWatchlist, {}),
+      SUSPENDED_CODE,
+    );
 
     await setStanding(t, USER_A.tokenIdentifier, "active");
     await expect(
@@ -511,12 +516,17 @@ describe("the beta switch off preserves today's behavior", () => {
     await insertLegacyRecord(t, USER_B.tokenIdentifier);
     const session = t.withIdentity(USER_B);
 
-    // Reads do not consult the directory while the beta is off, exactly as
-    // before this task; writes hit the same standing-read conflict they
-    // always have. Neither outcome is an admission refusal.
+    // Identifier-only reads do not consult the directory while the beta is
+    // off, exactly as before this task. Watchlist and writes hit the same
+    // standing-read conflict they share. Neither outcome is an admission
+    // refusal.
     await expect(
       session.query(api.savedItems.getSavedItemIds, {}),
     ).resolves.toEqual({ savedRepackIds: [], savedCollectibleIds: [] });
+    await expectErrorCode(
+      session.query(api.savedItems.getOwnerWatchlist, {}),
+      "PRODUCT_USER_STATE_CONFLICT",
+    );
     await expectErrorCode(
       session.mutation(api.savedItems.setSavedRepack, {
         publicRepackId,

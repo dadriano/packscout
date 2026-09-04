@@ -306,6 +306,7 @@ async function findActiveRepackForWatchlist(
   catalog: ActiveCatalog,
   publicRepackId: string,
 ): Promise<Doc<"providerCatalogRepacks"> | null> {
+  let found: Doc<"providerCatalogRepacks"> | null = null;
   for (const releaseId of catalog.releaseIds) {
     const matches = await ctx.db
       .query("providerCatalogRepacks")
@@ -313,11 +314,20 @@ async function findActiveRepackForWatchlist(
         index.eq("releaseId", releaseId).eq("publicRepackId", publicRepackId),
       )
       .take(2);
-    if (matches.length > 1) refuse("SAVED_ITEMS_STATE_CONFLICT");
     const match = matches[0];
-    if (match !== undefined) return match;
+    if (
+      matches.length > 1 ||
+      (match !== undefined &&
+        (match.releaseId !== releaseId ||
+          match.publicRepackId !== publicRepackId ||
+          match.detail.publicRepackId !== publicRepackId)) ||
+      (found !== null && match !== undefined)
+    ) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+    if (match !== undefined) found = match;
   }
-  return null;
+  return found;
 }
 
 async function findActiveCollectibleForWatchlist(
@@ -325,6 +335,8 @@ async function findActiveCollectibleForWatchlist(
   catalog: ActiveCatalog,
   publicCollectibleId: string,
 ): Promise<Doc<"providerCatalogCollectibles"> | null> {
+  let found: Doc<"providerCatalogCollectibles"> | null = null;
+  let canonicalDetail: string | null = null;
   for (const releaseId of catalog.releaseIds) {
     const matches = await ctx.db
       .query("providerCatalogCollectibles")
@@ -334,11 +346,22 @@ async function findActiveCollectibleForWatchlist(
           .eq("publicCollectibleId", publicCollectibleId),
       )
       .take(2);
-    if (matches.length > 1) refuse("SAVED_ITEMS_STATE_CONFLICT");
     const match = matches[0];
-    if (match !== undefined) return match;
+    const detail = match === undefined ? null : canonicalJson(match.detail);
+    if (
+      matches.length > 1 ||
+      (match !== undefined &&
+        (match.releaseId !== releaseId ||
+          match.publicCollectibleId !== publicCollectibleId ||
+          match.detail.publicCollectibleId !== publicCollectibleId ||
+          (canonicalDetail !== null && canonicalDetail !== detail)))
+    ) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+    if (match !== undefined) found = match;
+    if (detail !== null) canonicalDetail = detail;
   }
-  return null;
+  return found;
 }
 
 function newestSavedFirst<TRow>(
@@ -445,10 +468,10 @@ export const getSavedItemIds = query({
 
 /**
  * The caller's Watchlist: both saved collections resolved against the current
- * catalog, newest first, with per-tab counts. This is the same owner-only
- * read capability as `getSavedItemIds`; it adds display fields so later UI
- * can render lists without a second store. Missing catalog references stay
- * in the payload as unavailable, not-openable rows.
+ * catalog, newest first, with per-tab counts. Watchlist is a save-gated
+ * destination, so it uses the same standing policy as saving: a suspended
+ * account cannot load it, even while the closed beta is off. Missing catalog
+ * references stay in the payload as unavailable, not-openable rows.
  */
 export const getOwnerWatchlist = query({
   args: {},
@@ -456,7 +479,7 @@ export const getOwnerWatchlist = query({
   handler: async (ctx): Promise<OwnerWatchlist> => {
     const ownerTokenIdentifier = await requireAdmittedProductUser(
       ctx,
-      PRODUCT_USER_READ_CAPABILITY,
+      PRODUCT_USER_WRITE_CAPABILITY,
     );
     const [savedRepacks, savedCollectibles] = await Promise.all([
       ctx.db
