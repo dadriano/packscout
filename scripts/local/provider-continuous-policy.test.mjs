@@ -10,6 +10,7 @@ const { withContinuousResidency, claimContinuousResidency, continuousResidencyPo
 const { assertLocalBackfillDestination, localBackfillProviderPorts } = await tsImport("./provider-backfill-supervisor-authority.mts", import.meta.url);
 const { dataforrestContinuation } = await tsImport("@packscout/contracts", import.meta.url);
 const { parseContinuousArguments } = await tsImport("./run-provider-continuous-poller.mts", import.meta.url);
+const { ProviderBackfillSupervisorError } = await tsImport("./provider-backfill-supervisor-policy.mts", import.meta.url);
 const { ContinuousReadUnavailableError } = policy;
 const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
@@ -281,4 +282,37 @@ test("all four isolated destinations are exact, legacy/cross-provider routes and
   assert.throws(() => parseContinuousArguments(["--run", "--await-initial-run",
     ...keys.flatMap((key, index) => [`--${key}`, values[index]])]));
   assert.throws(() => parseContinuousArguments([...args, "--reset-cursor"]));
+});
+test("provider-database refusal during a cycle waits with backoff and re-executes the same queued cycle", async () => {
+  const unavailable = () => new ProviderBackfillSupervisorError(policy.providerUnavailableRefusalCode);
+  const v = fixture(); let executions = 0; const waits = []; const events = []; const stop = new AbortController();
+  await policy.superviseContinuousProvider({ pins, read: async () => v,
+    persist: async view => { v.cycle = policy.makeContinuousCycle(view, pins); v.cycleQueued = false; },
+    queue: async cycle => { v.cycleQueued = true; v.snapshot.run = { ...v.snapshot.run, id: cycle.runId,
+      state: "queued", reachedHead: false, requestedHash: cycle.checkpointHash }; v.snapshot.activeRunIds = [cycle.runId]; },
+    execute: async () => { if (++executions <= 2) throw unavailable();
+      v.snapshot.run.state = "succeeded"; v.snapshot.run.reachedHead = true; v.snapshot.run.finishedAt = new Date(v.snapshot.now);
+      v.snapshot.activeRunIds = []; stop.abort(); return "head"; },
+    wait: async ms => { waits.push(ms); v.snapshot.now = new Date(v.snapshot.now.getTime() + ms); }, emit: event => events.push(event),
+  }, stop.signal);
+  assert.equal(executions, 3); assert.deepEqual(waits, [15000, 30000]);
+  assert.deepEqual(events.map(event => event.state), ["due", "queue", "execute", "provider_unavailable", "execute",
+    "provider_unavailable", "execute", "stopped"], "the queued cycle is re-executed, never re-persisted or re-queued");
+  assert.deepEqual(events.filter(event => event.state === "provider_unavailable").map(event => event.retry), [1, 2]);
+
+  // The bound still holds: a refusal that never clears latches under the same code.
+  const w = fixture(); w.cycle = policy.makeContinuousCycle(w, pins); w.cycleQueued = true;
+  w.snapshot.run = { ...w.snapshot.run, id: w.cycle.runId, state: "queued", reachedHead: false, requestedHash: w.cycle.checkpointHash };
+  w.snapshot.activeRunIds = [w.cycle.runId];
+  const halt = new AbortController(); let launches = 0; const states = [];
+  await policy.superviseContinuousProvider({ pins, read: async () => w, persist: async () => assert.fail(), queue: async () => assert.fail(),
+    execute: async () => { launches++; throw unavailable(); },
+    wait: async () => { if (states.filter(event => event.state === "blocked").length === 2) halt.abort(); }, emit: event => states.push(event),
+  }, halt.signal);
+  assert.equal(launches, policy.providerUnavailableRetryLimit + 1);
+  assert.equal(states.filter(event => event.state === "provider_unavailable").length, policy.providerUnavailableRetryLimit);
+  assert.equal(states.find(event => event.state === "blocked").code, policy.providerUnavailableRefusalCode);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 24].map(policy.providerUnavailableWaitMilliseconds),
+    [15000, 30000, 60000, 120000, 240000, 300000, 300000, 300000]);
+  for (const count of [0, -1, 1.5, NaN, Infinity]) assert.throws(() => policy.providerUnavailableWaitMilliseconds(count), /RETRY_COUNT_INVALID/);
 });

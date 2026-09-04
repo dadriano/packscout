@@ -130,6 +130,14 @@ async function run(): Promise<ProviderManualImportProcessResult> {
     maximumCachedProviders: maximumConcurrentLanes,
     operationProfile: databaseConfiguration.runtimePolicy.mode === "remote" ? "atomic_import_page" : "standard",
     operationTimeoutMs: providerManualImportExecutionBudget(databaseConfiguration.runtimePolicy.mode).gatewayMilliseconds,
+    // The only place the real rejection behind PROVIDER_IMPORT_DATABASE_UNAVAILABLE survives.
+    diagnostics: (event) => {
+      console.error(JSON.stringify({
+        level: "warning",
+        event: `provider_database_${event.kind}`,
+        ...event,
+      }));
+    },
   });
   const operations = new ProviderManualImportOperationDrain();
   try {
