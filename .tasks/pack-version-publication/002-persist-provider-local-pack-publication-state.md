@@ -124,7 +124,7 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ### Current delivery status
 
-PR96 merged at `1e79ff9ca961b569ca4b191e617b60dc315cc390` after its complete CI gate passed on `744bed7e` (run `33827531502`, retry two). PR95 now targets that main base, including independently merged PR103/104. The latest recovery implementation checkpoint is `cd470095b28b6306c8dc64a3a18624e6ce4c4659`; P03 remains a separate local branch.
+PR96 merged at `1e79ff9ca961b569ca4b191e617b60dc315cc390` after its complete CI gate passed on `744bed7e` (run `33827531502`, retry two). PR95 is based on that main checkpoint, including independently merged PR103/104; main has since advanced. The latest implementation checkpoint is `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`; P03 remains a separate local branch.
 
 Full certification is blocked by the merged PR103 Watchlist change: the EV cutover guard reports `convex/savedItems.ts (estimatedEv, EstimatedEv)` missing from its inventory. PR95 CI run `33830594805` and the isolated local inventory test reproduce that exact failure. P02 changes neither that Convex file nor the inventory. Correct the upstream mismatch without exempting or baselining the finding, then repeat the unchanged full gate before merging PR95. No publication processor or ingestion cutover is enabled.
 
@@ -133,7 +133,7 @@ Full certification is blocked by the merged PR103 Watchlist change: the EV cutov
 - Native and shared impact expansion uses transaction-local membership, bounded keyset pages, hash-chained receipts, and acknowledgment only after every affected pack has durable work or an exact current no-op.
 - Captured bytes are schema-normalized and preserved before evaluator callbacks. Admission compares the complete capture and persists a private copy, including across later database awaits.
 - Admission independently derives every input digest, the exact sorted profile prerequisite set, and readiness outcome/reason from preserved bytes and database time. The pure V1 decision rules are shared with the service evaluator; no database-to-service dependency or duplicated rule set is introduced.
-- Native shared identities use UUIDs; shared delivery sequences fit signed PostgreSQL bigint. Public action/member-profile/eligible-valuation identities are unique; aliases follow public bounds. Invalid captures remain unclaimable.
+- Native shared identities use UUIDs; shared delivery sequences fit signed PostgreSQL bigint. Public action/member-profile/eligible-valuation identities are unique. Complete normalized search text, aliases, and category sets must fit the public projection schema at readiness and independent admission; overflow blocks without dropping contents.
 - Canonical captures retain the 16,000,000-byte limit. Shared progress, requests, intents, and operations allow 18,000,000 JSONB bytes for formatting headroom. Full 10,000-item multibyte dependency evidence survives paging and exact replay.
 - Lifecycle-only requests pin the stored active artifact and preserve complete metadata, contents, profiles, display, and economics. Admission and sealing independently reject forged lifecycle metadata. Sealing recomputes the full economics tuple before persistence.
 - Coalescing applies only to the latest compatible episode. A→B→A and replacement of superseded work allocate new sequences without reopening terminal rows. The unapplied V1 migration no longer globally uniquifies desired digests across history.
@@ -142,7 +142,7 @@ Full certification is blocked by the merged PR103 Watchlist change: the EV cutov
 - An expired intent with no persisted operation is retired and, only when still the latest desired work, creates a fresh request from preserved inputs. Still-valid evidence can reuse the artifact under a new intent; expired evidence waits for fresh inputs. Existing operation-bearing episodes remain available for receipt reconciliation, and older expiry never replaces newer desired work.
 - Scoped foreign keys, immutable operation/receipt evidence, fenced claims, bounded attempts, and explicit local runtime grants preserve provider/organization isolation. No transport, scheduler, or public activation is added.
 
-The latest recovery cases address discussions `3930457571`, `3930457576`, and `3930457580`. Earlier capture, readiness, recurrence, and reconciliation corrections remain covered by the combined regression matrix and their GitHub review replies. Detailed chronological checkpoints remain in Git history rather than repeated stale status notes here.
+The latest cases address discussions `3930457571`, `3930457576`, `3930457580`, and `3930580327`. Red/green search regressions cover six long member names, exact 1,024-character and 100-category boundaries, overflow, and forged ready admission. Earlier capture, readiness, recurrence, and reconciliation corrections remain covered; chronological checkpoints remain in Git history.
 
 ### Intentional adaptations and later owners
 
@@ -167,8 +167,8 @@ Related guidance reviewed: feature `tech-001` through `tech-005`, with P02 imple
 | Captured authority, false-ready refusal, maximum shared evidence, duplicate IDs, A→B→A, accepted/ambiguous receipt recovery below newer work, EV and unused-intent expiry | `packages/services/src/provider-pack-publication-boundaries.integration.test.ts` |
 | Role inventory, scoped references, immutable episodes, migration/schema consistency | `packages/database/prisma/distributed-schema-contract.test.ts` and migrated provider databases |
 
-On the latest recovery implementation, all **82** combined contract/readiness/PostgreSQL checks and **30** schema checks pass, with zero skips. Provider schema generation/validation, affected contract/database/service lint and typechecks, documentation checks, and the zero-finding standards ratchet pass. The time-controlled expiry tests preserve database constraints; the lifecycle corruption fixture deliberately bypasses repository admission to retain an independent seal refusal test.
+On the latest implementation, **84** contract/readiness/PostgreSQL checks (72 plus 12 native contract checks) and **30** schema checks pass, with zero skips. Affected contract/service lint and typechecks and the zero-finding standards ratchet pass; earlier database lint/typechecks and provider schema generation/validation also passed. Expiry tests preserve database constraints; the lifecycle corruption fixture retains an independent seal refusal test.
 
-Historical full local verification passed on `f699d11b`, before later review corrections and main updates. That is not current certification. The current full gate remains required and blocked by the independently reproduced Watchlist inventory failure; no audit exception, timeout, baseline, or verifier has been weakened.
+Historical full verification on `f699d11b` does not certify later changes. The full attempt on `408e1ffc` reproduced the Watchlist inventory failure and was stopped after that failure before the latest search correction. Current-head full certification remains required; no audit exception, timeout, baseline, or verifier has been weakened.
 
 There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.

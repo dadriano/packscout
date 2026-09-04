@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged. P02 review corrections pass 82 boundary checks and 30 schema checks, but the full gate is blocked by merged PR103's Watchlist EV inventory mismatch. Correct that upstream finding without an exemption, then re-run the full gate and merge PR95. P03 remains a separate local implementation; no publication processor is enabled.
+PR96 is merged. P02 review corrections pass 84 contract/boundary checks and 30 schema checks, but the full gate is blocked by merged PR103's Watchlist EV inventory mismatch. Correct that upstream finding without an exemption, then re-run the full gate and merge PR95. P03 remains a separate local implementation; no publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -149,9 +149,9 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
 - **Current parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (main with PR96 and independently merged PR103/104).
-- **Implementation checkpoint:** `cd470095b28b6306c8dc64a3a18624e6ce4c4659`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
+- **Implementation checkpoint:** `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
 - **Delivery gate:** PR96 is merged. PR95 CI `33830594805` and the isolated local guard fail because PR103 introduced uninventoried EV tokens in `convex/savedItems.ts`. Resolve that upstream finding and require current-head full gates before merging PR95; P03 stays separate.
-- **Current correction evidence:** All 82 contract/readiness/persistence checks and 30 schema checks pass, including complete capture/readiness authority, full shared evidence, recurring desired states, reconciliation below newer work, per-pack independence, queued EV expiry, and safe unused-intent replacement. Affected lint/typechecks and the zero-finding standards ratchet pass; no gate was weakened.
+- **Current correction evidence:** All 84 contract/readiness/persistence checks and 30 schema checks pass, including complete capture/readiness authority, full shared evidence, recurring desired states, reconciliation below newer work, expiry recovery, and complete search-projection limits. Affected lint/typechecks and the zero-finding standards ratchet pass; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
