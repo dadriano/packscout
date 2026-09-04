@@ -99,6 +99,21 @@ test("protected data, mutable handles, oversized fields and unknown controls are
   await reject(await requestFor(input.inputs, true));
 });
 
+test("URL parsing exposes protected query keys across normalized schemes and nested public fields", async () => {
+  const fields = [(input: ProviderPackBuildInputs, url: string) => { input.imageUrl = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.actions[0]!.url = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.contents[0]!.imageUrl = url; }];
+  for (const prefix of ["HTTPS://", "  https://", "\tHtTpS://"]) {
+    for (const setUrl of fields) {
+      const { input } = await assemblyFixture();
+      setUrl(input.inputs, `${prefix}example.com/image?size=large`);
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+      setUrl(input.inputs, `${prefix}example.com/image?%58-Amz-Signature=private-marker`);
+      await reject(await requestFor(input.inputs));
+    }
+  }
+});
+
 test("pure assembly uses neither live time nor network on success or rejection", async () => {
   const { input, golden } = await assemblyFixture();
   const originalFetch = globalThis.fetch, originalNow = Date.now;

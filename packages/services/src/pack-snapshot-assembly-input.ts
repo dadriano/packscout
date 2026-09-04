@@ -1,5 +1,5 @@
 import { isProxy } from "node:util/types";
-import { assertPublicPackCatalogBytes, compareCanonicalStrings, packBuildRequestSchema,
+import { assertPublicPackCatalogBytes, compareCanonicalStrings, packBuildRequestSchema, packCatalogCanonicalByteCount,
   packSnapshotEvidenceSchema, providerPackBuildInputsSchema, publicProfileSnapshotIdSchema } from "@packscout/contracts";
 import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-snapshot-assembly-types.ts";
 
@@ -19,7 +19,7 @@ function preflight(value: unknown): void {
       requireAssembly(item.length <= limits.maximumSnapshotBytes);
       bytes += encoder.encode(item).byteLength;
       requireAssembly(!/^(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|Bearer [A-Za-z0-9._~-]{20,})/iu.test(item));
-      if ((field === "url" || field === "imageUrl") && item.startsWith("https://")) {
+      if (field === "url" || field === "imageUrl") {
         for (const key of new URL(item).searchParams.keys()) keys.add(key);
       }
     } else if (item === null || item === undefined || typeof item === "boolean") bytes += 5;
@@ -65,7 +65,12 @@ const dependencies = (value: unknown) => ordered(value, item => dependency.parse
 /** Runs entirely before the assembler's first await. */
 export function capturePackAssemblyInput(raw: unknown) {
   preflight(raw);
-  const value = record(structuredClone(raw));
+  const source = record(raw);
+  // Bound every supplied candidate before cloning/parsing, even when its identity will not be reused.
+  if (source.existingSnapshot !== undefined && source.existingSnapshot !== null) {
+    requireAssembly(packCatalogCanonicalByteCount(source.existingSnapshot) <= limits.maximumSnapshotBytes);
+  }
+  const value = record(structuredClone(source));
   requireAssembly(Object.keys(value).every(key => ["request", "inputs", "existingSnapshot"].includes(key)));
   const candidate = record(value.inputs), request = record(value.request), evidence = record(request.evidence);
   const shape = providerPackBuildInputsSchema.shape;

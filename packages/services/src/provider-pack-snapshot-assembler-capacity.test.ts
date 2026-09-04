@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogCanonicalByteCount, packSearchText,
-  packSnapshotHeaderFromPayload } from "@packscout/contracts";
+  packSnapshotHeaderFromPayload, publicPackSnapshotSchema } from "@packscout/contracts";
 import { ProviderPackSnapshotAssembler, PackSnapshotAssemblyError, packSnapshotAssemblyLimits } from "./provider-pack-snapshot-assembler.ts";
 import { assemblyFixture, requestFor, refreshEvInputs } from "./provider-pack-snapshot-assembler.test-support.ts";
 
@@ -67,4 +67,20 @@ test("8,000 complete members and maximum shared evidence survive lifecycle assem
   assert.equal(reused.disposition, "reused");
   assert.deepEqual(reused.snapshot, frozen.snapshot);
   assert.ok(nodeCount(reuseInput) <= packSnapshotAssemblyLimits.maximumNodes);
+
+  // A different candidate ID must not bypass its own snapshot-byte allowance.
+  const oversized = structuredClone(full.snapshot);
+  oversized.payload.contents.forEach(row => { row.imageUrl = `https://example.com/${"b".repeat(1_950)}`; });
+  assert.ok(packCatalogCanonicalByteCount(oversized) > packSnapshotAssemblyLimits.maximumSnapshotBytes);
+  await publicPackSnapshotSchema.parseAsync(oversized);
+  const { input: small, golden } = await assemblyFixture();
+  assert.notEqual(oversized.identity.publicPackSnapshotId, golden.snapshot.identity.publicPackSnapshotId);
+  const candidateInput = { ...small, existingSnapshot: oversized };
+  assert.ok(packCatalogCanonicalByteCount(candidateInput) < packSnapshotAssemblyLimits.maximumInputBytes);
+  assert.ok(nodeCount(candidateInput) < packSnapshotAssemblyLimits.maximumNodes);
+  await assert.rejects(assembler.assemble(candidateInput), error => {
+    assert.ok(error instanceof PackSnapshotAssemblyError);
+    assert.equal(error.message, "PACK_SNAPSHOT_INPUT_INVALID");
+    return true;
+  });
 });
