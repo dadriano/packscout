@@ -14,7 +14,7 @@ function rejectCredentialText(value: string): void {
 
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
  * execute during capture. Unknown schema fields are rejected, never stripped. */
-function preflight(value: unknown): void {
+export function assertPackAssemblyPublicData(value: unknown): void {
   let nodes = 0, bytes = 0;
   const ancestors = new Set<object>(), keys = new Set<string>();
   const encoder = new TextEncoder();
@@ -74,7 +74,7 @@ const dependencies = (value: unknown) => ordered(value, item => dependency.parse
 
 /** Runs entirely before the assembler's first await. */
 export function capturePackAssemblyInput(raw: unknown) {
-  preflight(raw);
+  assertPackAssemblyPublicData(raw);
   const source = record(raw);
   // Bound every supplied candidate before cloning/parsing, even when its identity will not be reused.
   if (source.existingSnapshot !== undefined && source.existingSnapshot !== null) {

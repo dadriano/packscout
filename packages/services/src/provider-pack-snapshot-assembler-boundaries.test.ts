@@ -146,6 +146,19 @@ test("credential-bearing public text is scanned after schema-equivalent normaliz
   }
 });
 
+test("derived search text cannot combine separate public fields into credentials", async () => {
+  const { input } = await assemblyFixture();
+  input.inputs.title = "Bearer";
+  input.inputs.aliases = ["Scout pack"];
+  const benign = await assembler.assemble(await requestFor(input.inputs));
+  assert.equal(benign.snapshot.payload.searchProjection.normalizedText, "bearer scout pack");
+  for (const title of ["Bearer", "Promo Bearer", "  Bearer\t"]) {
+    input.inputs.title = title;
+    input.inputs.aliases = ["12345678901234567890"];
+    await reject(await requestFor(input.inputs));
+  }
+});
+
 test("pure assembly uses neither live time nor network on success or rejection", async () => {
   const { input, golden } = await assemblyFixture();
   const originalFetch = globalThis.fetch, originalNow = Date.now;

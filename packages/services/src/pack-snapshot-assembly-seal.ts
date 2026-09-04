@@ -6,6 +6,7 @@ import {
   publicPackSnapshotSchema, type PublicPackSnapshotBatch,
 } from "@packscout/contracts";
 import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-snapshot-assembly-types.ts";
+import { assertPackAssemblyPublicData } from "./pack-snapshot-assembly-input.ts";
 
 const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
 
@@ -13,6 +14,8 @@ const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN,
  * The same verification also proves supplied lifecycle baselines. */
 export async function sealPackAssembly(payloadInput: unknown) {
   const payload = normalizePublicPackSnapshotPayload(payloadInput);
+  // Derived projections can join individually safe inputs into protected text.
+  assertPackAssemblyPublicData(payload);
   assertPublicPackCatalogBytes(payload);
   const { contents, ...header } = payload;
   const probabilityInputsSha256 = await hash(contents.map(({ publicCollectibleId, probabilityMicros }) => ({ publicCollectibleId, probabilityMicros })));
