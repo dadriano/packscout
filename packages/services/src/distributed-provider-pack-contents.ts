@@ -8,17 +8,22 @@ import {
   publicHttpsOriginSchema,
   publicRepackChaseSchema,
   publicRepackDetailSchema,
+  publicRepackDetailV3Schema,
   type ApprovedPublicCollectibleMapping,
   type PublicCollectible,
   type PublicRepackChase,
+  type PublicRepackDetail,
+  type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import {
   DistributedProviderPackContentsError,
   type DistributedProviderCollectibleInstanceRow,
   type DistributedProviderCollectibleRow,
   type DistributedProviderContentPack,
+  type DistributedProviderContentPackV3,
   type DistributedProviderPackContentRow,
   type DistributedProviderPackContentsProjection,
+  type DistributedProviderPackContentsProjectionV3,
 } from "./distributed-provider-pack-contents-types.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -150,7 +155,31 @@ export function projectProvisionalProviderPackContentsV1(input: {
     return project(input, (row) => ({
       publicCollectibleId: provisionalCollectiblePublicId({ providerId: input.providerId, localCollectibleId: row.id }),
       publicCategoryIds: [],
-    }));
+    }), undefined, publicRepackDetailSchema) as DistributedProviderPackContentsProjection;
+  } catch (error) {
+    if (error instanceof DistributedProviderPackContentsError) throw error;
+    return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
+  }
+}
+
+/** data_release_v3 equivalent of the governed provider-local bootstrap. */
+export function projectProvisionalProviderPackContentsV3(input: {
+  readonly identityPolicy: "provider_provisional_v1";
+  readonly providerId: string;
+  readonly platformKey: string;
+  readonly snapshotAt: Date;
+  readonly publicAssetOrigins: readonly string[];
+  readonly packs: readonly DistributedProviderContentPackV3[];
+  readonly collectibles: readonly DistributedProviderCollectibleRow[];
+  readonly instances: readonly DistributedProviderCollectibleInstanceRow[];
+  readonly memberships: readonly DistributedProviderPackContentRow[];
+}): DistributedProviderPackContentsProjectionV3 {
+  try {
+    if (input.identityPolicy !== "provider_provisional_v1") return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
+    return project(input, (row) => ({
+      publicCollectibleId: provisionalCollectiblePublicId({ providerId: input.providerId, localCollectibleId: row.id }),
+      publicCategoryIds: [],
+    }), undefined, publicRepackDetailV3Schema) as DistributedProviderPackContentsProjectionV3;
   } catch (error) {
     if (error instanceof DistributedProviderPackContentsError) throw error;
     return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
@@ -180,17 +209,30 @@ export function projectApprovedProviderPackContentsV1(input:
       const mapping = mappings.get(row.collectibleKey);
       if (mapping === undefined || mapping.collectibleType !== row.collectibleType) return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
       return mapping;
-    }, mappings);
+    }, mappings, publicRepackDetailSchema) as DistributedProviderPackContentsProjection;
   } catch (error) {
     if (error instanceof DistributedProviderPackContentsError) throw error;
     return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
   }
 }
 
-function project(input: Omit<Parameters<typeof projectProvisionalProviderPackContentsV1>[0], "identityPolicy">,
+type AnyContentPack = Omit<DistributedProviderContentPack, "detail"> & {
+  readonly detail: PublicRepackDetail | PublicRepackDetailV3;
+};
+type AnyContentsProjection = Omit<
+  DistributedProviderPackContentsProjection,
+  "repacks"
+> & {
+  readonly repacks: readonly (PublicRepackDetail | PublicRepackDetailV3)[];
+};
+
+function project(input: Omit<Parameters<typeof projectProvisionalProviderPackContentsV1>[0], "identityPolicy" | "packs"> & {
+  readonly packs: readonly AnyContentPack[];
+},
   identity: (row: DistributedProviderCollectibleRow) => Pick<PublicCollectible, "publicCollectibleId" | "publicCategoryIds">,
   approvedMappings?: ReadonlyMap<string, ApprovedPublicCollectibleMapping>,
-): DistributedProviderPackContentsProjection {
+  repackSchema: { parse(value: unknown): PublicRepackDetail | PublicRepackDetailV3 } = publicRepackDetailSchema,
+): AnyContentsProjection {
   if (!UUID.test(input.providerId) || input.packs.length === 0) {
     return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
   }
@@ -277,7 +319,7 @@ function project(input: Omit<Parameters<typeof projectProvisionalProviderPackCon
     });
     repackChases.push(...chases);
     const collectibleTypes = [...new Set(contents.map(({ collectibleId }) => byLocalId.get(collectibleId)!.collectibleType))].sort(compare);
-    return publicRepackDetailSchema.parse({
+    return repackSchema.parse({
       ...pack.detail,
       contentMode: collectibleTypes.length > 1 ? "mixed" : collectibleTypes.length === 1 ? "focused" : "unknown",
       collectibleTypes,

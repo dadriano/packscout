@@ -3,7 +3,9 @@ import { classifyBackfillCheckpoint, refuseBackfill,
 import { backfillHasOwnedExpiredHeadLease, type BackfillView } from "./provider-backfill-supervisor.mts";
 import { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
 export { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
-import { continuousObservationMilliseconds, isProviderUnavailableRefusal, providerUnavailableRetryLimit,
+export { ProviderBackfillSupervisorError };
+import { continuousObservationMilliseconds, isProviderUnavailableRefusal, ProviderBackfillSupervisorError,
+  providerUnavailableRetryLimit,
   providerUnavailableWaitMilliseconds } from "./provider-continuous-policy.mts";
 import { residentContinuousPins, type ResidentBootstrapView, type ResidentHandoff } from "./provider-resident-handoff.mts";
 import type { ContinuousHealth } from "./provider-continuous-residency.mts";

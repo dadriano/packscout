@@ -625,6 +625,16 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
         "Convex read model for saved items stores the pre-buyback estimate shape.",
     }),
     item({
+      itemKey: "public-field:convex-watchlist-saved-items",
+      kind: "public_field",
+      path: "convex/savedItems.ts",
+      elements: ["estimatedEvValidator", "displayWatchlistEstimatedEv"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note:
+        "Convex Watchlist projection reads the saved buyback-adjusted estimate shape while retaining its historical estimatedEv field name.",
+    }),
+    item({
       itemKey: "public-field:admin-product-user-directory",
       kind: "public_field",
       path: "apps/admin/server/product-user-directory.ts",

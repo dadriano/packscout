@@ -5,12 +5,11 @@ const loader = register({ namespace: import.meta.url });
 const tsImport = loader.import;
 after(() => loader.unregister());
 import { pins, residentFixture } from "./provider-resident-test-fixture.mjs";
-const { superviseResidentBootstrap, ContinuousReadUnavailableError } = await tsImport("./provider-resident-policy.mts", import.meta.url);
+const { superviseResidentBootstrap, ContinuousReadUnavailableError, ProviderBackfillSupervisorError } = await tsImport("./provider-resident-policy.mts", import.meta.url);
 const { readBackfillView } = await tsImport("./run-provider-backfill-supervisor.mts", import.meta.url);
 const { superviseProviderBackfill } = await tsImport("./provider-backfill-supervisor.mts", import.meta.url);
 const { persistResidentHandoff, residentContinuousPins } = await tsImport("./provider-resident-handoff.mts", import.meta.url);
 const { continuousDecision, isProviderUnavailableRefusal } = await tsImport("./provider-continuous-policy.mts", import.meta.url);
-const { ProviderBackfillSupervisorError } = await tsImport("./provider-backfill-supervisor-policy.mts", import.meta.url);
 async function ready() {
   const f = residentFixture(); const backfill = await readBackfillView(f.database, pins, f.authority);
   return { f, backfill, view: { backfill, handoff: null } };

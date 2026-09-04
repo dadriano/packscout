@@ -523,6 +523,7 @@ export function repackDetailFromPack({
   identity,
   categoryChain,
   collectibleTypes,
+  packScoutEv = null,
 }) {
   const name = boundedText(pack.display_name, 200);
   if (name === null) refuse("PACK_NAME_MISSING", pack.pack_key);
@@ -553,7 +554,7 @@ export function repackDetailFromPack({
     buyback: publicBuybackFromPack(pack),
     primaryImage: publicImageFromPack(pack),
     evEstimates: {
-      packScout: unavailablePackScoutEv(readAt, versions),
+      packScout: packScoutEv ?? unavailablePackScoutEv(readAt, versions),
       vendorReported: vendorReportedEvFromPack(pack),
     },
     topChase: null,
@@ -590,6 +591,7 @@ export function projectProviderPacks({
   versions,
   identity,
   includePriceless,
+  packScoutEvByPackKey = new Map(),
 }) {
   const repacks = [];
   const skipped = [];
@@ -614,6 +616,7 @@ export function projectProviderPacks({
       identity,
       categoryChain: chainByProviderCategoryId.get(pack.category_id) ?? [],
       collectibleTypes,
+      packScoutEv: packScoutEvByPackKey.get(pack.pack_key) ?? null,
     });
     if (seenIds.has(detail.publicRepackId)) {
       refuse("REPACK_IDENTITY_COLLISION", pack.pack_key);

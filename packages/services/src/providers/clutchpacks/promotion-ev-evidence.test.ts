@@ -11,6 +11,7 @@ import {
   ClutchpacksPromotionEvEvidenceError,
   normalizeClutchpacksPromotionEvEvidenceV1,
 } from "./promotion-ev-evidence.ts";
+import { normalizeProviderPromotionEvEvidenceV1 } from "../provider-promotion-ev-evidence.ts";
 
 // Acceptance map (Automated): exact canonical scope, price, and terms bind
 // retained evidence; source gaps fail closed; repeated promotions do not
@@ -126,6 +127,13 @@ test("promotion binds the exact pack row and uses existing midpoint and 90% buyb
   assert.equal(projection.confidence.scoreBasisPoints, 8_000);
   assert.deepEqual(projection.confidence.limitationCodes, ["closed_range_midpoint"]);
   assert.deepEqual(retained, before);
+});
+
+test("the generic promotion registry preserves ClutchPacks evidence", async () => {
+  assert.deepEqual(
+    await normalizeProviderPromotionEvEvidenceV1(request()),
+    await normalizeClutchpacksPromotionEvEvidenceV1(request()),
+  );
 });
 
 test("missing buyback stays unavailable and one-sided or conflicting terms never get a default", async () => {

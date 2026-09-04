@@ -136,6 +136,8 @@ export * from "./providers/collector-crypt/buyback-ev-evidence.ts";
 export * from "./providers/courtyard/buyback-ev-evidence.ts";
 export * from "./providers/gamestop/buyback-ev-evidence.ts";
 export * from "./providers/phygitals/buyback-ev-evidence.ts";
+export * from "./providers/phygitals/promotion-ev-evidence.ts";
+export * from "./providers/provider-promotion-ev-evidence.ts";
 export * from "./providers/stadium-vault/buyback-ev-evidence.ts";
 export * from "./providers/trove/buyback-ev-evidence.ts";
 export * from "./providers/beezie/mapper.ts";
