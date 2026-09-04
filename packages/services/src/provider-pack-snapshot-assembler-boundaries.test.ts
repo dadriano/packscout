@@ -103,14 +103,15 @@ test("URL parsing exposes protected query keys across normalized schemes and nes
   const fields = [(input: ProviderPackBuildInputs, url: string) => { input.imageUrl = url; },
     (input: ProviderPackBuildInputs, url: string) => { input.actions[0]!.url = url; },
     (input: ProviderPackBuildInputs, url: string) => { input.contents[0]!.imageUrl = url; }];
-  const signedQueries = ["%58-Amz-Signature=private-marker", "sv=1&se=expiry&sr=b&sp=r&%73ig=private-marker"];
+  const credentialLocations = ["?%58-Amz-Signature=private-marker", "?sv=1&se=expiry&sr=b&sp=r&%73ig=private-marker",
+    "#access_%74oken=private-marker"];
   for (const prefix of ["HTTPS://", "  https://", "\tHtTpS://"]) {
     for (const setUrl of fields) {
-      for (const query of signedQueries) {
+      for (const location of credentialLocations) {
         const { input } = await assemblyFixture();
         setUrl(input.inputs, `${prefix}example.com/image?size=large`);
         assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
-        setUrl(input.inputs, `${prefix}example.com/image?${query}`);
+        setUrl(input.inputs, `${prefix}example.com/image${location}`);
         await reject(await requestFor(input.inputs));
       }
     }
@@ -134,6 +135,14 @@ test("credential-bearing public text is scanned after schema-equivalent normaliz
     const pinned = await requestFor(input.inputs);
     set(pinned.inputs, `  ${value}\t`);
     await reject(pinned);
+  }
+  for (const { value, set } of [
+    { value: `Promo Bearer ${"A".repeat(20)}`, set: cases[0]!.set },
+    { value: "Database: postgres://user:pass@host/database", set: cases[1]!.set },
+  ]) {
+    const { input } = await assemblyFixture();
+    set(input.inputs, value);
+    await reject(await requestFor(input.inputs));
   }
 });
 

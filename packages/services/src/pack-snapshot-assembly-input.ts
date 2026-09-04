@@ -6,6 +6,11 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 const privateKeys = new Set(["account", "accountid", "authorization", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
+const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{20,})/iu;
+
+function rejectCredentialText(value: string): void {
+  requireAssembly(!credentialText.test(value.trim().normalize("NFC")));
+}
 
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
  * execute during capture. Unknown schema fields are rejected, never stripped. */
@@ -18,10 +23,14 @@ function preflight(value: unknown): void {
     if (typeof item === "string") {
       requireAssembly(item.length <= limits.maximumSnapshotBytes);
       bytes += encoder.encode(item).byteLength;
-      const normalizedText = item.trim().normalize("NFC");
-      requireAssembly(!/^(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|Bearer [A-Za-z0-9._~-]{20,})/iu.test(normalizedText));
+      rejectCredentialText(item);
       if (field === "url" || field === "imageUrl") {
-        for (const key of new URL(item).searchParams.keys()) keys.add(key);
+        const url = new URL(item);
+        for (const parameters of [url.searchParams, new URLSearchParams(url.hash.slice(1))]) {
+          for (const [key, nested] of parameters) {
+            rejectCredentialText(key); rejectCredentialText(nested); keys.add(key);
+          }
+        }
       }
     } else if (item === null || item === undefined || typeof item === "boolean") bytes += 5;
     else if (typeof item === "number") { requireAssembly(Number.isSafeInteger(item) && !Object.is(item, -0)); bytes += 20; }
