@@ -24,8 +24,10 @@ const contextSource = source("./AuthContext.client.tsx");
 test("a held account's refused session reads are absorbed, never thrown into the tree", () => {
   assert.match(
     savedItemsSource,
-    /useTolerantQuery\(\s*api\.savedItems\.getSavedItemIds,\s*signedIn \? \{\} : "skip",\s*\)\.data/,
+    /useTolerantQuery\(\s*api\.savedItems\.getSavedItemIds,\s*signedIn \? \{\} : "skip",\s*\)/,
   );
+  assert.match(savedItemsSource, /savedItemIdsQuery\.data/);
+  assert.match(savedItemsSource, /savedItemIdsQuery\.error/);
   assert.match(
     savedItemsSource,
     /useTolerantQuery\(\s*api\.productUsers\.getMyStanding,\s*signedIn \? \{\} : "skip",\s*\)\.data/,

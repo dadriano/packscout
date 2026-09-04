@@ -4,7 +4,7 @@
 
 Begin P01 with `watchlist/001`. Ship an owner-only watchlist read that returns both saved collections, resolved against the current catalog, with per-collection counts for the tab pips.
 
-**Progress:** 1/4 tasks complete; 1/3 phases published; 0/3 phases merged
+**Progress:** 3/4 tasks complete; 1/3 phases merged; P02 Watchlist page ready to publish
 
 ## Context
 
@@ -79,8 +79,8 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
-| P01 | Owner can read both saved collections as display-ready rows with per-tab counts | 001 | none | root on default branch | Owner-only watchlist read matrix | published |
-| P02 | Signed-in users can open Watchlist and see both lists with count pips | 002, 003 | P01 | stacked on P01 | Watchlist destination and list rendering | planned |
+| P01 | Owner can read both saved collections as display-ready rows with per-tab counts | 001 | none | root on default branch | Owner-only watchlist read matrix | merged |
+| P02 | Signed-in users can open Watchlist and see both lists with count pips | 002, 003 | P01 | stacked on P01 | Watchlist destination and list rendering | published |
 | P03 | Users can unsave or open a row from Watchlist | 004 | P02 | stacked on P02 | Unsave and catalog-open from a Watchlist row | planned |
 
 ### Phase Details
@@ -91,10 +91,10 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Review budget:** 1 task; 3–6 hours; target at most 12 authored files and 800 authored lines.
 - **Rollback:** Revert the unused owner read. Existing ID-only saved-item reads remain.
 - **Size exception:** none
-- **Branch:** `codex/watchlist-p01-owner-read`
-- **Verified parent:** `4862700852c7db4a76ec5592ba7e4f8cabf20916` (`origin/main`)
-- **Verified implementation:** `3c18b2ad937f7160f8bd52c793c2e0bde5a68aac`
-- **PR:** https://github.com/dadriano/packscout/pull/103
+- **Branch:** `codex/watchlist-p01-chased-repacks`
+- **Verified parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (`origin/main`)
+- **Verified implementation:** `d341b26c5311dabd59c01c6fd8bf03ebfff3aacb`
+- **PR:** https://github.com/dadriano/packscout/pull/103 (merged as `a63d98a9`); follow-up https://github.com/dadriano/packscout/pull/106
 
 #### P02 — Watchlist page and lists
 
@@ -102,10 +102,10 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Review budget:** 2 tasks; 1–2 days total; nav plus Watchlist page as the two surfaces; target at most 20 authored files and 2,000 authored lines.
 - **Rollback:** Revert the route and nav item. The owner read can remain unused.
 - **Size exception:** none
-- **Branch:** assigned by builder
-- **Verified parent:** not recorded
-- **Verified implementation:** not recorded
-- **PR:** not opened
+- **Branch:** `codex/watchlist-p02-page-and-lists`
+- **Verified parent:** `1b75a4b56defc3436566dac56d4c0ce03166a465` (`codex/watchlist-p01-chased-repacks`)
+- **Verified implementation:** `21bf39f7ef6d02c5633053de11b21f70a0b4c450`
+- **PR:** https://github.com/dadriano/packscout/pull/107
 
 #### P03 — Act from a row
 
@@ -123,14 +123,14 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Serve the owner's watchlist | P01 | small | 3–6 hours | done | none |
-| 002 | Open the Watchlist destination | P02 | medium | 4–8 hours | todo | 001 |
-| 003 | Show saved repacks and chase cards | P02 | medium | 4–8 hours | todo | 001, 002 |
+| 002 | Open the Watchlist destination | P02 | medium | 4–8 hours | done | 001 |
+| 003 | Show saved repacks and chase cards | P02 | medium | 4–8 hours | done | 001, 002 |
 | 004 | Unsave and open from Watchlist | P03 | medium | 3–6 hours | todo | 003 |
 
 ## Build Order
 
-1. Merge P01 (`watchlist/001`) so later UI can consume one owner watchlist read.
-2. Stack P02 on P01. Build `watchlist/002` first, then `watchlist/003` on the same branch.
+1. Land the chased-repack follow-up on default so Open-equivalent collectible proof is on main.
+2. Stack P02 on current main. Build `watchlist/002` first, then `watchlist/003` on the same branch.
 3. Stack P03 on P02 and add row actions in `watchlist/004`.
 
 ## Parallel Groups
@@ -146,11 +146,12 @@ No two numbered tasks are safe to implement in parallel. P02 still publishes 002
 
 ```text
 default
- └── P01 owner watchlist read
-      └── P02 Watchlist page and lists
-           └── P03 unsave and open from a row
+ └── P01 owner watchlist read (#103, merged)
+      └── P01 chased-repack proof (#106)
+           └── P02 Watchlist page and lists (#107)
+                └── P03 unsave and open from a row
 ```
 
 ## Next Action
 
-Run `/tasks-to-tech-specs .tasks/watchlist` if you want implementation contracts next, `/tasks-to-ux-specs .tasks/watchlist` for the page and tab UX, or `/build-from-tasks plan` to confirm the P01 branch.
+Wait for https://github.com/dadriano/packscout/pull/106 to merge, restack https://github.com/dadriano/packscout/pull/107 onto `main`, then start P03 (`watchlist/004`).

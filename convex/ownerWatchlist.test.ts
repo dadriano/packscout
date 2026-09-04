@@ -27,7 +27,12 @@ import {
   stageRetentionRelease,
   unavailableRetentionDetail,
 } from "./dataReleaseV3Retention.test-support";
-import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
+import { MAX_DATA_RELEASE_V3_REPACKS } from "./dataReleaseV3Search";
+import {
+  MAX_SAVED_ITEMS_PER_KIND,
+  WATCHLIST_CHASE_VALIDATION_BATCH,
+  WATCHLIST_REPACK_PROOF_BATCH,
+} from "./savedItems";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -183,6 +188,14 @@ afterEach(() => {
 });
 
 describe("owner watchlist read", () => {
+  test("proves only chased packs in small document pages", () => {
+    expect(WATCHLIST_CHASE_VALIDATION_BATCH).toBeGreaterThan(1);
+    expect(WATCHLIST_REPACK_PROOF_BATCH).toBeGreaterThan(0);
+    expect(WATCHLIST_REPACK_PROOF_BATCH).toBeLessThan(
+      MAX_DATA_RELEASE_V3_REPACKS,
+    );
+  });
+
   test("refuses unauthenticated and invalid-identity callers without a payload", async () => {
     const t = createTest();
     await seed(t);
@@ -590,6 +603,42 @@ describe("owner watchlist read", () => {
       });
     });
     await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedCollectibles).toEqual([
+      {
+        publicCollectibleId: V3_COLLECTIBLE_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        collectible: null,
+      },
+    ]);
+  });
+
+  test("marks a collectible whose chased catalog pack diverges from facts as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Repacks").collect()).find(
+        (document) => document.publicRepackId === V3_REPACK_ID_A,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 repack.");
+      }
+      await ctx.db.patch(source._id, {
+        detail: {
+          ...source.detail,
+          evEstimates: {
+            ...source.detail.evEstimates,
+            packScout: buildV3UnavailableEv(),
+          },
+        },
+      });
+    });
     const watchlist = await t
       .withIdentity(USER_A)
       .action(api.savedItems.getOwnerWatchlist, {});

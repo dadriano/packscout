@@ -779,6 +779,9 @@ describe("authenticated entry-point enumeration", () => {
       true,
     );
     expect(
+      watchlistAction?.segment.includes("proveOwnerWatchlistRepacks"),
+    ).toBe(true);
+    expect(
       watchlistAction?.segment.includes(
         "validateOwnerWatchlistCollectibleChases",
       ),

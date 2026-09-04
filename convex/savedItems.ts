@@ -5,6 +5,7 @@ import {
   publicRepackDetailV3Schema,
   publicRepackIdSchema,
   type PackScoutDisplayedEvV3,
+  type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import { ConvexError, v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
@@ -20,7 +21,10 @@ import {
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
 import { evFactsFromDetail } from "./dataReleaseV3EvFacts";
 import { isDataReleaseV3EvaluationTime } from "./dataReleaseV3Pagination";
-import { dataReleaseV3SearchRowMatchesDetail } from "./dataReleaseV3Search";
+import {
+  dataReleaseV3SearchRowFromDetail,
+  dataReleaseV3SearchRowMatchesDetail,
+} from "./dataReleaseV3Search";
 import {
   PRODUCT_USER_READ_CAPABILITY,
   PRODUCT_USER_WRITE_CAPABILITY,
@@ -39,10 +43,16 @@ import {
 } from "./publicRepacksV3";
 
 export const MAX_SAVED_ITEMS_PER_KIND = 250;
-/** Stay under Convex's per-query document-read budget when proving chase openability. */
+const WATCHLIST_QUERY_DOCUMENT_BUDGET = 4_096;
+/** Stay under Convex's per-query document-read budget when proving chase rows. */
 export const WATCHLIST_CHASE_VALIDATION_BATCH = Math.floor(
-  4_096 / (MAX_DESIRED_CHASES_PER_COLLECTIBLE + 1),
+  WATCHLIST_QUERY_DOCUMENT_BUDGET / (MAX_DESIRED_CHASES_PER_COLLECTIBLE + 1),
 );
+/**
+ * Full pack details are large. Prove a handful of chased documents per query
+ * without reloading the catalog.
+ */
+export const WATCHLIST_REPACK_PROOF_BATCH = 8;
 
 /**
  * Codes this module raises itself. Authentication and admission refusals —
@@ -138,11 +148,22 @@ const ownerWatchlistValidator = v.object({
 });
 
 type OwnerWatchlist = Infer<typeof ownerWatchlistValidator>;
+const watchlistRepackProofValidator = v.object({
+  publicRepackId: v.string(),
+  searchRowCanonical: v.string(),
+  omitDerivedSearchPenalty: v.boolean(),
+  factsCanonical: v.union(v.string(), v.null()),
+  hasDisplayedEv: v.boolean(),
+});
 const ownerWatchlistSnapshotValidator = v.object({
   watchlist: ownerWatchlistValidator,
   releaseId: v.id("dataReleaseV3Releases"),
+  legacyEvSnapshot: v.boolean(),
+  displayedPackProofs: v.array(watchlistRepackProofValidator),
+  failedDisplayedPublicRepackIds: v.array(v.string()),
 });
 type OwnerWatchlistSnapshot = Infer<typeof ownerWatchlistSnapshotValidator>;
+type WatchlistRepackProof = Infer<typeof watchlistRepackProofValidator>;
 
 function refuse(code: SavedItemsErrorCode): never {
   const message =
@@ -381,6 +402,93 @@ async function findActiveCollectibleForWatchlist(
     return null;
   }
   return match;
+}
+
+function catalogPackProofs(catalog: ActiveDataReleaseV3): {
+  displayedPackProofs: WatchlistRepackProof[];
+  failedDisplayedPublicRepackIds: string[];
+} {
+  const displayedPackProofs = [];
+  const failedDisplayedPublicRepackIds = [];
+  for (const publicRepackId of catalog.rowByPublicId.keys()) {
+    const rawRow = catalog.storedRowByPublicId.get(publicRepackId);
+    if (rawRow === undefined) {
+      failedDisplayedPublicRepackIds.push(publicRepackId);
+      continue;
+    }
+    const facts = catalog.factsByPublicId.get(publicRepackId);
+    displayedPackProofs.push({
+      publicRepackId,
+      searchRowCanonical: canonicalJson(rawRow),
+      omitDerivedSearchPenalty:
+        rawRow.packScoutStaticConfidencePenaltyBasisPoints === undefined,
+      factsCanonical: facts === undefined ? null : canonicalJson(facts),
+      hasDisplayedEv: catalog.evByPublicId.get(publicRepackId) !== undefined,
+    });
+  }
+  return { displayedPackProofs, failedDisplayedPublicRepackIds };
+}
+
+function derivedSearchRowCanonical(
+  detail: PublicRepackDetailV3,
+  omitDerivedSearchPenalty: boolean,
+): string {
+  const derived = dataReleaseV3SearchRowFromDetail(detail);
+  if (!omitDerivedSearchPenalty) return canonicalJson(derived);
+  const {
+    packScoutStaticConfidencePenaltyBasisPoints: _penalty,
+    ...retainedShape
+  } = derived;
+  return canonicalJson(retainedShape);
+}
+
+async function proveWatchlistRepackDocument(
+  ctx: QueryCtx,
+  releaseId: Id<"dataReleaseV3Releases">,
+  proof: WatchlistRepackProof,
+  legacyEvSnapshot: boolean,
+): Promise<boolean> {
+  const matches = await ctx.db
+    .query("dataReleaseV3Repacks")
+    .withIndex("by_release_id_and_public_repack_id", (index) =>
+      index
+        .eq("releaseId", releaseId)
+        .eq("publicRepackId", proof.publicRepackId),
+    )
+    .take(2);
+  const match = matches[0];
+  if (
+    matches.length > 1 ||
+    (match !== undefined &&
+      (match.releaseId !== releaseId ||
+        match.publicRepackId !== proof.publicRepackId ||
+        match.detail.publicRepackId !== proof.publicRepackId))
+  ) {
+    refuse("SAVED_ITEMS_STATE_CONFLICT");
+  }
+  if (match === undefined) return false;
+  const parsed = publicRepackDetailV3Schema.safeParse(match.detail);
+  if (!parsed.success) return false;
+  if (
+    derivedSearchRowCanonical(parsed.data, proof.omitDerivedSearchPenalty) !==
+    proof.searchRowCanonical
+  ) {
+    return false;
+  }
+  if (!legacyEvSnapshot) {
+    if (!proof.hasDisplayedEv || proof.factsCanonical === null) return false;
+    if (canonicalJson(evFactsFromDetail(parsed.data)) !== proof.factsCanonical) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function chasedCatalogRepacksCanOpen(
+  publicRepackIds: readonly string[],
+  failedPublicRepackIds: ReadonlySet<string>,
+): boolean {
+  return !publicRepackIds.some((id) => failedPublicRepackIds.has(id));
 }
 
 function newestSavedFirst<TRow>(
@@ -625,36 +733,82 @@ export const getOwnerWatchlistAtTime = internalQuery({
         savedCollectibleCount: resolvedCollectibles.length,
       },
       releaseId: catalog.releaseDocument._id,
+      legacyEvSnapshot: catalog.legacyEvSnapshot,
+      ...catalogPackProofs(catalog),
     };
   },
 });
 
 /**
- * Bounded chase proof for a small batch of saved collectibles. The public
- * Watchlist action pages this so a cap-sized list cannot read 250 × 513 chase
- * documents in one transaction.
+ * Open-equivalent proof for a small page of chased pack documents. Catalog
+ * fingerprints come from the snapshot; this query does not reload the catalog.
+ */
+export const proveOwnerWatchlistRepacks = internalQuery({
+  args: {
+    releaseId: v.id("dataReleaseV3Releases"),
+    legacyEvSnapshot: v.boolean(),
+    packs: v.array(watchlistRepackProofValidator),
+  },
+  returns: v.array(v.string()),
+  handler: async (ctx, args): Promise<string[]> => {
+    await requireAdmittedProductUser(ctx, PRODUCT_USER_WRITE_CAPABILITY);
+    if (args.packs.length > WATCHLIST_REPACK_PROOF_BATCH) {
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
+    }
+    const failedPublicRepackIds = [];
+    for (const proof of args.packs) {
+      if (
+        !(await proveWatchlistRepackDocument(
+          ctx,
+          args.releaseId,
+          proof,
+          args.legacyEvSnapshot,
+        ))
+      ) {
+        failedPublicRepackIds.push(proof.publicRepackId);
+      }
+    }
+    return failedPublicRepackIds;
+  },
+});
+
+const watchlistCollectibleChasesValidator = v.object({
+  publicCollectibleId: v.string(),
+  publicRepackIds: v.union(v.null(), v.array(v.string())),
+});
+
+/**
+ * Bounded chase-row proof for a small batch of saved collectibles. Does not
+ * load the catalog or pack details.
  */
 export const validateOwnerWatchlistCollectibleChases = internalQuery({
   args: {
     releaseId: v.id("dataReleaseV3Releases"),
     publicCollectibleIds: v.array(v.string()),
   },
-  returns: v.array(v.string()),
-  handler: async (ctx, args): Promise<string[]> => {
+  returns: v.array(watchlistCollectibleChasesValidator),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<Array<{ publicCollectibleId: string; publicRepackIds: string[] | null }>> => {
     await requireAdmittedProductUser(ctx, PRODUCT_USER_WRITE_CAPABILITY);
     if (args.publicCollectibleIds.length > WATCHLIST_CHASE_VALIDATION_BATCH) {
-      refuse("SAVED_ITEMS_STATE_CONFLICT");
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
     const release = { releaseDocument: { _id: args.releaseId } };
-    const failed = [];
+    const rows = [];
     for (const publicCollectibleId of args.publicCollectibleIds) {
-      if (
-        (await loadDesiredChases(ctx, release, publicCollectibleId)) === null
-      ) {
-        failed.push(publicCollectibleId);
-      }
+      const chases = await loadDesiredChases(
+        ctx,
+        release,
+        publicCollectibleId,
+      );
+      rows.push({
+        publicCollectibleId,
+        publicRepackIds: chases === null ? null : [...chases.keys()],
+      });
     }
-    return failed;
+    return rows;
   },
 });
 
@@ -667,14 +821,18 @@ export const getOwnerWatchlist = action({
   args: {},
   returns: ownerWatchlistValidator,
   handler: async (ctx): Promise<OwnerWatchlist> => {
-    const snapshot = await ctx.runQuery(
+    const currentTime = Date.now();
+    const snapshot: OwnerWatchlistSnapshot = await ctx.runQuery(
       internal.savedItems.getOwnerWatchlistAtTime,
-      { currentTime: Date.now() },
+      { currentTime },
     );
     const resolvedIds = snapshot.watchlist.savedCollectibles
       .filter((row) => row.catalogStatus === "resolved")
       .map((row) => row.publicCollectibleId);
-    const failed = new Set<string>();
+    const chaseRows: Array<{
+      publicCollectibleId: string;
+      publicRepackIds: string[] | null;
+    }> = [];
     for (
       let offset = 0;
       offset < resolvedIds.length;
@@ -684,12 +842,58 @@ export const getOwnerWatchlist = action({
         offset,
         offset + WATCHLIST_CHASE_VALIDATION_BATCH,
       );
-      const batchFailed = await ctx.runQuery(
+      const batch: typeof chaseRows = await ctx.runQuery(
         internal.savedItems.validateOwnerWatchlistCollectibleChases,
         { releaseId: snapshot.releaseId, publicCollectibleIds },
       );
-      for (const publicCollectibleId of batchFailed) {
-        failed.add(publicCollectibleId);
+      chaseRows.push(...batch);
+    }
+    const proofByPublicId = new Map(
+      snapshot.displayedPackProofs.map((proof) => [
+        proof.publicRepackId,
+        proof,
+      ]),
+    );
+    const chasedDisplayedProofs = [];
+    const seen = new Set<string>();
+    for (const row of chaseRows) {
+      if (row.publicRepackIds === null) continue;
+      for (const publicRepackId of row.publicRepackIds) {
+        const proof = proofByPublicId.get(publicRepackId);
+        if (proof === undefined || seen.has(publicRepackId)) continue;
+        seen.add(publicRepackId);
+        chasedDisplayedProofs.push(proof);
+      }
+    }
+    const failedPacks = new Set(snapshot.failedDisplayedPublicRepackIds);
+    for (
+      let offset = 0;
+      offset < chasedDisplayedProofs.length;
+      offset += WATCHLIST_REPACK_PROOF_BATCH
+    ) {
+      const packs = chasedDisplayedProofs.slice(
+        offset,
+        offset + WATCHLIST_REPACK_PROOF_BATCH,
+      );
+      const batchFailed: string[] = await ctx.runQuery(
+        internal.savedItems.proveOwnerWatchlistRepacks,
+        {
+          releaseId: snapshot.releaseId,
+          legacyEvSnapshot: snapshot.legacyEvSnapshot,
+          packs,
+        },
+      );
+      for (const publicRepackId of batchFailed) {
+        failedPacks.add(publicRepackId);
+      }
+    }
+    const failed = new Set<string>();
+    for (const row of chaseRows) {
+      if (
+        row.publicRepackIds === null ||
+        !chasedCatalogRepacksCanOpen(row.publicRepackIds, failedPacks)
+      ) {
+        failed.add(row.publicCollectibleId);
       }
     }
     return demoteCollectiblesThatCannotOpen(snapshot.watchlist, failed);

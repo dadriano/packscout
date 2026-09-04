@@ -1,4 +1,4 @@
-export type GlobalDestination = "dashboard" | "learn" | null;
+export type GlobalDestination = "dashboard" | "watchlist" | "learn" | null;
 export type DashboardView = "overview" | "all-repacks" | null;
 
 type ShortcutEvent = Readonly<{
@@ -11,6 +11,7 @@ type ShortcutEvent = Readonly<{
 
 export function resolveGlobalDestination(pathname: string): GlobalDestination {
   if (pathname === "/" || pathname === "/packs") return "dashboard";
+  if (pathname === "/watchlist") return "watchlist";
   if (pathname === "/learn" || pathname.startsWith("/learn/")) return "learn";
   return null;
 }
