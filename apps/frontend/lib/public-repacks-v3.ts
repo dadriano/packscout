@@ -5,6 +5,7 @@ import {
   dashboardKpisSchema,
   dataReleaseV3IdentitySchema,
   desiredCollectibleRepackResultsV3Schema,
+  displayedEvMedianSourcesV3Schema,
   publicCollectibleSchema,
   publicCatalogRecordUpdateStatusV3Schema,
   publicDashboardBundleV3Schema,
@@ -22,6 +23,8 @@ import {
   type DashboardKpis,
   type DataReleaseV3Identity,
   type DesiredCollectibleRepackResultsV3,
+  type DisplayedEvMedianSource,
+  type DisplayedEvMedianSourcesV3,
   type PublicCollectible,
   type PublicCatalogRecordUpdateStatusV3,
   type PublicDashboardBundleV3,
@@ -57,6 +60,7 @@ export type DashboardBundleV3 = PublicDashboardBundleV3 &
     categorySummaries: readonly RepackSummaryGroupV3[];
     facets: ContextualRepackFacets;
     activeFilters: PublicRepackFilters;
+    evMedianSources: DisplayedEvMedianSourcesV3;
   }>;
 
 export type ListPublicRepacksPageV3 = PublicRepackListPageV3 &
@@ -130,7 +134,7 @@ function parsedResult<T>(
 const summaryGroupsSchema = repackSummaryGroupSchema.array().max(5);
 const collectibleMatchesSchema = publicCollectibleSchema.array().max(20);
 
-function parseDashboardBundleV3(data: unknown): DashboardBundleV3 | null {
+function parseDashboardBundleV3(data: unknown): Omit<DashboardBundleV3, "evMedianSources"> | null {
   if (!isRecord(data)) return null;
   const {
     kpis,
@@ -256,7 +260,34 @@ export function parseGetPublicCatalogRecordUpdateStatusV3Result(
 export function parseGetDashboardBundleV3Result(
   input: unknown,
 ): GetDashboardBundleV3Result {
-  return parsedResult(input, parseDashboardBundleV3);
+  return parsedResult(input, (data) => {
+    const bundle = parseDashboardBundleV3(data);
+    const sources = displayedEvMedianSourcesV3Schema.safeParse(isRecord(input) ? input.evMedianSources : undefined);
+    if (bundle === null || !sources.success ||
+        !medianSourceMatches(bundle.kpis.medianPackScoutEvPercent, sources.data.overall) ||
+        !groupSourcesMatch(bundle.vendorSummaries, sources.data.vendors) ||
+        !groupSourcesMatch(bundle.categorySummaries, sources.data.categories)) return null;
+    return { ...bundle, evMedianSources: sources.data };
+  });
+}
+
+function medianSourceMatches(
+  metric: DashboardKpis["medianPackScoutEvPercent"],
+  source: DisplayedEvMedianSource | null,
+): boolean {
+  if (metric.status === "unavailable") return source === null;
+  return source !== null && (source !== "packscout" || metric.basisPoints <= 0);
+}
+
+function groupSourcesMatch(
+  groups: readonly RepackSummaryGroupV3[],
+  sources: DisplayedEvMedianSourcesV3["vendors"],
+): boolean {
+  const byKey = new Map(sources.map(({ key, source }) => [key, source]));
+  return byKey.size === sources.length && byKey.size === groups.length &&
+    new Set(groups.map(({ key }) => key)).size === groups.length &&
+    groups.every(group => byKey.has(group.key) &&
+      medianSourceMatches(group.medianPackScoutEvPercent, byKey.get(group.key)!));
 }
 
 export function parseListPublicRepacksV3Result(

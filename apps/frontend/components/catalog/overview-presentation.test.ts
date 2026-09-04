@@ -26,7 +26,7 @@ test("presents the three overview KPIs using displayed EV", () => {
     highConfidenceRepacks: 500,
   };
 
-  const presentation = presentDashboardKpis(kpis);
+  const presentation = presentDashboardKpis(kpis, "packscout");
 
   assert.deepEqual(
     presentation.map(({ id }) => id),
@@ -38,11 +38,11 @@ test("presents the three overview KPIs using displayed EV", () => {
   );
   assert.equal(
     presentation[1]?.helper,
-    "Displayed EV · 500 high confidence",
+    "PackScout EV · 500 high confidence",
   );
   assert.equal(
     presentation[1]?.accessibleLabel,
-    "Median EV %: -1.80%. Negative. Includes displayed EV. 500 high-confidence repacks.",
+    "Median EV %: -1.80%. Negative. PackScout EV. 500 high-confidence repacks.",
   );
   assert.equal(presentation[1]?.tone, "positive");
   assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
@@ -51,15 +51,32 @@ test("presents the three overview KPIs using displayed EV", () => {
 test("positive source-derived medians remain visible in headline and group summaries", () => {
   const metric = { status: "available" as const, basisPoints: 800 };
   const kpis = presentDashboardKpis({ totalRepacks: 1, medianPackScoutEvPercent: metric,
-    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 });
+    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 }, "provider_reported");
   const summaries = presentCatalogSummaries([{ key: "phygitals", label: "Phygitals",
-    repackCount: 1, medianPackScoutEvPercent: metric }]);
+    repackCount: 1, medianPackScoutEvPercent: metric }], [{ key: "phygitals", source: "provider_reported" }]);
   assert.equal(kpis[1]?.value, "+8.00%");
   assert.equal(kpis[1]?.tone, "positive");
   assert.equal(kpis[1]?.state, "plain");
   assert.equal(summaries[0]?.medianEvPercent.displayValue, "+8.00%");
   assert.equal(summaries[0]?.medianEvPercent.tone, "positive");
-  assert.match(summaries[0]!.accessibleLabel, /Median displayed EV %: \+8\.00%/);
+  assert.match(summaries[0]!.accessibleLabel, /Median EV %: \+8\.00%.*Platform EV × buyback/);
+  assert.equal(summaries[0]?.sourceLabel, "Platform EV × buyback");
+  assert.match(kpis[1]!.helper, /^Platform EV × buyback/);
+});
+
+test("negative and mixed medians retain explicit sources, and independent positives stay unavailable", () => {
+  const metric = { status: "available" as const, basisPoints: -1500 };
+  for (const [source, label] of [["provider_reported", "Platform EV × buyback"], ["mixed", "Mixed sources"], ["packscout", "PackScout EV"]] as const) {
+    const result = presentCatalogSummaries([{ key: "sample", label: "Sample", repackCount: 1,
+      medianPackScoutEvPercent: metric }], [{ key: "sample", source }]);
+    assert.equal(result[0]?.medianEvPercent.displayValue, "-15.00%");
+    assert.equal(result[0]?.sourceLabel, label);
+    assert.ok(result[0]?.accessibleLabel.includes(label));
+  }
+  const result = presentDashboardKpis({ totalRepacks: 1,
+    medianPackScoutEvPercent: { status: "available", basisPoints: 800 },
+    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 }, "packscout");
+  assert.equal(result[1]?.value, "Unavailable");
 });
 
 test("overview opportunity rows retain server-presented last-known EV", () => {
@@ -146,7 +163,7 @@ test("scales repack groups and retains unavailable reasons", () => {
     },
   ];
 
-  const presentation = presentCatalogSummaries(summaries);
+  const presentation = presentCatalogSummaries(summaries, [{ key: "collector_crypt", source: "packscout" }, { key: "courtyard", source: null }]);
 
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
   assert.equal(presentation[0]?.medianEvPercent.displayValue, "-2.30%");
@@ -161,7 +178,7 @@ test("overview medians propagate selective EV tones", () => {
     medianPackScoutEvPercent: { status: "available", basisPoints: -1_000 },
     highestChaseValueUsdMinor: null,
     highConfidenceRepacks: 0,
-  });
+  }, "packscout");
   const summaries = presentCatalogSummaries([
     {
       key: "collector_crypt",
@@ -169,7 +186,7 @@ test("overview medians propagate selective EV tones", () => {
       repackCount: 1,
       medianPackScoutEvPercent: { status: "available", basisPoints: -500 },
     },
-  ]);
+  ], [{ key: "collector_crypt", source: "packscout" }]);
 
   assert.equal(kpis[1]?.state, "negative");
   assert.equal(kpis[1]?.tone, "warning");
