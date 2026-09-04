@@ -60,6 +60,34 @@ test("Provider-local planning and persistence crash matrix", async suite => {
     const change = async (tx: ProviderTransactionClient, id: string, version = 1n) => appendPromotionRange(tx,
       [{ entityType: "pack", entityId: id, entityVersion: version, operation: "upsert" }]);
 
+    await suite.test("shared input representation mismatches refuse before progress or acknowledgment", async () => {
+      const delivery: SharedProviderChangeDelivery = { ...scope, centralChangeIdentity: "invalid:boundary", providerChangeSequence: "1",
+        sharedDependencies: [], payloadSha256: "a".repeat(64), leaseIdentity: randomUUID(), acknowledgmentIdentity: null };
+      for (const kind of ["category", "collectible_profile", "valuation"] as const) {
+        await assert.rejects(planner.plan({ kind: "shared", delivery: { ...delivery,
+          sharedDependencies: [{ kind, identity: "not-a-native-id", contentSha256: "b".repeat(64) }] } }), { code: "PACK_INPUT_INVALID" });
+      }
+      for (const providerChangeSequence of ["9223372036854775808", "9".repeat(30)]) {
+        await assert.rejects(planner.plan({ kind: "shared", delivery: { ...delivery, providerChangeSequence } }), { code: "PACK_INPUT_INVALID" });
+      }
+      assert.equal(await client.pack_publication_impact_progress.count(), 0);
+      assert.equal(await client.pack_publication_change_receipts.count(), 0);
+      assert.equal(await client.pack_build_requests.count(), 0);
+      assert.equal((await client.pack_publication_scopes.findUniqueOrThrow({ where: { provider_id: scope.providerId } })).shared_change_sequence, 0n);
+    });
+    await suite.test("capture recomputes every readiness digest before allocating a request", async () => {
+      const value = await evaluator.evaluate({ candidate: fixtures[0]!.inputs, evaluatedAt: new Date().toISOString() });
+      for (const key of ["contentsSha256", "probabilityInputsSha256", "valuationInputsSha256", "evInputsSha256"] as const) {
+        const forged = structuredClone(value); forged.readiness[key] = "f".repeat(64);
+        await assert.rejects(context.transaction(async tx => {
+          await requests.enqueueInTransaction(tx, { ...forged, boundaryIdentity: `forged:${key}` });
+          // Keep the red regression isolated even if an invalid request is accepted.
+          throw new Error("test expected forged readiness refusal");
+        }), { code: "PACK_INPUT_INVALID" });
+        assert.equal(await client.pack_build_requests.count(), 0);
+        assert.equal(await client.pack_publication_heads.count(), 0);
+      }
+    });
     await suite.test("planning crash before/after enqueue or checkpoint never loses a boundary", async () => {
       for (const failure of ["pack_build_requests.create", "pack_publication_change_receipts.create", "pack_publication_scopes.update"]) {
         const broken = new ProviderPackImpactRepository(new ProviderPackPublicationContext(faultClient(client, failure), scope), capture);
@@ -272,6 +300,15 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       await assert.rejects(snapshots.sealAndEnqueueActivation(claim, { snapshot, descriptor, batches }), { code: "PACK_INPUT_INVALID" });
       assert.equal(await client.pack_snapshot_artifacts.count(), before);
       assert.equal(await snapshots.findActivationForRequest(claim.workId), null);
+    });
+    await suite.test("the greatest valid shared sequence is durably acknowledged and replayable", async () => {
+      const delivery: SharedProviderChangeDelivery = { ...scope, centralChangeIdentity: "boundary:max-int64",
+        providerChangeSequence: "9223372036854775807", sharedDependencies: [], payloadSha256: "a".repeat(64),
+        leaseIdentity: randomUUID(), acknowledgmentIdentity: null };
+      const result = await planner.plan({ kind: "shared", delivery });
+      assert.equal(result?.complete, true); assert.ok(result?.acknowledgmentDigest);
+      assert.equal((await planner.plan({ kind: "shared", delivery }))?.acknowledgmentDigest, result?.acknowledgmentDigest);
+      assert.equal((await client.pack_publication_scopes.findUniqueOrThrow({ where: { provider_id: scope.providerId } })).shared_change_sequence, 9223372036854775807n);
     });
   } finally { await Promise.all([first.close(), second.close()]); }
 });

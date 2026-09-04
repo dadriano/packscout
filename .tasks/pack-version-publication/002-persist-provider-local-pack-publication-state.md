@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** blocked
+**Status:** in_progress
 
 ## Start Here
 
@@ -99,6 +99,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 ### Persistence and isolation
 
 - [x] Planning and local sequence allocation commit together before provider or shared-delivery progress advances.
+- [x] Captured-input digests are recomputed at admission, and shared identities/sequences are validated against their actual database representations before planning.
 - [x] Sealing and activation enqueue either commit together or leave the fenced build request safely retryable.
 - [x] Sealing recomputes the canonical economics digest and rejects a coherently rehashed artifact with forged economics evidence before any writes.
 - [x] Same-pack claims serialize while two unrelated packs can be claimed concurrently.
@@ -118,6 +119,14 @@ There is no direct user-facing change. The resulting state machine ensures that 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
 
 ## Implementation and Spec Compliance
+
+### Additional review corrections — 2026-09-03
+
+Discussions `3929802770`, `3929802774`, and `3929904797` are covered by red/green regressions. UUID-resolved shared category/collectible/valuation identities now use the native UUID contract (including lowercase normalization), while named policy/profile dependencies retain their text identity. The shared-delivery sequence alone is constrained to positive signed-64-bit range, matching the provider persistence columns; the general V1 sequence grammar is unchanged. Malformed values return validation failures rather than conversion exceptions. Planning converts these refusals to `PACK_INPUT_INVALID` before transaction/progress writes.
+
+`deriveProviderPackInputDigests` is the one pure V1 definition used by readiness and durable admission. Admission recomputes desired-state, contents, probability, valuation, and EV-input hashes from the captured bytes before allocating a request, instead of trusting a caller's declared evidence. This does not calculate EV or change canonical snapshot bytes. Tests refuse each forged digest with no head/request writes and prove that the maximum valid shared sequence is acknowledged and replayable.
+
+The combined P01 contract, shared-boundary, readiness, and PostgreSQL matrix passes 50 checks with zero skips; affected contract/database/service lint and typechecks plus the standards ratchet pass. The audit endpoint subsequently responded successfully and a fresh full `npm run verify:framework` is in progress. Task completion and merge approval are still pending that full result and current PR96 CI. The older blocker/evidence records below remain historical, not current approval.
 
 ### Current merge blocker — 2026-09-03
 

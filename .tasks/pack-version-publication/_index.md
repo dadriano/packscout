@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 and PR95 corrections are pushed, but merge is blocked: npm audit failed locally and in PR96 CI, and the existing maximum-volume database test timed out locally. Restore the unchanged gates before merging PR96 then PR95. P03 remains a separate preserved child; no publication processor is enabled.
+PR96 test fixes are pushed; PR95 now also corrects shared-input representations and captured-input digest validation. All 50 focused/contract checks pass. The audit endpoint has recovered for a fresh full local gate, and PR96 CI is being retried. Do not merge until those gates pass; order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | blocked |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -152,6 +152,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Verified implementation:** `994ea17cf91e8248c98da6921cd7e6debe0845ea`; includes all three review corrections. The focused 32-check matrix and full `npm run verify:framework` gate passed on this parent.
 - **Delivery gate:** PR96's runtime fix landed through PR98; its regression and CI-fixture corrections are pushed. PR95's economics correction is pushed in `2ab594fef399495793cba9bb7127b98ef593c8a3`, with its review reply posted. Prior full-gate evidence above is historical. Both PRs remain unmerged; merge PR96 before restacking/retargeting P02 onto main.
 - **Current correction evidence:** The coherently forged economics artifact fails closed; all 33 readiness/persistence checks, database/service lint and typechecks, docs, and zero-finding standards ratchet pass on the current parent. Local and PR96 CI full verification failed at npm audit; supplemental local verification also hit the unchanged maximum-volume database test's 30-second transaction limit, reproduced in isolation. No gate was weakened. See task 002 for the exact resume sequence.
+- **Latest follow-up:** Shared UUID/sequence representation and captured-input digest review regressions now pass in a 50-check combined suite. The audit has succeeded in a fresh full local verifier; its remaining lanes and PR96 CI rerun are in progress. These later results supersede only the resolved review gaps, not the still-pending full-gate certification.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -251,7 +252,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | blocked | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |

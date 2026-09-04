@@ -1,6 +1,6 @@
 import {
-  PACK_SNAPSHOT_HASH_DOMAIN, assertPublicPackCatalogBytes, compareCanonicalStrings,
-  hashPackCatalogValue, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
+  assertPublicPackCatalogBytes, compareCanonicalStrings, deriveProviderPackInputDigests,
+  packCatalogCanonicalByteCount, packCatalogCanonicalJson,
   packCatalogTimestampSchema, packPublicationLimits, providerPackBuildInputsSchema, preservesPackLifecycleBaseline,
   publicPackContentSchema, publicPackSnapshotSchema,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackSnapshot,
@@ -24,15 +24,9 @@ export class ProviderPackReadinessEvaluator {
     if (packCatalogCanonicalByteCount(inputs) > packPublicationLimits.maximumInputBytes) {
       throw new TypeError("pack.inputs_too_large");
     }
-    const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
-    const probabilityInputsSha256 = await hash(inputs.contents.map(({ publicCollectibleId, probabilityMicros }) => ({ publicCollectibleId, probabilityMicros })));
-    const valuationInputsSha256 = await hash(inputs.contents.map(({ publicCollectibleId, valuation }) => ({ publicCollectibleId, valuation })));
-    const evInputsSha256 = await hash({ price: inputs.price, probabilityInputsSha256,
-      valuationsSha256: valuationInputsSha256, evMethodIdentity: inputs.evMethodIdentity, evPolicyIdentity: inputs.evPolicyIdentity });
     const readiness: ProviderPackReadiness = {
       outcome: "ready", reasonCode: null,
-      desiredStateSha256: await hash(inputs), contentsSha256: await hash(inputs.contents),
-      probabilityInputsSha256, valuationInputsSha256, evInputsSha256,
+      ...await deriveProviderPackInputDigests(inputs),
       requiredProfileSnapshotIds: [...new Set([inputs.providerProfileSnapshotId,
         ...inputs.contents.map(row => row.collectibleProfileSnapshotId)].filter((id): id is string => id !== null))].sort(compareCanonicalStrings),
     };
@@ -64,7 +58,7 @@ export class ProviderPackReadinessEvaluator {
       return result("waiting", "EV_INPUTS_PENDING");
     }
     if (inputs.evFailure === "technical") return result("waiting", "EV_TECHNICAL_RETRY");
-    if (!inputs.ev || inputs.evFailure === "pending" || inputs.evInputsSha256 !== evInputsSha256 ||
+    if (!inputs.ev || inputs.evFailure === "pending" || inputs.evInputsSha256 !== readiness.evInputsSha256 ||
       Date.parse(inputs.ev.evaluatedAt) > now || Date.parse(inputs.ev.validUntil) <= now) {
       return result("waiting", "EV_INPUTS_PENDING");
     }

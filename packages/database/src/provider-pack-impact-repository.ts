@@ -38,7 +38,12 @@ export class ProviderPackImpactRepository {
   }
   async plan(input: { kind: "provider" } | { kind: "shared"; delivery: SharedProviderChangeDelivery }): Promise<PackImpactResult | null> {
     packInvariant(["provider", "shared"].includes(input.kind), "PACK_INPUT_INVALID");
-    const delivery = input.kind === "shared" ? sharedProviderChangeDeliverySchema.parse(input.delivery) : null;
+    let delivery: SharedProviderChangeDelivery | null = null;
+    if (input.kind === "shared") {
+      const parsed = sharedProviderChangeDeliverySchema.safeParse(input.delivery);
+      packInvariant(parsed.success, "PACK_INPUT_INVALID");
+      delivery = parsed.data;
+    }
     if (delivery) packInvariant(delivery.organizationId === this.context.scope.organizationId && delivery.providerId === this.context.scope.providerId, "PACK_SCOPE_MISMATCH");
     return this.context.transaction(async tx => {
       await tx.$queryRaw`SELECT provider_id FROM pack_publication_scopes WHERE provider_id = ${this.context.scope.providerId}::uuid FOR UPDATE`;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
 import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
@@ -67,6 +67,18 @@ export const packPublicationLimits = Object.freeze({
 export type ProviderPackBuildInputs = z.infer<typeof providerPackBuildInputsSchema>;
 export type ProviderPackReadiness = z.infer<typeof providerPackReadinessSchema>;
 export type PackPublicationScope = z.infer<typeof packPublicationScopeSchema>;
+
+/** Derive evidence from captured bytes, never from a caller's declared digests.
+ * Readiness evaluation and durable admission share this V1 hash definition. */
+export async function deriveProviderPackInputDigests(inputs: ProviderPackBuildInputs) {
+  const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
+  const probabilityInputsSha256 = await hash(inputs.contents.map(({ publicCollectibleId, probabilityMicros }) => ({ publicCollectibleId, probabilityMicros })));
+  const valuationInputsSha256 = await hash(inputs.contents.map(({ publicCollectibleId, valuation }) => ({ publicCollectibleId, valuation })));
+  return { desiredStateSha256: await hash(inputs), contentsSha256: await hash(inputs.contents),
+    probabilityInputsSha256, valuationInputsSha256,
+    evInputsSha256: await hash({ price: inputs.price, probabilityInputsSha256, valuationsSha256: valuationInputsSha256,
+      evMethodIdentity: inputs.evMethodIdentity, evPolicyIdentity: inputs.evPolicyIdentity }) };
+}
 
 /** Lifecycle revisions may change availability/provenance and action eligibility,
  * never the baseline's metadata, profiles, display or numeric economics. */
