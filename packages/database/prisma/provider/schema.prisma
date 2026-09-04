@@ -1016,7 +1016,6 @@ model pack_build_requests {
   head pack_publication_heads @relation(fields: [organization_id, provider_id, public_repack_id], references: [organization_id, provider_id, public_repack_id], onDelete: NoAction, onUpdate: NoAction)
   activation pack_activation_intents?
   @@unique([organization_id, provider_id, public_repack_id, id])
-  @@unique([public_repack_id, desired_state_sha256, expected_publication_epoch], map: "pack_build_requests_desired_epoch_key")
   @@unique([public_repack_id, pack_publication_sequence])
   @@index([state, available_at, public_repack_id, pack_publication_sequence], map: "pack_build_requests_claim_idx")
 }

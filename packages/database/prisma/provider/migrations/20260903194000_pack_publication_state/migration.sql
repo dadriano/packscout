@@ -43,7 +43,6 @@ CREATE TABLE pack_build_requests (
   available_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (organization_id, provider_id, public_repack_id) REFERENCES pack_publication_heads(organization_id, provider_id, public_repack_id),
   UNIQUE (organization_id, provider_id, public_repack_id, id),
-  CONSTRAINT pack_build_requests_desired_epoch_key UNIQUE (public_repack_id, desired_state_sha256, expected_publication_epoch),
   UNIQUE (public_repack_id, pack_publication_sequence),
   CHECK (desired_state_sha256 ~ '^[a-f0-9]{64}$'),
   -- Full dependency evidence follows the admitted 16 MB input budget, with

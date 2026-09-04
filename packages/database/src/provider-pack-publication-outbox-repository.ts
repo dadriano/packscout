@@ -116,10 +116,13 @@ export class ProviderPackPublicationOutboxRepository {
         packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId && previous.held === head.held);
         return;
       }
-      // Every pending intent was sealed against the previous mirrored head. Keep
-      // its immutable evidence, but never reacquire that obsolete CAS episode.
+      // Preserve the exact successful episode for lost-receipt reconciliation;
+      // all genuinely conflicting CAS episodes become terminal audit evidence.
       await tx.pack_activation_intents.updateMany({ where: { ...this.context.where, public_repack_id: head.publicRepackId,
-        state: { in: ["waiting", "ready", "publishing", "retry_scheduled"] } },
+        state: { in: ["waiting", "ready", "publishing", "retry_scheduled"] }, NOT: {
+          public_pack_snapshot_id: head.activeSnapshot.publicPackSnapshotId,
+          pack_publication_sequence: BigInt(head.latestAcceptedPackPublicationSequence),
+          intent_json: { path: ["expectedHead", "publicationEpoch"], equals: head.publicationEpoch } } },
         data: { state: "superseded", reason_code: "ACTIVATION_CONFLICT" } });
       // A full build can survive a generation-only change; epoch-bound and
       // lifecycle-baseline-bound captures cannot. Prepared resume work survives.

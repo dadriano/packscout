@@ -122,6 +122,12 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Episode recurrence and receipt reconciliation review — 2026-09-03
+
+Discussions `3930353110` and `3930353122` corrected episode identity and authoritative-head reconciliation. Coalescing now checks only the current latest request and compatible non-superseded episode; historical matching bytes can allocate a new sequence. The unmerged V1 migration no longer globally uniquifies a desired digest/epoch across all history. Existing pack/sequence uniqueness and head locking serialize allocation, and terminal rows remain immutable.
+
+Head observation preserves the exact intent matching the authoritative snapshot, accepted sequence, and epoch so a remote success with a lost local receipt can be reclaimed and completed. Conflicting episodes are still retired. Red/green tests cover A→B→A, current duplicate coalescing, replacement of a superseded latest episode, and remote success followed by observation before receipt persistence; exactly one operation is retained and completed. All 78 combined boundary checks and 30 schema checks pass, plus affected lint/typechecks, docs, and the zero-finding ratchet. Full current-head verification remains pending.
+
 ### Independently verified readiness admission — 2026-09-03
 
 Discussion `3930330107` showed that correct hashes and unchanged captured bytes did not establish a correct evaluator verdict. Pure `deriveProviderPackReadinessDecision` rules now live alongside the V1 capture contract and are shared by the service evaluator and independently executed during database admission using database time. Admission compares both outcome and reason, and checks any lifecycle baseline against the stored active artifact. This avoids a database-to-service dependency or a duplicated rule set. `no_change` still requires a ready decision and an existing represented request in persistence.

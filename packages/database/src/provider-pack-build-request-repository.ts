@@ -84,9 +84,14 @@ export class ProviderPackBuildRequestRepository {
     await tx.$queryRaw`SELECT public_repack_id FROM pack_publication_heads WHERE public_repack_id = ${publicRepackId}::uuid FOR UPDATE`;
     const head = await tx.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: publicRepackId } });
     packInvariant(head.organization_id === this.context.scope.organizationId && head.provider_id === this.context.scope.providerId, "PACK_SCOPE_MISMATCH");
-    const previous = await tx.pack_build_requests.findUnique({ where: { public_repack_id_desired_state_sha256_expected_publication_epoch: {
-      public_repack_id: publicRepackId, desired_state_sha256: input.digest, expected_publication_epoch: head.publication_epoch } } });
-    if (previous) return { publicRepackId, outcome: "no_change", sequence: previous.pack_publication_sequence.toString(), requestId: previous.id };
+    const previous = await tx.pack_build_requests.findUnique({ where: { public_repack_id_pack_publication_sequence: {
+      public_repack_id: publicRepackId, pack_publication_sequence: head.latest_sequence } }, include: { activation: { select: { state: true } } } });
+    // A digest identifies desired bytes, not an eternal episode. A -> B -> A
+    // needs a new sequence; neither superseded work nor its intent is reopened.
+    if (previous?.desired_state_sha256 === input.digest && previous.expected_publication_epoch === head.publication_epoch &&
+      !["superseded", "rolled_back"].includes(previous.state) && !["superseded", "rolled_back"].includes(previous.activation?.state ?? "")) {
+      return { publicRepackId, outcome: "no_change", sequence: previous.pack_publication_sequence.toString(), requestId: previous.id };
+    }
     packInvariant(["ready", "waiting", "blocked"].includes(input.state), "PACK_INPUT_INVALID");
     const [allocation] = await tx.$queryRaw<Array<{ sequence: bigint }>>`SELECT nextval('pack_build_requests_pack_publication_sequence_seq') AS sequence`;
     const sequence = allocation!.sequence.toString();
