@@ -25,13 +25,13 @@ import {
   type PublicProviderHealthV1,
 } from "./public-ev-presentation-v1.ts";
 import {
-  packAvailabilityIsPurchasableV3,
   packScoutEvProjectionsAreByteEquivalentV3,
   publicRepackDetailDisplayedV3Schema,
   publicRepackSummaryDisplayedV3Schema,
   type PublicRepackDetailDisplayedV3,
   type PublicRepackSummaryDisplayedV3,
 } from "./data-release-v3-entities.ts";
+import { rankableDisplayedEvDollarsV3 } from "./vendor-reported-gross-ev-v3.ts";
 
 export * from "./data-release-v3-ev-estimates.ts";
 export * from "./data-release-v3-entities.ts";
@@ -143,6 +143,33 @@ function validateSelectedRepackV3(
   }
 }
 
+function validateSelectedOpportunityV3(
+  selectedRepack: PublicRepackViewDetailV3 | null,
+  details: readonly PublicRepackViewDetailV3[],
+  context: z.RefinementCtx,
+): void {
+  validateSelectedRepackV3(selectedRepack, details, context);
+  if (selectedRepack?.evEstimates.packScout.status !== "unavailable") return;
+  // Source-derived economics depend on price, buyback, and vendor identity
+  // outside evEstimates. Bind the inspector to the same complete projection.
+  const matching = details.find(
+    ({ publicRepackId }) => publicRepackId === selectedRepack.publicRepackId,
+  );
+  if (matching === undefined) return;
+  // Refinements also run for recoverably invalid child fields. Do not call a
+  // throwing projection parser on such a selection inside safeParse's path.
+  const selectedSummary = publicRepackViewSummaryV3Schema.safeParse(Object.fromEntries(
+    Object.entries(selectedRepack).filter(([key]) => key !== "description" && key !== "actions"),
+  ));
+  if (!selectedSummary.success || !summaryMatchesDetailV3(selectedSummary.data, matching)) {
+    context.addIssue({
+      code: "custom",
+      path: ["selectedRepack"],
+      message: "data_release_v3.selected_item_divergence",
+    });
+  }
+}
+
 export const publicShellStatusV3Schema = z
   .object({
     release: dataReleaseV3IdentitySchema,
@@ -236,7 +263,8 @@ function validateResponsePresentationClockV3(
 /**
  * The dashboard opportunity projection. Opportunities carry the byte-
  * equivalent PackScout projection of their details, admit only purchasable
- * repacks with a last validated estimate, and rank by signed EV dollars.
+ * repacks with independent or supported source-derived EV, and rank by the
+ * displayed signed EV dollars without rewriting independent evidence.
  */
 export const publicDashboardBundleV3Schema = z
   .object({
@@ -258,15 +286,8 @@ export const publicDashboardBundleV3Schema = z
       context,
     );
     bundle.opportunities.forEach((repack, index) => {
-      // The listing must still be purchasable. A validated last-known
-      // estimate remains eligible even after its confidence reaches zero.
-      if (
-        !packAvailabilityIsPurchasableV3(repack.availability) ||
-        (repack.evEstimates.packScout.status !== "current" &&
-          repack.evEstimates.packScout.status !== "last_known") ||
-        (repack.evEstimates.packScout.status === "last_known" &&
-          repack.evEstimates.packScout.historicalSoldOutAt !== null)
-      ) {
+      const evDollars = rankableDisplayedEvDollarsV3(repack);
+      if (evDollars === null) {
         context.addIssue({
           code: "custom",
           path: ["opportunities", index],
@@ -274,14 +295,13 @@ export const publicDashboardBundleV3Schema = z
         });
       }
       const previous = bundle.opportunities[index - 1];
+      const previousEvDollars = previous === undefined
+        ? null : rankableDisplayedEvDollarsV3(previous);
       if (
         previous !== undefined &&
-        previous.evEstimates.packScout.status !== "unavailable" &&
-        repack.evEstimates.packScout.status !== "unavailable" &&
-        (previous.evEstimates.packScout.metrics.evDollars.minorUnits <
-          repack.evEstimates.packScout.metrics.evDollars.minorUnits ||
-          (previous.evEstimates.packScout.metrics.evDollars.minorUnits ===
-            repack.evEstimates.packScout.metrics.evDollars.minorUnits &&
+        previousEvDollars !== null && evDollars !== null &&
+        (previousEvDollars < evDollars ||
+          (previousEvDollars === evDollars &&
             previous.publicRepackId >= repack.publicRepackId))
       ) {
         context.addIssue({
@@ -298,7 +318,7 @@ export const publicDashboardBundleV3Schema = z
         message: "data_release_v3.selection_mismatch",
       });
     }
-    validateSelectedRepackV3(bundle.selectedRepack, bundle.details, context);
+    validateSelectedOpportunityV3(bundle.selectedRepack, bundle.details, context);
   });
 
 export const desiredChasePageMatchV3Schema = z

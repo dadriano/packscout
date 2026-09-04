@@ -135,10 +135,15 @@ function OpportunityRow({
         <MetricCell metric={row.packPrice} />
       </td>
       <td>
-        <MetricCell metric={row.packScoutEv.evDollars} />
+        <MetricCell metric={row.displayedEv.evDollars} />
+        {row.displayedEv.sourceNote ? (
+          <span className={styles.sourceLabel} title={row.displayedEv.sourceNote}>
+            {row.displayedEv.sourceLabel}
+          </span>
+        ) : null}
       </td>
       <td>
-        <MetricCell metric={row.packScoutEv.evPercent} />
+        <MetricCell metric={row.displayedEv.evPercent} />
       </td>
       <td>
         <CatalogConfidenceEvidence
