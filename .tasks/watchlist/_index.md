@@ -93,7 +93,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Size exception:** none
 - **Branch:** `codex/watchlist-p01-chased-repacks`
 - **Verified parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (`origin/main`)
-- **Verified implementation:** `2f495c1fd9052b411a1f265e3863df52fb605418`
+- **Verified implementation:** `d341b26c5311dabd59c01c6fd8bf03ebfff3aacb`
 - **PR:** https://github.com/dadriano/packscout/pull/103 (merged as `a63d98a9`); follow-up https://github.com/dadriano/packscout/pull/106
 
 #### P02 — Watchlist page and lists
