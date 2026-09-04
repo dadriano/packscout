@@ -85,6 +85,8 @@ import {
   resolvePublicCategories,
   summarizePlan,
 } from "./promote-provider-data-release-v3-plan.mjs";
+import { readProviderPackContents, projectProviderPackContents, mergePromotedCollectibles,
+  type ProviderContentSnapshot } from "./provider-pack-content-promotion.mts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -298,6 +300,7 @@ interface ProviderSnapshot {
   readonly packs: readonly Record<string, unknown>[];
   readonly categories: readonly Record<string, unknown>[];
   readonly collectibleTypes: readonly string[];
+  readonly contents: ProviderContentSnapshot;
 }
 
 async function readProviderSnapshot(
@@ -322,8 +325,9 @@ async function readProviderSnapshot(
     await client.query("set default_transaction_read_only = on").catch((error: unknown) =>
       databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} read-only session`, error),
     );
+    await client.query("begin isolation level repeatable read read only");
     const packs = await client.query(
-      `select id, pack_key, display_name, description, pack_format, availability,
+      `select id, row_version::text, pack_key, display_name, description, pack_format, availability,
               content_evidence, lifecycle, category_id,
               price_amount::text, price_currency, price_usd_amount::text,
               buyback_rate::text, vendor_ev_amount::text, vendor_ev_currency,
@@ -348,11 +352,16 @@ async function readProviderSnapshot(
     ).catch((error: unknown) =>
       databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectible types`, error),
     );
+    const contents = await readProviderPackContents(client, packs.rows.map(row => String(row.id))).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} pack contents`, error),
+    );
+    await client.query("commit");
     return {
       platform: access.platform,
       packs: packs.rows,
       categories: categories.rows,
       collectibleTypes: types.rows.map((row) => String(row.collectible_type)),
+      contents,
     };
   } finally {
     await client.end();
@@ -596,6 +605,8 @@ async function main(): Promise<void> {
     identity,
   });
   const repacks = [...(carried?.repacks ?? [])];
+  const chases = [...(carried?.chases ?? [])];
+  let collectibles = [...(carried?.collectibles ?? [])];
   const skipped: unknown[] = [];
   for (const snapshot of snapshots) {
     const projected = projectProviderPacks({
@@ -608,7 +619,15 @@ async function main(): Promise<void> {
       identity,
       includePriceless: options.includePriceless,
     });
-    repacks.push(...projected.repacks);
+    const contents = projectProviderPackContents({
+      providerId: snapshot.platform.providerId, platformKey: snapshot.platform.platformKey, readAt,
+      publicAssetOrigins: (environment.PACKSCOUT_PUBLIC_IMAGE_ORIGINS ?? "").split(",").map(value => value.trim()).filter(Boolean),
+      packs: snapshot.packs as { id: string; pack_key: string; row_version: string }[],
+      repacks: projected.repacks, identity, contents: snapshot.contents,
+    });
+    repacks.push(...contents.repacks);
+    chases.push(...contents.repackChases);
+    collectibles = mergePromotedCollectibles(collectibles, contents.collectibles);
     skipped.push(
       ...projected.skipped.map((entry: { packKey: string; reason: string }) => ({
         platformKey: snapshot.platform.platformKey,
@@ -623,9 +642,9 @@ async function main(): Promise<void> {
     {
       readAt,
       categories: resolved.categories,
-      collectibles: carried?.collectibles ?? [],
+      collectibles,
       repacks,
-      chases: carried?.chases ?? [],
+      chases,
     },
     {
       sha256CanonicalJson,

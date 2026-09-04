@@ -18,7 +18,7 @@ import {
   publicHttpsOriginSchema,
   publicHttpsUrlSchema,
   publicImageSchema,
-  publicMoneySchema,
+  publicReportedMoneySchema,
   publicPriceSchema,
   publicPromoSchema,
   publicReferralParameterSchema,
@@ -143,7 +143,7 @@ export function buildPublicCollectibleSearchText(
 
 export const publicCollectibleValuationSchema = z
   .object({
-    displayMoney: publicMoneySchema.nullable(),
+    displayMoney: publicReportedMoneySchema.nullable(),
     usdComparison: publicAvailableValueSchema(
       publicUsdMoneySchema,
       z.enum(["VALUATION_UNAVAILABLE", "CURRENCY_UNSUPPORTED"]),

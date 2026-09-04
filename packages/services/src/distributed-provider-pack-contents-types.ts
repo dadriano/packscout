@@ -59,18 +59,18 @@ export interface DistributedProviderPackContentRow {
   readonly displayOrder: number;
 }
 
-export interface DistributedProviderContentPack {
+export interface DistributedProviderContentPack<TDetail = PublicRepackDetail> {
   readonly id: string;
   readonly rowVersion: bigint;
   readonly packKey: string;
-  readonly detail: PublicRepackDetail;
+  readonly detail: TDetail;
   /** Derived from the retained inventory snapshot, independently of EV evidence. */
   readonly evidenceCompleteness: "complete" | "partial" | "unknown";
 }
 
-export interface DistributedProviderPackContentsProjection {
+export interface DistributedProviderPackContentsProjection<TDetail = PublicRepackDetail> {
   readonly collectibles: readonly PublicCollectible[];
-  readonly repacks: readonly PublicRepackDetail[];
+  readonly repacks: readonly TDetail[];
   readonly repackChases: readonly PublicRepackChase[];
   readonly collectibleMappings: readonly ApprovedPublicCollectibleMapping[];
   readonly dataAsOf: Date;

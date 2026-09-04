@@ -8,9 +8,11 @@ import {
   publicHttpsOriginSchema,
   publicRepackChaseSchema,
   publicRepackDetailSchema,
+  publicRepackDetailV3Schema,
   type ApprovedPublicCollectibleMapping,
   type PublicCollectible,
   type PublicRepackChase,
+  type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import {
   DistributedProviderPackContentsError,
@@ -70,7 +72,7 @@ function valuation(row: DistributedProviderCollectibleRow, ceiling: number): Pub
       row.valuationType === null || row.valuationObservedAt === null) {
     return refuse("DISTRIBUTED_CONTENT_VALUE_INVALID");
   }
-  const displayMoney = row.valuationAmount !== null && /^[A-Z]{3}$/u.test(row.valuationCurrency!)
+  const displayMoney = row.valuationAmount !== null && /^[A-Z0-9]{2,12}$/u.test(row.valuationCurrency!)
     ? { minorUnits: scaled(row.valuationAmount, 2), currency: row.valuationCurrency! } : null;
   const usdComparison = row.valuationUsdAmount === null
     ? {
@@ -150,7 +152,25 @@ export function projectProvisionalProviderPackContentsV1(input: {
     return project(input, (row) => ({
       publicCollectibleId: provisionalCollectiblePublicId({ providerId: input.providerId, localCollectibleId: row.id }),
       publicCategoryIds: [],
-    }));
+    }), publicRepackDetailSchema.parse);
+  } catch (error) {
+    if (error instanceof DistributedProviderPackContentsError) throw error;
+    return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
+  }
+}
+
+/** The same membership projection, validated against the V3 economics contract. */
+export function projectProvisionalProviderPackContentsV3(input:
+  Omit<Parameters<typeof projectProvisionalProviderPackContentsV1>[0], "packs"> & {
+    readonly packs: readonly DistributedProviderContentPack<PublicRepackDetailV3>[];
+  },
+): DistributedProviderPackContentsProjection<PublicRepackDetailV3> {
+  try {
+    if (input.identityPolicy !== "provider_provisional_v1") return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
+    return project(input, row => ({
+      publicCollectibleId: provisionalCollectiblePublicId({ providerId: input.providerId, localCollectibleId: row.id }),
+      publicCategoryIds: [],
+    }), publicRepackDetailV3Schema.parse, undefined, true);
   } catch (error) {
     if (error instanceof DistributedProviderPackContentsError) throw error;
     return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
@@ -180,17 +200,22 @@ export function projectApprovedProviderPackContentsV1(input:
       const mapping = mappings.get(row.collectibleKey);
       if (mapping === undefined || mapping.collectibleType !== row.collectibleType) return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
       return mapping;
-    }, mappings);
+    }, publicRepackDetailSchema.parse, mappings);
   } catch (error) {
     if (error instanceof DistributedProviderPackContentsError) throw error;
     return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
   }
 }
 
-function project(input: Omit<Parameters<typeof projectProvisionalProviderPackContentsV1>[0], "identityPolicy">,
+function project<TDetail extends { publicRepackId: string; categories: readonly unknown[]; sourceUpdatedAt: string }>(
+  input: Omit<Parameters<typeof projectProvisionalProviderPackContentsV1>[0], "identityPolicy" | "packs"> & {
+    readonly packs: readonly DistributedProviderContentPack<TDetail>[];
+  },
   identity: (row: DistributedProviderCollectibleRow) => Pick<PublicCollectible, "publicCollectibleId" | "publicCategoryIds">,
+  parseDetail: (value: unknown) => TDetail,
   approvedMappings?: ReadonlyMap<string, ApprovedPublicCollectibleMapping>,
-): DistributedProviderPackContentsProjection {
+  compareSourceMoney = false,
+): DistributedProviderPackContentsProjection<TDetail> {
   if (!UUID.test(input.providerId) || input.packs.length === 0) {
     return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
   }
@@ -253,8 +278,16 @@ function project(input: Omit<Parameters<typeof projectProvisionalProviderPackCon
     observed(new Date(pack.detail.sourceUpdatedAt), ceiling);
     const contents = contentsByPack.get(pack.id) ?? [];
     const candidates = contents.filter((row) => row.contentRole !== "other" && row.availableQuantity !== 0n);
+    const valuations = candidates.map(row => byLocalId.get(row.collectibleId)!.valuation);
+    const commonCurrency = new Set(valuations.map(value => value?.displayMoney?.currency)).size === 1
+      ? valuations[0]?.displayMoney?.currency : undefined;
+    const useSourceMoney = compareSourceMoney && commonCurrency !== undefined && valuations.some(value => value?.usdComparison.status !== "available");
     const value = (row: typeof candidates[number]) => {
-      const comparison = byLocalId.get(row.collectibleId)!.valuation?.usdComparison;
+      const valuation = byLocalId.get(row.collectibleId)!.valuation;
+      // Comparing like-denominated vendor values needs no USD conversion. The
+      // public USD comparison remains unavailable for cross-pack sorting.
+      if (useSourceMoney) return valuation?.displayMoney?.minorUnits ?? -1;
+      const comparison = valuation?.usdComparison;
       return comparison?.status === "available" ? comparison.value.minorUnits : -1;
     };
     candidates.sort((left, right) => value(right) - value(left) || compare(
@@ -277,7 +310,7 @@ function project(input: Omit<Parameters<typeof projectProvisionalProviderPackCon
     });
     repackChases.push(...chases);
     const collectibleTypes = [...new Set(contents.map(({ collectibleId }) => byLocalId.get(collectibleId)!.collectibleType))].sort(compare);
-    return publicRepackDetailSchema.parse({
+    return parseDetail({
       ...pack.detail,
       contentMode: collectibleTypes.length > 1 ? "mixed" : collectibleTypes.length === 1 ? "focused" : "unknown",
       collectibleTypes,
