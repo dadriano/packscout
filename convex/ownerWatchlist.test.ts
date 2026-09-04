@@ -27,7 +27,12 @@ import {
   stageRetentionRelease,
   unavailableRetentionDetail,
 } from "./dataReleaseV3Retention.test-support";
-import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
+import { MAX_DATA_RELEASE_V3_REPACKS } from "./dataReleaseV3Search";
+import {
+  MAX_SAVED_ITEMS_PER_KIND,
+  WATCHLIST_CATALOG_REPACK_PROOF_BATCH,
+  WATCHLIST_CHASE_VALIDATION_BATCH,
+} from "./savedItems";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -183,6 +188,13 @@ afterEach(() => {
 });
 
 describe("owner watchlist read", () => {
+  test("shares one catalog pack proof across saved collectibles", () => {
+    expect(WATCHLIST_CHASE_VALIDATION_BATCH).toBeGreaterThan(1);
+    expect(WATCHLIST_CATALOG_REPACK_PROOF_BATCH).toBeGreaterThanOrEqual(
+      MAX_DATA_RELEASE_V3_REPACKS,
+    );
+  });
+
   test("refuses unauthenticated and invalid-identity callers without a payload", async () => {
     const t = createTest();
     await seed(t);
