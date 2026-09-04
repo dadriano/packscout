@@ -76,6 +76,7 @@ test("Pack publication preserves captured authority and maximum dependency evide
         ["technical EV", inputs => { inputs.evFailure = "technical"; }],
         ["invalid EV", inputs => { inputs.evFailure = "invalid_domain"; }],
         ["duplicate actions", inputs => { inputs.actions.push({ ...inputs.actions[0]! }); }],
+        ["search projection", inputs => { inputs.aliases = Array.from({ length: 10 }, (_, index) => `${index}${"a".repeat(119)}`); }],
       ];
       const guardedClient = client.$extends({ query: { pack_publication_change_receipts: { async create() {
         throw new Error("rollback unexpected forged readiness acceptance");

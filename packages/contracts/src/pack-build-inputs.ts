@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, normalizePackCatalogSearchText, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
 import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicPackSnapshotSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
@@ -113,6 +113,11 @@ export async function deriveProviderPackReadinessDecision(inputs: ProviderPackBu
     inputs.contents.reduce((total, row) => total + row.probabilityMicros, 0) !== 1_000_000) return result("blocked", "INVALID_PROBABILITIES");
   if (!inputs.providerProfileSnapshotId || inputs.contents.some(row => !row.collectibleProfileSnapshotId)) return result("waiting", "PROFILE_HEAD_MISSING");
   if (inputs.contents.some(row => !publicPackContentSchema.safeParse(row).success)) return result("blocked", "INVALID_DOMAIN_DATA");
+  // Complete projections must fit the public contract; never truncate captured members.
+  if (!publicPackSearchProjectionSchema.safeParse({ publicRepackId: inputs.publicRepackId, aliases: inputs.aliases,
+    normalizedText: normalizePackCatalogSearchText([inputs.title, ...inputs.contents.map(row => row.displayName), ...inputs.aliases].join(" ")),
+    categoryIds: [...new Set([inputs.category.publicCategoryId, ...inputs.contents.map(row => row.category.publicCategoryId)])].sort(compareCanonicalStrings),
+  }).success) return result("blocked", "INVALID_DOMAIN_DATA");
   // These identities become canonical-unique arrays in the sealed payload.
   const profileIds = inputs.contents.map(row => row.collectibleProfileSnapshotId);
   const valuationIds = inputs.contents.filter(row => row.eligibleForChase).map(row => row.valuation.valuationIdentity);

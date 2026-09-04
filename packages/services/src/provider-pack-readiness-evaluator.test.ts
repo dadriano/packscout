@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ProviderPackBuildInputs } from "@packscout/contracts";
+import { deriveProviderPackInputDigests, normalizePackCatalogSearchText, type ProviderPackBuildInputs } from "@packscout/contracts";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
 
@@ -78,6 +78,36 @@ test("Provider-local planning and persistence crash matrix: deterministic readin
     assert.equal((await evaluate({ ...inputs, aliases: ["a".repeat(120)] })).readiness.outcome, "ready");
     for (const aliases of [["a".repeat(121)], ["same", "same"], ["same", " same "]]) {
       await assert.rejects(evaluate({ ...inputs, aliases }));
+    }
+  });
+  await context.test("complete search text must fit without dropping members or aliases", async () => {
+    for (const [lastAliasLength, outcome] of [[106, "ready"], [107, "blocked"]] as const) {
+      const candidate = structuredClone(inputs);
+      candidate.title = "t".repeat(200);
+      candidate.contents.forEach(row => { row.displayName = "m".repeat(200); });
+      candidate.aliases = ["a".repeat(104), "b".repeat(104), "c".repeat(104), "d".repeat(lastAliasLength)];
+      assert.equal(normalizePackCatalogSearchText([candidate.title, ...candidate.contents.map(row => row.displayName),
+        ...candidate.aliases].join(" ")).length, lastAliasLength === 106 ? 1_024 : 1_025);
+      const result = await evaluate(candidate);
+      assert.equal(result.readiness.outcome, outcome);
+      assert.equal(result.readiness.reasonCode, outcome === "ready" ? null : "INVALID_DOMAIN_DATA");
+    }
+  });
+  await context.test("aggregate member search limits include the pack category", async () => {
+    for (const [count, longNames, outcome] of [[6, true, "blocked"], [99, false, "ready"], [100, false, "blocked"]] as const) {
+      const candidate = structuredClone(inputs);
+      candidate.title = "pack"; candidate.aliases = [];
+      candidate.contents = Array.from({ length: count }, (_, index) => ({ ...structuredClone(inputs.contents[0]!),
+        publicCollectibleId: `00000000-0000-4000-8000-${(index + 1).toString().padStart(12, "0")}`,
+        collectibleProfileSnapshotId: `ppfs_${(index + 1).toString(16).padStart(64, "0")}`,
+        displayName: longNames ? "m".repeat(200) : "m", eligibleForChase: false,
+        category: { ...inputs.category, publicCategoryId: `00000000-0000-4000-9000-${(index + 1).toString().padStart(12, "0")}` },
+        probabilityMicros: Math.floor(1_000_000 / count) + (index === 0 ? 1_000_000 % count : 0),
+      }));
+      candidate.evInputsSha256 = (await deriveProviderPackInputDigests(candidate)).evInputsSha256;
+      const result = await evaluate(candidate);
+      assert.equal(result.readiness.outcome, outcome, `${count} members, long names: ${longNames}`);
+      assert.equal(result.readiness.reasonCode, outcome === "ready" ? null : "INVALID_DOMAIN_DATA");
     }
   });
   await context.test("unknown protected fields and credential-bearing URLs cannot be captured", async () => {
