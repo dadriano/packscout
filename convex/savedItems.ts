@@ -95,7 +95,7 @@ const collectibleTypeValidator = v.union(
   v.literal("memorabilia"),
   v.literal("other"),
 );
-const estimatedEvValidator = v.object({
+const displayedEvValidator = v.object({
   evDollarsMinorUnits: v.number(),
   grossReturnBasisPoints: v.number(),
   confidenceBand: v.union(
@@ -123,7 +123,7 @@ const ownerWatchlistRepackValidator = v.object({
       name: v.string(),
       vendorDisplayName: v.string(),
       availability: publicPackAvailabilityValidator,
-      estimatedEv: v.union(v.null(), estimatedEvValidator),
+      displayedEv: v.union(v.null(), displayedEvValidator),
       primaryImage: nullableImageValidator,
     }),
   ),
@@ -516,7 +516,7 @@ function newestSavedFirst<TRow>(
   );
 }
 
-function displayWatchlistEstimatedEv(
+function displayWatchlistDisplayedEv(
   estimate: PackScoutDisplayedEvV3 | undefined,
 ) {
   if (
@@ -541,7 +541,7 @@ function displayWatchlistRepack(
     name: detail.name,
     vendorDisplayName: detail.vendorDisplayName,
     availability: normalizeLegacyPackAvailability(detail.availability),
-    estimatedEv: displayWatchlistEstimatedEv(
+    displayedEv: displayWatchlistDisplayedEv(
       catalog.legacyEvSnapshot
         ? detail.evEstimates.packScout
         : catalog.evByPublicId.get(detail.publicRepackId),

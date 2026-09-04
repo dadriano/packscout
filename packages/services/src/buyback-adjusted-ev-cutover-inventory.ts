@@ -90,6 +90,7 @@ export const PACKSCOUT_BUYBACK_EV_V3_SURFACE_PREFIXES_V1 = Object.freeze([
   "packages/services/src/providers/buyback-ev-evidence.ts",
   "convex/dataReleaseV3",
   "convex/publicRepacksV3",
+  "convex/savedItems.ts",
 ] as const);
 
 /**

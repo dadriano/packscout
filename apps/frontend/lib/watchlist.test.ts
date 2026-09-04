@@ -238,7 +238,7 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
       name: "Prism Break",
       vendorDisplayName: "Clutch",
       availability: "sold_out",
-      estimatedEv: {
+      displayedEv: {
         evDollarsMinorUnits: 1250,
         grossReturnBasisPoints: 11_250,
         confidenceBand: "medium",
@@ -252,6 +252,7 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
   assert.equal(resolved.title, "Prism Break");
   assert.match(resolved.detail ?? "", /Clutch/);
   assert.match(resolved.detail ?? "", /Sold out/);
+  assert.match(resolved.detail ?? "", /\$12\.50/);
   assert.equal(resolved.stale, false);
   assert.equal(resolved.canInspect, true);
   assert.equal(
@@ -262,6 +263,19 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
     presentWatchlistInspectLabel(resolved.title, resolved.canInspect),
     "View details for Prism Break",
   );
+
+  const withoutEv = presentWatchlistRepackRow({
+    publicRepackId: "pack-2", savedAt: "2026-09-04T00:00:00.000Z",
+    catalogStatus: "resolved", openable: true,
+    repack: {
+      name: "Prism Break",
+      vendorDisplayName: "Clutch",
+      availability: "sold_out",
+      displayedEv: null,
+      primaryImage: null,
+    },
+  });
+  assert.equal(withoutEv.detail, "Clutch · Sold out");
 
   const stale = presentWatchlistRepackRow({
     publicRepackId: "pack-gone",
