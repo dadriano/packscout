@@ -1,5 +1,9 @@
 # Feature: Atomic Pack Publication in Pack Catalog V1
 
+## Admission-order review repair — 2026-09-04
+
+`d9262973b1ebd619e0e5a35053b2bc84645c624e` addresses review3935344215 on parent `8125934bb39338f73501ac1bc9fef8950d462746`. Direct admission compares schema-parsed captured bytes with the existing shared canonicalizer and refuses changed contents/action/alias order before persistence; it does not silently rewrite a pinned request. Planner/evaluator normalization still works, and duplicate-invalid domain inputs keep their existing blocked behavior. Genuine red proof: `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log`; all112 focused checks pass, zero skips, in `/tmp/packscout-p02-canonical-admission-focused-20260904.log`. Affected lint/types, docs, and the zero-finding ratchet pass. Task acceptance is complete; **phase delivery still waits for the corrected-head full local/CI gate**, not the historical full pass below. The interrupted pre-fix new-parent run is not certification. P03 remains separate and unmerged.
+
 ## Base refresh — 2026-09-04 15:12 UTC
 
 PR113 independently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`. P02 rebased without conflicts; all36 patches have identical range-diff. Current implementation is `8a9947ce` on that exact parent; backup `codex/p02-before-watchlist113-20260904` retains `b71ec45b`. No P02 runtime or test change was made. The completed task acceptance below was certified on1117b456; **the new-parent merge gate is being rerun locally and in CI before merge**. The prior full pass is not new-parent certification. All30 addressed review threads remain resolved; recheck for fresh feedback before merge. P03 still follows the actual PR95 merge, and no deployment of PR113 is performed here.
