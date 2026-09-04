@@ -1,3 +1,4 @@
+import type { PublicImage } from "@packscout/contracts";
 import { formatCollectibleDescriptor } from "./collectible-identity";
 import { presentPackAvailability } from "./pack-availability-presentation";
 import {
@@ -27,6 +28,7 @@ export type WatchlistRepackRow = Readonly<{
     vendorDisplayName: string;
     availability: "available" | "unavailable" | "unknown" | "sold_out";
     estimatedEv: WatchlistRepackEv | null;
+    primaryImage: PublicImage | null;
   }> | null;
 }>;
 
@@ -51,6 +53,7 @@ export type WatchlistCollectibleRow = Readonly<{
     referenceNumber: string | null;
     grade: string | null;
     grader: string | null;
+    primaryImage: PublicImage | null;
   }> | null;
 }>;
 
@@ -174,16 +177,34 @@ export const WATCHLIST_EMPTY_CHASE_CARDS_COPY =
 
 export const WATCHLIST_UNAVAILABLE_LABEL = "No longer in the catalog" as const;
 
+export const WATCHLIST_REMOVING_COPY = "Removing this save." as const;
+
+export const WATCHLIST_STALE_INSPECT_COPY =
+  "This save is no longer in the catalog." as const;
+
+export const WATCHLIST_PACK_INSPECT_LOADING_COPY =
+  "Loading pack details…" as const;
+
+export const WATCHLIST_PACK_INSPECT_FAILED_COPY =
+  "Pack details are temporarily unavailable." as const;
+
+export const WATCHLIST_PACK_INSPECT_MISSING_COPY =
+  "This pack is no longer available." as const;
+
 export function presentWatchlistRepackRow(row: WatchlistRepackRow): Readonly<{
   title: string;
   detail: string | null;
   stale: boolean;
+  image: PublicImage | null;
+  canInspect: boolean;
 }> {
   if (row.catalogStatus === "unavailable" || row.repack === null) {
     return {
       title: row.publicRepackId,
       detail: WATCHLIST_UNAVAILABLE_LABEL,
       stale: true,
+      image: null,
+      canInspect: false,
     };
   }
   const availability = presentPackAvailability(row.repack.availability).label;
@@ -197,6 +218,8 @@ export function presentWatchlistRepackRow(row: WatchlistRepackRow): Readonly<{
       .filter((value): value is string => value !== null && value !== "")
       .join(" · "),
     stale: false,
+    image: row.repack.primaryImage ?? null,
+    canInspect: row.openable,
   };
 }
 
@@ -206,12 +229,16 @@ export function presentWatchlistCollectibleRow(
   title: string;
   detail: string | null;
   stale: boolean;
+  image: PublicImage | null;
+  canInspect: boolean;
 }> {
   if (row.catalogStatus === "unavailable" || row.collectible === null) {
     return {
       title: row.publicCollectibleId,
       detail: WATCHLIST_UNAVAILABLE_LABEL,
       stale: true,
+      image: null,
+      canInspect: false,
     };
   }
   const descriptor = formatCollectibleDescriptor(row.collectible);
@@ -219,5 +246,58 @@ export function presentWatchlistCollectibleRow(
     title: row.collectible.name,
     detail: descriptor.length > 0 ? descriptor : null,
     stale: false,
+    image: row.collectible.primaryImage ?? null,
+    canInspect: row.openable,
+  };
+}
+
+export function presentWatchlistInspectLabel(
+  title: string,
+  canInspect: boolean,
+): string {
+  return canInspect
+    ? `View details for ${title}`
+    : `${title}. ${WATCHLIST_STALE_INSPECT_COPY}`;
+}
+
+export function presentWatchlistRemoveLabel(title: string): string {
+  return `Remove ${title} from Watchlist`;
+}
+
+export function presentWatchlistRemoveControl(input: Readonly<{
+  pending: boolean;
+  loading: boolean;
+  failed: boolean;
+  saved: boolean;
+  message?: Readonly<{ copy: string; tone: "success" | "error" }>;
+}>): Readonly<{
+  disabled: boolean;
+  label: string;
+  statusCopy: string;
+  tone: "neutral" | "success" | "error";
+}> {
+  if (input.pending) {
+    return {
+      disabled: true,
+      label: "Removing…",
+      statusCopy: WATCHLIST_REMOVING_COPY,
+      tone: "neutral",
+    };
+  }
+  if (input.loading || input.failed || !input.saved) {
+    return {
+      disabled: true,
+      label: "Remove",
+      statusCopy: input.failed
+        ? "Your saved items could not be loaded right now."
+        : input.message?.copy ?? "",
+      tone: input.failed ? "error" : (input.message?.tone ?? "neutral"),
+    };
+  }
+  return {
+    disabled: false,
+    label: "Remove",
+    statusCopy: input.message?.copy ?? "",
+    tone: input.message?.tone ?? "neutral",
   };
 }

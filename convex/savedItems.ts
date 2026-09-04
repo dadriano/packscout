@@ -105,6 +105,13 @@ const estimatedEvValidator = v.object({
   ),
 });
 const nullableTextValidator = v.union(v.string(), v.null());
+const nullableImageValidator = v.union(
+  v.object({
+    url: v.string(),
+    alt: v.string(),
+  }),
+  v.null(),
+);
 const ownerWatchlistRepackValidator = v.object({
   publicRepackId: v.string(),
   savedAt: v.string(),
@@ -117,6 +124,7 @@ const ownerWatchlistRepackValidator = v.object({
       vendorDisplayName: v.string(),
       availability: publicPackAvailabilityValidator,
       estimatedEv: v.union(v.null(), estimatedEvValidator),
+      primaryImage: nullableImageValidator,
     }),
   ),
 });
@@ -137,6 +145,7 @@ const ownerWatchlistCollectibleValidator = v.object({
       referenceNumber: nullableTextValidator,
       grade: nullableTextValidator,
       grader: nullableTextValidator,
+      primaryImage: nullableImageValidator,
     }),
   ),
 });
@@ -537,6 +546,7 @@ function displayWatchlistRepack(
         ? detail.evEstimates.packScout
         : catalog.evByPublicId.get(detail.publicRepackId),
     ),
+    primaryImage: detail.primaryImage ?? null,
   };
 }
 
@@ -553,6 +563,7 @@ function displayWatchlistCollectible(
     referenceNumber: detail.referenceNumber,
     grade: detail.grade,
     grader: detail.grader,
+    primaryImage: detail.primaryImage ?? null,
   };
 }
 

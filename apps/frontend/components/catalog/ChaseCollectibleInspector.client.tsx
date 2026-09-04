@@ -45,7 +45,13 @@ export function useOptionalChaseInspect(): ChaseInspectContextValue | null {
   return useContext(ChaseInspectContext);
 }
 
-export function ChaseInspectProvider({ children }: { readonly children: ReactNode }) {
+export function ChaseInspectProvider({
+  children,
+  onClosed,
+}: {
+  readonly children: ReactNode;
+  readonly onClosed?: () => void;
+}) {
   const [request, setRequest] = useState<ChaseInspectRequest | null>(null);
   const packOpenerRef = useRef<PackOpener | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -57,10 +63,11 @@ export function ChaseInspectProvider({ children }: { readonly children: ReactNod
 
   const close = useCallback((restoreFocus = true) => {
     setRequest(null);
+    onClosed?.();
     if (restoreFocus) {
       requestAnimationFrame(() => returnFocusRef.current?.focus());
     }
-  }, []);
+  }, [onClosed]);
 
   const registerPackOpener = useCallback((opener: PackOpener | null) => {
     packOpenerRef.current = opener;

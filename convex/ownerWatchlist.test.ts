@@ -260,6 +260,7 @@ describe("owner watchlist read", () => {
           vendorDisplayName: soldOutRepack.vendorDisplayName,
           availability: "sold_out",
           estimatedEv: watchlistEstimatedEv(soldOutRepack.evEstimates.packScout),
+          primaryImage: soldOutRepack.primaryImage,
         },
       },
       {
@@ -274,6 +275,7 @@ describe("owner watchlist read", () => {
           estimatedEv: watchlistEstimatedEv(
             availableRepack.evEstimates.packScout,
           ),
+          primaryImage: availableRepack.primaryImage,
         },
       },
     ]);
@@ -293,6 +295,7 @@ describe("owner watchlist read", () => {
           referenceNumber: firstCollectible.referenceNumber,
           grade: firstCollectible.grade,
           grader: firstCollectible.grader,
+          primaryImage: firstCollectible.primaryImage,
         },
       },
     ]);
@@ -461,6 +464,7 @@ describe("owner watchlist read", () => {
           estimatedEv: watchlistEstimatedEv(
             availableRepack.evEstimates.packScout,
           ),
+          primaryImage: availableRepack.primaryImage,
         },
       },
       {
@@ -810,6 +814,7 @@ describe("owner watchlist read", () => {
           vendorDisplayName: original.vendorDisplayName,
           availability: "available",
           estimatedEv: { ...expectedEv, confidenceBand: "low" },
+          primaryImage: original.primaryImage,
         },
       },
     ]);
