@@ -4,7 +4,7 @@
 
 Begin P01 with task 001. Write the executable two-pack contract fixture and prove that changing one pack cannot change the other pack's bytes or active head.
 
-**Progress:** 1/10 tasks complete; 0/9 implementation phases merged; 0/1 launch operations complete
+**Progress:** 2/10 tasks complete; 1/9 implementation phases merged; P05 built and in review; 0/1 launch operations complete
 
 ## Context
 
@@ -119,7 +119,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | sibling from P01 | Provider-local crash and isolation matrix | planned |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
-| P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | planned |
+| P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05 | root after prerequisites merge | Publication ambiguity and recovery race | planned |
 | P07 | Direct V1 frontend across every catalog journey | 007 | P05 | stacked on P05 | Six-journey browser acceptance | planned |
 | P08 | Bounded monitoring, read-only Admin, alerts, and launch-plan/readiness evaluation | 008 | P06, P07 | root after prerequisites merge | Operational readiness and fault drill | planned |
@@ -177,11 +177,12 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Authenticated staging, finalization, heads, holds, and the sole V1 API are complete but not publicly routed.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Keep public routing absent and revert unused store/read code.
-- **Size exception:** The store and read API share one schema-bound integrity thesis; separating them would permit unverified public shapes to diverge from stored snapshot evidence. Authored volume remains capped at the default threshold.
-- **Branch:** assigned by builder.
-- **Verified parent:** not recorded.
-- **Verified implementation:** not recorded.
-- **PR:** not opened.
+- **Size exception:** The store and read API share one schema-bound integrity thesis; separating them would permit unverified public shapes to diverge from stored snapshot evidence. Delivered at 33 authored files and 4,962 added authored lines (about 1,440 in tests and test support), over the 25-file / 2,500-line target and inside the 5,000-line / 40-file hard stop; the protocol contract, store, read API, and their boundary tests form one review thesis.
+- **Branch:** `codex/pack-version-publication-p05-store`.
+- **Verified parent:** `86e2a142` (`origin/main`, including merged #96 and #105).
+- **Verified implementation:** `cba917ab`.
+- **Contract correction:** pack search text is title plus aliases; the measured P01 fixture exceeds its 1,024-character bound at 50 contents and the Convex document bound at 8,000. P03's assembler adopts the rule at rebase. See task 005.
+- **PR:** https://github.com/dadriano/packscout/pull/108
 
 #### P06 — Publisher and recovery
 
@@ -248,7 +249,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | todo | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
-| 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | todo | 001 |
+| 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
 
 ### Integration and launch tasks
 

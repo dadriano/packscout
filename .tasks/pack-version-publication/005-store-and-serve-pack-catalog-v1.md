@@ -6,7 +6,7 @@
 **Delivery phase:** P05
 **Estimated scope:** large
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including storage, authorization, concurrency, query, cursor, lifecycle, and saved-item verification
-**Status:** in_progress
+**Status:** done
 
 ## Start Here
 
@@ -88,40 +88,69 @@ The authenticated profile write boundary exposes `startPublicProfileSnapshot`, `
 
 ### Storage and atomicity
 
-- [ ] Missing, reordered, changed, incomplete, or cross-entity batches cannot finalize or become reachable.
-- [ ] Exact repeated operations inside the replay window return their original receipt, expired operations return `OPERATION_EXPIRED`, and changed-byte reuse fails without mutation.
-- [ ] Competing same-pack activations yield one winner and one bounded conflict, and readers observe only the prior or new complete snapshot.
-- [ ] Different pack and profile heads activate independently after required initial profile heads exist.
-- [ ] Stale sequence, stale epoch, held-head, unauthorized, expired, wrong-environment, and wrong-scope writes fail closed.
+- [x] Missing, reordered, changed, incomplete, or cross-entity batches cannot finalize or become reachable.
+- [x] Exact repeated operations inside the replay window return their original receipt, expired operations return `OPERATION_EXPIRED`, and changed-byte reuse fails without mutation.
+- [x] Competing same-pack activations yield one winner and one bounded conflict, and readers observe only the prior or new complete snapshot.
+- [x] Different pack and profile heads activate independently after required initial profile heads exist.
+- [x] Stale sequence, stale epoch, held-head, unauthorized, expired, wrong-environment, and wrong-scope writes fail closed.
 
 ### Recovery mutations
 
-- [ ] Holding a pack head atomically increments its epoch and prevents every prior-epoch normal activation.
-- [ ] Retained-snapshot activation succeeds only for the exact previous complete snapshot while the expected head remains held.
-- [ ] Resume releases only the exact expected held generation and epoch; exact repeats are idempotent and conflicts leave the head unchanged.
+- [x] Holding a pack head atomically increments its epoch and prevents every prior-epoch normal activation.
+- [x] Retained-snapshot activation succeeds only for the exact previous complete snapshot while the expected head remains held.
+- [x] Resume releases only the exact expected held generation and epoch; exact repeats are idempotent and conflicts leave the head unchanged.
 
 ### Catalog behavior
 
-- [ ] All six journeys agree on each pack's active snapshot, byte-equivalent projection, stable identities, complete membership, odds, chase, valuation, actions, and EV.
-- [ ] Default and all-state fixtures expose the agreed lifecycle behavior, keep full contents readable, and enable actions only for active and available packs.
-- [ ] Pack and collectible URLs and saves survive snapshot update, per-pack rollback, sold-out, unavailable, unknown, and retired states.
-- [ ] Standalone collectible results use one active collectible-profile snapshot while pack-local results retain their sealed collectible copy.
-- [ ] Heat is absent from responses, cursors, saved-item authority, ranking, filtering, dependencies, and error details.
+- [x] All six journeys agree on each pack's active snapshot, byte-equivalent projection, stable identities, complete membership, odds, chase, valuation, actions, and EV.
+- [x] Default and all-state fixtures expose the agreed lifecycle behavior, keep full contents readable, and enable actions only for active and available packs.
+- [x] Pack and collectible URLs and saves survive snapshot update, per-pack rollback, sold-out, unavailable, unknown, and retired states.
+- [x] Standalone collectible results use one active collectible-profile snapshot while pack-local results retain their sealed collectible copy.
+- [x] Heat is absent from responses, cursors, saved-item authority, ranking, filtering, dependencies, and error details.
 
 ### Saved-item behavior
 
-- [ ] The three named saved-item operations match P01 inputs, results, errors, authentication, canonical ordering, and independent 250-item caps.
-- [ ] Saving checks the current V1 head, removal remains possible without one, and repeated set operations converge without duplicate rows.
-- [ ] At capacity, only the oldest unreachable item of the same kind may be pruned; otherwise the operation returns `SAVED_ITEM_LIMIT_REACHED` without mutation.
+- [x] The three named saved-item operations match P01 inputs, results, errors, authentication, canonical ordering, and independent 250-item caps.
+- [x] Saving checks the current V1 head, removal remains possible without one, and repeated set operations converge without duplicate rows.
+- [x] At capacity, only the oldest unreachable item of the same kind may be pruned; otherwise the operation returns `SAVED_ITEM_LIMIT_REACHED` without mutation.
 
 ### Pagination and dormant delivery
 
-- [ ] A two-page activation race proves live cursor validity, deterministic ties, current heads, and the documented move, repeat, or skip behavior.
-- [ ] Expired, malformed, tampered, and query-mismatched cursors return `CURSOR_EXPIRED` without a loop or unstructured server failure.
-- [ ] One missing initial pack head or one failed candidate does not make any active independent pack unavailable.
-- [ ] Browser-safe exports contain no server implementation, credential, raw record, protected evidence, or mutation authority.
-- [ ] Merging P05 changes no buyer route and leaves every production writer, schedule, and public mutation disabled.
+- [x] A two-page activation race proves live cursor validity, deterministic ties, current heads, and the documented move, repeat, or skip behavior.
+- [x] Expired, malformed, tampered, and query-mismatched cursors return `CURSOR_EXPIRED` without a loop or unstructured server failure.
+- [x] One missing initial pack head or one failed candidate does not make any active independent pack unavailable.
+- [x] Browser-safe exports contain no server implementation, credential, raw record, protected evidence, or mutation authority.
+- [x] Merging P05 changes no buyer route and leaves every production writer, schedule, and public mutation disabled.
 
 ## Verification
 
 Named scenario: **Atomic store and six-journey catalog contract** — stage complete and incomplete fixtures, race pack and profile activations, exercise all lifecycle and saved-item states, paginate while one pack changes, attempt every invalid or unauthorized operation, and prove complete per-pack reads with no Heat or merge-time public activation.
+
+## Implementation Record — 2026-09-03
+
+- **Branch:** `codex/pack-version-publication-p05-store`; verified parent `86e2a142` (`origin/main`, including merged #96 and #105); verified implementation `cba917ab`.
+- **Measured limits (the tech-003 open question):** the P01 fixture builder at 25-character names produces 1,108 search-text characters for 50 contents (bound: 1,024) and a 1.35 MB pack header at 8,000 contents (Convex document bound: 1 MiB). Both figures come from `sealFixturePack` over payloads of 50, 400, 2,000, and 8,000 contents. The header without its two contents-derived vectors is 234 KB at 8,000 contents.
+- **Resolution:** pack search text is title plus aliases (`packSearchText`), recorded in `pack-catalog-domain.ts`; the wire header omits `contents`, `collectibleProfileSnapshotIds`, and `valuationDependencyIdentities`, which the store rebuilds from the ordered batches before recomputing `contentSha256` at finalize. `PACK_SNAPSHOT_MAX_CONTENTS` stays 8,000.
+- **Store shape:** `publicPackSnapshots` (root with running invariants), `publicPackSnapshotBatches`, `publicPackSnapshotBatchDependencies`, `publicPackMemberships`, `activePackHeads`, `activeProviderProfileHeads`, `activeCollectibleProfileHeads`, `publicProfileSnapshots`, `packCatalogOperations`. Heads are the only public reachability roots.
+- **Authorization:** the existing HMAC boundary gains a `packCatalog` surface; every request then binds its P01 trusted service identity to the key's deployment authority (`PACKSCOUT_PACK_CATALOG_V1_PUBLICATION_KEYS`: environment, organization, scope) and to the exact entity and operation. Mismatches, expiry, and wrong runtime environment answer `403 PACK_CATALOG_AUTH_FORBIDDEN`; a provider-scoped key cannot touch another provider's pack.
+- **Receipts:** exact repeats inside 30 days return the stored bytes; changed bytes under a known operation or idempotency key answer `conflict`; a repeat after the window answers `operation_expired`; domain refusals are receipts, never HTTP errors. Status reads store nothing.
+- **Reads:** six head-driven internal queries plus public actions minting the clock; one index per sort path; a bounded scan of at most 2,000 heads per request and 5,000 membership rows per desired-collectible lookup; live signed keyset cursors reuse `PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY`; content pages pin one immutable snapshot and answer `CURSOR_EXPIRED` once it is gone.
+- **Saved items:** `packCatalogSavedItems` implements `SavedCatalogItemsV1` over the existing `savedRepacks` / `savedCollectibles` tables, resolving V1 heads; the live `savedItems` module is untouched so no user-visible behavior changes before P07.
+- **Dormancy:** no cron, worker, buyer route, or writer credential is enabled. The 15 routes refuse every request until both key environment variables are configured.
+
+## Spec Compliance
+
+- Related specs reviewed: pack-version-publication/tech-001, pack-version-publication/tech-003, pack-version-publication/tech-004
+- Alignment: implemented as specified for the authenticated operation protocol, staged immutable snapshots, compare-and-swap heads, hold/retained/resume fencing, exact replay, six head-driven journeys, live keyset cursors, and V1 saved items.
+- Divergences:
+  - Pack search text is title plus aliases rather than every collectible display name (tech-001, tech-004); the measured P01 fixture cannot seal a 50-content pack under the original rule. P03's assembler adopts the same rule at rebase.
+  - The `start` request carries the header without the two contents-derived vectors; the store stores them per batch (`publicPackSnapshotBatchDependencies`) and reassembles them at finalize, so the maximum pack never needs one document or request above the P01 batch bound (tech-003 open question).
+  - Desired-collectible lookup uses exact `publicPackMemberships` rows written at batch time and verified against the active snapshot at read time, not membership tokens in a search index; Convex text search is fuzzy and unordered (tech-003 anticipated this fallback).
+  - Profiles keep their single batch on the snapshot root; there is no `publicProfileSnapshotBatches` table. Receipts live on `packCatalogOperations`; there is no separate `packCatalogReceipts` table (tech-003 table list).
+  - Collectible search pages by normalized display name with a bounded substring scan rather than a search index, so its cursors are deterministic live keysets like the pack lists.
+  - `SavedCatalogItemsV1` is a new dormant module instead of a rewire of `convex/savedItems.ts` (tech-004), because the live module serves production saves against V3 until P07 switches the frontend.
+  - Public read refusals under the closed beta answer the non-leaking `CATALOG_UNAVAILABLE`, matching the existing catalog read gate; `AUTH_REQUIRED` and `UNAUTHORIZED` remain reserved.
+  - Authorization failures are HTTP `403` refusals rather than `refused` receipts, so an unauthorized caller consumes no operation identity and learns no catalog state.
+  - `convex/_generated/api.d.ts` and `server.d.ts` are patched by hand for the new modules and environment variable; `convex codegen` requires a configured deployment in this environment.
+- Verification: `npx vitest run convex/packCatalogStore.test.ts convex/packCatalogV1.test.ts` (20 tests, transaction limits enforced, real signed HTTP boundary); `npm run test:contracts` (455 tests); `node --import tsx --test packages/services/src/convex-pack-catalog-publication-client.test.ts` (5 checks); `npm run typecheck`; `npm run build`; `npm run scan:framework-standards:ratchet` (0 findings); `npm run check:framework`; `npm run check:prisma`. Product lanes services (one pre-existing failure, below), worker, convex (443 tests), frontend, admin, and ops-panel pass; tooling and PostgreSQL lanes were still running when this record was written and are appended when they finish.
+- Review size: 33 authored files, 4,962 added and 32 deleted authored lines, plus 23 generated lines; over the 25-file / 2,500-line target and inside the 5,000-line / 40-file hard stop under the recorded P05 size exception (store, read API, and protocol are one integrity thesis; about 1,440 lines are tests and test support).
