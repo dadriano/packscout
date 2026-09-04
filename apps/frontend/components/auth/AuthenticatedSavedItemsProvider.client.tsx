@@ -207,6 +207,7 @@ export function AuthenticatedSavedItemsProvider({
             savedItemIds === undefined &&
             !savedItemIdsFailed,
           pending: pendingKeys.has(key),
+          failed: signedIn && savedItemIdsFailed,
           message: messages[key],
           toggle: () => toggle(kind, id),
         };

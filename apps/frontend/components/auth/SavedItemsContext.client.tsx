@@ -10,6 +10,8 @@ export type SavedItemController = Readonly<{
   saved: boolean;
   loading: boolean;
   pending: boolean;
+  /** True when the signed-in saved-item id read failed. */
+  failed: boolean;
   message?: SavedItemMessage;
   toggle: () => Promise<void>;
 }>;
@@ -41,6 +43,7 @@ const unavailableController: SavedItemController = Object.freeze({
   saved: false,
   loading: false,
   pending: false,
+  failed: false,
   toggle: async () => undefined,
 });
 

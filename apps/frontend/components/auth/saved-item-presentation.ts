@@ -57,6 +57,7 @@ export function presentSaveControl(input: Readonly<{
   saved: boolean;
   loading: boolean;
   pending: boolean;
+  failed?: boolean;
   message?: Readonly<{
     copy: string;
     tone: "success" | "error";
@@ -114,6 +115,17 @@ export function presentSaveControl(input: Readonly<{
       pressed: false,
       statusCopy: "Checking your saved items.",
       tone: "neutral",
+    };
+  }
+
+  if (input.failed) {
+    return {
+      action: "none",
+      disabled: true,
+      label: "Save unavailable",
+      pressed: false,
+      statusCopy: "Your saved items could not be loaded right now.",
+      tone: "error",
     };
   }
 
