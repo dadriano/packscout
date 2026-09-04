@@ -4,7 +4,7 @@
 
 Begin P01 with `watchlist/001`. Ship an owner-only watchlist read that returns both saved collections, resolved against the current catalog, with per-collection counts for the tab pips.
 
-**Progress:** 3/4 tasks complete; 1/3 phases merged; P02 Watchlist page ready to publish
+**Progress:** 4/4 tasks complete; 1/3 phases merged; P03 Watchlist row actions ready to publish
 
 ## Context
 
@@ -16,7 +16,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 - A signed-in user can open Watchlist from the top nav and recognize every saved repack and chase card.
 - Each tab pip matches the number of rows in that tab, including stale rows and zero.
-- From a row, the user can unsave or leave Watchlist into the existing catalog.
+- From a row, the user can unsave or inspect the saved pack or chase card without leaving Watchlist.
 - Another user’s saves never appear. Signed-out visitors never see the nav item.
 
 ## Resolved Decisions
@@ -38,10 +38,11 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 ### Row actions
 
-- A resolved repack row can unsave or leave Watchlist and open that pack’s inspector on All Repacks, including sold-out packs.
-- A resolved chase-card row can unsave or leave Watchlist and open All Repacks filtered to that collectible.
+- A resolved repack row can unsave or open that pack’s inspector on Watchlist, including sold-out packs.
+- A resolved chase-card row can unsave or open the chase inspector on Watchlist.
 - A stale row stays in the list, labeled as no longer in the catalog. Unsave still works. Open is disabled.
 - Unsave matches today’s bookmark toggle: immediate, no confirmation dialog.
+- Open is an on-page inspector, not navigation to All Repacks. That override was taken when users asked to click a row for more information.
 
 ### Account and data
 
@@ -54,7 +55,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 ### Not in v1
 
-- Modal or sheet overlay instead of a page
+- Modal or sheet overlay instead of a Watchlist page
 - Search, extra sort, filters, or a mixed chronological feed
 - Adding new saves from Watchlist (bookmark controls elsewhere still do that)
 - A count pip on the Watchlist nav item itself
@@ -81,7 +82,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 |---|---|---|---|---|---|---|
 | P01 | Owner can read both saved collections as display-ready rows with per-tab counts | 001 | none | root on default branch | Owner-only watchlist read matrix | merged |
 | P02 | Signed-in users can open Watchlist and see both lists with count pips | 002, 003 | P01 | stacked on P01 | Watchlist destination and list rendering | published |
-| P03 | Users can unsave or open a row from Watchlist | 004 | P02 | stacked on P02 | Unsave and catalog-open from a Watchlist row | planned |
+| P03 | Users can unsave or inspect a row from Watchlist | 004 | P02 | stacked on P02 | Unsave and inspect from a Watchlist row | in progress |
 
 ### Phase Details
 
@@ -109,12 +110,12 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 #### P03 — Act from a row
 
-- **After merge:** A Watchlist row can unsave in place or leave Watchlist into the catalog. Stale rows stay labeled, remain unsaveable, and cannot open. Tab pips update after a successful unsave.
-- **Review budget:** 1 task; 3–6 hours; Watchlist rows plus the catalog landing; target at most 12 authored files and 800 authored lines.
+- **After merge:** A Watchlist row can unsave in place or open the existing pack/chase inspector on Watchlist. Stale rows stay labeled, remain unsaveable, and cannot open. Tab pips update after a successful unsave.
+- **Review budget:** 1 task; 3–6 hours; Watchlist rows plus pack-detail API; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Revert row actions. The page can remain view-only.
-- **Size exception:** none
-- **Branch:** assigned by builder
-- **Verified parent:** not recorded
+- **Size exception:** images plus on-page inspect needed a gated pack-detail adapter, so this exceeds the original 12-file P03 budget.
+- **Branch:** `cursor/watchlist-p03-row-actions`
+- **Verified parent:** `a91a5870f495940402d4e0f68eab4a0d5665e552` (`origin/main`)
 - **Verified implementation:** not recorded
 - **PR:** not opened
 
@@ -125,7 +126,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 | 001 | Serve the owner's watchlist | P01 | small | 3–6 hours | done | none |
 | 002 | Open the Watchlist destination | P02 | medium | 4–8 hours | done | 001 |
 | 003 | Show saved repacks and chase cards | P02 | medium | 4–8 hours | done | 001, 002 |
-| 004 | Unsave and open from Watchlist | P03 | medium | 3–6 hours | todo | 003 |
+| 004 | Unsave and open from Watchlist | P03 | medium | 3–6 hours | done | 003 |
 
 ## Build Order
 
@@ -154,4 +155,4 @@ default
 
 ## Next Action
 
-Wait for https://github.com/dadriano/packscout/pull/106 to merge, restack https://github.com/dadriano/packscout/pull/107 onto `main`, then start P03 (`watchlist/004`).
+Build P03 (`watchlist/004`) on `cursor/watchlist-p03-row-actions`: images, in-place unsave, and on-page pack/chase inspectors.

@@ -75,13 +75,56 @@
 }
 
 .row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem 1rem;
   border: 1px solid var(--color-border);
   border-radius: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.55rem 0.7rem 0.55rem 0.55rem;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--color-action) 5%, transparent), transparent 14rem),
+    var(--color-surface);
+}
+
+.row[data-stale="true"] {
   background: var(--color-surface);
+}
+
+.rowSelect {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.3rem;
+  text-align: start;
+}
+
+.rowSelect:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-action-soft) 42%, transparent);
+}
+
+.rowSelect:focus-visible,
+.removeButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-focus) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.rowSelect:disabled {
+  cursor: default;
+}
+
+.identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 
 .rowTitle {
@@ -102,8 +145,99 @@
   font-weight: 550;
 }
 
+.remove {
+  display: grid;
+  min-width: 6.5rem;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.removeButton {
+  min-height: 2rem;
+  border: 1px solid color-mix(in srgb, var(--color-action) 28%, var(--color-border));
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-control);
+  color: var(--color-action-strong);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.35rem 0.75rem;
+}
+
+.removeButton:hover:not(:disabled) {
+  border-color: var(--color-action);
+  background: color-mix(in srgb, var(--color-action-soft) 62%, var(--color-surface));
+}
+
+.removeButton:disabled {
+  border-color: var(--color-border);
+  background: var(--color-surface-subtle);
+  color: var(--color-status-neutral);
+  cursor: not-allowed;
+}
+
+.removeStatus {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  line-height: 1.35;
+  text-align: end;
+}
+
+.removeStatus[data-tone="success"] {
+  color: var(--color-positive);
+}
+
+.removeStatus[data-tone="error"] {
+  color: var(--color-negative);
+}
+
+.inspectDialog {
+  position: fixed;
+  z-index: 80;
+  inset: 50% auto auto 50%;
+  width: min(28rem, calc(100% - 1.5rem));
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.65rem;
+  background: var(--color-surface);
+  box-shadow: 0 28px 90px color-mix(in srgb, #000 46%, transparent);
+  color: var(--color-text);
+  padding: 1.1rem 1.15rem 1.25rem;
+  transform: translate(-50%, -50%);
+}
+
+.inspectDialog::backdrop {
+  background: color-mix(in srgb, #02040a 64%, transparent);
+}
+
+.inspectClose {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.inspectTitle {
+  margin: 0 2.5rem 0.65rem 0;
+  font-size: 1.05rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tab[aria-selected="true"] {
+    box-shadow: none;
+  }
+
+  .removeButton {
     box-shadow: none;
   }
 }

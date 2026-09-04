@@ -18,3 +18,14 @@ test("Watchlist sign-in completes the identity-cookie handoff and re-runs the ga
   assert.match(pageSource, /router\.refresh\(\)/u);
   assert.match(pageSource, /surrendered\.current = true;/u);
 });
+
+test("Watchlist rows inspect on the page and unsave through the account store", () => {
+  assert.match(pageSource, /WatchlistInspectHost/u);
+  assert.match(pageSource, /CatalogImage/u);
+  assert.match(pageSource, /variant="chase"/u);
+  assert.match(pageSource, /presentWatchlistRemoveLabel/u);
+  assert.match(pageSource, /savedItems\.get\(kind, id\)/u);
+  assert.match(pageSource, /inspect\.openPack\(/u);
+  assert.match(pageSource, /inspect\.openChase\(/u);
+  assert.match(pageSource, /disabled=\{!presented\.canInspect\}/u);
+});

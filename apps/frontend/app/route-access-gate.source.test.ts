@@ -27,6 +27,9 @@ const searchRouteSource = source("./api/collectibles/search/route.ts");
 const chaseRepacksRouteSource = source(
   "./api/collectibles/[publicCollectibleId]/repacks/route.ts",
 );
+const packDetailRouteSource = source(
+  "./api/repacks/[publicRepackId]/route.ts",
+);
 const rootLoadingSource = source("./loading.tsx");
 const healthRouteSource = source("./api/health/route.ts");
 
@@ -135,6 +138,10 @@ test("catalog search is guarded before its handler and the health probe stays op
   assert.match(
     chaseRepacksRouteSource,
     /createAccessGuardedHandler\(\s*resolveVisitorAccessForRequest,\s*createDesiredCollectibleRepacksHandler\(readRepacksByDesiredCollectible\),?\s*\)/,
+  );
+  assert.match(
+    packDetailRouteSource,
+    /createAccessGuardedHandler\(\s*resolveVisitorAccessForRequest,\s*createPublicRepackDetailHandler\(readPublicShellStatus,\s*readPublicRepack\),?\s*\)/,
   );
   assert.equal(healthRouteSource.includes("resolveVisitorAccess"), false);
   assert.equal(healthRouteSource.includes("cookies"), false);
@@ -283,6 +290,7 @@ test("every caller of a credentialed catalog read resolves access first", () => 
     "learn/[slug]/not-found.tsx",
     "api/collectibles/search/route.ts",
     "api/collectibles/[publicCollectibleId]/repacks/route.ts",
+    "api/repacks/[publicRepackId]/route.ts",
   ]) {
     assert.ok(callers.includes(expected), `${expected} was enumerated`);
   }

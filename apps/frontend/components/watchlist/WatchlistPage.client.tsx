@@ -3,7 +3,9 @@
 import Link from "next/link";
 import {
   useCallback,
+  useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
@@ -14,10 +16,12 @@ import { useRouter } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { usePackScoutAuth } from "@/components/auth/AuthContext.client";
 import {
+  SavedItemsContext,
   useAccountNotice,
   useAccountSavingAvailable,
   useAccountSavingFailed,
 } from "@/components/auth/SavedItemsContext.client";
+import { CatalogImage } from "@/components/catalog/CatalogImage.client";
 import {
   decideIdentityHandoff,
   IDENTITY_HANDOFF_MAX_ATTEMPTS,
@@ -29,17 +33,26 @@ import {
 import {
   presentWatchlistCollectibleRow,
   presentWatchlistFrame,
+  presentWatchlistInspectLabel,
+  presentWatchlistRemoveControl,
+  presentWatchlistRemoveLabel,
   presentWatchlistRepackRow,
   watchlistCanLoadOwnerRead,
   watchlistHref,
   watchlistTabAccessibleName,
   type OwnerWatchlist,
+  type WatchlistCollectibleRow,
+  type WatchlistRepackRow,
   type WatchlistTab,
   WATCHLIST_EMPTY_CHASE_CARDS_COPY,
   WATCHLIST_EMPTY_REPACKS_COPY,
   WATCHLIST_LOAD_ERROR_COPY,
   WATCHLIST_SIGN_IN_COPY,
 } from "@/lib/watchlist";
+import {
+  WatchlistInspectHost,
+  useWatchlistInspect,
+} from "./WatchlistInspectHost.client";
 import styles from "./Watchlist.module.css";
 
 const noIdentityCookieWrite = () => null;
@@ -190,7 +203,7 @@ function WatchlistOwnerPage({ tab }: Readonly<{ tab: WatchlistTab }>) {
   const requestId = useRef(0);
 
   const fetchWatchlist = useCallback(
-    (id: number) => {
+    (id: number, quiet = false) => {
       void getOwnerWatchlist({})
         .then((payload) => {
           if (requestId.current !== id) return;
@@ -200,6 +213,7 @@ function WatchlistOwnerPage({ tab }: Readonly<{ tab: WatchlistTab }>) {
         })
         .catch(() => {
           if (requestId.current !== id) return;
+          if (quiet) return;
           setWatchlist(null);
           setFailed(true);
           setLoading(false);
@@ -225,6 +239,12 @@ function WatchlistOwnerPage({ tab }: Readonly<{ tab: WatchlistTab }>) {
     fetchWatchlist(id);
   }
 
+  function retryQuiet() {
+    const id = requestId.current + 1;
+    requestId.current = id;
+    fetchWatchlist(id, true);
+  }
+
   const frame = presentWatchlistFrame({
     authStatus: "signed_in",
     accountSavingAvailable: true,
@@ -235,26 +255,32 @@ function WatchlistOwnerPage({ tab }: Readonly<{ tab: WatchlistTab }>) {
   });
 
   return (
-    <WatchlistShell
-      chaseCount={watchlist?.savedCollectibleCount ?? 0}
-      repackCount={watchlist?.savedRepackCount ?? 0}
-      tab={tab}
-    >
-      {frame.kind === "error" ? (
-        <div className={styles.actions}>
-          <p className={styles.copy}>{WATCHLIST_LOAD_ERROR_COPY}</p>
-          <button className="route-action" onClick={retry} type="button">
-            Try again
-          </button>
-        </div>
-      ) : frame.kind === "ready" ? (
-        <WatchlistPanel tab={tab} watchlist={frame.watchlist} />
-      ) : (
-        <p className={styles.copy} role="status">
-          Loading your Watchlist…
-        </p>
-      )}
-    </WatchlistShell>
+    <WatchlistInspectHost onInspectClosed={retryQuiet}>
+      <WatchlistShell
+        chaseCount={watchlist?.savedCollectibleCount ?? 0}
+        repackCount={watchlist?.savedRepackCount ?? 0}
+        tab={tab}
+      >
+        {frame.kind === "error" ? (
+          <div className={styles.actions}>
+            <p className={styles.copy}>{WATCHLIST_LOAD_ERROR_COPY}</p>
+            <button className="route-action" onClick={retry} type="button">
+              Try again
+            </button>
+          </div>
+        ) : frame.kind === "ready" ? (
+          <WatchlistPanel
+            onRemoved={retryQuiet}
+            tab={tab}
+            watchlist={frame.watchlist}
+          />
+        ) : (
+          <p className={styles.copy} role="status">
+            Loading your Watchlist…
+          </p>
+        )}
+      </WatchlistShell>
+    </WatchlistInspectHost>
   );
 }
 
@@ -334,9 +360,11 @@ function WatchlistShell({
 function WatchlistPanel({
   tab,
   watchlist,
+  onRemoved,
 }: Readonly<{
   tab: WatchlistTab;
   watchlist: OwnerWatchlist;
+  onRemoved: () => void;
 }>) {
   const isRepacks = tab === "repacks";
   const count = isRepacks
@@ -375,34 +403,176 @@ function WatchlistPanel({
           className={styles.list}
         >
           {isRepacks
-            ? watchlist.savedRepacks.map((row) => {
-                const presented = presentWatchlistRepackRow(row);
-                return (
-                  <li className={styles.row} key={row.publicRepackId}>
-                    <p className={styles.rowTitle}>{presented.title}</p>
-                    {presented.stale ? (
-                      <p className={styles.stale}>{presented.detail}</p>
-                    ) : (
-                      <p className={styles.rowDetail}>{presented.detail}</p>
-                    )}
-                  </li>
-                );
-              })
-            : watchlist.savedCollectibles.map((row) => {
-                const presented = presentWatchlistCollectibleRow(row);
-                return (
-                  <li className={styles.row} key={row.publicCollectibleId}>
-                    <p className={styles.rowTitle}>{presented.title}</p>
-                    {presented.stale ? (
-                      <p className={styles.stale}>{presented.detail}</p>
-                    ) : presented.detail ? (
-                      <p className={styles.rowDetail}>{presented.detail}</p>
-                    ) : null}
-                  </li>
-                );
-              })}
+            ? watchlist.savedRepacks.map((row) => (
+                <WatchlistRepackItem
+                  key={row.publicRepackId}
+                  onRemoved={onRemoved}
+                  row={row}
+                />
+              ))
+            : watchlist.savedCollectibles.map((row) => (
+                <WatchlistCollectibleItem
+                  key={row.publicCollectibleId}
+                  onRemoved={onRemoved}
+                  row={row}
+                />
+              ))}
         </ul>
       )}
     </>
+  );
+}
+
+function WatchlistRepackItem({
+  row,
+  onRemoved,
+}: Readonly<{
+  row: WatchlistRepackRow;
+  onRemoved: () => void;
+}>) {
+  const inspect = useWatchlistInspect();
+  const presented = presentWatchlistRepackRow(row);
+  return (
+    <li className={styles.row} data-stale={presented.stale ? "true" : "false"}>
+      <button
+        aria-label={presentWatchlistInspectLabel(
+          presented.title,
+          presented.canInspect,
+        )}
+        className={styles.rowSelect}
+        disabled={!presented.canInspect}
+        onClick={(event) =>
+          inspect.openPack(row.publicRepackId, event.currentTarget)
+        }
+        type="button"
+      >
+        <CatalogImage
+          fallbackAlt={presented.title}
+          image={presented.image}
+          variant="chase"
+        />
+        <span className={styles.identity}>
+          <span className={styles.rowTitle}>{presented.title}</span>
+          {presented.stale ? (
+            <span className={styles.stale}>{presented.detail}</span>
+          ) : (
+            <span className={styles.rowDetail}>{presented.detail}</span>
+          )}
+        </span>
+      </button>
+      <WatchlistRemoveButton
+        id={row.publicRepackId}
+        kind="repack"
+        onRemoved={onRemoved}
+        title={presented.title}
+      />
+    </li>
+  );
+}
+
+function WatchlistCollectibleItem({
+  row,
+  onRemoved,
+}: Readonly<{
+  row: WatchlistCollectibleRow;
+  onRemoved: () => void;
+}>) {
+  const inspect = useWatchlistInspect();
+  const presented = presentWatchlistCollectibleRow(row);
+  return (
+    <li className={styles.row} data-stale={presented.stale ? "true" : "false"}>
+      <button
+        aria-label={presentWatchlistInspectLabel(
+          presented.title,
+          presented.canInspect,
+        )}
+        className={styles.rowSelect}
+        disabled={!presented.canInspect}
+        onClick={(event) =>
+          inspect.openChase(
+            row.publicCollectibleId,
+            row.collectible ?? undefined,
+            event.currentTarget,
+          )
+        }
+        type="button"
+      >
+        <CatalogImage
+          fallbackAlt={presented.title}
+          image={presented.image}
+          variant="chase"
+        />
+        <span className={styles.identity}>
+          <span className={styles.rowTitle}>{presented.title}</span>
+          {presented.stale ? (
+            <span className={styles.stale}>{presented.detail}</span>
+          ) : presented.detail ? (
+            <span className={styles.rowDetail}>{presented.detail}</span>
+          ) : null}
+        </span>
+      </button>
+      <WatchlistRemoveButton
+        id={row.publicCollectibleId}
+        kind="collectible"
+        onRemoved={onRemoved}
+        title={presented.title}
+      />
+    </li>
+  );
+}
+
+function WatchlistRemoveButton({
+  kind,
+  id,
+  title,
+  onRemoved,
+}: Readonly<{
+  kind: "repack" | "collectible";
+  id: string;
+  title: string;
+  onRemoved: () => void;
+}>) {
+  const savedItems = useContext(SavedItemsContext);
+  if (savedItems === null) {
+    throw new Error("Watchlist remove requires an authentication provider");
+  }
+  const controller = savedItems.get(kind, id);
+  const statusId = useId();
+  const presentation = presentWatchlistRemoveControl({
+    pending: controller.pending,
+    loading: controller.loading,
+    failed: controller.failed,
+    saved: controller.saved,
+    message: controller.message,
+  });
+
+  async function remove() {
+    if (presentation.disabled) return;
+    await controller.toggle();
+    onRemoved();
+  }
+
+  return (
+    <div className={styles.remove}>
+      <button
+        aria-describedby={statusId}
+        aria-label={presentWatchlistRemoveLabel(title)}
+        className={styles.removeButton}
+        disabled={presentation.disabled}
+        onClick={() => void remove()}
+        type="button"
+      >
+        {presentation.label}
+      </button>
+      <p
+        aria-live="polite"
+        className={styles.removeStatus}
+        data-tone={presentation.tone}
+        id={statusId}
+        role="status"
+      >
+        {presentation.statusCopy}
+      </p>
+    </div>
   );
 }

@@ -4,6 +4,9 @@ import {
   parseWatchlistTab,
   presentWatchlistCollectibleRow,
   presentWatchlistFrame,
+  presentWatchlistInspectLabel,
+  presentWatchlistRemoveControl,
+  presentWatchlistRemoveLabel,
   presentWatchlistRepackRow,
   presentWatchlistUnavailableCopy,
   watchlistCanLoadOwnerRead,
@@ -13,7 +16,9 @@ import {
   WATCHLIST_EMPTY_CHASE_CARDS_COPY,
   WATCHLIST_EMPTY_REPACKS_COPY,
   WATCHLIST_PATH,
+  WATCHLIST_REMOVING_COPY,
   WATCHLIST_SIGN_IN_COPY,
+  WATCHLIST_STALE_INSPECT_COPY,
   WATCHLIST_UNAVAILABLE_LABEL,
 } from "./watchlist";
 
@@ -238,6 +243,10 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
         grossReturnBasisPoints: 11_250,
         confidenceBand: "medium",
       },
+      primaryImage: {
+        url: "https://assets.vendor.example/repacks/prism.webp",
+        alt: "Prism Break",
+      },
     },
   });
   assert.equal(resolved.title, "Prism Break");
@@ -245,11 +254,26 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
   assert.match(resolved.detail ?? "", /Sold out/);
   assert.match(resolved.detail ?? "", /\$12\.50/);
   assert.equal(resolved.stale, false);
+  assert.equal(resolved.canInspect, true);
+  assert.equal(
+    resolved.image?.url,
+    "https://assets.vendor.example/repacks/prism.webp",
+  );
+  assert.equal(
+    presentWatchlistInspectLabel(resolved.title, resolved.canInspect),
+    "View details for Prism Break",
+  );
 
   const withoutEv = presentWatchlistRepackRow({
     publicRepackId: "pack-2", savedAt: "2026-09-04T00:00:00.000Z",
     catalogStatus: "resolved", openable: true,
-    repack: { name: "Prism Break", vendorDisplayName: "Clutch", availability: "sold_out", displayedEv: null },
+    repack: {
+      name: "Prism Break",
+      vendorDisplayName: "Clutch",
+      availability: "sold_out",
+      displayedEv: null,
+      primaryImage: null,
+    },
   });
   assert.equal(withoutEv.detail, "Clutch · Sold out");
 
@@ -263,6 +287,12 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
   assert.equal(stale.title, "pack-gone");
   assert.equal(stale.detail, WATCHLIST_UNAVAILABLE_LABEL);
   assert.equal(stale.stale, true);
+  assert.equal(stale.canInspect, false);
+  assert.equal(stale.image, null);
+  assert.equal(
+    presentWatchlistInspectLabel(stale.title, stale.canInspect),
+    `pack-gone. ${WATCHLIST_STALE_INSPECT_COPY}`,
+  );
 
   const collectible = presentWatchlistCollectibleRow({
     publicCollectibleId: "card-1",
@@ -279,9 +309,57 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
       referenceNumber: null,
       grade: null,
       grader: null,
+      primaryImage: {
+        url: "https://assets.vendor.example/collectibles/charizard.webp",
+        alt: "Charizard ex card",
+      },
     },
   });
   assert.equal(collectible.title, "Charizard ex #199");
   assert.match(collectible.detail ?? "", /Pokemon/);
   assert.equal(collectible.stale, false);
+  assert.equal(collectible.canInspect, true);
+  assert.equal(
+    collectible.image?.url,
+    "https://assets.vendor.example/collectibles/charizard.webp",
+  );
+});
+
+test("Watchlist row remove stays immediate and blocks a second click", () => {
+  assert.equal(
+    presentWatchlistRemoveLabel("Prism Break"),
+    "Remove Prism Break from Watchlist",
+  );
+  const pending = presentWatchlistRemoveControl({
+    pending: true,
+    loading: false,
+    failed: false,
+    saved: true,
+  });
+  assert.equal(pending.disabled, true);
+  assert.equal(pending.label, "Removing…");
+  assert.equal(pending.statusCopy, WATCHLIST_REMOVING_COPY);
+
+  const idle = presentWatchlistRemoveControl({
+    pending: false,
+    loading: false,
+    failed: false,
+    saved: true,
+    message: {
+      copy: "We couldn't update this repack. Try again.",
+      tone: "error",
+    },
+  });
+  assert.equal(idle.disabled, false);
+  assert.equal(idle.label, "Remove");
+  assert.equal(idle.tone, "error");
+  assert.match(idle.statusCopy, /Try again/);
+
+  const failedIds = presentWatchlistRemoveControl({
+    pending: false,
+    loading: false,
+    failed: true,
+    saved: true,
+  });
+  assert.equal(failedIds.disabled, true);
 });
