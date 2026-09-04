@@ -2,12 +2,15 @@ import {
   PackCatalogCursorError,
   compareCanonicalStrings,
   issuePackCatalogCursor,
+  publicProviderProfileSchema,
   readPackCatalogCursor,
   type PackCatalogCursorBinding,
+  type PublicProviderProfile,
 } from "@packscout/contracts";
 import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { configuredDataReleaseV3CursorSigningKey } from "./dataReleaseV3Pagination";
+import { loadProfileSnapshot, loadProviderProfileHead } from "./packCatalogStoreSupport";
 
 /**
  * Head-driven read model for `pack_catalog_v1` (pack-version-publication/005,
@@ -45,6 +48,46 @@ const SORT_FIELD = {
   ev: "sortEv",
   top_chase: "sortTopChase",
 } as const;
+
+/** Per-query cache of each provider's current active profile (null when unavailable). */
+export type ProviderProfileCache = Map<string, PublicProviderProfile | null>;
+
+/**
+ * The current active provider profile for provider-wide display fields. A
+ * missing head, an incomplete snapshot, or a profile that fails the P01 schema
+ * reads as unavailable, so only the dependent pack results fail.
+ */
+export async function currentProviderProfile(
+  ctx: QueryCtx,
+  cache: ProviderProfileCache,
+  providerId: string,
+): Promise<PublicProviderProfile | null> {
+  const cached = cache.get(providerId);
+  if (cached !== undefined) return cached;
+  const head = await loadProviderProfileHead(ctx, providerId);
+  const root = head === null ? null : await loadProfileSnapshot(ctx, head.activeProfileSnapshotId);
+  const parsed = root !== null && root.state === "complete" ? publicProviderProfileSchema.safeParse(root.profile) : null;
+  const profile = parsed?.success === true && parsed.data.identity.providerId === providerId ? parsed.data : null;
+  cache.set(providerId, profile);
+  return profile;
+}
+
+/** Keeps only heads whose provider profile is available; returns the sorted joined profiles. */
+export async function joinProviderProfiles(
+  ctx: QueryCtx,
+  heads: readonly PackHead[],
+): Promise<{ readonly heads: PackHead[]; readonly providerProfiles: PublicProviderProfile[] }> {
+  const cache: ProviderProfileCache = new Map();
+  const kept: PackHead[] = [];
+  for (const head of heads) {
+    if (await currentProviderProfile(ctx, cache, head.providerId) !== null) kept.push(head);
+  }
+  const providerProfiles = [...new Set(kept.map(({ providerId }) => providerId))]
+    .sort(compareCanonicalStrings)
+    .map((providerId) => cache.get(providerId)!)
+    .filter((profile): profile is PublicProviderProfile => profile !== null);
+  return { heads: kept, providerProfiles };
+}
 
 export function cursorSigningKeyBytes(): Uint8Array | null {
   const key = configuredDataReleaseV3CursorSigningKey();

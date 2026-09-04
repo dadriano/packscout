@@ -22,6 +22,8 @@ import {
   postOperation,
   publishFixtureProfiles,
   publishPack,
+  publishProfile,
+  resealProviderProfile,
   stagePack,
   startBody,
   type Fixture,
@@ -101,6 +103,8 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ publicRepackId: packCatalogFixtureIds.packA, publicPackSnapshotId: packA.publicPackSnapshotId, contentSha256: packA.contentSha256, headGeneration: 1 });
     expect(list.nextCursor).toBeNull();
+    expect(list.providerProfiles).toEqual([fixture.provider.profile]);
+    expect(dashboard.providerProfiles).toEqual([fixture.provider.profile]);
     const allState = ok(await run(t, "listPublicPacks", { lifecycle: ALL_STATES, sort: "title", direction: "asc" }));
     expect(allState.items.map((item) => item.publicRepackId)).toEqual([packCatalogFixtureIds.packA, packCatalogFixtureIds.packB]);
     expect(allState.items[1]!.lifecycle.availability).toBe("sold_out");
@@ -112,6 +116,7 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
     expect(detail.detail.valuationDependencyIdentities).toEqual(fixture.packs.packA.snapshot.payload.valuationDependencyIdentities);
     expect(detail.detail.economicsSha256).toBe(fixture.packs.packA.snapshot.payload.economicsSha256);
     expect(detail.nextContentsCursor).toBeNull();
+    expect(detail.providerProfile).toEqual(fixture.provider.profile);
     const soldOut = ok(await run(t, "getPublicPack", { publicRepackId: packCatalogFixtureIds.packB }));
     expect(soldOut.contents).toHaveLength(2);
     expect(soldOut.detail.actions.every((action) => !action.enabled && action.disabledReason === "PACK_UNAVAILABLE")).toBe(true);
@@ -120,6 +125,7 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
     expect(search.items[0]!.identity).toEqual(fixture.collectibles[1]!.profile.identity);
     const desired = ok(await run(t, "findPacksByDesiredCollectible", { publicCollectibleId: packCatalogFixtureIds.collectibleB }));
     expect(desired.items.map((item) => item.publicPackSnapshotId)).toEqual([packA.publicPackSnapshotId]);
+    expect(desired.providerProfiles).toEqual([fixture.provider.profile]);
     const desiredAll = ok(await run(t, "findPacksByDesiredCollectible", { publicCollectibleId: packCatalogFixtureIds.collectibleB, lifecycle: ALL_STATES, sort: "title", direction: "asc" }));
     expect(desiredAll.items.map((item) => item.publicRepackId)).toEqual([packCatalogFixtureIds.packA, packCatalogFixtureIds.packB]);
     expect(JSON.stringify([shell, dashboard, list, detail, search, desired]).toLocaleLowerCase("en-US").includes("heat")).toBe(false);
@@ -207,6 +213,34 @@ describe("Atomic store and six-journey catalog contract (public reads)", () => {
     expect(ok(await run(t, "searchPublicCollectibles", { query: "zzz" })).items).toEqual([]);
     expect(await run(t, "searchPublicCollectibles", { query: "" })).toMatchObject({ ok: false, code: "INVALID_QUERY" });
     void fixture;
+  });
+});
+
+describe("Atomic store and six-journey catalog contract (provider profile join)", () => {
+  beforeEach(configurePackCatalogAuthority);
+  afterEach(() => vi.unstubAllEnvs());
+
+  test("pack reads join the current provider profile and fail only the dependent result when it is missing", async () => {
+    const t = createTest();
+    const fixture = await seed(t);
+    const renamed = await resealProviderProfile(fixture.provider, "Renamed Provider");
+    await publishProfile(t, renamed, 1);
+    const list = ok(await run(t, "listPublicPacks", { lifecycle: ALL_STATES }));
+    expect(list.providerProfiles.map((profile) => profile.displayName)).toEqual(["Renamed Provider"]);
+    expect(list.items.map((item) => item.publicPackSnapshotId).sort()).toEqual([fixture.packs.packA.snapshot.identity.publicPackSnapshotId, fixture.packs.packB.snapshot.identity.publicPackSnapshotId].sort());
+    const detail = ok(await run(t, "getPublicPack", { publicRepackId: packCatalogFixtureIds.packA }));
+    expect(detail.providerProfile.displayName).toBe("Renamed Provider");
+    expect(detail.detail.providerProfileSnapshotId).toBe(fixture.provider.profile.identity.publicProfileSnapshotId);
+    await t.run(async (ctx) => {
+      const head = (await ctx.db.query("activeProviderProfileHeads").withIndex("by_provider_id", (index) => index.eq("providerId", packCatalogFixtureIds.providerId)).take(1))[0]!;
+      await ctx.db.delete("activeProviderProfileHeads", head._id);
+    });
+    expect(await run(t, "getPublicPack", { publicRepackId: packCatalogFixtureIds.packA })).toMatchObject({ ok: false, code: "CATALOG_UNAVAILABLE", retryable: true });
+    const orphaned = ok(await run(t, "listPublicPacks", { lifecycle: ALL_STATES }));
+    expect(orphaned.items).toEqual([]);
+    expect(orphaned.providerProfiles).toEqual([]);
+    expect(ok(await run(t, "getDashboardBundle", { lifecycle: ALL_STATES })).totalMatchingPacks).toBe(0);
+    expect(ok(await run(t, "getPublicShellStatus", {})).catalogAvailable).toBe(true);
   });
 });
 

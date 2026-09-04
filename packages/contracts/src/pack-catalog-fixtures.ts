@@ -304,8 +304,8 @@ export async function createPackCatalogV1Fixture(signingKey: Uint8Array) {
   const intent = (intentId: string) => packActivationIntentSchema.parse({ intentId, idempotencyKey: `activate:${intentId}`, snapshot: packA.snapshot.identity, packPublicationSequence: "1", evidence, expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null }, operationDigest: HASH_C, createdAt: DATA_AS_OF, expiresAt: "2026-09-03T19:00:00.000Z" });
   const binding: PackCatalogCursorBinding = { operation: "listPublicPacks", filters: { availabilities: ["available", "sold_out"], retirements: ["active"] }, sort: "title", direction: "asc", pageSize: 1, publicPackSnapshotId: null };
   const cursor = await issuePackCatalogCursor({ binding, lastSortKey: "alpha pack", lastStableId: packCatalogFixtureIds.packA, issuedAt: DATA_AS_OF, signingKey });
-  const firstPage = packCatalogListPublicPacksResultSchema.parse({ evaluatedAt: DATA_AS_OF, items: [summary(heads.packA)], nextCursor: cursor });
-  const secondPage = packCatalogListPublicPacksResultSchema.parse({ evaluatedAt: "2026-09-03T18:01:00.000Z", items: [summary(heads.packB)], nextCursor: null });
+  const firstPage = packCatalogListPublicPacksResultSchema.parse({ evaluatedAt: DATA_AS_OF, items: [summary(heads.packA)], nextCursor: cursor, providerProfiles: [provider.profile] });
+  const secondPage = packCatalogListPublicPacksResultSchema.parse({ evaluatedAt: "2026-09-03T18:01:00.000Z", items: [summary(heads.packB)], nextCursor: null, providerProfiles: [provider.profile] });
   return {
     provider,
     collectibles,

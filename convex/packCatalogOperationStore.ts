@@ -113,6 +113,17 @@ export async function findPackCatalogReplay(
   }
   const operation = byOperationId[0] ?? byIdempotencyKey[0] ?? null;
   if (operation === null) return null;
+  // A foreign operation identity is not a status capability: another scope's
+  // record answers only that this caller may not use that identity.
+  if (operation.authorizationScopeSha256 !== request.serviceIdentity.authorizationSha256 ||
+    operation.entityIdentity !== entityIdentityOf(packCatalogRequestEntity(request))) {
+    return await buildPackCatalogReceipt({
+      request,
+      requestSha256,
+      now,
+      outcome: { result: { outcome: "refused", state: "blocked", reasonCode: "AUTHORIZATION_REFUSED" }, snapshotId: null, snapshotState: null, packHead: null, profileHead: null, statusOperation: null },
+    });
+  }
   const sameIdentity = byOperationId[0]?._id === operation._id &&
     byIdempotencyKey[0]?._id === operation._id &&
     operation.operationKind === request.operationKind;
@@ -182,6 +193,7 @@ export async function describeOperation(
   ctx: MutationCtx,
   lookup: { readonly operationId: string; readonly requestSha256: string } | null,
   now: string,
+  scope: { readonly authorizationScopeSha256: string; readonly entityIdentity: string },
 ): Promise<PackCatalogPublicationReceipt["statusOperation"]> {
   if (lookup === null) return null;
   const rows = await ctx.db.query("packCatalogOperations")
@@ -189,7 +201,11 @@ export async function describeOperation(
     .take(2);
   if (rows.length > 1) refusePackCatalog("PACK_CATALOG_STATE_CONFLICT");
   const operation = rows[0];
-  if (operation === undefined) return { found: false, result: null };
+  // Records outside the caller's authority and entity read as absent.
+  if (operation === undefined || operation.authorizationScopeSha256 !== scope.authorizationScopeSha256 ||
+    operation.entityIdentity !== scope.entityIdentity) {
+    return { found: false, result: null };
+  }
   return {
     found: true,
     result: evaluatePublicationReplay({

@@ -21,6 +21,7 @@ import {
   buildPackCatalogReceipt,
   conflict,
   describeOperation,
+  entityIdentityOf,
   findPackCatalogReplay,
   refused,
   storePackCatalogReceipt,
@@ -112,7 +113,7 @@ export const start = internalMutation({
     if (existing !== null) {
       if (existing.state === "blocked") return { ...evidence(existing, head), result: refused(existing.blockReasonCode ?? "INVALID_DOMAIN_DATA", "blocked"), store: true };
       const same = packCatalogCanonicalJson(existing.descriptor) === packCatalogCanonicalJson(descriptor);
-      return { ...evidence(existing, head), result: same ? applied("already_applied", state(existing, head)) : conflict(state(existing, head)), store: same };
+      return { ...evidence(existing, head), result: same ? applied("already_applied", state(existing, head)) : conflict(state(existing, head)), store: true };
     }
     const rootId = await ctx.db.insert("publicProfileSnapshots", {
       profileKind: identity.profileKind,
@@ -147,7 +148,7 @@ export const applyBatch = internalMutation({
     if (root.state === "blocked") return { ...evidence(root, head), result: refused(root.blockReasonCode ?? "INVALID_DOMAIN_DATA", "blocked"), store: true };
     if (root.profile !== null) {
       const same = packCatalogCanonicalJson(root.profile) === packCatalogCanonicalJson(profile);
-      return { ...evidence(root, head), result: same ? applied("already_applied", state(root, head)) : conflict(state(root, head)), store: same };
+      return { ...evidence(root, head), result: same ? applied("already_applied", state(root, head)) : conflict(state(root, head)), store: true };
     }
     const { identity, ...fields } = profile;
     const source = {
@@ -252,14 +253,20 @@ export const activate = internalMutation({
 export const status = internalMutation({
   args: EXECUTION_ARGS,
   returns: v.any(),
-  handler: (ctx, args) => run(ctx, args, "profile_publication_status", async ({ request, now }) => {
+  handler: (ctx, args) => run(ctx, args, "profile_publication_status", async (authorized) => {
+    const { request, now } = authorized;
     const { profile, publicProfileSnapshotId, operation } = request.body;
     const head = await loadHead(ctx, profile);
     const root = publicProfileSnapshotId === null ? null : await loadProfileSnapshot(ctx, publicProfileSnapshotId);
     const snapshot = root !== null && root.profileKind === profile.profileKind && root.entityId === entityIdOf(profile) ? root : null;
     return {
       ...evidence(snapshot, head),
-      statusOperation: await describeOperation(ctx, operation, now),
+      statusOperation: await describeOperation(ctx, operation, now, {
+        authorizationScopeSha256: authorized.authorizationScopeSha256,
+        entityIdentity: entityIdentityOf(profile.profileKind === "provider"
+          ? { entityKind: "provider_profile", providerId: profile.providerId }
+          : { entityKind: "collectible_profile", publicCollectibleId: profile.publicCollectibleId }),
+      }),
       result: applied("applied", snapshot !== null ? state(snapshot, head) : head !== null ? "published" : "waiting"),
       store: false,
     };

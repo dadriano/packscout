@@ -32,6 +32,7 @@ import {
   publishPack,
   publishProfile,
   resealCollectibleProfile,
+  resealProviderProfile,
   serviceIdentity,
   stagePack,
   startBody,
@@ -198,6 +199,24 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
     expect(rest[2]!.result.outcome).toBe("applied");
     const again = await expectSignedReceipt(await postOperation(t, "finalize_pack_snapshot", { snapshot: fixture.packs.packA.snapshot.identity }, entity));
     expect(again.result).toEqual({ outcome: "already_applied", state: "ready", reasonCode: null });
+    // A fresh operation that conflicts is durable: its exact retry returns the same receipt and its identity cannot be reused with corrected bytes.
+    const relabeled = startBody(fixture.packs.packA, "1");
+    relabeled.header.actions[0]!.label = "Relabeled action";
+    const freshConflict = await postOperation(t, "start_pack_snapshot", relabeled, entity);
+    const conflictReceipt = await expectSignedReceipt(freshConflict);
+    expect(conflictReceipt.result.outcome).toBe("conflict");
+    const conflictRetry = await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", relabeled, entity, { bodyJson: freshConflict.bodyJson, identity: freshConflict.envelope.serviceIdentity as never, mutate: () => freshConflict.envelope }));
+    expect(conflictRetry).toEqual(conflictReceipt);
+    const corrected = await expectSignedReceipt(await postOperation(t, "start_pack_snapshot", startBody(fixture.packs.packA, "1"), entity, { operationId: freshConflict.envelope.operationId as string, idempotencyKey: freshConflict.envelope.idempotencyKey as string }));
+    expect(corrected.result.outcome).toBe("conflict");
+    // Another provider's key learns nothing from this provider's operation identities.
+    const FOREIGN_PACK = "31000000-0000-4000-8000-000000000001";
+    const foreignEntity = packEntity(FOREIGN_PACK);
+    const foreignStatus = await expectSignedReceipt(await postOperation(t, "pack_publication_status", { publicRepackId: FOREIGN_PACK, publicPackSnapshotId: null, operation: { operationId, requestSha256: await hashHex(first.bodyJson) } }, foreignEntity, { keyId: OTHER_PROVIDER_KEY_ID }), OTHER_PROVIDER_KEY_ID);
+    expect(foreignStatus.statusOperation).toEqual({ found: false, result: null });
+    const foreignReplay = await expectSignedReceipt(await postOperation(t, "pack_publication_status", { publicRepackId: FOREIGN_PACK, publicPackSnapshotId: null, operation: null }, foreignEntity, { keyId: OTHER_PROVIDER_KEY_ID, operationId }), OTHER_PROVIDER_KEY_ID);
+    expect(foreignReplay.result).toEqual({ outcome: "refused", state: "blocked", reasonCode: "AUTHORIZATION_REFUSED" });
+    expect(foreignReplay.packHead).toBeNull();
     const expiredId = nextUuid();
     await t.run(async (ctx) => {
       const record = (await ctx.db.query("packCatalogOperations").withIndex("by_operation_id", (index) => index.eq("operationId", operationId)).take(1))[0]!;
@@ -352,11 +371,23 @@ describe("Atomic store and six-journey catalog contract (authenticated store)", 
       { publicRepackId: packCatalogFixtureIds.packA, publicPackSnapshotId: fixture.packs.packA.snapshot.identity.publicPackSnapshotId, batch: fixture.packs.packA.batches[0]! }, entityA));
     expect(staleReference.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "PROFILE_HEAD_MISSING" });
     for (const receipt of await stagePack(t, fixture.packs.packB, "1")) expect(receipt.result.outcome).toBe("applied");
+    // A collectible head advancing after staging does not invalidate the sealed proof (tech-003):
+    // the pack keeps its sealed collectible copy and profile heads are never deleted.
     const renamedB = await resealCollectibleProfile(fixture.collectibles[1]!, "Beta Card Renamed");
     await publishProfile(t, renamedB, 1);
-    const movedHead = await activatePack(t, fixture.packs.packB, { packPublicationSequence: "1", expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null } });
-    expect(movedHead.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "PROFILE_HEAD_MISSING" });
-    expect(await t.run(async (ctx) => (await ctx.db.query("activePackHeads").take(1)).length)).toBe(0);
+    const activated = await activatePack(t, fixture.packs.packB, { packPublicationSequence: "1", expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null } });
+    expect(activated.result.outcome).toBe("applied");
+    const sealed = await t.run(async (ctx) => (await ctx.db.query("publicPackSnapshotBatches").withIndex("by_public_pack_snapshot_id_and_batch_index", (index) => index.eq("publicPackSnapshotId", fixture.packs.packB.snapshot.identity.publicPackSnapshotId)).take(1))[0]!);
+    expect(sealed.records.find((record) => record.publicCollectibleId === packCatalogFixtureIds.collectibleB)?.collectibleProfileSnapshotId).toBe(fixture.collectibles[1]!.profile.identity.publicProfileSnapshotId);
+    // The provider reference is re-proven at first activation because it is one bounded read.
+    const t2 = createTest();
+    const fixture2 = await loadFixture();
+    await publishFixtureProfiles(t2, fixture2);
+    for (const receipt of await stagePack(t2, fixture2.packs.packA, "1")) expect(receipt.result.outcome).toBe("applied");
+    await publishProfile(t2, await resealProviderProfile(fixture2.provider, "Renamed Provider"), 1);
+    const movedProvider = await activatePack(t2, fixture2.packs.packA, { packPublicationSequence: "1", expectedHead: { generation: 0, publicationEpoch: 0, activeSnapshotId: null } });
+    expect(movedProvider.result).toEqual({ outcome: "refused", state: "waiting", reasonCode: "PROFILE_HEAD_MISSING" });
+    expect(await t2.run(async (ctx) => (await ctx.db.query("activePackHeads").take(1)).length)).toBe(0);
   });
 
   test("a maximum P01 batch stages, finalizes, and activates inside one transaction budget", async () => {

@@ -19,8 +19,10 @@ import {
   PACK_CATALOG_MAX_ACTIVE_HEADS,
   PACK_CATALOG_MEMBERSHIP_SCAN_LIMIT,
   comparePackHeads,
+  currentProviderProfile,
   cursorSigningKeyBytes,
   issueListCursor,
+  joinProviderProfiles,
   lifecycleMatches,
   packFilterMatches,
   packSortKey,
@@ -30,6 +32,7 @@ import {
   type KeysetPosition,
   type PackHead,
   type PackSort,
+  type ProviderProfileCache,
 } from "./packCatalogReadModel";
 import {
   loadCollectibleProfileHead,
@@ -100,7 +103,7 @@ async function pagedHeads(ctx: QueryCtx, input: {
   readonly signingKey: Uint8Array;
   readonly matches: (head: PackHead) => boolean;
   readonly candidates?: PackHead[];
-}): Promise<Result<{ items: ReturnType<typeof packSummaryOf>[]; nextCursor: string | null }>> {
+}): Promise<Result<{ items: ReturnType<typeof packSummaryOf>[]; nextCursor: string | null; providerProfiles: Awaited<ReturnType<typeof joinProviderProfiles>>["providerProfiles"] }>> {
   const binding: PackCatalogCursorBinding = {
     operation: input.operation, filters: input.filters, sort: input.sort,
     direction: input.direction, pageSize: input.pageSize, publicPackSnapshotId: null,
@@ -139,7 +142,9 @@ async function pagedHeads(ctx: QueryCtx, input: {
   const nextCursor = hasMore && resume !== null
     ? await issueListCursor({ binding, last: resume, issuedAt: input.evaluatedAt, signingKey: input.signingKey })
     : null;
-  return { ok: true, data: { items: items.map(packSummaryOf), nextCursor } };
+  // A pack whose provider profile is unavailable fails alone; the page and its cursor stand.
+  const joined = await joinProviderProfiles(ctx, items);
+  return { ok: true, data: { items: joined.heads.map(packSummaryOf), nextCursor, providerProfiles: joined.providerProfiles } };
 }
 
 export const getPublicShellStatusAtTime = internalQuery({
@@ -166,17 +171,20 @@ export const getDashboardBundleAtTime = internalQuery({
   handler: async (ctx, args): Promise<Result<unknown>> => {
     const ready = await prelude(ctx, args, (value) => packCatalogV1QueryContracts.getDashboardBundle.input.safeParse(value));
     if (!ready.ok) return ready.error;
-    const packs: ReturnType<typeof packSummaryOf>[] = [];
+    const packs: PackHead[] = [];
+    const cache: ProviderProfileCache = new Map();
     let totalMatchingPacks = 0;
     let scanned = 0;
     for await (const head of ctx.db.query("activePackHeads").withIndex("by_sort_ev_and_public_repack_id").order("desc")) {
       scanned += 1;
       if (scanned > PACK_CATALOG_MAX_ACTIVE_HEADS) return readError("CATALOG_UNAVAILABLE");
       if (!lifecycleMatches(head, ready.input.lifecycle)) continue;
+      if (await currentProviderProfile(ctx, cache, head.providerId) === null) continue;
       totalMatchingPacks += 1;
-      if (packs.length < PACK_CATALOG_LIST_MAX_ITEMS) packs.push(packSummaryOf(head));
+      if (packs.length < PACK_CATALOG_LIST_MAX_ITEMS) packs.push(head);
     }
-    return { ok: true, data: { evaluatedAt: ready.evaluatedAt, packs, totalMatchingPacks } };
+    const joined = await joinProviderProfiles(ctx, packs);
+    return { ok: true, data: { evaluatedAt: ready.evaluatedAt, packs: joined.heads.map(packSummaryOf), totalMatchingPacks, providerProfiles: joined.providerProfiles } };
   },
 });
 
@@ -254,6 +262,8 @@ export const getPublicPackAtTime = internalQuery({
     if (dependencies.length !== manifest.length) return readError("CATALOG_UNAVAILABLE");
     const valuationDependencyIdentities = [...new Set(dependencies.flatMap((row) => row.valuationDependencyIdentities))].sort(compareCanonicalStrings);
     const header = root.header;
+    const providerProfile = await currentProviderProfile(ctx, new Map(), root.providerId);
+    if (providerProfile === null) return readError("CATALOG_UNAVAILABLE");
     const nextContentsCursor = nextOffset < header.contentCount
       ? await issuePackCatalogCursor({ binding: bindingFor(snapshotId), lastSortKey: String(nextOffset), lastStableId: input.publicRepackId, issuedAt: ready.evaluatedAt, signingKey: ready.signingKey })
       : null;
@@ -280,6 +290,7 @@ export const getPublicPackAtTime = internalQuery({
           economicsSha256: header.economicsSha256,
           searchProjection: header.searchProjection,
         },
+        providerProfile,
         contents,
         contentCount: header.contentCount,
         nextContentsCursor,

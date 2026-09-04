@@ -309,3 +309,30 @@ export async function resealCollectibleProfile(source: SealedProfile, displayNam
     descriptor: { identity: nextIdentity, batch: { publicProfileSnapshotId: nextIdentity.publicProfileSnapshotId, batchIndex: 0, recordCount: 1, byteCount, batchSha256 }, completionState: "complete" },
   } as SealedProfile;
 }
+
+/** Seals a new version of the provider profile fixture with a different display name. */
+export async function resealProviderProfile(source: SealedProfile, displayName: string): Promise<SealedProfile> {
+  const profile = source.profile;
+  if (!("brandAssets" in profile)) throw new Error("provider profile required");
+  const { identity, ...fields } = profile;
+  const body = {
+    profileKind: "provider" as const,
+    providerId: identity.providerId,
+    sourceIdentity: `${identity.sourceIdentity}:renamed`,
+    dataAsOf: "2026-09-03T18:30:00.000Z",
+    ...fields,
+    displayName,
+  };
+  const contentSha256 = await hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, body);
+  const nextIdentity = { profileKind: "provider" as const, providerId: body.providerId, sourceIdentity: body.sourceIdentity, dataAsOf: body.dataAsOf, publicProfileSnapshotId: `ppfs_${contentSha256}`, contentSha256 };
+  const nextProfile = { identity: nextIdentity, displayName, brandAssets: fields.brandAssets, promotions: fields.promotions };
+  const batchBody = { kind: "profile_batch", profile: nextProfile };
+  const batchSha256 = await hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, batchBody);
+  const byteCount = packCatalogCanonicalByteCount(batchBody);
+  const batch = { publicProfileSnapshotId: nextIdentity.publicProfileSnapshotId, batchIndex: 0 as const, recordCount: 1 as const, byteCount, batchSha256, profile: nextProfile };
+  return {
+    profile: nextProfile,
+    batch,
+    descriptor: { identity: nextIdentity, batch: { publicProfileSnapshotId: nextIdentity.publicProfileSnapshotId, batchIndex: 0, recordCount: 1, byteCount, batchSha256 }, completionState: "complete" },
+  } as SealedProfile;
+}

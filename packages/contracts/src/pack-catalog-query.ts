@@ -27,6 +27,7 @@ import {
   publicPackSummaryCoreSchema,
   publicPackSearchProjectionSchema,
   publicProfileSnapshotIdSchema,
+  publicProviderProfileSchema,
 } from "./pack-catalog-domain.ts";
 
 export const packCatalogQueryNames = [
@@ -103,6 +104,11 @@ export const publicPackSummarySchema = publicPackSummaryCoreSchema.extend({
   "Pack summary must bind one snapshot hash.",
 );
 const nullableCursor = cursorSchema.nullable();
+/** The current active provider profiles for every provider present in a page, sorted by provider. */
+const providerProfilesSchema = z.array(publicProviderProfileSchema).max(PACK_CATALOG_LIST_MAX_ITEMS)
+  .refine((profiles) => isCanonicalAscending(profiles.map(({ identity }) => identity.providerId)), "Provider profiles must be unique and sorted.");
+const coveredByProfiles = (profiles: readonly { identity: { providerId: string } }[], packs: readonly { providerId: string }[]) =>
+  packs.every((pack) => profiles.some(({ identity }) => identity.providerId === pack.providerId));
 export const packCatalogPublicShellStatusResultSchema = z.object({
   schemaVersion: z.literal(PACK_CATALOG_V1),
   evaluatedAt: packCatalogTimestampSchema,
@@ -113,12 +119,14 @@ export const packCatalogDashboardBundleResultSchema = z.object({
   evaluatedAt: packCatalogTimestampSchema,
   packs: z.array(publicPackSummarySchema).max(PACK_CATALOG_LIST_MAX_ITEMS),
   totalMatchingPacks: z.number().int().safe().nonnegative(),
-}).strict();
+  providerProfiles: providerProfilesSchema,
+}).strict().refine(({ providerProfiles, packs }) => coveredByProfiles(providerProfiles, packs), "Every pack's provider profile must be joined.");
 export const packCatalogListPublicPacksResultSchema = z.object({
   evaluatedAt: packCatalogTimestampSchema,
   items: z.array(publicPackSummarySchema).max(PACK_CATALOG_LIST_MAX_ITEMS),
   nextCursor: nullableCursor,
-}).strict();
+  providerProfiles: providerProfilesSchema,
+}).strict().refine(({ providerProfiles, items }) => coveredByProfiles(providerProfiles, items), "Every pack's provider profile must be joined.");
 export const packCatalogGetPublicPackResultSchema = z.object({
   evaluatedAt: packCatalogTimestampSchema,
   snapshot: publicPackSnapshotIdentitySchema,
@@ -137,12 +145,14 @@ export const packCatalogGetPublicPackResultSchema = z.object({
     economicsSha256: packCatalogSha256Schema,
     searchProjection: publicPackSearchProjectionSchema,
   }).strict(),
+  providerProfile: publicProviderProfileSchema,
   contents: z.array(publicPackContentSchema).max(PACK_CONTENT_PAGE_MAX_ITEMS),
   contentCount: z.number().int().safe().min(1),
   nextContentsCursor: nullableCursor,
 }).strict().refine(
-  ({ snapshot, summary }) => snapshot.publicRepackId === summary.publicRepackId,
-  "Pack detail must resolve through one snapshot.",
+  ({ snapshot, summary, providerProfile }) =>
+    snapshot.publicRepackId === summary.publicRepackId && providerProfile.identity.providerId === summary.providerId,
+  "Pack detail must resolve through one snapshot and its current provider profile.",
 );
 export const packCatalogSearchPublicCollectiblesResultSchema = z.object({
   evaluatedAt: packCatalogTimestampSchema,
@@ -154,7 +164,8 @@ export const packCatalogFindPacksByDesiredCollectibleResultSchema = z.object({
   publicCollectibleId: packCatalogUuidSchema,
   items: z.array(publicPackSummarySchema).max(PACK_CATALOG_LIST_MAX_ITEMS),
   nextCursor: nullableCursor,
-}).strict();
+  providerProfiles: providerProfilesSchema,
+}).strict().refine(({ providerProfiles, items }) => coveredByProfiles(providerProfiles, items), "Every pack's provider profile must be joined.");
 
 export const packCatalogReadErrorCodes = [
   "INVALID_QUERY",

@@ -22,8 +22,9 @@ import {
   applied,
   buildPackCatalogReceipt,
   conflict,
-  findPackCatalogReplay,
   describeOperation,
+  entityIdentityOf,
+  findPackCatalogReplay,
   refused,
   storePackCatalogReceipt,
   type ReceiptOutcome,
@@ -94,21 +95,25 @@ async function block(ctx: MutationCtx, root: Doc<"publicPackSnapshots">, reasonC
   return { ...root, state: "blocked" as const, blockReasonCode: reasonCode, terminalAt: now };
 }
 
-/** First activation re-proves every referenced profile snapshot is the current head. */
-async function initialProfileReferencesHold(ctx: MutationCtx, root: Doc<"publicPackSnapshots">): Promise<boolean> {
+/**
+ * First activation verifies the bounded prerequisite proof sealed during
+ * staging (tech-003): the provider profile head must still name the sealed
+ * provider snapshot, and every batch must have recorded its verified
+ * collectible references. Each collectible reference was proven to be the
+ * current head when its batch was applied; profile heads are protected roots
+ * that are never deleted, so a collectible profile advancing between staging
+ * and activation does not invalidate the pack. Re-reading every reference here
+ * would cost one query per content and exceed transaction limits at the
+ * 8,000-content maximum, so activation stays O(batches).
+ */
+async function initialProfileProofHolds(ctx: MutationCtx, root: Doc<"publicPackSnapshots">): Promise<boolean> {
   const providerHead = await loadProviderProfileHead(ctx, root.providerId);
   if (providerHead === null || providerHead.activeProfileSnapshotId !== root.header.providerProfileSnapshotId) return false;
   const dependencies = await ctx.db.query("publicPackSnapshotBatchDependencies")
     .withIndex("by_public_pack_snapshot_id_and_batch_index", (index) => index.eq("publicPackSnapshotId", root.publicPackSnapshotId))
     .take(root.descriptor.batches.length + 1);
-  if (dependencies.length !== root.descriptor.batches.length) return false;
-  for (const dependency of dependencies) {
-    for (const reference of dependency.collectibleProfiles) {
-      const head = await loadCollectibleProfileHead(ctx, reference.publicCollectibleId);
-      if (head === null || head.activeProfileSnapshotId !== reference.collectibleProfileSnapshotId) return false;
-    }
-  }
-  return true;
+  return dependencies.length === root.descriptor.batches.length &&
+    dependencies.reduce((sum, dependency) => sum + dependency.collectibleProfiles.length, 0) === root.header.contentCount;
 }
 
 export const start = internalMutation({
@@ -131,7 +136,7 @@ export const start = internalMutation({
       const stored = { descriptor: existing.descriptor, header: existing.header };
       const same = packCatalogCanonicalJson(stored) === packCatalogCanonicalJson({ descriptor, header });
       const state = packSnapshotWorkState(existing, head);
-      if (!same) return { ...evidence(existing, head), result: conflict(state), store: false };
+      if (!same) return { ...evidence(existing, head), result: conflict(state), store: true };
       const order = comparePublicationSequences(packPublicationSequence, existing.packPublicationSequence);
       if (order < 0) return { ...evidence(existing, head), result: conflict(state), store: true };
       if (order > 0) {
@@ -195,10 +200,10 @@ export const applyBatch = internalMutation({
           index.eq("publicPackSnapshotId", publicPackSnapshotId).eq("batchIndex", batch.batchIndex))
         .take(1);
       const same = stored[0]?.batchSha256 === batch.batchSha256;
-      return { ...evidence(root, head), result: same ? applied("already_applied", state) : conflict(state), store: same };
+      return { ...evidence(root, head), result: same ? applied("already_applied", state) : conflict(state), store: true };
     }
     if (batch.batchIndex !== root.receivedBatchCount) {
-      return { ...evidence(root, head), result: conflict(state), store: false };
+      return { ...evidence(root, head), result: conflict(state), store: true };
     }
     const expected = root.descriptor.batches[batch.batchIndex];
     const body = { kind: "contents_batch", providerId: root.providerId, publicRepackId: root.publicRepackId, batchIndex: batch.batchIndex, records: batch.records };
@@ -362,7 +367,7 @@ export const activate = internalMutation({
       }
       const proof = root.initialProfileProof;
       if (!proof.required || !proof.providerHeadVerified || proof.collectibleHeadsVerified !== root.header.contentCount ||
-        !(await initialProfileReferencesHold(ctx, root))) {
+        !(await initialProfileProofHolds(ctx, root))) {
         return { ...evidence(root, head), result: refused("PROFILE_HEAD_MISSING", "waiting"), store: true };
       }
     } else {
@@ -412,7 +417,10 @@ export const status = internalMutation({
       snapshotState: snapshot?.state ?? null,
       packHead: packHeadEvidence(head),
       profileHead: null,
-      statusOperation: await describeOperation(ctx, operation, now),
+      statusOperation: await describeOperation(ctx, operation, now, {
+        authorizationScopeSha256: authorized.authorizationScopeSha256,
+        entityIdentity: entityIdentityOf({ entityKind: "pack", publicRepackId }),
+      }),
       result: applied("applied", snapshot !== null ? packSnapshotWorkState(snapshot, head) : head !== null ? "published" : "waiting"),
       store: false,
     };
