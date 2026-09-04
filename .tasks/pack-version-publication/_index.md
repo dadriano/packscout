@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged. The P02 crash/partial-expiry repairs now pass focused regression checks, and the separate Watchlist vocabulary repair is in PR109 with full certification running. Finish and merge the prerequisite, refresh/reverify PR95, then restack and certify the existing P03 implementation. No publication processor is enabled.
+PR96 is merged. P02's crash/partial-expiry repairs pass 101 focused checks. Separate PR109 repairs the Watchlist vocabulary and two PR105 test-fixture failures; its focused/tooling checks and builds pass, but the full local gate fails at the online npm audit, also failing in PR95 CI. Obtain an unchanged full pass and merge PR109, refresh/reverify and merge PR95, then restack and certify the preserved P03 implementation. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -149,8 +149,8 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
 - **Current parent:** `86e2a142` (main with PR96 and PR103–105); a backup preserves pre-repair P02 `8409143c`.
-- **Implementation checkpoint:** `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
-- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637` pass. PR109 repairs the separate Watchlist vocabulary failure with a strengthened guard. Merge the verified prerequisite, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
+- **Implementation checkpoint:** `56691725c1d2d1875af44ea4d3ac6c7567cd355c`, with focused and static checks passed; subsequent handoff edits are documentation-only. Historical full passes do not certify this head.
+- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637` pass. PR109 repairs the separate Watchlist vocabulary and PR105 test-fixture failures. Its full local gate and PR95 CI `33864049013` fail at npm audit. Keep the guard/audit intact, certify and merge PR109, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
 - **Current correction evidence:** The cumulative 101-check contract/readiness/persistence matrix passes, including 17 checks in the new recovery suite. All 30 schema checks, affected lint/typechecks, docs, and the zero-finding standards ratchet pass; no gate was weakened. Full certification remains pending.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
@@ -301,4 +301,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Finish full certification and merge the separate Watchlist repair PR109, then refresh/reverify and merge PR95 before certifying/publishing P03. Recovery regressions pass; PR96 is already merged. Publication stays disabled until P06 and launch authorization.
+Resume with the unchanged full gate on PR109 once npm audit responds successfully. Merge the certified prerequisite, refresh/reverify and merge PR95, then restack/certify/publish P03 separately. Recovery regressions pass; PR96 is already merged. No new phase, processor, deployment, or launch operation is enabled by this repair.
