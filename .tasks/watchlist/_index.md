@@ -4,7 +4,7 @@
 
 Begin P01 with `watchlist/001`. Ship an owner-only watchlist read that returns both saved collections, resolved against the current catalog, with per-collection counts for the tab pips.
 
-**Progress:** 1/4 tasks complete; 0/3 phases published; 0/3 phases merged
+**Progress:** 1/4 tasks complete; 1/3 phases published; 0/3 phases merged
 
 ## Context
 
@@ -79,7 +79,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
-| P01 | Owner can read both saved collections as display-ready rows with per-tab counts | 001 | none | root on default branch | Owner-only watchlist read matrix | building |
+| P01 | Owner can read both saved collections as display-ready rows with per-tab counts | 001 | none | root on default branch | Owner-only watchlist read matrix | published |
 | P02 | Signed-in users can open Watchlist and see both lists with count pips | 002, 003 | P01 | stacked on P01 | Watchlist destination and list rendering | planned |
 | P03 | Users can unsave or open a row from Watchlist | 004 | P02 | stacked on P02 | Unsave and catalog-open from a Watchlist row | planned |
 
@@ -92,9 +92,9 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Rollback:** Revert the unused owner read. Existing ID-only saved-item reads remain.
 - **Size exception:** none
 - **Branch:** `codex/watchlist-p01-owner-read`
-- **Verified parent:** not recorded
-- **Verified implementation:** not recorded
-- **PR:** not opened
+- **Verified parent:** `4862700852c7db4a76ec5592ba7e4f8cabf20916` (`origin/main`)
+- **Verified implementation:** `120a83b8d880198896785fdf43d08b4691174126`
+- **PR:** https://github.com/dadriano/packscout/pull/103
 
 #### P02 — Watchlist page and lists
 
