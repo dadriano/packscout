@@ -264,6 +264,28 @@ export function formatSignedEvPercent(basisPoints: number): string {
   });
 }
 
+/** Compact Watchlist EV line: money, signed return, and confidence band. */
+export type WatchlistRepackEv = Readonly<{
+  evDollarsMinorUnits: number;
+  grossReturnBasisPoints: number;
+  confidenceBand: "low" | "medium" | "high";
+}>;
+
+export function formatWatchlistRepackEvSummary(
+  estimatedEv: WatchlistRepackEv,
+): string {
+  return [
+    formatMoneyMinorUnits({
+      minorUnits: estimatedEv.evDollarsMinorUnits,
+      currency: "USD",
+    }),
+    formatSignedEvPercent(
+      estimatedEv.grossReturnBasisPoints - 10_000,
+    ),
+    `${estimatedEv.confidenceBand} confidence`,
+  ].join(" · ");
+}
+
 /** Unsigned Gross EV % with exact two-decimal rendering (85.00%). */
 export function formatGrossEvPercent(basisPoints: number): string {
   return formatBasisPoints(basisPoints, {

@@ -43,10 +43,12 @@ export function AuthenticatedSavedItemsProvider({
    * crash, and the live subscription starts answering by itself the moment
    * the account is admitted.
    */
-  const savedItemIds = useTolerantQuery(
+  const savedItemIdsQuery = useTolerantQuery(
     api.savedItems.getSavedItemIds,
     signedIn ? {} : "skip",
-  ).data;
+  );
+  const savedItemIds = savedItemIdsQuery.data;
+  const savedItemIdsFailed = savedItemIdsQuery.error !== undefined;
   /**
    * The account's own standing, read once the session is established and kept
    * live afterwards. This is presentation only — the backend re-reads the
@@ -200,13 +202,20 @@ export function AuthenticatedSavedItemsProvider({
         const key = itemKey(kind, id);
         return {
           saved: isSaved(kind, id),
-          loading: signedIn && savedItemIds === undefined,
+          loading:
+            signedIn &&
+            savedItemIds === undefined &&
+            !savedItemIdsFailed,
           pending: pendingKeys.has(key),
+          failed: signedIn && savedItemIdsFailed,
           message: messages[key],
           toggle: () => toggle(kind, id),
         };
       },
       accountNotice,
+      accountSavingAvailable:
+        signedIn && savedItemIds !== undefined && accountNotice === null,
+      accountSavingFailed: signedIn && savedItemIdsFailed,
     }),
     [
       accountNotice,
@@ -214,6 +223,7 @@ export function AuthenticatedSavedItemsProvider({
       messages,
       pendingKeys,
       savedItemIds,
+      savedItemIdsFailed,
       signedIn,
       toggle,
     ],

@@ -47,6 +47,7 @@ function SavedItemButton({
     saved: controller.saved,
     loading: controller.loading,
     pending: controller.pending,
+    failed: controller.failed,
     message: controller.message,
   });
 

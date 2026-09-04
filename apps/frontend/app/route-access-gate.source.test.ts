@@ -19,6 +19,7 @@ const rootSource = source("./page.tsx");
 const packsSource = source("./packs/page.tsx");
 const learnSource = source("./learn/page.tsx");
 const learnArticleSource = source("./learn/[slug]/page.tsx");
+const watchlistSource = source("./watchlist/page.tsx");
 const accessSource = source("./access/page.tsx");
 const layoutSource = source("./layout.tsx");
 const robotsSource = source("./robots.ts");
@@ -43,6 +44,11 @@ test("every gated page resolves access before any catalog read", () => {
     [
       "learn article",
       learnArticleSource,
+      "readPublicCatalogRecordUpdateStatus(",
+    ],
+    [
+      "watchlist",
+      watchlistSource,
       "readPublicCatalogRecordUpdateStatus(",
     ],
   ] as const) {
@@ -101,6 +107,19 @@ test("gated surfaces carry the decision-driven robots metadata", () => {
   for (const pageSource of [packsSource, learnSource, learnArticleSource]) {
     assert.match(pageSource, /robots: gatedSurfaceRobots\(await resolveVisitorAccess\(\)\)|const robots = gatedSurfaceRobots\(await resolveVisitorAccess\(\)\)/);
   }
+});
+
+test("Watchlist stays a personal destination: signed-out visitors render, crawlers never index it", () => {
+  const body = defaultExportBody(watchlistSource);
+  assert.match(body, /resolveWatchlistRoute\(access\)/);
+  assert.equal(watchlistSource.includes("resolveGatedRoute"), false);
+  assert.match(watchlistSource, /robots: PERSONAL_SURFACE_ROBOTS/);
+  assert.equal(watchlistSource.includes("gatedSurfaceRobots"), false);
+  assert.match(body, /<ShellSurfaceReporter mode=\{surface\} \/>/);
+  assert.match(
+    body,
+    /completeSignInHandoff=\{access\.outcome === "signed_out"\}/,
+  );
 });
 
 test("the robots surface serves the fail-closed policy dynamically", () => {
@@ -259,6 +278,7 @@ test("every caller of a credentialed catalog read resolves access first", () => 
     "packs/page.tsx",
     "learn/page.tsx",
     "learn/[slug]/page.tsx",
+    "watchlist/page.tsx",
     "not-found.tsx",
     "learn/[slug]/not-found.tsx",
     "api/collectibles/search/route.ts",

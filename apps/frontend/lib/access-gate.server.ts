@@ -315,6 +315,25 @@ export function resolveGatedRoute(
   }
 }
 
+/**
+ * Watchlist is personal: signed-out visitors still get the page and a
+ * sign-in prompt. Held or unresolved sessions still go to the holding
+ * surface, same as every other product route.
+ */
+export function resolveWatchlistRoute(
+  decision: VisitorAccessDecision,
+): GatedRouteOutcome {
+  switch (decision.outcome) {
+    case "public":
+    case "admitted":
+    case "signed_out":
+      return { kind: "render" };
+    case "held":
+    case "undetermined":
+      return { kind: "redirect", destination: "/access" };
+  }
+}
+
 export type AccessRouteOutcome =
   | Readonly<{ kind: "hold"; reason: AccessHoldReason | "undetermined" }>
   | Readonly<{ kind: "redirect"; destination: "/" }>;
@@ -395,7 +414,14 @@ export const GATED_INDEX_EXCLUSIONS: readonly string[] = Object.freeze([
   "/api/",
   "/learn",
   "/packs",
+  "/watchlist",
 ]);
+
+/** Personal destinations stay noindex even after the closed-beta switch lifts. */
+export const PERSONAL_SURFACE_ROBOTS = Object.freeze({
+  index: false,
+  follow: false,
+});
 
 /**
  * The robots policy for the whole site. Fail-closed: an unknown switch keeps

@@ -10,6 +10,8 @@ export type SavedItemController = Readonly<{
   saved: boolean;
   loading: boolean;
   pending: boolean;
+  /** True when the signed-in saved-item id read failed. */
+  failed: boolean;
   message?: SavedItemMessage;
   toggle: () => Promise<void>;
 }>;
@@ -23,18 +25,33 @@ export type SavedItemsValue = Readonly<{
    * do; public browsing is unaffected either way.
    */
   accountNotice: string | null;
+  /**
+   * True only when the signed-in account can currently save. False while
+   * signed out, while auth or saved-item ids are still loading, when the
+   * saved-item id read failed, when saving is unavailable, and when the
+   * session cannot be verified.
+   */
+  accountSavingAvailable: boolean;
+  /**
+   * True when the signed-in saved-item id read failed. Distinct from loading:
+   * `undefined` data is not enough to tell those apart.
+   */
+  accountSavingFailed: boolean;
 }>;
 
 const unavailableController: SavedItemController = Object.freeze({
   saved: false,
   loading: false,
   pending: false,
+  failed: false,
   toggle: async () => undefined,
 });
 
 export const unavailableSavedItemsValue: SavedItemsValue = Object.freeze({
   get: () => unavailableController,
   accountNotice: null,
+  accountSavingAvailable: false,
+  accountSavingFailed: false,
 });
 
 export const SavedItemsContext = createContext<SavedItemsValue | null>(null);
@@ -65,4 +82,12 @@ export function useSavedCollectible(
  */
 export function useAccountNotice(): string | null {
   return useContext(SavedItemsContext)?.accountNotice ?? null;
+}
+
+export function useAccountSavingAvailable(): boolean {
+  return useContext(SavedItemsContext)?.accountSavingAvailable === true;
+}
+
+export function useAccountSavingFailed(): boolean {
+  return useContext(SavedItemsContext)?.accountSavingFailed === true;
 }

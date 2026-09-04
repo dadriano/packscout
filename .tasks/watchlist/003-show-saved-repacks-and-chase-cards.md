@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 4–8 hours for one builder, including empty, stale, and cap-sized list verification
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -75,12 +75,18 @@ Tab pips remain owned by `watchlist/002`. This task must not show a second confl
 
 ## Acceptance Criteria
 
-- [ ] A signed-in user with mixed saves sees every saved repack in Repacks and every saved chase card in Chase cards, newest first, with row counts matching the tab pips.
-- [ ] Empty tabs show distinct empty copy and a way to go save that kind of item.
-- [ ] Unavailable catalog rows remain visible and labeled, and they are included in the pip count.
-- [ ] A cap-sized collection renders completely and remains scannable.
-- [ ] Loading does not flash empty copy; a read error does not look like an empty Watchlist.
+- [x] A signed-in user with mixed saves sees every saved repack in Repacks and every saved chase card in Chase cards, newest first, with row counts matching the tab pips.
+- [x] Empty tabs show distinct empty copy and a way to go save that kind of item.
+- [x] Unavailable catalog rows remain visible and labeled, and they are included in the pip count.
+- [x] A cap-sized collection renders completely and remains scannable.
+- [x] Loading does not flash empty copy; a read error does not look like an empty Watchlist.
 
 ## Verification
 
 Named scenario: **Watchlist list rendering** — empty tabs, mixed resolved and unavailable rows, newest-first order, pip-to-row count match, and a cap-sized list. Pass when both tabs match their pips and stale rows stay labeled.
+
+Coverage: Automated — `apps/frontend/lib/watchlist.test.ts` for resolved/stale presentation, empty copy, and loading/error frames that never use empty-tab copy. The page renders the owner payload in order with no truncation.
+
+## Spec Compliance
+
+Rows consume `getOwnerWatchlist` fields only. Stale rows keep the public id and the “no longer in the catalog” label. `publicRepackId` / `publicCollectibleId` and `openable` remain on each row for `watchlist/004`. No unsave or open controls.

@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 4–8 hours for one builder, including signed-out URL, nav visibility, and tab pip shells
-**Status:** todo
+**Status:** done
 
 ## Start Here
 
@@ -80,12 +80,18 @@ Tab pip values are the counts from `watchlist/001`, not a separate client-side t
 
 ## Acceptance Criteria
 
-- [ ] A signed-in user with account saving available sees Watchlist in the primary nav, can open it, and sees Repacks and Chase cards tabs with count pips, including `0`.
-- [ ] A signed-out visitor does not see Watchlist in the nav; opening the Watchlist URL shows a sign-in prompt and no saved rows.
-- [ ] Auth loading, save-unavailable, and unverifiable-session states hide the nav item and do not present another user’s Watchlist.
-- [ ] Refresh keeps the selected tab. Each tab’s accessible name includes its count.
-- [ ] The Watchlist destination is not treated as a public indexed page.
+- [x] A signed-in user with account saving available sees Watchlist in the primary nav, can open it, and sees Repacks and Chase cards tabs with count pips, including `0`.
+- [x] A signed-out visitor does not see Watchlist in the nav; opening the Watchlist URL shows a sign-in prompt and no saved rows.
+- [x] Auth loading, save-unavailable, and unverifiable-session states hide the nav item and do not present another user’s Watchlist.
+- [x] Refresh keeps the selected tab. Each tab’s accessible name includes its count.
+- [x] The Watchlist destination is not treated as a public indexed page.
 
 ## Verification
 
 Named scenario: **Watchlist destination and auth frames** — signed-in nav and page, signed-out hidden nav plus URL sign-in prompt, loading without empty flash, unavailable/session-error copy, and tab pip/accessible-name pairing. Pass when those frames are observed and no other user’s data appears.
+
+Coverage: Automated — `apps/frontend/lib/watchlist.test.ts`, `apps/frontend/lib/access-gate.server.test.ts`, `apps/frontend/app/route-access-gate.source.test.ts`. Live `/watchlist` on the P02 frontend served `Watchlist · PackScout` with `noindex, nofollow`; local Convex was down, so the gate fail-closed to `/access` instead of the signed-out prompt.
+
+## Spec Compliance
+
+Destination is a dedicated `/watchlist` page with Dashboard | Watchlist | Learn nav gated on signed-in account saving. Signed-out visitors still hit the route (no `resolveGatedRoute` bounce to `/`); held/undetermined still hold. Metadata is always noindex.
