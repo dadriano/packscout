@@ -75,6 +75,15 @@ test("Pack publication preserves captured authority and maximum dependency evide
         ["pending EV", inputs => { inputs.evFailure = "pending"; }],
         ["technical EV", inputs => { inputs.evFailure = "technical"; }],
         ["invalid EV", inputs => { inputs.evFailure = "invalid_domain"; }],
+        ["EV pinned before price changed", inputs => { inputs.price.minorUnits += 1; }],
+        ["EV pinned before odds changed", inputs => { inputs.contents[0]!.probabilityMicros += 1; inputs.contents[1]!.probabilityMicros -= 1; }],
+        ["EV pinned before valuation changed", inputs => {
+          const valuation = inputs.contents[0]!.valuation;
+          assert.equal(valuation.status, "available");
+          if (valuation.status === "available") valuation.amount.minorUnits += 1;
+        }],
+        ["EV pinned before method changed", inputs => { inputs.evMethodIdentity += ":changed"; }],
+        ["EV pinned before policy changed", inputs => { inputs.evPolicyIdentity += ":changed"; }],
         ["duplicate actions", inputs => { inputs.actions.push({ ...inputs.actions[0]! }); }],
         ["search projection", inputs => { inputs.aliases = Array.from({ length: 10 }, (_, index) => `${index}${"a".repeat(119)}`); }],
       ];
