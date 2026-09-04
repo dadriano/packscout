@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged. P02's crash/partial-expiry repairs pass 101 focused checks. Separate PR109 repairs the Watchlist vocabulary and two PR105 test-fixture failures; its focused/tooling checks and builds pass, but the full local gate fails at the online npm audit, also failing in PR95 CI. Obtain an unchanged full pass and merge PR109, refresh/reverify and merge PR95, then restack and certify the preserved P03 implementation. No publication processor is enabled.
+P05/task 005 is merged in PR108 (`27c7f7ec`, 2026-09-04). P02 is rebased onto that main and passes 106 focused checks plus 30 schema checks, including the new readiness-time transition and lifecycle `dataAsOf` regressions. Separate PR109 now aligns the merged Watchlist frontend with its corrected response field and repairs the two PR105 test fixtures. Its current full gate has passed npm audit and is still running; no full pass is claimed yet. Certify the prerequisite and confirm coordinated frontend/Convex release ordering before merging it, then refresh/reverify and merge PR95. Restack and certify P03 separately. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -119,7 +119,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR96 merged | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
-| P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
+| P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05 | root after prerequisites merge | Publication ambiguity and recovery race | planned |
 | P07 | Direct V1 frontend across every catalog journey | 007 | P05 | stacked on P05 | Six-journey browser acceptance | planned |
 | P08 | Bounded monitoring, read-only Admin, alerts, and launch-plan/readiness evaluation | 008 | P06, P07 | root after prerequisites merge | Operational readiness and fault drill | planned |
@@ -145,13 +145,13 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Every provider database can durably plan affected packs and record ready or blocked desired state; no publisher is enabled.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Leave new state unused and revert the disabled planner.
-- **Size exception:** Boundary review permits 27 authored files and approximately 2,800 authored changed lines. The two boundary/recovery test modules certify inseparable admission-to-outbox and crash/expiry invariants while keeping the existing 469-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
+- **Size exception:** Boundary review permits 26 authored files and approximately 2,900 authored changed lines after the P05 rebase. The boundary/recovery test modules certify inseparable admission-to-outbox, time-dependent readiness, and crash/expiry invariants while keeping the existing 470-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
-- **Current parent:** `86e2a142` (main with PR96 and PR103–105); a backup preserves pre-repair P02 `8409143c`.
-- **Implementation checkpoint:** `56691725c1d2d1875af44ea4d3ac6c7567cd355c`, with focused and static checks passed; subsequent handoff edits are documentation-only. Historical full passes do not certify this head.
-- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637` pass. PR109 repairs the separate Watchlist vocabulary and PR105 test-fixture failures. Its full local gate and PR95 CI `33864049013` fail at npm audit. Keep the guard/audit intact, certify and merge PR109, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
-- **Current correction evidence:** The cumulative 101-check contract/readiness/persistence matrix passes, including 17 checks in the new recovery suite. All 30 schema checks, affected lint/typechecks, docs, and the zero-finding standards ratchet pass; no gate was weakened. Full certification remains pending.
+- **Current parent:** `27c7f7ec894996747095aa97652cd95aaefdc4e3` (main including PR96, PR103–108, and PR110); `codex/p02-before-p05-merge-20260904` preserves the previously published `9b3fb05a`. The earlier pre-repair backup at `8409143c` is also retained.
+- **Implementation checkpoint:** `2b9874d1a1b84b9a470733a753da5020ed80021e`, with focused and static checks passed; subsequent handoff edits are documentation-only. Historical full passes do not certify this head.
+- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637`, time-dependent readiness (`3933224053`), and lifecycle baseline timestamp protection (`3933383209`) pass. PR109 repairs the separate Watchlist vocabulary and PR105 test-fixture failures; its rerun has passed audit but full certification is pending. Keep the guard/audit intact, certify and safely release PR109, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
+- **Current correction evidence:** The cumulative 106-check contract/readiness/persistence matrix and all 30 schema checks pass on `2b9874d1`, with affected lint/typechecks and a zero-finding standards ratchet. The three time-transition regressions first failed on unchanged admission code, then passed without sleeps against an isolated PostgreSQL fixture. No gate was weakened. Full certification remains pending.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -188,6 +188,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Verified implementation:** `cba917ab`; review fixes `af924572`, `a995f62d`, and `7b319840`.
 - **Contract correction:** pack search text is title plus aliases; the measured P01 fixture exceeds its 1,024-character bound at 50 contents and the Convex document bound at 8,000. P03's assembler adopts the rule at rebase. See task 005.
 - **PR:** https://github.com/dadriano/packscout/pull/108
+- **Merged:** `27c7f7ec894996747095aa97652cd95aaefdc4e3` on 2026-09-04 at 11:54:05 UTC. The P05 owner's task record retains its focused evidence and inherited full-gate failures; the merge is not certification of P02 or current main.
 
 #### P06 — Publisher and recovery
 
@@ -301,4 +302,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Resume with the unchanged full gate on PR109 once npm audit responds successfully. Merge the certified prerequisite, refresh/reverify and merge PR95, then restack/certify/publish P03 separately. Recovery regressions pass; PR96 is already merged. No new phase, processor, deployment, or launch operation is enabled by this repair.
+Finish PR109's unchanged full gate and confirm coordinated frontend/Convex release ordering. Merge only the certified prerequisite, refresh/reverify and merge PR95, then restack/certify/publish P03 separately from its exact old P02 boundary `8409143c`. Adopt P05's title-plus-alias search and bounded snapshot header in P03. P05/PR108 and PR96 are already merged. No new phase, processor, manual deployment, or launch operation is enabled by this repair.
