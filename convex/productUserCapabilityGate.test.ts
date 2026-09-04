@@ -778,6 +778,11 @@ describe("authenticated entry-point enumeration", () => {
     expect(watchlistAction?.segment.includes("getOwnerWatchlistAtTime")).toBe(
       true,
     );
+    expect(
+      watchlistAction?.segment.includes(
+        "validateOwnerWatchlistCollectibleChases",
+      ),
+    ).toBe(true);
     expect(watchlistAction?.segment.includes(GATE_CALL)).toBe(false);
     expect(watchlistAction?.segment.includes("ctx.db")).toBe(false);
     expect(savedItemsSource).toContain(

@@ -544,6 +544,66 @@ describe("owner watchlist read", () => {
     ]);
   });
 
+  test("marks a collectible whose detail violates the public contract as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await t.run(async (ctx) => {
+      const source = (
+        await ctx.db.query("dataReleaseV3Collectibles").collect()
+      ).find((document) => document.publicCollectibleId === V3_COLLECTIBLE_ID);
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 collectible.");
+      }
+      await ctx.db.patch(source._id, {
+        detail: { ...source.detail, name: "", year: 99 },
+      });
+    });
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedCollectibles).toEqual([
+      {
+        publicCollectibleId: V3_COLLECTIBLE_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        collectible: null,
+      },
+    ]);
+  });
+
+  test("marks a collectible whose chase detail disagrees with outer ids as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Chases").collect()).find(
+        (document) => document.publicCollectibleId === V3_COLLECTIBLE_ID,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 chase.");
+      }
+      await ctx.db.patch(source._id, {
+        detail: { ...source.detail, publicRepackId: EXTRA_REPACK_ID },
+      });
+    });
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedCollectibles).toEqual([
+      {
+        publicCollectibleId: V3_COLLECTIBLE_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        collectible: null,
+      },
+    ]);
+  });
+
   test("marks a collectible with too many chase rows as unavailable", async () => {
     const t = createTest();
     await seed(t);
@@ -682,11 +742,13 @@ describe("owner watchlist read", () => {
     const saver = createSaver(t);
     await saver.repacks(USER_A.tokenIdentifier, [original.publicRepackId]);
     const later = V3_FIXTURE_NOW + 24 * 60 * 60_000;
-    const watchlist = await t
-      .withIdentity(USER_A)
-      .query(internal.savedItems.getOwnerWatchlistAtTime, {
-        currentTime: later,
-      });
+    const watchlist = (
+      await t
+        .withIdentity(USER_A)
+        .query(internal.savedItems.getOwnerWatchlistAtTime, {
+          currentTime: later,
+        })
+    ).watchlist;
     const expectedEv = watchlistEstimatedEv(original.evEstimates.packScout);
     expect(watchlist.savedRepacks).toEqual([
       {

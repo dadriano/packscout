@@ -1,6 +1,7 @@
 import {
   canonicalJson,
   publicCollectibleIdSchema,
+  publicCollectibleSchema,
   publicRepackDetailV3Schema,
   publicRepackIdSchema,
   type PackScoutDisplayedEvV3,
@@ -33,10 +34,15 @@ import {
 import {
   loadActiveDataReleaseV3,
   loadDesiredChases,
+  MAX_DESIRED_CHASES_PER_COLLECTIBLE,
   type ActiveDataReleaseV3,
 } from "./publicRepacksV3";
 
 export const MAX_SAVED_ITEMS_PER_KIND = 250;
+/** Stay under Convex's per-query document-read budget when proving chase openability. */
+export const WATCHLIST_CHASE_VALIDATION_BATCH = Math.floor(
+  4_096 / (MAX_DESIRED_CHASES_PER_COLLECTIBLE + 1),
+);
 
 /**
  * Codes this module raises itself. Authentication and admission refusals —
@@ -132,6 +138,11 @@ const ownerWatchlistValidator = v.object({
 });
 
 type OwnerWatchlist = Infer<typeof ownerWatchlistValidator>;
+const ownerWatchlistSnapshotValidator = v.object({
+  watchlist: ownerWatchlistValidator,
+  releaseId: v.id("dataReleaseV3Releases"),
+});
+type OwnerWatchlistSnapshot = Infer<typeof ownerWatchlistSnapshotValidator>;
 
 function refuse(code: SavedItemsErrorCode): never {
   const message =
@@ -366,7 +377,7 @@ async function findActiveCollectibleForWatchlist(
     refuse("SAVED_ITEMS_STATE_CONFLICT");
   }
   if (match === undefined) return null;
-  if ((await loadDesiredChases(ctx, catalog, publicCollectibleId)) === null) {
+  if (!publicCollectibleSchema.safeParse(match.detail).success) {
     return null;
   }
   return match;
@@ -437,6 +448,33 @@ function displayWatchlistCollectible(
   };
 }
 
+function unavailableCollectibleRow(
+  row: OwnerWatchlist["savedCollectibles"][number],
+): OwnerWatchlist["savedCollectibles"][number] {
+  return {
+    publicCollectibleId: row.publicCollectibleId,
+    savedAt: row.savedAt,
+    catalogStatus: "unavailable",
+    openable: false,
+    collectible: null,
+  };
+}
+
+function demoteCollectiblesThatCannotOpen(
+  watchlist: OwnerWatchlist,
+  failedPublicCollectibleIds: ReadonlySet<string>,
+): OwnerWatchlist {
+  if (failedPublicCollectibleIds.size === 0) return watchlist;
+  return {
+    ...watchlist,
+    savedCollectibles: watchlist.savedCollectibles.map((row) =>
+      failedPublicCollectibleIds.has(row.publicCollectibleId)
+        ? unavailableCollectibleRow(row)
+        : row,
+    ),
+  };
+}
+
 /**
  * The caller's own saved item IDs. Reading is an authenticated product
  * capability: while the closed beta is on, an unadmitted account is refused
@@ -495,8 +533,8 @@ export const getSavedItemIds = query({
  */
 export const getOwnerWatchlistAtTime = internalQuery({
   args: { currentTime: v.number() },
-  returns: ownerWatchlistValidator,
-  handler: async (ctx, args): Promise<OwnerWatchlist> => {
+  returns: ownerWatchlistSnapshotValidator,
+  handler: async (ctx, args): Promise<OwnerWatchlistSnapshot> => {
     if (!isDataReleaseV3EvaluationTime(args.currentTime)) {
       refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
@@ -580,11 +618,43 @@ export const getOwnerWatchlistAtTime = internalQuery({
     }
 
     return {
-      savedRepacks: resolvedRepacks,
-      savedCollectibles: resolvedCollectibles,
-      savedRepackCount: resolvedRepacks.length,
-      savedCollectibleCount: resolvedCollectibles.length,
+      watchlist: {
+        savedRepacks: resolvedRepacks,
+        savedCollectibles: resolvedCollectibles,
+        savedRepackCount: resolvedRepacks.length,
+        savedCollectibleCount: resolvedCollectibles.length,
+      },
+      releaseId: catalog.releaseDocument._id,
     };
+  },
+});
+
+/**
+ * Bounded chase proof for a small batch of saved collectibles. The public
+ * Watchlist action pages this so a cap-sized list cannot read 250 × 513 chase
+ * documents in one transaction.
+ */
+export const validateOwnerWatchlistCollectibleChases = internalQuery({
+  args: {
+    releaseId: v.id("dataReleaseV3Releases"),
+    publicCollectibleIds: v.array(v.string()),
+  },
+  returns: v.array(v.string()),
+  handler: async (ctx, args): Promise<string[]> => {
+    await requireAdmittedProductUser(ctx, PRODUCT_USER_WRITE_CAPABILITY);
+    if (args.publicCollectibleIds.length > WATCHLIST_CHASE_VALIDATION_BATCH) {
+      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    }
+    const release = { releaseDocument: { _id: args.releaseId } };
+    const failed = [];
+    for (const publicCollectibleId of args.publicCollectibleIds) {
+      if (
+        (await loadDesiredChases(ctx, release, publicCollectibleId)) === null
+      ) {
+        failed.push(publicCollectibleId);
+      }
+    }
+    return failed;
   },
 });
 
@@ -596,10 +666,34 @@ export const getOwnerWatchlistAtTime = internalQuery({
 export const getOwnerWatchlist = action({
   args: {},
   returns: ownerWatchlistValidator,
-  handler: async (ctx): Promise<OwnerWatchlist> =>
-    await ctx.runQuery(internal.savedItems.getOwnerWatchlistAtTime, {
-      currentTime: Date.now(),
-    }),
+  handler: async (ctx): Promise<OwnerWatchlist> => {
+    const snapshot = await ctx.runQuery(
+      internal.savedItems.getOwnerWatchlistAtTime,
+      { currentTime: Date.now() },
+    );
+    const resolvedIds = snapshot.watchlist.savedCollectibles
+      .filter((row) => row.catalogStatus === "resolved")
+      .map((row) => row.publicCollectibleId);
+    const failed = new Set<string>();
+    for (
+      let offset = 0;
+      offset < resolvedIds.length;
+      offset += WATCHLIST_CHASE_VALIDATION_BATCH
+    ) {
+      const publicCollectibleIds = resolvedIds.slice(
+        offset,
+        offset + WATCHLIST_CHASE_VALIDATION_BATCH,
+      );
+      const batchFailed = await ctx.runQuery(
+        internal.savedItems.validateOwnerWatchlistCollectibleChases,
+        { releaseId: snapshot.releaseId, publicCollectibleIds },
+      );
+      for (const publicCollectibleId of batchFailed) {
+        failed.add(publicCollectibleId);
+      }
+    }
+    return demoteCollectiblesThatCannotOpen(snapshot.watchlist, failed);
+  },
 });
 
 export const setSavedRepack = mutation({
