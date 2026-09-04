@@ -18,6 +18,7 @@ import {
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import { providerDataforrestLiveIntegrationRegistry } from
@@ -174,6 +175,10 @@ test("adapter profiles never resolve across provider boundaries", () => {
       providerKey: "phygitals" as const,
       adapterKey: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
     },
+    {
+      providerKey: "phygitals" as const,
+      adapterKey: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
+    },
   ];
 
   for (const profile of profiles) {
@@ -232,6 +237,7 @@ test("installed live integrations expose the exact closed profile set", () => {
       ["phygitals", DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION],
       ["phygitals", DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION],
       ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION],
+      ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION],
     ],
   );
 });

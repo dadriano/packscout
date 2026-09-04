@@ -19,6 +19,7 @@ import {
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
 } from "@packscout/contracts";
 import {
   ProviderMappingAdapterRegistry,
@@ -129,6 +130,8 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     `courtyard:${dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion}`,
     `collector_crypt:${dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion}`,
+    // Distributed-v4 binds the Phygitals rarity distribution as an EV input.
+    `phygitals:${dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion}`,
   ].sort());
   for (const [providerKey, adapterVersion] of [
     ["courtyard", dataforrestCourtyardCatalogV2SourceAdapterManifest.adapterVersion],
@@ -137,6 +140,7 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     ["courtyard", dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion],
     ["collector_crypt", dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion],
+    ["phygitals", dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion],
   ] as const) {
     assert.equal(installed.has(providerKey, adapterVersion), true,
       `${providerKey} must be admitted on ${adapterVersion}`);

@@ -12,6 +12,8 @@ import { phygitalsCardProviderFactsV2 } from
   "./dataforrest-phygitals-card-v2.ts";
 import { phygitalsPackProviderFactsV1 } from
   "./dataforrest-phygitals-pack-v1.ts";
+import { phygitalsPackProviderFactsV2 } from
+  "./dataforrest-phygitals-pack-v2.ts";
 import { courtyardCardProviderFactsV1 } from
   "./dataforrest-courtyard-card-v1.ts";
 import { courtyardPackProviderFactsV1 } from
@@ -38,6 +40,7 @@ import {
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import type { LaunchProviderKey } from "./provider-source-contract-v1.ts";
 import type { NormalizedProviderFacts } from "./provider-source-facts-v1.ts";
@@ -200,6 +203,21 @@ const providerFactsAdapters = Object.freeze([
     kind: "pack",
     read: phygitalsPackProviderFactsV1,
   },
+  // Distributed-v4 carries the distributed-v2 card interpretation forward and
+  // the pack reader V2, which binds the published rarity distribution as a
+  // probability-only EV input; distributed-v3 left evInput absent.
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "phygitals",
+    kind: "card",
+    read: phygitalsCardProviderFactsV2,
+  },
+  {
+    adapterVersion: DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "phygitals",
+    kind: "pack",
+    read: phygitalsPackProviderFactsV2,
+  },
   {
     adapterVersion: DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
     provider: "phygitals",
@@ -244,6 +262,7 @@ const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
 ]);
 
 export function readDataforrestProviderFacts(

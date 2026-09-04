@@ -40,6 +40,7 @@ import {
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
   "./dataforrest-provider-facts-registry.ts";
@@ -74,6 +75,7 @@ export {
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 export const DATAFORREST_EVENTS_V1_CONNECTION_TYPE_KEY =
   "dataforrest-events-connection-v1" as const;
@@ -236,6 +238,7 @@ export function dataforrestEventsSourceConfigurationSchemaForAdapter(
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION:
       return dataforrestEventsSourceConfigurationV1Schema;
     default:
       throw new RangeError("dataforrest_events.adapter_version_unsupported");
@@ -275,6 +278,7 @@ export function adaptDataforrestEventRecordForAdapter(
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION:
     case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION:
+    case DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION:
       return record;
     default:
       throw new RangeError("dataforrest_events.adapter_version_unsupported");
@@ -309,7 +313,8 @@ function dataforrestEventsSourceAdapterManifest(
     | typeof DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION
     | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION
-    | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+    | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION
+    | typeof DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
   options: Readonly<{
     pageLimit?: number;
     maximumResponseBytes?: number;
@@ -594,6 +599,23 @@ export const dataforrestPhygitalsDistributedV3SourceAdapterManifest =
     },
   );
 
+/**
+ * Phygitals distributed (all-stream) profile carrying the distributed-v2 card
+ * interpretation and the catalog-PACK reader V2, which binds the published
+ * rarity distribution as a probability-only EV input. Transport bounds are
+ * copied from distributed-v3 exactly.
+ */
+export const dataforrestPhygitalsDistributedV4SourceAdapterManifest =
+  dataforrestEventsSourceAdapterManifest(
+    DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
+    {
+      pageLimit: DATAFORREST_LAUNCH_DISTRIBUTED_PAGE_TARGET_RECORDS,
+      supportedProviders: dataforrestProviderDeclarations.filter(
+        ({ provider }) => provider === "phygitals",
+      ),
+    },
+  );
+
 /** Catalog-only Phygitals profile with distributed-v2 native semantics. */
 export const dataforrestPhygitalsCatalogSourceAdapterManifest =
   dataforrestEventsSourceAdapterManifest(
@@ -641,6 +663,7 @@ export const dataforrestEventsV1SourceAdapterManifests = Object.freeze([
   dataforrestPhygitalsDistributedSourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
 ]);
@@ -756,7 +779,8 @@ export function normalizeDataforrestEventRecordForAdapter(
     adapterVersion !== DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION &&
     adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION &&
-    adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION
+    adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION &&
+    adapterVersion !== DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION
   ) {
     throw new RangeError("dataforrest_events.adapter_version_unsupported");
   }

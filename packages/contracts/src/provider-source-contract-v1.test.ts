@@ -422,6 +422,7 @@ test("configurable source limits do not redefine any distributed capacity profil
     ["dataforrest-phygitals-distributed-adapter-v1", 100, 8_388_608, 480_000],
     ["dataforrest-phygitals-distributed-adapter-v2", 100, 8_388_608, 480_000],
     ["dataforrest-phygitals-distributed-adapter-v3", 100, 8_388_608, 480_000],
+    ["dataforrest-phygitals-distributed-adapter-v4", 100, 8_388_608, 480_000],
     ["dataforrest-phygitals-catalog-adapter-v1", 100, 8_388_608, 480_000],
     ["dataforrest-phygitals-catalog-adapter-v2", 100, 8_388_608, 480_000],
   ];

@@ -13,6 +13,7 @@ import {
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   launchProviderKeySchema,
   sourceAdapterManifestV1Schema,
   type LaunchProviderKey,
@@ -163,5 +164,9 @@ export const providerDataforrestLiveIntegrationRegistry =
     createProviderDataforrestLiveIntegration(
       "phygitals",
       dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "phygitals",
+      dataforrestPhygitalsDistributedV4SourceAdapterManifest,
     ),
   ]);

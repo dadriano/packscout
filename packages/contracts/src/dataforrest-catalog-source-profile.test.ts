@@ -25,6 +25,7 @@ import {
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   normalizeDataforrestEventRecordForAdapter,
   type DataforrestEventRecordV1,
 } from "./index.ts";
@@ -179,6 +180,7 @@ test("catalog source configuration is exact and selected only by catalog version
       dataforrestCourtyardDistributedV3SourceAdapterManifest,
       dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
       dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+      dataforrestPhygitalsDistributedV4SourceAdapterManifest,
     ]
   ) {
     const platform = distributed.supportedProviders[0]!.provider;
