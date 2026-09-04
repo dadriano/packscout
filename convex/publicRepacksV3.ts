@@ -11,6 +11,7 @@ import {
   publicReadError,
   publicRepackListPageV3Schema,
   publicRepackDetailV3Schema,
+  publicRepackChaseSchema,
   publicShellStatusV3Schema,
   publicRepackViewDetailV3Schema,
   unavailableRepackHeat,
@@ -32,7 +33,7 @@ import {
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   action,
   internalQuery,
@@ -89,7 +90,7 @@ import {
  * heat state rather than borrowing a v2-aligned signal.
  */
 
-const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
+export const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
 
 type Success<T> = { readonly ok: true; readonly data: T };
 type PublicResult<T> = Success<T> | PublicReadError;
@@ -141,7 +142,7 @@ export type ActiveDataReleaseV3 = Readonly<{
   }>[];
 }>;
 
-async function loadActiveDataReleaseV3(
+export async function loadActiveDataReleaseV3(
   ctx: QueryCtx,
   currentTime?: number,
 ): Promise<ActiveDataReleaseV3 | null> {
@@ -701,9 +702,11 @@ function collectibleDisplay(detail: PublicCollectible) {
   };
 }
 
-async function loadDesiredChases(
+export async function loadDesiredChases(
   ctx: QueryCtx,
-  release: ActiveDataReleaseV3,
+  release: Readonly<{
+    releaseDocument: Readonly<{ _id: Id<"dataReleaseV3Releases"> }>;
+  }>,
   publicCollectibleId: string,
 ): Promise<ReadonlyMap<string, PublicRepackChase> | null> {
   const chases = await ctx.db
@@ -717,8 +720,18 @@ async function loadDesiredChases(
   if (chases.length > MAX_DESIRED_CHASES_PER_COLLECTIBLE) return null;
   const byRepack = new Map<string, PublicRepackChase>();
   for (const chase of chases) {
-    if (byRepack.has(chase.publicRepackId)) return null;
-    byRepack.set(chase.publicRepackId, chase.detail as PublicRepackChase);
+    if (
+      chase.publicRepackId !== chase.detail.publicRepackId ||
+      chase.publicCollectibleId !== chase.detail.publicCollectibleId ||
+      chase.publicCollectibleId !== publicCollectibleId
+    ) {
+      return null;
+    }
+    const parsed = publicRepackChaseSchema.safeParse(chase.detail);
+    if (!parsed.success || byRepack.has(parsed.data.publicRepackId)) {
+      return null;
+    }
+    byRepack.set(parsed.data.publicRepackId, parsed.data);
   }
   return byRepack;
 }
