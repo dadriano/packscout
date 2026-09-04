@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { ProviderPackPublicationContext, ProviderPackBuildRequestRepository, ProviderPackSnapshotRepository, appendPromotionRange } from "@packscout/database";
+import { ProviderPackPublicationContext, ProviderPackBuildRequestRepository, ProviderPackImpactRepository, ProviderPackSnapshotRepository, appendPromotionRange } from "@packscout/database";
 import { createProviderHarness } from "@packscout/database/test-support";
 import { ProviderPackSnapshotAssembler } from "./provider-pack-snapshot-assembler.ts";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
@@ -53,5 +53,31 @@ test("P02 captured request → P03 assembler → durable artifact and intent, wi
     assert.equal(await client.pack_publication_receipts.count(), 0);
     const head = await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: inputs.publicRepackId } });
     assert.equal(head.active_snapshot_id, null); assert.equal(head.generation, 0n);
+
+    // Fixture an already-active local mirror, without contacting a public store.
+    // The planner must load its stored artifact and pin that baseline for P03.
+    await client.pack_publication_heads.update({ where: { public_repack_id: inputs.publicRepackId },
+      data: { active_snapshot_id: snapshot.identity.publicPackSnapshotId, generation: 1n } });
+    const planner = new ProviderPackImpactRepository(context, {
+      async capture(_tx, input) { return { ...structuredClone(captured.inputs), sourceRevisionIdentity: input.sourceRevisionIdentity,
+        snapshotKind: "lifecycle_only", lifecycleBaseline: null, lifecycleProvenanceIdentity: "sold-out:2",
+        lifecycle: { ...inputs.lifecycle, availability: "sold_out", availabilityEvidence: { kind: "explicit_sold_out", sourceIdentity: "sold-out:2" } },
+        actions: inputs.actions.map(action => ({ ...action, enabled: false, disabledReason: "PACK_UNAVAILABLE" })) }; },
+      evaluate: input => evaluator.evaluate(input),
+    });
+    assert.equal((await planner.plan({ kind: "provider" }))?.complete, true);
+    const [lifecycleClaim] = await requests.claim(randomUUID()); assert.ok(lifecycleClaim);
+    const lifecycleCapture = await requests.load(lifecycleClaim);
+    assert.deepEqual(lifecycleCapture.inputs.lifecycleBaseline, snapshot);
+    const lifecycleBuilt = await assembler.assemble(lifecycleCapture);
+    assert.deepEqual(lifecycleBuilt.snapshot.payload.contents, snapshot.payload.contents);
+    assert.equal(lifecycleBuilt.snapshot.payload.economicsSha256, snapshot.payload.economicsSha256);
+    assert.equal(lifecycleBuilt.snapshot.payload.lifecycle.availability, "sold_out");
+    await new ProviderPackSnapshotRepository(context).sealAndEnqueueActivation(lifecycleClaim, {
+      snapshot: lifecycleBuilt.snapshot, descriptor: lifecycleBuilt.descriptor, batches: lifecycleBuilt.batches });
+    assert.equal(await client.pack_snapshot_artifacts.count(), 2);
+    assert.equal(await client.pack_publication_operations.count(), 0);
+    assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: inputs.publicRepackId } })).active_snapshot_id,
+      snapshot.identity.publicPackSnapshotId);
   } finally { await harness.close(); }
 });

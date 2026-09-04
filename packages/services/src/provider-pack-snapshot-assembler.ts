@@ -70,7 +70,10 @@ export class ProviderPackSnapshotAssembler {
       const requestedAt = Date.parse(request.requestedAt);
       requireAssembly(Date.parse(inputs.dataAsOf) <= requestedAt && inputs.contents.every(row =>
         row.valuation.status !== "available" || Date.parse(row.valuation.observedAt) <= requestedAt));
-      const { readiness } = await new ProviderPackReadinessEvaluator().evaluate({ candidate: inputs, evaluatedAt: request.requestedAt });
+      // P02 already pinned this stored baseline into the immutable request.
+      // Revalidate those captured bytes here; never choose a new live baseline.
+      const { readiness } = await new ProviderPackReadinessEvaluator().evaluate({ candidate: inputs,
+        evaluatedAt: request.requestedAt, previousSnapshot: inputs.lifecycleBaseline });
       requireAssembly(readiness.outcome === "ready", readiness.reasonCode ?? "INVALID_DOMAIN_DATA");
       for (const key of ["desiredStateSha256", "contentsSha256", "probabilityInputsSha256", "valuationInputsSha256", "evInputsSha256"] as const) {
         requireAssembly(request[key] === readiness[key]);

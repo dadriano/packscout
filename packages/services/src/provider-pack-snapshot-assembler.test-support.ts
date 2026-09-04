@@ -9,7 +9,8 @@ export const ASSEMBLY_TIME = "2026-09-03T18:05:00.000Z";
 
 export async function requestFor(inputs: ProviderPackBuildInputs, allowUnready = false) {
   const { buildRequest } = await fixture;
-  const result = await new ProviderPackReadinessEvaluator().evaluate({ candidate: inputs, evaluatedAt: ASSEMBLY_TIME });
+  const result = await new ProviderPackReadinessEvaluator().evaluate({ candidate: inputs,
+    evaluatedAt: ASSEMBLY_TIME, previousSnapshot: inputs.lifecycleBaseline });
   if (!allowUnready) assert.equal(result.readiness.outcome, "ready");
   const readiness = result.readiness;
   return { inputs: result.inputs, request: packBuildRequestSchema.parse({
