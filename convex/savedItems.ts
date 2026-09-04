@@ -39,9 +39,19 @@ import {
 } from "./publicRepacksV3";
 
 export const MAX_SAVED_ITEMS_PER_KIND = 250;
-/** Stay under Convex's per-query document-read budget when proving chase openability. */
-export const WATCHLIST_CHASE_VALIDATION_BATCH = Math.floor(
-  4_096 / (MAX_DESIRED_CHASES_PER_COLLECTIBLE + 1),
+const WATCHLIST_QUERY_DOCUMENT_BUDGET = 4_096;
+const WATCHLIST_CATALOG_READ_ALLOWANCE = 1_600;
+const WATCHLIST_CHASE_AND_REPACK_READS_PER_COLLECTIBLE =
+  MAX_DESIRED_CHASES_PER_COLLECTIBLE +
+  1 +
+  MAX_DESIRED_CHASES_PER_COLLECTIBLE * 2;
+/** Stay under Convex's per-query document-read budget, including catalog load. */
+export const WATCHLIST_CHASE_VALIDATION_BATCH = Math.max(
+  1,
+  Math.floor(
+    (WATCHLIST_QUERY_DOCUMENT_BUDGET - WATCHLIST_CATALOG_READ_ALLOWANCE) /
+      WATCHLIST_CHASE_AND_REPACK_READS_PER_COLLECTIBLE,
+  ),
 );
 
 /**
@@ -383,6 +393,23 @@ async function findActiveCollectibleForWatchlist(
   return match;
 }
 
+async function chasedCatalogRepacksCanOpen(
+  ctx: QueryCtx,
+  catalog: ActiveDataReleaseV3,
+  chases: ReadonlyMap<string, unknown>,
+): Promise<boolean> {
+  for (const publicRepackId of chases.keys()) {
+    if (!catalog.rowByPublicId.has(publicRepackId)) continue;
+    if (
+      (await findActiveRepackForWatchlist(ctx, catalog, publicRepackId)) ===
+      null
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function newestSavedFirst<TRow>(
   rows: readonly TRow[],
   publicId: (row: TRow) => string,
@@ -630,26 +657,39 @@ export const getOwnerWatchlistAtTime = internalQuery({
 });
 
 /**
- * Bounded chase proof for a small batch of saved collectibles. The public
- * Watchlist action pages this so a cap-sized list cannot read 250 × 513 chase
- * documents in one transaction.
+ * Bounded chase-and-repack proof for a small batch of saved collectibles.
+ * The public Watchlist action pages this so a cap-sized list cannot read
+ * 250 × (513 chases + 512 repack lookups) in one transaction.
  */
 export const validateOwnerWatchlistCollectibleChases = internalQuery({
   args: {
+    currentTime: v.number(),
     releaseId: v.id("dataReleaseV3Releases"),
     publicCollectibleIds: v.array(v.string()),
   },
   returns: v.array(v.string()),
   handler: async (ctx, args): Promise<string[]> => {
     await requireAdmittedProductUser(ctx, PRODUCT_USER_WRITE_CAPABILITY);
-    if (args.publicCollectibleIds.length > WATCHLIST_CHASE_VALIDATION_BATCH) {
-      refuse("SAVED_ITEMS_STATE_CONFLICT");
+    if (
+      !isDataReleaseV3EvaluationTime(args.currentTime) ||
+      args.publicCollectibleIds.length > WATCHLIST_CHASE_VALIDATION_BATCH
+    ) {
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
-    const release = { releaseDocument: { _id: args.releaseId } };
+    const catalog = await loadActiveDataReleaseV3(ctx, args.currentTime);
+    if (catalog === null || catalog.releaseDocument._id !== args.releaseId) {
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
+    }
     const failed = [];
     for (const publicCollectibleId of args.publicCollectibleIds) {
+      const chases = await loadDesiredChases(
+        ctx,
+        catalog,
+        publicCollectibleId,
+      );
       if (
-        (await loadDesiredChases(ctx, release, publicCollectibleId)) === null
+        chases === null ||
+        !(await chasedCatalogRepacksCanOpen(ctx, catalog, chases))
       ) {
         failed.push(publicCollectibleId);
       }
@@ -667,9 +707,10 @@ export const getOwnerWatchlist = action({
   args: {},
   returns: ownerWatchlistValidator,
   handler: async (ctx): Promise<OwnerWatchlist> => {
+    const currentTime = Date.now();
     const snapshot = await ctx.runQuery(
       internal.savedItems.getOwnerWatchlistAtTime,
-      { currentTime: Date.now() },
+      { currentTime },
     );
     const resolvedIds = snapshot.watchlist.savedCollectibles
       .filter((row) => row.catalogStatus === "resolved")
@@ -686,7 +727,11 @@ export const getOwnerWatchlist = action({
       );
       const batchFailed = await ctx.runQuery(
         internal.savedItems.validateOwnerWatchlistCollectibleChases,
-        { releaseId: snapshot.releaseId, publicCollectibleIds },
+        {
+          currentTime,
+          releaseId: snapshot.releaseId,
+          publicCollectibleIds,
+        },
       );
       for (const publicCollectibleId of batchFailed) {
         failed.add(publicCollectibleId);
