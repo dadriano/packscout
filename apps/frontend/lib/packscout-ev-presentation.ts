@@ -3,6 +3,7 @@ import {
   vendorReportedGrossEvV3,
   type DashboardKpis,
   type DataReleaseV3Identity,
+  type DisplayedEvMedianSource,
   type PackScoutDisplayedEvSourceAgeStateV3,
   type PackScoutDisplayedEvV3,
   type PublicBuybackSummaryV3,
@@ -907,14 +908,16 @@ export function presentVendorReportedEvV3(
 export function presentSignedEvPercentMetric(
   metric: DashboardKpis["medianPackScoutEvPercent"],
   label = "EV %",
+  source: DisplayedEvMedianSource | null = null,
 ): MetricValuePresentation {
   if (metric.status === "unavailable") {
     return unavailableMetric(label, "evPercent", metric.reason);
   }
-  if (metric.basisPoints > 0) {
+  if (source === null || (source === "packscout" && metric.basisPoints > 0)) {
     return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
   }
-  const state = semanticStateForSignedBasisPoints(metric.basisPoints);
+  const state = metric.basisPoints > 0 ? undefined
+    : semanticStateForSignedBasisPoints(metric.basisPoints);
   const tone = evToneForSignedBasisPoints(metric.basisPoints);
   return availableMetric(
     label,

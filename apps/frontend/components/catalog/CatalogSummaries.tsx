@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { PublicRepackFilters } from "@packscout/contracts";
+import type { DisplayedEvMedianSourcesV3, PublicRepackFilters } from "@packscout/contracts";
 import { catalogHrefForSummary } from "@/lib/catalog-query-state.client";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 import { presentCatalogSummaries } from "./overview-presentation";
@@ -9,6 +9,7 @@ import styles from "./CatalogSummaries.module.css";
 type CatalogSummariesProps = Readonly<{
   title: "By vendor" | "By category";
   summaries: readonly RepackSummaryGroupV3[];
+  evMedianSources: DisplayedEvMedianSourcesV3["vendors"];
   activeFilters: PublicRepackFilters;
 }>;
 
@@ -17,9 +18,10 @@ type SummaryBarStyle = CSSProperties & { "--bar-ratio": number };
 export function CatalogSummaries({
   title,
   summaries,
+  evMedianSources,
   activeFilters,
 }: CatalogSummariesProps) {
-  const rows = presentCatalogSummaries(summaries);
+  const rows = presentCatalogSummaries(summaries, evMedianSources);
   const headingId =
     title === "By vendor" ? "catalog-by-vendor" : "catalog-by-category";
 
@@ -66,6 +68,7 @@ export function CatalogSummaries({
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
                   <small>{row.medianEvPercent.semanticLabel}</small>
+                  <small>{row.sourceLabel}</small>
                 </span>
               </Link>
             </li>

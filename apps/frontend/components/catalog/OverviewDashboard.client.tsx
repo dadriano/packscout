@@ -70,7 +70,7 @@ export function OverviewDashboard({
       data-has-side-inspector={showSideInspector}
     >
       <div className={styles.resultsColumn}>
-        <OverviewKpis kpis={bundle.kpis} repacksHref={repacksHref} />
+        <OverviewKpis kpis={bundle.kpis} evMedianSource={bundle.evMedianSources.overall} repacksHref={repacksHref} />
         {controls ? <div className={styles.controls}>{controls}</div> : null}
         <OpportunityTable
           onSelectOpportunity={onSelectOpportunity}
@@ -82,11 +82,13 @@ export function OverviewDashboard({
           <CatalogSummaries
             activeFilters={bundle.activeFilters}
             summaries={bundle.vendorSummaries}
+            evMedianSources={bundle.evMedianSources.vendors}
             title="By vendor"
           />
           <CatalogSummaries
             activeFilters={bundle.activeFilters}
             summaries={bundle.categorySummaries}
+            evMedianSources={bundle.evMedianSources.categories}
             title="By category"
           />
         </div>

@@ -521,6 +521,7 @@ test("server aggregates format through the same signed-percent presentation", ()
   const available = presentSignedEvPercentMetric(
     { status: "available", basisPoints: -775 },
     "Median EV %",
+    "packscout",
   );
   assert.equal(available.displayValue, "-7.75%");
   assert.equal(available.semanticState, "negative");
@@ -534,12 +535,23 @@ test("server aggregates format through the same signed-percent presentation", ()
   assert.equal(unavailable.displayValue, "Unavailable");
   assert.equal(unavailable.tone, "unavailable");
 
-  const forbiddenPositive = presentSignedEvPercentMetric(
+  const positive = presentSignedEvPercentMetric(
     { status: "available", basisPoints: 100 },
     "Median EV %",
+    "provider_reported",
   );
-  assert.equal(forbiddenPositive.availability, "unavailable");
-  assert.equal(forbiddenPositive.displayValue, "Unavailable");
+  assert.equal(positive.availability, "available");
+  assert.equal(positive.displayValue, "+1.00%");
+  assert.equal(positive.semanticState, undefined);
+  assert.equal(positive.tone, "positive");
+  for (const source of ["packscout", null] as const) {
+    assert.equal(presentSignedEvPercentMetric(
+      { status: "available", basisPoints: 100 }, "Median EV %", source,
+    ).availability, "unavailable");
+  }
+  assert.equal(presentSignedEvPercentMetric(
+    { status: "available", basisPoints: 100 }, "Median EV %", "mixed",
+  ).displayValue, "+1.00%");
 });
 
 test("presentation output never carries protected calculation evidence", () => {

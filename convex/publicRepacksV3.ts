@@ -19,6 +19,7 @@ import {
   publicRepackViewSummaryV3FromDetail,
   searchPublicCollectiblesInputSchema,
   type DashboardKpis,
+  type DisplayedEvMedianSource,
   type DataReleaseV3Identity,
   type ListPublicRepacksInput,
   type PublicCollectible,
@@ -53,6 +54,7 @@ import {
 } from "./dataReleaseV3Search";
 import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
 import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { medianDisplayedEvPercent, type DisplayedEvMedianContext } from "./dataReleaseV3DisplayedEvMedian";
 import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
 import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
@@ -497,31 +499,6 @@ function compareRows(
   return compareText(left.publicRepackId, right.publicRepackId);
 }
 
-function medianPackScoutEvPercent(
-  rows: readonly DataReleaseV3SearchRow[],
-): DashboardKpis["medianPackScoutEvPercent"] {
-  const values = rows
-    .flatMap((row) =>
-      row.packScoutEvPercentBasisPoints === null
-        ? []
-        : [row.packScoutEvPercentBasisPoints],
-    )
-    .sort((left, right) => left - right);
-  if (values.length === 0) {
-    return {
-      status: "unavailable",
-      basisPoints: null,
-      reason: "ESTIMATE_UNAVAILABLE",
-    };
-  }
-  const middle = Math.floor(values.length / 2);
-  const basisPoints =
-    values.length % 2 === 1
-      ? values[middle]!
-      : Math.round((values[middle - 1]! + values[middle]!) / 2);
-  return { status: "available", basisPoints };
-}
-
 function purchasableRepackRows(
   rows: readonly DataReleaseV3SearchRow[],
 ): DataReleaseV3SearchRow[] {
@@ -535,14 +512,16 @@ function purchasableRepackRows(
  * counts the catalog the filters matched, and all four states stay
  * discoverable there.
  */
-function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
+function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: DisplayedEvMedianContext):
+  Readonly<{ kpis: DashboardKpis; source: DisplayedEvMedianSource | null }> {
   const purchasableRows = purchasableRepackRows(rows);
   const chaseValues = purchasableRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
-  return {
+  const median = medianDisplayedEvPercent(purchasableRows, context);
+  return { source: median.source, kpis: {
     totalRepacks: rows.length,
-    medianPackScoutEvPercent: medianPackScoutEvPercent(purchasableRows),
+    medianPackScoutEvPercent: median.metric,
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
     highConfidenceRepacks: purchasableRows.filter(
@@ -550,12 +529,13 @@ function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
         row.packScoutConfidenceBasisPoints !== null &&
         row.packScoutConfidenceBasisPoints >= 8_000,
     ).length,
-  };
+  } };
 }
 
 function repackSummaries(
   rows: readonly DataReleaseV3SearchRow[],
   group: "vendor" | "category",
+  context: DisplayedEvMedianContext,
 ) {
   const groups = new Map<
     string,
@@ -579,20 +559,24 @@ function repackSummaries(
       }
     });
   }
-  return [...groups]
-    .map(([key, value]) => ({
-      key,
-      label: value.label,
-      repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianPackScoutEvPercent(
-        purchasableRepackRows(value.rows),
-      ),
-    }))
+  const summaries = [...groups]
+    .map(([key, value]) => {
+      const median = medianDisplayedEvPercent(purchasableRepackRows(value.rows), context);
+      return {
+        key,
+        label: value.label,
+        repackCount: value.rows.length,
+        medianPackScoutEvPercent: median.metric,
+        source: median.source,
+      };
+    })
     .sort(
       (left, right) =>
         right.repackCount - left.repackCount || left.key.localeCompare(right.key),
     )
     .slice(0, 5);
+  return { groups: summaries.map(({ source: _source, ...group }) => group),
+    sources: summaries.map(({ key, source }) => ({ key, source })) };
 }
 
 function contextualFacets(
@@ -917,11 +901,14 @@ export const getDashboardBundleV3AtTime = internalQuery({
       selectedRepack,
     });
     if (!bundle.success) return publicReadError("RELEASE_UNAVAILABLE");
-    return success({
+    const kpis = dashboardKpis(matchingRows, active);
+    const vendors = repackSummaries(matchingRows, "vendor", active);
+    const categories = repackSummaries(matchingRows, "category", active);
+    return { ...success({
       ...bundle.data,
-      kpis: dashboardKpis(matchingRows),
-      vendorSummaries: repackSummaries(matchingRows, "vendor"),
-      categorySummaries: repackSummaries(matchingRows, "category"),
+      kpis: kpis.kpis,
+      vendorSummaries: vendors.groups,
+      categorySummaries: categories.groups,
       facets: contextualFacets(
         allRows,
         allRows,
@@ -930,7 +917,7 @@ export const getDashboardBundleV3AtTime = internalQuery({
         active.categoryByPublicId,
       ),
       activeFilters: request.filters,
-    });
+    }), evMedianSources: { overall: kpis.source, vendors: vendors.sources, categories: categories.sources } };
   },
 });
 

@@ -30,6 +30,7 @@ import type * as catalogRetentionRequests from "../catalogRetentionRequests.js";
 import type * as catalogRetentionState from "../catalogRetentionState.js";
 import type * as crons from "../crons.js";
 import type * as dataReleaseCanonicalHash from "../dataReleaseCanonicalHash.js";
+import type * as dataReleaseV3DisplayedEvMedian from "../dataReleaseV3DisplayedEvMedian.js";
 import type * as dataReleaseV3DisplayedRepacks from "../dataReleaseV3DisplayedRepacks.js";
 import type * as dataReleaseV3EvFacts from "../dataReleaseV3EvFacts.js";
 import type * as dataReleaseV3EvFactsBackfill from "../dataReleaseV3EvFactsBackfill.js";
@@ -123,6 +124,7 @@ declare const fullApi: ApiFromModules<{
   catalogRetentionState: typeof catalogRetentionState;
   crons: typeof crons;
   dataReleaseCanonicalHash: typeof dataReleaseCanonicalHash;
+  dataReleaseV3DisplayedEvMedian: typeof dataReleaseV3DisplayedEvMedian;
   dataReleaseV3DisplayedRepacks: typeof dataReleaseV3DisplayedRepacks;
   dataReleaseV3EvFacts: typeof dataReleaseV3EvFacts;
   dataReleaseV3EvFactsBackfill: typeof dataReleaseV3EvFactsBackfill;

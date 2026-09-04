@@ -1,5 +1,7 @@
 import type {
   DashboardKpis,
+  DisplayedEvMedianSource,
+  DisplayedEvMedianSourcesV3,
   PackScoutDisplayedEvV3,
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
@@ -57,6 +59,7 @@ export type CatalogSummaryPresentation = Readonly<{
   repackCountLabel: string;
   barRatio: number;
   medianEvPercent: MetricValuePresentation;
+  sourceLabel: string;
   accessibleLabel: string;
 }>;
 
@@ -64,13 +67,21 @@ function countLabel(count: number): string {
   return COUNT_FORMATTER.format(count);
 }
 
+function medianSourceLabel(source: DisplayedEvMedianSource | null): string {
+  if (source === "provider_reported") return "Platform EV × buyback";
+  if (source === "mixed") return "Mixed sources";
+  return source === "packscout" ? "PackScout EV" : "Source unavailable";
+}
+
 /** Formats the server-materialized dashboard KPIs without browser recomputation. */
 export function presentDashboardKpis(
   kpis: DashboardKpis,
+  source: DisplayedEvMedianSource | null,
 ): readonly KpiPresentation[] {
   const median = presentSignedEvPercentMetric(
     kpis.medianPackScoutEvPercent,
     "Median EV %",
+    source,
   );
   const highestValue = kpis.highestChaseValueUsdMinor === null
     ? "Unavailable"
@@ -95,8 +106,8 @@ export function presentDashboardKpis(
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Known current + last-known EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
-      accessibleLabel: `${median.accessibleLabel} Includes known current and last-known estimates. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
+      helper: `${medianSourceLabel(source)} · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      accessibleLabel: `${median.accessibleLabel} ${medianSourceLabel(source)}. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
       tone: median.tone,
@@ -169,16 +180,20 @@ export function resolveOverviewSelection(
 
 export function presentCatalogSummaries(
   summaries: readonly RepackSummaryGroupV3[],
+  sources: DisplayedEvMedianSourcesV3["vendors"],
 ): readonly CatalogSummaryPresentation[] {
+  const sourceByKey = new Map(sources.map(({ key, source }) => [key, source]));
   const largestCount = Math.max(
     0,
     ...summaries.map(({ repackCount }) => repackCount),
   );
   return Object.freeze(
     summaries.map((summary) => {
+      const source = sourceByKey.get(summary.key) ?? null;
       const median = presentSignedEvPercentMetric(
         summary.medianPackScoutEvPercent,
         "Median EV %",
+        source,
       );
       const repacks = countLabel(summary.repackCount);
       const reasonCopy =
@@ -190,7 +205,8 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median known current and last-known EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        sourceLabel: medianSourceLabel(source),
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median EV %: ${median.displayValue}. ${medianSourceLabel(source)}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );

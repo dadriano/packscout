@@ -82,6 +82,8 @@ function dashboardPayload() {
   const detail = buildV3ViewDetail();
   return {
     ok: true,
+    evMedianSources: { overall: "packscout" as const,
+      vendors: [{ key: "collector_example", source: "packscout" as const }], categories: [] },
     data: {
       release: buildV3ReleaseIdentity(),
       publicFreshnessPolicyVersion:
@@ -170,6 +172,47 @@ test("parses a coherent v3 dashboard bundle and preserves aggregates", () => {
   assert.equal(result.data.opportunities.length, 1);
   assert.equal(result.data.vendorSummaries[0]?.repackCount, 1);
   assert.equal(dashboardCatalogIsEmpty(result.data), false);
+  assert.deepEqual(result.data.evMedianSources, dashboardPayload().evMedianSources);
+});
+
+test("dashboard provenance admits positive platform and mixed medians without changing inner records", () => {
+  for (const source of ["provider_reported", "mixed"] as const) {
+    const payload = dashboardPayload();
+    payload.data.kpis.medianPackScoutEvPercent.basisPoints = 800;
+    payload.data.vendorSummaries[0]!.medianPackScoutEvPercent.basisPoints = 800;
+    const result = parseGetDashboardBundleV3Result({ ...payload,
+      evMedianSources: { overall: source, vendors: [{ key: "collector_example", source }], categories: [] } });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.data.evMedianSources.overall, source);
+    assert.equal("evMedianSources" in payload.data, false);
+  }
+});
+
+test("dashboard fails closed on missing, inconsistent or untrusted median provenance", () => {
+  const payload = dashboardPayload();
+  const invalidMetadata = [undefined,
+    { ...payload.evMedianSources, overall: "unknown" },
+    { ...payload.evMedianSources, overall: null },
+    { ...payload.evMedianSources, vendors: [] },
+    { ...payload.evMedianSources, vendors: [{ key: "wrong", source: "packscout" }] },
+    { ...payload.evMedianSources, vendors: [{ key: "collector_example", source: null }] },
+    { ...payload.evMedianSources, vendors: [...payload.evMedianSources.vendors, ...payload.evMedianSources.vendors] },
+    { ...payload.evMedianSources, categories: [{ key: "extra", source: "packscout" }] },
+  ];
+  for (const evMedianSources of invalidMetadata) {
+    assert.deepEqual(parseGetDashboardBundleV3Result({ ...payload, evMedianSources }), publicReadError("RELEASE_UNAVAILABLE"));
+  }
+  const positive = dashboardPayload();
+  positive.data.kpis.medianPackScoutEvPercent.basisPoints = 800;
+  assert.deepEqual(parseGetDashboardBundleV3Result(positive), publicReadError("RELEASE_UNAVAILABLE"));
+  const positiveGroup = dashboardPayload();
+  positiveGroup.data.vendorSummaries[0]!.medianPackScoutEvPercent.basisPoints = 800;
+  assert.deepEqual(parseGetDashboardBundleV3Result(positiveGroup), publicReadError("RELEASE_UNAVAILABLE"));
+  const unavailable = { status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE" };
+  const noMedian = { ...payload, data: { ...payload.data, kpis: { ...payload.data.kpis, medianPackScoutEvPercent: unavailable } } };
+  assert.deepEqual(parseGetDashboardBundleV3Result(noMedian), publicReadError("RELEASE_UNAVAILABLE"));
+  assert.equal(parseGetDashboardBundleV3Result({ ...noMedian, evMedianSources: { ...payload.evMedianSources, overall: null } }).ok, true);
+  assert.deepEqual(parseGetDashboardBundleV3Result(publicReadError("RELEASE_UNAVAILABLE")), publicReadError("RELEASE_UNAVAILABLE"));
 });
 
 test("parses a coherent v3 list page and its pagination envelope", () => {
