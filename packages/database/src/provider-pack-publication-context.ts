@@ -29,16 +29,15 @@ export function boundedPackInteger(value: number, maximum: number): number {
 }
 export const packWorkTable = (kind: PackWorkKind) => Prisma.raw(kind === "build" ? "pack_build_requests" : "pack_activation_intents");
 
-/** Receipts are immutable and validated on admission. Expired activation replay is not failure proof. */
+/** State describes the snapshot, not whether this command activated it.
+ * Only a definitive conflict/refusal proves non-activation; expired replay does not. */
 export function unreconciledPackOperations(intentId: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`EXISTS (SELECT 1 FROM pack_publication_operations pack_op
     LEFT JOIN pack_publication_receipts pack_receipt ON pack_receipt.operation_id = pack_op.id WHERE pack_op.intent_id = ${intentId}
     AND (pack_receipt.operation_id IS NULL OR pack_receipt.receipt_json->>'requestSha256' IS DISTINCT FROM pack_op.request_sha256
       OR COALESCE(pack_op.request_json->>'kind', '') NOT IN ('start_snapshot','stage_batch','finalize_snapshot','activate_head')
-      OR COALESCE(pack_receipt.receipt_json #>> '{result,state}', '') NOT IN ('waiting','ready','publishing','retry_scheduled','blocked','superseded')
       OR (pack_op.request_json->>'kind' = 'activate_head' AND NOT (
         COALESCE(pack_receipt.receipt_json #>> '{result,outcome}', '') IN ('conflict','refused')
-        AND COALESCE(pack_receipt.receipt_json #>> '{result,state}', '') IN ('blocked','superseded')
         AND pack_receipt.receipt_json #>> '{result,reasonCode}' IS NOT NULL))))`;
 }
 

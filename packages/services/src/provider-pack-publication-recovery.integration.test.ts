@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { packPublicationLimits, type ProviderPackPublicationOperation } from "@packscout/contracts";
+import { packPublicationLimits, type ActivePackHead, type ProviderPackPublicationOperation } from "@packscout/contracts";
 import {
   ProviderPackPublicationContext, ProviderPackBuildRequestRepository, ProviderPackSnapshotRepository,
   ProviderPackPublicationOutboxRepository, appendPromotionRange, type PackWorkClaim, type ProviderPrismaClient,
@@ -302,6 +302,80 @@ test("Persisted publication operations survive crashes and expire only with reco
       await expiredOutbox.retireReconciled(claim);
       await context.defer((await requests.claim(randomUUID()))[0]!, "superseded", "ACTIVATION_CONFLICT");
     });
+    for (const mode of ["direct", "observed", "resume_observed"] as const) {
+      await suite.test(`public-store already_active completes at the same generation: ${mode}`, async () => {
+        const { fixture, id, claim, intent, operation } = await prepare();
+        const first = await operation("activate_head"), firstDigest = await outbox.recordOperation(claim, first);
+        await outbox.recordReceipt(claim, { operationId: first.operationId, requestSha256: firstDigest,
+          result: { outcome: "applied", state: "published", reasonCode: null }, completedAt: new Date().toISOString() });
+        const head: ActivePackHead = { providerId, publicRepackId: id, generation: 1, publicationEpoch: 0,
+          held: false, holdReason: null, latestAcceptedPackPublicationSequence: claim.sequence, activeSnapshot: intent.snapshot,
+          previousSnapshot: null, indexableSummary: fixture.built.snapshot.payload.summaryProjection, activatedAt: new Date().toISOString() };
+        await outbox.complete(claim, first.operationId, head);
+        const resumed = { ...head, publicationEpoch: 1 };
+        if (mode === "resume_observed") await outbox.observeHead({ ...resumed, held: true, holdReason: "OPERATOR_HOLD" });
+        await outbox.observeHead(resumed);
+        await assert.rejects(outbox.observeHead({ ...resumed, held: true, holdReason: "OPERATOR_HOLD" }), { code: "PACK_STATE_CONFLICT" });
+        const next = await enqueue(fixture.inputs);
+        const build = (await requests.claim(randomUUID(), 25)).find(value => value.workId === next.requestId)!;
+        assert.equal((await snapshots.sealAndEnqueueActivation(build, fixture.built)).artifact, "reused");
+        let current = (await outbox.claim(randomUUID(), 25)).find(value => value.publicRepackId === id)!;
+        const nextIntent = await outbox.load(current);
+        const command = { ...await operation("activate_head"), intent: nextIntent, idempotencyKey: `${nextIntent.intentId}:activate`,
+          payloadSha256: await publicationHash(nextIntent) };
+        const digest = await outbox.recordOperation(current, command);
+        const accepted = { ...resumed, latestAcceptedPackPublicationSequence: current.sequence };
+        if (mode === "direct") {
+          const bad = { ...command, operationId: randomUUID(), idempotencyKey: `${nextIntent.intentId}:bad-generation` };
+          const badDigest = await outbox.recordOperation(current, bad);
+          await outbox.recordReceipt(current, { operationId: bad.operationId, requestSha256: badDigest,
+            result: { outcome: "applied", state: "published", reasonCode: null }, completedAt: new Date().toISOString() });
+          await assert.rejects(outbox.complete(current, bad.operationId, accepted), { code: "PACK_INPUT_INVALID" });
+        } else {
+          // The remote write succeeded but the worker lost its response. Status advances only the sequence.
+          await outbox.observeHead(accepted);
+          await assert.rejects(outbox.load(current), { code: "PACK_LEASE_LOST" });
+          current = (await outbox.claim(randomUUID(), 25)).find(value => value.workId === nextIntent.intentId)!;
+          assert.deepEqual((await outbox.readOperation(current, command.operationId))?.operation, command);
+        }
+        // Exact result shape from packCatalogStore.test.ts's signed already-active response.
+        const receipt = { operationId: command.operationId, requestSha256: digest,
+          result: { outcome: "already_active", state: "published", reasonCode: null }, completedAt: new Date().toISOString() };
+        await outbox.recordReceipt(current, receipt);
+        await outbox.complete(current, command.operationId, accepted);
+        const mirror = await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: id } });
+        assert.equal(mirror.generation, 1n); assert.equal(mirror.publication_epoch, 1n);
+        assert.equal(mirror.accepted_sequence, BigInt(current.sequence)); assert.equal(mirror.held, false);
+        assert.equal(mirror.active_snapshot_id, intent.snapshot.publicPackSnapshotId);
+        assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: current.workId } })).state, "published");
+        assert.equal(await client.pack_snapshot_artifacts.count({ where: { public_repack_id: id } }), 1);
+        await outbox.observeHead(accepted);
+        await assert.rejects(outbox.observeHead(resumed), { code: "PACK_STATE_CONFLICT" });
+      });
+    }
+    for (const state of ["ready", "published"] as const) {
+      await suite.test(`public-store CAS conflict in snapshot state ${state} releases newer desired work`, async () => {
+        const { fixture, id, claim, operation } = await prepare();
+        const start = await operation("start_snapshot"), startDigest = await outbox.recordOperation(claim, start);
+        // Redeclaring already-active bytes returns applied/published, without activating this intent.
+        await outbox.recordReceipt(claim, { operationId: start.operationId, requestSha256: startDigest,
+          result: { outcome: "applied", state, reasonCode: null }, completedAt: new Date().toISOString() });
+        const activation = await operation("activate_head"), digest = await outbox.recordOperation(claim, activation);
+        const receipt = { operationId: activation.operationId, requestSha256: digest,
+          result: { outcome: "conflict", state, reasonCode: "ACTIVATION_CONFLICT" }, completedAt: new Date().toISOString() };
+        await outbox.recordReceipt(claim, receipt);
+        assert.equal(await context.transaction(tx => context.operationsNeedReconciliation(tx, claim.workId)), false);
+        await context.defer(claim, "blocked", "ACTIVATION_CONFLICT");
+        const newer = await enqueue({ ...fixture.inputs, title: `Corrected after ${state} conflict` });
+        const build = (await requests.claim(randomUUID(), 25)).find(value => value.workId === newer.requestId);
+        assert.ok(build);
+        assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: claim.workId } })).state, "superseded");
+        assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: id } })).active_snapshot_id, null);
+        assert.deepEqual((await client.pack_publication_receipts.findUniqueOrThrow({ where: { operation_id: activation.operationId } })).receipt_json, receipt);
+        assert.equal(await client.pack_publication_operations.count({ where: { intent_id: claim.workId } }), 2);
+        await context.defer(build, "superseded", "ACTIVATION_CONFLICT");
+      });
+    }
     for (const outcome of ["applied", "already_applied", "already_active", "operation_expired", "conflict", "refused"] as const) {
       await suite.test(`activation receipt ${outcome} ${["conflict", "refused"].includes(outcome) ? "permits" : "prevents"} safe expiry retirement`, async () => {
         const { id, claim, operation } = await prepare();
@@ -310,8 +384,8 @@ test("Persisted publication operations survive crashes and expire only with reco
         await assert.rejects(expiredOutbox.retireReconciled(claim), { code: "PACK_STATE_CONFLICT" });
         const refused = ["conflict", "refused"].includes(outcome);
         await outbox.recordReceipt(claim, { operationId: activation.operationId, requestSha256, completedAt: new Date().toISOString(),
-          result: { outcome, state: refused || outcome === "operation_expired" ? "blocked" : "published",
-            reasonCode: outcome === "operation_expired" ? "OPERATION_EXPIRED" : refused ? "ACTIVATION_CONFLICT" : null } });
+          result: { outcome, state: outcome === "conflict" ? "ready" : outcome === "refused" ? "waiting" : outcome === "operation_expired" ? "blocked" : "published",
+            reasonCode: outcome === "operation_expired" ? "OPERATION_EXPIRED" : outcome === "refused" ? "PROFILE_HEAD_MISSING" : refused ? "ACTIVATION_CONFLICT" : null } });
         if (refused) {
           await expiredOutbox.retireReconciled(claim);
           const build = (await requests.claim(randomUUID()))[0]!;

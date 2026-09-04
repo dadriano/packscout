@@ -272,7 +272,7 @@ test("Provider-local planning and persistence crash matrix", async suite => {
     });
     await suite.test("hold fences owners and a new epoch creates a new episode without reopening history", async () => {
       const [owned] = await outbox.claim(randomUUID()); assert.ok(owned);
-      const held: ActivePackHead = { ...head, generation: 2, publicationEpoch: 1, held: true, holdReason: "OPERATOR_HOLD" };
+      const held: ActivePackHead = { ...head, publicationEpoch: 1, held: true, holdReason: "OPERATOR_HOLD" };
       await outbox.observeHead(held); await outbox.observeHead(held);
       await assert.rejects(context.renew(owned), { code: "PACK_LEASE_LOST" });
       assert.deepEqual(await outbox.claim(randomUUID()), []);
@@ -282,10 +282,11 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       const replacement = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: "resume:1" }));
       assert.equal(replacement.outcome, "change"); assert.notEqual(replacement.requestId, previous.id);
       assert.deepEqual(await requests.claim(randomUUID()), []);
-      await outbox.observeHead({ ...held, generation: 3, held: false, holdReason: null });
+      await outbox.observeHead({ ...held, held: false, holdReason: null });
       const [claim] = await requests.claim(randomUUID()); assert.ok(claim);
       const sealed = await snapshots.sealAndEnqueueActivation(claim, fixtures[0]!.built);
       assert.equal(sealed.intent.expectedHead.publicationEpoch, 1); assert.equal(sealed.artifact, "reused");
+      assert.equal(sealed.intent.expectedHead.generation, head.generation);
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: intent.intentId } })).state, "published");
       await client.pack_activation_intents.update({ where: { id: sealed.intent.intentId }, data: { attempts: 20 } });
       assert.deepEqual(await outbox.claim(randomUUID()), []);

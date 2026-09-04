@@ -148,7 +148,8 @@ export class ProviderPackPublicationOutboxRepository {
         receipt.result.state === "published" && receipt.result.reasonCode === null);
       packInvariant(head.providerId === this.context.scope.providerId && head.publicRepackId === claim.publicRepackId &&
         equal(head.activeSnapshot, operation.intent.snapshot) && head.latestAcceptedPackPublicationSequence === claim.sequence &&
-        head.generation >= operation.intent.expectedHead.generation + 1 &&
+        head.generation >= operation.intent.expectedHead.generation + (receipt.result.outcome === "already_active" ? 0 : 1) &&
+        (receipt.result.outcome !== "already_active" || operation.intent.expectedHead.activeSnapshotId === operation.intent.snapshot.publicPackSnapshotId) &&
         head.publicationEpoch === operation.intent.expectedHead.publicationEpoch &&
         BigInt(head.generation) >= mirror.generation && BigInt(head.publicationEpoch) >= mirror.publication_epoch, "PACK_INPUT_INVALID");
       await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: { state: "published", reason_code: null } });
@@ -166,11 +167,14 @@ export class ProviderPackPublicationOutboxRepository {
     await this.context.transaction(async tx => {
       await tx.$queryRaw`SELECT public_repack_id FROM pack_publication_heads WHERE public_repack_id = ${head.publicRepackId}::uuid FOR UPDATE`;
       const previous = await tx.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: head.publicRepackId } });
-      packInvariant(BigInt(head.generation) >= previous.generation && BigInt(head.publicationEpoch) >= previous.publication_epoch);
+      packInvariant(BigInt(head.generation) >= previous.generation && BigInt(head.publicationEpoch) >= previous.publication_epoch &&
+        BigInt(head.latestAcceptedPackPublicationSequence) >= previous.accepted_sequence);
+      if (BigInt(head.generation) === previous.generation) packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId);
       if (BigInt(head.generation) === previous.generation && BigInt(head.publicationEpoch) === previous.publication_epoch) {
-        packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId && previous.held === head.held &&
-          previous.accepted_sequence === BigInt(head.latestAcceptedPackPublicationSequence));
-        return;
+        const sameSequence = previous.accepted_sequence === BigInt(head.latestAcceptedPackPublicationSequence);
+        // Resume clears a hold without changing epoch/generation; already_active advances only sequence.
+        packInvariant(!head.held || (previous.held && sameSequence));
+        if (previous.held === head.held && sameSequence) return;
       }
       // Preserve the exact successful episode for lost-receipt reconciliation;
       // all genuinely conflicting CAS episodes become terminal audit evidence.
