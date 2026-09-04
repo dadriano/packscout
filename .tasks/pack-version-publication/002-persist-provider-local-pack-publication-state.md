@@ -8,6 +8,10 @@
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
 **Status:** done
 
+## Base refresh — 2026-09-04 15:12 UTC
+
+PR113 independently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`. P02 rebased without conflicts; all36 patches have identical range-diff. Current implementation is `8a9947ce` on that exact parent; backup `codex/p02-before-watchlist113-20260904` retains `b71ec45b`. No P02 runtime or test change was made. The completed task acceptance below was certified on1117b456; **the new-parent merge gate is being rerun locally and in CI before merge**. The prior full pass is not new-parent certification. All30 addressed review threads remain resolved; recheck for fresh feedback before merge. P03 still follows the actual PR95 merge, and no deployment of PR113 is performed here.
+
 ## Current checkpoint — 2026-09-04
 
 PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Pinned Convex `shiny-newt-310` and matching frontend passed the Watchlist smoke check; automatic domain assignment is restored and all temporary deployment keys are revoked. Publication authority remains absent.

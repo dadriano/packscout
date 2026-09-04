@@ -1,12 +1,16 @@
 # Feature: Atomic Pack Publication in Pack Catalog V1
 
+## Base refresh — 2026-09-04 15:12 UTC
+
+PR113 independently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`. P02 rebased without conflicts; all36 patches have identical range-diff. Current implementation is `8a9947ce` on that exact parent; backup `codex/p02-before-watchlist113-20260904` retains `b71ec45b`. No P02 runtime or test change was made. The completed task acceptance below was certified on1117b456; **the new-parent merge gate is being rerun locally and in CI before merge**. The prior full pass is not new-parent certification. All30 addressed review threads remain resolved; recheck for fresh feedback before merge. P03 still follows the actual PR95 merge, and no deployment of PR113 is performed here.
+
 ## Start Here
 
 PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Pinned Convex `shiny-newt-310` and matching frontend passed the Watchlist smoke check; automatic domain assignment is restored and all temporary deployment keys are revoked. Publication authority remains absent.
 
 P02 implementation `69a1a8735d8484e96607e3f4d913198a04f20a45` is verified on that exact parent: 108 focused checks, 30 schema checks, and the full local `npm run verify:framework` passed, including both builds. PR95 remains open for final current-head CI and review resolution before the authorized merge. P03 is preserved locally on old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack, align, certify, and publish it separately after PR95 merges. Do not merge P03 or start later phases.
 
-**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; P02 published, final CI pending; 0/1 launch operations complete
+**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; P02 refreshing certification after PR113; 0/1 launch operations complete
 
 ## Context
 
@@ -118,7 +122,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | published |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | building |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P02 | follows PR95 | Complete deterministic assembly | blocked |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
