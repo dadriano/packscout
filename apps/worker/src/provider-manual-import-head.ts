@@ -4,9 +4,20 @@ import { PrismaProviderHeadReconciliationRepository, PrismaProviderRunRepository
 import type { ProviderManualImportExecutionResult } from "./provider-manual-import-executor.ts";
 import type { ProviderManualImportStage } from "./provider-manual-import-diagnostics.ts";
 
+/** A head batch that follows a page must also fit the remaining page window: the
+ * executor admits it with as little as 35 s left and the gateway retires the
+ * connection at its own operation deadline, so the transaction gets whichever
+ * is shorter, never less than the repository's 1 s floor. */
+export function boundedHeadTransactionMilliseconds(budgetMilliseconds: number, deadlineAt?: number,
+  now: () => number = Date.now): number {
+  if (deadlineAt === undefined) return budgetMilliseconds;
+  return Math.max(1_000, Math.min(budgetMilliseconds, Math.floor(deadlineAt - now() - 5_000)));
+}
+
 export async function finishProviderImportHead(input: {
   database: ProviderPrismaClient; runId: string; workerId: string; fence: bigint;
-  leaseMilliseconds: number; signal: AbortSignal; onStage(stage: ProviderManualImportStage): void;
+  leaseMilliseconds: number; transactionMilliseconds: number; signal: AbortSignal;
+  onStage(stage: ProviderManualImportStage): void;
 }): Promise<ProviderManualImportExecutionResult> {
   if (input.signal.aborted) return { kind: "blocked", runId: input.runId, failureCode: "PROVIDER_CAPTURE_ABORTED" };
   input.onStage("lease_renewal");
@@ -17,6 +28,7 @@ export async function finishProviderImportHead(input: {
   input.onStage("head_reconciliation");
   const step = await new PrismaProviderHeadReconciliationRepository(input.database).step({
     runId: input.runId, workerId: input.workerId, workerFence: input.fence,
+    timeoutMilliseconds: input.transactionMilliseconds,
   });
   const runs = new PrismaProviderRunRepository(input.database);
   if (step === "progress") {

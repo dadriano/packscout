@@ -13,7 +13,8 @@ import { ProviderCanonicalRepository } from "./provider-canonical-repository.ts"
 import { type ProviderQueryClient } from "./provider-database.ts";
 import { PrismaProviderWorkerLeaseRepository } from
   "./provider-worker-lease-repository.ts";
-import { resolveProviderFactReferencesBatch } from "./provider-fact-reference-reconciliation.ts";
+import { FACT_REFERENCE_RECONCILIATION_LIMIT,
+  resolveProviderFactReferencesBatch } from "./provider-fact-reference-reconciliation.ts";
 
 import { createProviderHarness, type ProviderHarness } from "./provider-canonical-integration-support.ts";
 const fixedInstant = new Date("2026-08-29T12:34:56.123456Z");
@@ -558,7 +559,7 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
   assert.equal(resolvedEvent.collectible_id, futureCollectible.id);
   assert.equal(resolvedEvent.row_version, 3n);
 
-  const boundedEventIds = Array.from({ length: 501 }, () => randomUUID());
+  const boundedEventIds = Array.from({ length: FACT_REFERENCE_RECONCILIATION_LIMIT + 1 }, () => randomUUID());
   await harness.client.$transaction(async (transaction) => {
     await transaction.market_events.createMany({
       data: boundedEventIds.map((id, index) => ({
@@ -602,8 +603,8 @@ async function exerciseCanonicalWarehouse(harness: ProviderHarness): Promise<{
     reconciliationAuthority,
   );
   assert.ok(firstBoundedResolution);
-  assert.equal(firstBoundedResolution.marketEventCollectibleCount, 500);
-  assert.equal(firstBoundedResolution.materialChangeCount, 500);
+  assert.equal(firstBoundedResolution.marketEventCollectibleCount, FACT_REFERENCE_RECONCILIATION_LIMIT);
+  assert.equal(firstBoundedResolution.materialChangeCount, FACT_REFERENCE_RECONCILIATION_LIMIT);
   const finalBoundedResolution = await repository.reconcileFactReferences(
     reconciliationAuthority,
   );
@@ -788,37 +789,43 @@ test("reconciliation skips empty catalogs and index-probes 150,000 unrelated fac
   const harness = await createProviderHarness();
   const { client } = harness;
   try {
-    // 501 facts span two late targets, proving the outer cap is global rather
-    // than 500 per catalog key. Another 50,000 keys never receive catalog rows.
+    // One more late fact than a full batch spans two late targets, proving the
+    // outer cap is global rather than per catalog key. Another 50,000 keys never
+    // receive catalog rows.
+    const late = FACT_REFERENCE_RECONCILIATION_LIMIT + 1;
+    const lateA = Math.floor(FACT_REFERENCE_RECONCILIATION_LIMIT / 2) + 1;
+    const unrelated = 50_000;
+    const total = unrelated + late;
+    const seeded = BigInt(3 * total);
     await client.$transaction(async (seed) => {
       await seed.$executeRaw`
         INSERT INTO pulls (id, pull_key, fact_digest, pack_key, item_count, occurred_at)
         SELECT md5('synthetic-pull-' || n)::uuid, 'synthetic-pull-' || n, repeat('a', 64),
-          CASE WHEN n <= 251 THEN 'late-pack-a' WHEN n <= 501 THEN 'late-pack-b'
+          CASE WHEN n <= ${lateA} THEN 'late-pack-a' WHEN n <= ${late} THEN 'late-pack-b'
             ELSE 'missing-pack-' || n END, 1, CURRENT_TIMESTAMP
-        FROM generate_series(1, 50501) AS n
+        FROM generate_series(1, ${total}) AS n
       `;
       await seed.$executeRaw`
         INSERT INTO pull_items (pull_id, ordinal, collectible_key, quantity)
         SELECT md5('synthetic-pull-' || n)::uuid, 1,
-          CASE WHEN n <= 251 THEN 'late-card-a' WHEN n <= 501 THEN 'late-card-b'
+          CASE WHEN n <= ${lateA} THEN 'late-card-a' WHEN n <= ${late} THEN 'late-card-b'
             ELSE 'missing-card-' || n END, 1
-        FROM generate_series(1, 50501) AS n
+        FROM generate_series(1, ${total}) AS n
       `;
       await seed.$executeRaw`
         INSERT INTO market_events (event_key, fact_digest, event_type, pack_key, collectible_key, occurred_at)
         SELECT 'synthetic-event-' || n, repeat('b', 64), 'sale'::market_event_type,
-          CASE WHEN n <= 251 THEN 'late-pack-a' WHEN n <= 501 THEN 'late-pack-b'
+          CASE WHEN n <= ${lateA} THEN 'late-pack-a' WHEN n <= ${late} THEN 'late-pack-b'
             ELSE 'missing-pack-' || n END,
-          CASE WHEN n <= 251 THEN 'late-card-a' WHEN n <= 501 THEN 'late-card-b'
+          CASE WHEN n <= ${lateA} THEN 'late-card-a' WHEN n <= ${late} THEN 'late-card-b'
             ELSE 'missing-card-' || n END, CURRENT_TIMESTAMP
-        FROM generate_series(1, 50501) AS n
+        FROM generate_series(1, ${total}) AS n
       `;
       const head = await seed.promotion_ledger.update({
-        where: { singleton_key: true }, data: { last_sequence: { increment: 151_503n } },
+        where: { singleton_key: true }, data: { last_sequence: { increment: seeded } },
         select: { last_sequence: true },
       });
-      const first = head.last_sequence - 151_503n + 1n;
+      const first = head.last_sequence - seeded + 1n;
       await seed.$executeRaw`
         INSERT INTO promotion_changes (sequence, entity_type, entity_id, entity_version, operation, changed_at)
         SELECT ${first} + row_number() OVER (ORDER BY kind, id) - 1,
@@ -842,8 +849,8 @@ test("reconciliation skips empty catalogs and index-probes 150,000 unrelated fac
     if (lease.kind === "held") throw new Error("Synthetic test lease was not acquired.");
     const authority = { workerId, workerFence: lease.lease.fence };
     assert.equal((await repository.reconcileFactReferences(authority))?.materialChangeCount, 0);
-    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), 50_501);
-    assert.equal(await client.promotion_changes.count(), 151_503);
+    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), total);
+    assert.equal(await client.promotion_changes.count(), Number(seeded));
 
     const category = await repository.upsertCategory({
       categoryKey: "synthetic", parentCategoryId: null, displayName: "Synthetic",
@@ -852,7 +859,7 @@ test("reconciliation skips empty catalogs and index-probes 150,000 unrelated fac
       await repository.upsertPack({ ...packInput(category.id), packKey: `late-pack-${suffix}` });
       await repository.upsertCollectible(collectibleInput(category.id, `late-card-${suffix}`, "Late Card", suffix));
     }
-    for (const expected of [500, 1, 0]) {
+    for (const expected of [FACT_REFERENCE_RECONCILIATION_LIMIT, 1, 0]) {
       const result = await repository.reconcileFactReferences(authority);
       assert.ok(result);
       assert.deepEqual([
@@ -865,12 +872,12 @@ test("reconciliation skips empty catalogs and index-probes 150,000 unrelated fac
         assert.equal(result.promotionRange.last - result.promotionRange.first + 1n, BigInt(expected * 4));
       } else assert.equal(result.promotionRange, null);
     }
-    assert.equal(await client.pulls.count({ where: { row_version: 2n } }), 501);
-    assert.equal(await client.pull_items.count({ where: { row_version: 2n } }), 501);
-    assert.equal(await client.market_events.count({ where: { row_version: 3n } }), 501);
-    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), 50_000);
-    assert.equal(await client.pull_items.count({ where: { row_version: 1n } }), 50_000);
-    assert.equal(await client.market_events.count({ where: { row_version: 1n } }), 50_000);
+    assert.equal(await client.pulls.count({ where: { row_version: 2n } }), late);
+    assert.equal(await client.pull_items.count({ where: { row_version: 2n } }), late);
+    assert.equal(await client.market_events.count({ where: { row_version: 3n } }), late);
+    assert.equal(await client.pulls.count({ where: { row_version: 1n } }), unrelated);
+    assert.equal(await client.pull_items.count({ where: { row_version: 1n } }), unrelated);
+    assert.equal(await client.market_events.count({ where: { row_version: 1n } }), unrelated);
 
     // Capture the real production statements, then EXPLAIN ANALYZE the drained
     // no-match case. This is a disposable database, never a source/provider DB.

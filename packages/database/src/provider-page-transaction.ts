@@ -20,18 +20,31 @@ function own(value: unknown, name: string): unknown {
   return field && "value" in field ? field.value : undefined;
 }
 
-/** Inspect only Prisma's closed timeout template, never log error text, SQL, or metadata. */
-export function providerPageQueryExpiration(error: unknown): ProviderPageTransactionExpiredError | null {
+function expirationFor(error: unknown, subject: string): ProviderPageTransactionExpiredError | null {
   try {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || own(error, "code") !== "P2028") return null;
     const detail = own(own(error, "meta"), "error");
     if (typeof detail !== "string" || detail.length > 1_024) return null;
-    const match = /^(?:Transaction already closed: )?A query cannot be executed on an expired transaction\. The timeout for this transaction was ([0-9]+) ms, however ([0-9]+) ms passed since the start of the transaction\. Consider increasing the interactive transaction timeout or doing less work in the transaction\.$/u.exec(detail);
+    const match = new RegExp(`^(?:Transaction API error: )?(?:Transaction already closed: )?${subject} cannot be executed on an expired transaction\\. The timeout for this transaction was ([0-9]+) ms, however ([0-9]+) ms passed since the start of the transaction\\. Consider increasing the interactive transaction timeout or doing less work in the transaction\\.$`, "u").exec(detail);
     if (!match) return null;
     const timeout = Number(match[1]), elapsed = Number(match[2]);
     return Number.isSafeInteger(timeout) && timeout > 0 && Number.isSafeInteger(elapsed) && elapsed >= timeout
       ? new ProviderPageTransactionExpiredError(timeout, elapsed) : null;
   } catch { return null; }
+}
+
+/** Inspect only Prisma's closed timeout template, never log error text, SQL, or metadata. */
+export function providerPageQueryExpiration(error: unknown): ProviderPageTransactionExpiredError | null {
+  return expirationFor(error, "A query");
+}
+
+/** Every expired-transaction template, including batch-query, commit, and rollback
+ * rejections. Page commits and head batches are digest-replayable, so a supervised
+ * rerun after an ambiguous commit expiry either replays as a no-op or re-executes
+ * cleanly; this matcher exists for that failure classification, never for
+ * in-transaction retry. */
+export function providerPageTransactionExpiration(error: unknown): ProviderPageTransactionExpiredError | null {
+  return expirationFor(error, "A (?:batch query|query|commit|rollback)");
 }
 
 /** Two sequential attempts at most. Only an expired query inside a rejected callback can retry. */
