@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { compareCanonicalStrings, deriveProviderPackInputDigests, packCatalogCanonicalByteCount, packPublicationLimits, type ProviderPackBuildInputs } from "@packscout/contracts";
+import { compareCanonicalStrings, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, deriveProviderPackReadinessDecision,
+  providerPackBuildInputsSchema, packCatalogCanonicalByteCount, packPublicationLimits, type ProviderPackBuildInputs } from "@packscout/contracts";
 import {
   ProviderPackPublicationContext, ProviderPackBuildRequestRepository, ProviderPackImpactRepository,
   ProviderPackSnapshotRepository, ProviderPackPublicationOutboxRepository, appendPromotionRange,
@@ -105,6 +106,44 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.equal(await client.pack_build_requests.count(), 0);
       assert.equal(await client.pack_publication_heads.count(), 0);
       assert.equal(await client.pack_publication_change_receipts.count(), 0);
+    });
+    await suite.test("direct admission rejects noncanonical ordering even with matching raw-input evidence", async checks => {
+      const mutations: Array<[string, (inputs: ProviderPackBuildInputs) => void]> = [
+        ["contents", inputs => { inputs.contents.reverse(); }],
+        ["actions", inputs => { inputs.actions = [
+          { ...inputs.actions[0]!, actionId: "z-action" }, { ...inputs.actions[0]!, actionId: "a-action" },
+        ]; }],
+        ["aliases", inputs => { inputs.aliases = ["z-alias", "a-alias"]; }],
+      ];
+      for (const [name, mutate] of mutations) await checks.test(name, async () => {
+        const inputs = structuredClone(fixture.inputs); mutate(inputs);
+        assert.equal(providerPackBuildInputsSchema.safeParse(inputs).success, true);
+        inputs.evInputsSha256 = (await deriveProviderPackInputDigests(inputs)).evInputsSha256;
+        const digests = await deriveProviderPackInputDigests(inputs);
+        const decision = await deriveProviderPackReadinessDecision(inputs, digests.evInputsSha256, new Date().toISOString());
+        // Alias projection ordering already blocks readiness; contents/actions previously became claimable.
+        assert.equal(decision.outcome, name === "aliases" ? "blocked" : "ready");
+        const readiness = { ...digests, ...decision, requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs) };
+        await assert.rejects(context.transaction(async tx => {
+          await requests.enqueueInTransaction(tx, { inputs, readiness, boundaryIdentity: `unordered:${name}` });
+          throw new Error("rollback unexpected noncanonical admission");
+        }), { code: "PACK_INPUT_INVALID" });
+        assert.equal(await client.pack_build_requests.count(), 0);
+        assert.equal(await client.pack_publication_heads.count(), 0);
+        assert.deepEqual(await requests.claim(randomUUID()), []);
+      });
+      const canonical = await evaluator.evaluate({ candidate: { ...fixture.inputs, contents: [...fixture.inputs.contents].reverse() },
+        evaluatedAt: new Date().toISOString() });
+      assert.equal(canonical.readiness.outcome, "ready");
+      let canonicalAdmitted = false;
+      await assert.rejects(context.transaction(async tx => {
+        await requests.enqueueInTransaction(tx, { ...canonical, boundaryIdentity: "canonical:admission" });
+        const row = await tx.pack_build_requests.findFirstOrThrow();
+        assert.deepEqual(row.inputs_json, canonical.inputs);
+        canonicalAdmitted = true;
+        throw new Error("rollback accepted canonical fixture");
+      }), { code: "PACK_PERSISTENCE_FAILED" });
+      assert.equal(canonicalAdmitted, true);
     });
     await suite.test("later mutation of evaluator-owned objects cannot change admitted capture bytes", async () => {
       let returnedInputs: ProviderPackBuildInputs | null = null;
