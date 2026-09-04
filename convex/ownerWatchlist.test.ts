@@ -169,7 +169,7 @@ function boundedPublicId(index: number): string {
   return `41000000-0000-5000-8000-${String(index).padStart(12, "0")}`;
 }
 
-function watchlistEstimatedEv(
+function watchlistDisplayedEv(
   packScout: typeof availableRepack.evEstimates.packScout,
 ) {
   if (packScout.metrics === null || packScout.confidence === null) {
@@ -259,7 +259,7 @@ describe("owner watchlist read", () => {
           name: soldOutRepack.name,
           vendorDisplayName: soldOutRepack.vendorDisplayName,
           availability: "sold_out",
-          estimatedEv: watchlistEstimatedEv(soldOutRepack.evEstimates.packScout),
+          displayedEv: watchlistDisplayedEv(soldOutRepack.evEstimates.packScout),
         },
       },
       {
@@ -271,7 +271,7 @@ describe("owner watchlist read", () => {
           name: availableRepack.name,
           vendorDisplayName: availableRepack.vendorDisplayName,
           availability: "available",
-          estimatedEv: watchlistEstimatedEv(
+          displayedEv: watchlistDisplayedEv(
             availableRepack.evEstimates.packScout,
           ),
         },
@@ -458,7 +458,7 @@ describe("owner watchlist read", () => {
           name: availableRepack.name,
           vendorDisplayName: availableRepack.vendorDisplayName,
           availability: "available",
-          estimatedEv: watchlistEstimatedEv(
+          displayedEv: watchlistDisplayedEv(
             availableRepack.evEstimates.packScout,
           ),
         },
@@ -798,7 +798,7 @@ describe("owner watchlist read", () => {
           currentTime: later,
         })
     ).watchlist;
-    const expectedEv = watchlistEstimatedEv(original.evEstimates.packScout);
+    const expectedEv = watchlistDisplayedEv(original.evEstimates.packScout);
     expect(watchlist.savedRepacks).toEqual([
       {
         publicRepackId: original.publicRepackId,
@@ -809,7 +809,7 @@ describe("owner watchlist read", () => {
           name: original.name,
           vendorDisplayName: original.vendorDisplayName,
           availability: "available",
-          estimatedEv: { ...expectedEv, confidenceBand: "low" },
+          displayedEv: { ...expectedEv, confidenceBand: "low" },
         },
       },
     ]);

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import net from "node:net";
-import test from "node:test";
-import { tsImport } from "tsx/esm/api";
+import test, { after } from "node:test";
+import { register } from "tsx/esm/api";
+const loader = register({ namespace: import.meta.url });
+const tsImport = loader.import;
+after(() => loader.unregister());
 const policy = await tsImport("./provider-continuous-policy.mts", import.meta.url);
 const cadencePolicy = await tsImport("./provider-continuous-cadence.mts", import.meta.url);
 const postHeadPolicy = await tsImport("./provider-continuous-post-head-policy.mts", import.meta.url);
@@ -285,6 +288,7 @@ test("all four isolated destinations are exact, legacy/cross-provider routes and
 });
 test("provider-database refusal during a cycle waits with backoff and re-executes the same queued cycle", async () => {
   const unavailable = () => new ProviderBackfillSupervisorError(policy.providerUnavailableRefusalCode);
+  assert.equal(policy.isProviderUnavailableRefusal(unavailable()), true, "test errors must share the supervisor's module identity");
   const v = fixture(); let executions = 0; const waits = []; const events = []; const stop = new AbortController();
   await policy.superviseContinuousProvider({ pins, read: async () => v,
     persist: async view => { v.cycle = policy.makeContinuousCycle(view, pins); v.cycleQueued = false; },
@@ -293,9 +297,10 @@ test("provider-database refusal during a cycle waits with backoff and re-execute
     execute: async () => { if (++executions <= 2) throw unavailable();
       v.snapshot.run.state = "succeeded"; v.snapshot.run.reachedHead = true; v.snapshot.run.finishedAt = new Date(v.snapshot.now);
       v.snapshot.activeRunIds = []; stop.abort(); return "head"; },
-    wait: async ms => { waits.push(ms); v.snapshot.now = new Date(v.snapshot.now.getTime() + ms); }, emit: event => events.push(event),
+    wait: async ms => { waits.push(ms); v.snapshot.now = new Date(v.snapshot.now.getTime() + ms); },
+    emit: event => { events.push(event); if (events.length > 10) stop.abort(); },
   }, stop.signal);
-  assert.equal(executions, 3); assert.deepEqual(waits, [15000, 30000]);
+  assert.equal(executions, 3, JSON.stringify(events)); assert.deepEqual(waits, [15000, 30000]);
   assert.deepEqual(events.map(event => event.state), ["due", "queue", "execute", "provider_unavailable", "execute",
     "provider_unavailable", "execute", "stopped"], "the queued cycle is re-executed, never re-persisted or re-queued");
   assert.deepEqual(events.filter(event => event.state === "provider_unavailable").map(event => event.retry), [1, 2]);
@@ -307,7 +312,8 @@ test("provider-database refusal during a cycle waits with backoff and re-execute
   const halt = new AbortController(); let launches = 0; const states = [];
   await policy.superviseContinuousProvider({ pins, read: async () => w, persist: async () => assert.fail(), queue: async () => assert.fail(),
     execute: async () => { launches++; throw unavailable(); },
-    wait: async () => { if (states.filter(event => event.state === "blocked").length === 2) halt.abort(); }, emit: event => states.push(event),
+    wait: async () => { if (states.filter(event => event.state === "blocked").length === 2) halt.abort(); },
+    emit: event => { states.push(event); if (states.length > 60) halt.abort(); },
   }, halt.signal);
   assert.equal(launches, policy.providerUnavailableRetryLimit + 1);
   assert.equal(states.filter(event => event.state === "provider_unavailable").length, policy.providerUnavailableRetryLimit);

@@ -26,7 +26,7 @@ export type WatchlistRepackRow = Readonly<{
     name: string;
     vendorDisplayName: string;
     availability: "available" | "unavailable" | "unknown" | "sold_out";
-    estimatedEv: WatchlistRepackEv | null;
+    displayedEv: WatchlistRepackEv | null;
   }> | null;
 }>;
 
@@ -188,9 +188,9 @@ export function presentWatchlistRepackRow(row: WatchlistRepackRow): Readonly<{
   }
   const availability = presentPackAvailability(row.repack.availability).label;
   const ev =
-    row.repack.estimatedEv === null
+    row.repack.displayedEv === null
       ? null
-      : formatWatchlistRepackEvSummary(row.repack.estimatedEv);
+      : formatWatchlistRepackEvSummary(row.repack.displayedEv);
   return {
     title: row.repack.name,
     detail: [row.repack.vendorDisplayName, availability, ev]
