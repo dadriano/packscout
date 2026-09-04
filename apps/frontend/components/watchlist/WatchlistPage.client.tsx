@@ -1,18 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useAction } from "convex/react";
+import { useRouter } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { usePackScoutAuth } from "@/components/auth/AuthContext.client";
 import {
   useAccountNotice,
   useAccountSavingAvailable,
+  useAccountSavingFailed,
 } from "@/components/auth/SavedItemsContext.client";
+import {
+  decideIdentityHandoff,
+  IDENTITY_HANDOFF_MAX_ATTEMPTS,
+  IDENTITY_HANDOFF_TIMEOUT_MS,
+  readBrowserIdentityCookie,
+  readLastIdentityCookieWrite,
+  subscribeToIdentityCookieWrites,
+} from "@/lib/identity-cookie";
 import {
   presentWatchlistCollectibleRow,
   presentWatchlistFrame,
   presentWatchlistRepackRow,
+  watchlistCanLoadOwnerRead,
   watchlistHref,
   watchlistTabAccessibleName,
   type OwnerWatchlist,
@@ -24,47 +42,144 @@ import {
 } from "@/lib/watchlist";
 import styles from "./Watchlist.module.css";
 
-export function WatchlistPage({ tab }: Readonly<{ tab: WatchlistTab }>) {
+const noIdentityCookieWrite = () => null;
+
+export function WatchlistPage({
+  tab,
+  completeSignInHandoff,
+}: Readonly<{
+  tab: WatchlistTab;
+  completeSignInHandoff: boolean;
+}>) {
   const auth = usePackScoutAuth();
+  const router = useRouter();
   const accountNotice = useAccountNotice();
   const accountSavingAvailable = useAccountSavingAvailable();
-  const canLoadOwnerWatchlist =
-    auth.status === "signed_in" && accountSavingAvailable;
+  const accountSavingFailed = useAccountSavingFailed();
+  const canLoadOwnerWatchlist = watchlistCanLoadOwnerRead({
+    authStatus: auth.status,
+    accountNotice,
+    accountSavingAvailable,
+    accountSavingFailed,
+  });
 
-  if (!canLoadOwnerWatchlist) {
-    const frame = presentWatchlistFrame({
-      authStatus: auth.status,
-      accountSavingAvailable,
-      accountNotice,
-      loading: false,
-      failed: false,
-      watchlist: null,
+  return (
+    <>
+      {completeSignInHandoff ? <WatchlistSignInHandoff /> : null}
+      {canLoadOwnerWatchlist ? (
+        <WatchlistOwnerPage tab={tab} />
+      ) : (
+        <WatchlistShell chaseCount={0} repackCount={0} tab={tab}>
+          <WatchlistAuthFrame
+            accountNotice={accountNotice}
+            accountSavingAvailable={accountSavingAvailable}
+            completeSignInHandoff={completeSignInHandoff}
+            onContinue={() => router.refresh()}
+            onSignIn={() => auth.login()}
+            status={auth.status}
+          />
+        </WatchlistShell>
+      )}
+    </>
+  );
+}
+
+function WatchlistSignInHandoff() {
+  const auth = usePackScoutAuth();
+  const router = useRouter();
+  const lastWrite = useSyncExternalStore(
+    subscribeToIdentityCookieWrites,
+    readLastIdentityCookieWrite,
+    noIdentityCookieWrite,
+  );
+  const mountedAtMs = useRef(0);
+  const armedAtMs = useRef(0);
+  const attempted = useRef<readonly string[]>([]);
+  const surrendered = useRef(false);
+  const armed = auth.status === "signed_in";
+
+  useEffect(() => {
+    if (mountedAtMs.current === 0) mountedAtMs.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    if (!armed || surrendered.current) return;
+    if (armedAtMs.current === 0) armedAtMs.current = Date.now();
+    const decision = decideIdentityHandoff({
+      cookieToken: readBrowserIdentityCookie(),
+      lastWrite,
+      mountedAtMs: mountedAtMs.current,
+      armedAtMs: armedAtMs.current,
+      nowMs: Date.now(),
+      timeoutMs: IDENTITY_HANDOFF_TIMEOUT_MS,
+      attemptedTokens: attempted.current,
+      maxAttempts: IDENTITY_HANDOFF_MAX_ATTEMPTS,
     });
+    if (decision.kind === "give_up") {
+      surrendered.current = true;
+      return;
+    }
+    if (decision.kind !== "hand_off") return;
+    attempted.current = [...attempted.current, decision.token];
+    router.refresh();
+  }, [armed, lastWrite, router]);
+
+  return null;
+}
+
+function WatchlistAuthFrame({
+  status,
+  accountSavingAvailable,
+  accountNotice,
+  completeSignInHandoff,
+  onSignIn,
+  onContinue,
+}: Readonly<{
+  status: "unavailable" | "loading" | "signed_out" | "signed_in" | "error";
+  accountSavingAvailable: boolean;
+  accountNotice: string | null;
+  completeSignInHandoff: boolean;
+  onSignIn: () => void;
+  onContinue: () => void;
+}>) {
+  const frame = presentWatchlistFrame({
+    authStatus: status,
+    accountSavingAvailable,
+    accountNotice,
+    loading: false,
+    failed: false,
+    watchlist: null,
+  });
+  const continueAfterSignIn =
+    completeSignInHandoff && status === "signed_in";
+
+  if (frame.kind === "sign_in") {
     return (
-      <WatchlistShell chaseCount={0} repackCount={0} tab={tab}>
-        {frame.kind === "sign_in" ? (
-          <div className={styles.actions}>
-            <p className={styles.copy}>{WATCHLIST_SIGN_IN_COPY}</p>
-            <button
-              className="route-action"
-              onClick={() => auth.login()}
-              type="button"
-            >
-              Sign in
-            </button>
-          </div>
-        ) : frame.kind === "unavailable" ? (
-          <p className={styles.copy}>{frame.copy}</p>
-        ) : (
-          <p className={styles.copy} role="status">
-            Loading your Watchlist…
-          </p>
-        )}
-      </WatchlistShell>
+      <div className={styles.actions}>
+        <p className={styles.copy}>{WATCHLIST_SIGN_IN_COPY}</p>
+        <button className="route-action" onClick={onSignIn} type="button">
+          Sign in
+        </button>
+      </div>
     );
   }
 
-  return <WatchlistOwnerPage tab={tab} />;
+  if (frame.kind === "unavailable") {
+    return <p className={styles.copy}>{frame.copy}</p>;
+  }
+
+  return (
+    <div className={styles.actions}>
+      <p className={styles.copy} role="status">
+        Loading your Watchlist…
+      </p>
+      {continueAfterSignIn ? (
+        <button className="route-action" onClick={onContinue} type="button">
+          Continue
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function WatchlistOwnerPage({ tab }: Readonly<{ tab: WatchlistTab }>) {

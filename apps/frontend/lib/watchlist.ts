@@ -89,6 +89,19 @@ export function watchlistNavVisible(input: Readonly<{
   return input.authStatus === "signed_in" && input.accountSavingAvailable;
 }
 
+export function watchlistCanLoadOwnerRead(input: Readonly<{
+  authStatus: WatchlistAuthStatus;
+  accountNotice: string | null;
+  accountSavingAvailable: boolean;
+  accountSavingFailed: boolean;
+}>): boolean {
+  return (
+    input.authStatus === "signed_in" &&
+    input.accountNotice === null &&
+    (input.accountSavingAvailable || input.accountSavingFailed)
+  );
+}
+
 export function watchlistTabAccessibleName(
   tab: WatchlistTab,
   count: number,

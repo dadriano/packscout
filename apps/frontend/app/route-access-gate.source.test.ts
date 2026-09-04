@@ -116,6 +116,10 @@ test("Watchlist stays a personal destination: signed-out visitors render, crawle
   assert.match(watchlistSource, /robots: PERSONAL_SURFACE_ROBOTS/);
   assert.equal(watchlistSource.includes("gatedSurfaceRobots"), false);
   assert.match(body, /<ShellSurfaceReporter mode=\{surface\} \/>/);
+  assert.match(
+    body,
+    /completeSignInHandoff=\{access\.outcome === "signed_out"\}/,
+  );
 });
 
 test("the robots surface serves the fail-closed policy dynamically", () => {

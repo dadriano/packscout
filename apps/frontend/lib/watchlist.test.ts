@@ -6,6 +6,7 @@ import {
   presentWatchlistFrame,
   presentWatchlistRepackRow,
   presentWatchlistUnavailableCopy,
+  watchlistCanLoadOwnerRead,
   watchlistHref,
   watchlistNavVisible,
   watchlistTabAccessibleName,
@@ -61,6 +62,54 @@ test("Watchlist nav is only for a signed-in account that can save", () => {
     watchlistNavVisible({
       authStatus: "error",
       accountSavingAvailable: false,
+    }),
+    false,
+  );
+});
+
+test("a failed saved-id read still loads the owner Watchlist instead of spinning", () => {
+  assert.equal(
+    watchlistCanLoadOwnerRead({
+      authStatus: "signed_in",
+      accountNotice: null,
+      accountSavingAvailable: true,
+      accountSavingFailed: false,
+    }),
+    true,
+  );
+  assert.equal(
+    watchlistCanLoadOwnerRead({
+      authStatus: "signed_in",
+      accountNotice: null,
+      accountSavingAvailable: false,
+      accountSavingFailed: true,
+    }),
+    true,
+  );
+  assert.equal(
+    watchlistCanLoadOwnerRead({
+      authStatus: "signed_in",
+      accountNotice: null,
+      accountSavingAvailable: false,
+      accountSavingFailed: false,
+    }),
+    false,
+  );
+  assert.equal(
+    watchlistCanLoadOwnerRead({
+      authStatus: "signed_in",
+      accountNotice: "Your account is suspended.",
+      accountSavingAvailable: false,
+      accountSavingFailed: true,
+    }),
+    false,
+  );
+  assert.equal(
+    watchlistCanLoadOwnerRead({
+      authStatus: "signed_out",
+      accountNotice: null,
+      accountSavingAvailable: false,
+      accountSavingFailed: false,
     }),
     false,
   );
@@ -186,7 +235,7 @@ test("resolved and stale Watchlist rows stay recognizable", () => {
       availability: "sold_out",
       estimatedEv: {
         evDollarsMinorUnits: 1250,
-        grossReturnBasisPoints: -250,
+        grossReturnBasisPoints: 11_250,
         confidenceBand: "medium",
       },
     },

@@ -42,7 +42,10 @@ export default async function WatchlistRoute({
     <>
       <ShellSurfaceReporter mode={surface} />
       {status ? <DataReleaseStatusReporter status={status} /> : null}
-      <WatchlistPage tab={parseWatchlistTab((await searchParams).tab)} />
+      <WatchlistPage
+        completeSignInHandoff={access.outcome === "signed_out"}
+        tab={parseWatchlistTab((await searchParams).tab)}
+      />
     </>
   );
 }

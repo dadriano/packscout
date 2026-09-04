@@ -279,7 +279,9 @@ export function formatWatchlistRepackEvSummary(
       minorUnits: estimatedEv.evDollarsMinorUnits,
       currency: "USD",
     }),
-    formatBasisPoints(estimatedEv.grossReturnBasisPoints, { signed: true }),
+    formatSignedEvPercent(
+      estimatedEv.grossReturnBasisPoints - 10_000,
+    ),
     `${estimatedEv.confidenceBand} confidence`,
   ].join(" · ");
 }
