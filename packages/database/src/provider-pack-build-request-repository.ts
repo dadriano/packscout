@@ -3,7 +3,7 @@ import {
   PACK_CATALOG_V1, PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packBuildRequestSchema,
   providerPackBuildInputsSchema, providerPackReadinessSchema, packCatalogTextSchema, packCatalogUuidSchema,
   assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, deriveProviderPackReadinessDecision,
-  packCatalogCanonicalByteCount, packCatalogCanonicalJson, packPublicationLimits, normalizeProviderPackBuildInputs,
+  packCatalogCanonicalJson, providerPackBuildInputsWithinLimits, normalizeProviderPackBuildInputs,
   type PackBuildRequest, type ProviderPackBuildInputs, type ProviderPackReadiness,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -27,7 +27,7 @@ export class ProviderPackBuildRequestRepository {
     const inputs = providerPackBuildInputsSchema.parse(input.inputs);
     const readiness = providerPackReadinessSchema.parse(input.readiness);
     assertPublicPackCatalogBytes(inputs);
-    packInvariant(packCatalogCanonicalByteCount(inputs) <= packPublicationLimits.maximumInputBytes, "PACK_LIMIT_EXCEEDED");
+    packInvariant(providerPackBuildInputsWithinLimits(inputs), "PACK_LIMIT_EXCEEDED");
     packInvariant(inputs.providerId === this.context.scope.providerId, "PACK_SCOPE_MISMATCH");
     // Admission preserves captured bytes; it cannot admit an order that P03 must change to seal.
     packInvariant(packCatalogCanonicalJson(inputs) === packCatalogCanonicalJson(

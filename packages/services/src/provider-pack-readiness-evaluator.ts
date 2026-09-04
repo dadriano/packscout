@@ -1,6 +1,6 @@
 import {
   assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites,
-  deriveProviderPackReadinessDecision, normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packPublicationLimits,
+  deriveProviderPackReadinessDecision, normalizeProviderPackBuildInputs, providerPackBuildInputsWithinLimits,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackSnapshot,
 } from "@packscout/contracts";
 
@@ -14,7 +14,7 @@ export class ProviderPackReadinessEvaluator {
   }): Promise<{ inputs: ProviderPackBuildInputs; readiness: ProviderPackReadiness }> {
     const inputs = normalizeProviderPackBuildInputs(input.candidate, input.previousSnapshot);
     assertPublicPackCatalogBytes(inputs);
-    if (packCatalogCanonicalByteCount(inputs) > packPublicationLimits.maximumInputBytes) {
+    if (!providerPackBuildInputsWithinLimits(inputs)) {
       throw new TypeError("pack.inputs_too_large");
     }
     const readiness: ProviderPackReadiness = {

@@ -48,7 +48,9 @@ CREATE TABLE pack_build_requests (
   CHECK (desired_state_sha256 ~ '^[a-f0-9]{64}$'),
   -- Full dependency evidence follows the admitted 16 MB input budget, with
   -- bounded headroom for PostgreSQL JSONB formatting, through every work record.
-  CHECK (octet_length(inputs_json::text) <= 18000000 AND octet_length(request_json::text) <= 18000000)
+  -- Current capture and pinned lifecycle baseline each have a 16 MB canonical bound.
+  -- JSONB formatting headroom is separate from the unchanged request/document budgets.
+  CHECK (octet_length(inputs_json::text) <= 36000000 AND octet_length(request_json::text) <= 18000000)
 );
 CREATE INDEX pack_build_requests_claim_idx ON pack_build_requests(state, available_at, public_repack_id, pack_publication_sequence);
 

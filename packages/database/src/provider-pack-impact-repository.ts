@@ -1,7 +1,7 @@
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogTextSchema, packCatalogUuidSchema,
   packPublicationLimits, sharedProviderChangeDeliverySchema, providerPackBuildInputsSchema,
-  assertPublicPackCatalogBytes, normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
+  assertPublicPackCatalogBytes, normalizeProviderPackBuildInputs, providerPackBuildInputsWithinLimits, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type SharedProviderChangeDelivery,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -106,24 +106,32 @@ export class ProviderPackImpactRepository {
         let valid = providerPackBuildInputsSchema.safeParse(candidate).success;
         try {
           assertPublicPackCatalogBytes(candidate);
-          valid &&= packCatalogCanonicalByteCount(candidate) <= packPublicationLimits.maximumInputBytes;
+          valid &&= providerPackBuildInputsWithinLimits(candidate);
         } catch (error) { if (!(error instanceof TypeError)) throw error; valid = false; }
         if (!valid) {
           outcomes.push(await this.#requests.rejectInTransaction(tx, { publicRepackId, sourceRevisionIdentity, boundaryIdentity }));
           continue;
         }
-        const inputBytes = packCatalogCanonicalByteCount(candidate);
+        assertDeliveredDependencies(candidate, delivery?.sharedDependencies ?? []);
+        const head = await tx.pack_publication_heads.findUnique({ where: { public_repack_id: publicRepackId } });
+        const previousArtifact = candidate.snapshotKind === "lifecycle_only" && head?.active_snapshot_id
+          ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
+        const previousSnapshot = (previousArtifact?.snapshot_json ?? null) as import("@packscout/contracts").PublicPackSnapshot | null;
+        const normalized = normalizeProviderPackBuildInputs(candidate, previousSnapshot);
+        if (!providerPackBuildInputsWithinLimits(normalized)) {
+          outcomes.push(await this.#requests.rejectInTransaction(tx, { publicRepackId, sourceRevisionIdentity, boundaryIdentity }));
+          continue;
+        }
+        const inputBytes = packCatalogCanonicalByteCount(normalized);
+        // A large lifecycle capture may occupy one page alone (at most two 16 MB values).
+        // Count the pinned baseline too; the following pack resumes on the next page.
         if (outcomes.length > 0 && capturedBytes + inputBytes > packPublicationLimits.maximumInputBytes) {
           complete = false;
           break;
         }
         capturedBytes += inputBytes;
-        assertDeliveredDependencies(candidate, delivery?.sharedDependencies ?? []);
-        const head = await tx.pack_publication_heads.findUnique({ where: { public_repack_id: publicRepackId } });
-        const previousArtifact = head?.active_snapshot_id ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
-        const previousSnapshot = (previousArtifact?.snapshot_json ?? null) as import("@packscout/contracts").PublicPackSnapshot | null;
         // Preserve bytes before the callback can mutate the candidate or baseline.
-        const capturedJson = packCatalogCanonicalJson(normalizeProviderPackBuildInputs(candidate, previousSnapshot));
+        const capturedJson = packCatalogCanonicalJson(normalized);
         const result = await this.capture.evaluate({ candidate, evaluatedAt, previousSnapshot });
         // Callbacks may return replacements or mutate their argument. Bind the
         // result to the original page identity and unaliased delivery evidence.

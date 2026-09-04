@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalByteCount, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
 import { packSearchText, publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicPackSnapshotSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
@@ -69,6 +69,13 @@ export const packPublicationLimits = Object.freeze({
 export type ProviderPackBuildInputs = z.infer<typeof providerPackBuildInputsSchema>;
 export type ProviderPackReadiness = z.infer<typeof providerPackReadinessSchema>;
 export type PackPublicationScope = z.infer<typeof packPublicationScopeSchema>;
+
+/** A lifecycle request owns two complete bounded values, not one shared budget.
+ * Keeping the null baseline in the capture measure bounds their combined encoding too. */
+export function providerPackBuildInputsWithinLimits(inputs: ProviderPackBuildInputs): boolean {
+  return packCatalogCanonicalByteCount({ ...inputs, lifecycleBaseline: null }) <= packPublicationLimits.maximumInputBytes &&
+    (inputs.lifecycleBaseline === null || packCatalogCanonicalByteCount(inputs.lifecycleBaseline) <= packPublicationLimits.maximumInputBytes);
+}
 
 /** The only allowed capture normalization: schema values, canonical ordering,
  * and the baseline supplied by the stored active artifact. No pack data changes. */

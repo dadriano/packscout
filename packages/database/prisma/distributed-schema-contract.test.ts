@@ -576,6 +576,8 @@ test("pack publication owns only scoped local references and immutable episodes"
   assert.match(migration, /after_pack_id uuid REFERENCES packs\(id\)/u);
   assert.match(migration, /OLD.state IN \('published','superseded','rolled_back'\)/u);
   assert.match(migration, /pack_publication_one_shared_boundary_idx/u);
+  assert.match(migration, /octet_length\(inputs_json::text\) <= 36000000 AND octet_length\(request_json::text\) <= 18000000/u);
+  assert.match(migration, /octet_length\(snapshot_json::text\) <= 18000000/u);
 });
 
 test("provider facts preserve source identities while local relationships resolve monotonically", () => {
