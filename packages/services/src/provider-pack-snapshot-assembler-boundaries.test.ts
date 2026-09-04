@@ -95,7 +95,8 @@ test("protected data, mutable handles, oversized fields and unknown controls are
   await reject({ ...input, inputs: { ...input.inputs, title: "postgres://private-marker" } });
   await reject({ ...input, inputs: { ...input.inputs, contents: Array.from({ length: 8_001 }, () => input.inputs.contents[0]) } });
   input.inputs.aliases = Array.from({ length: 100 }, (_, index) => `${index}-${"a".repeat(100)}`);
-  await reject(await requestFor(input.inputs)); // complete derived search text exceeds the public bound
+  // P02 now blocks this capture; forge the request only to retain P03's independent refusal.
+  await reject(await requestFor(input.inputs, true));
 });
 
 test("pure assembly uses neither live time nor network on success or rejection", async () => {
