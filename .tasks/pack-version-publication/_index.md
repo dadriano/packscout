@@ -1,20 +1,14 @@
 # Feature: Atomic Pack Publication in Pack Catalog V1
 
-## Admission-order review repair — 2026-09-04
-
-`d9262973b1ebd619e0e5a35053b2bc84645c624e` addresses review3935344215 on parent `8125934bb39338f73501ac1bc9fef8950d462746`. Direct admission compares schema-parsed captured bytes with the existing shared canonicalizer and refuses changed contents/action/alias order before persistence; it does not silently rewrite a pinned request. Planner/evaluator normalization still works, and duplicate-invalid domain inputs keep their existing blocked behavior. Genuine red proof: `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log`; all112 focused checks pass, zero skips, in `/tmp/packscout-p02-canonical-admission-focused-20260904.log`. Affected lint/types, docs, and the zero-finding ratchet pass. Task acceptance is complete; **phase delivery still waits for the corrected-head full local/CI gate**, not the historical full pass below. The interrupted pre-fix new-parent run is not certification. P03 remains separate and unmerged.
-
-## Base refresh — 2026-09-04 15:12 UTC
-
-PR113 independently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`. P02 rebased without conflicts; all36 patches have identical range-diff. Current implementation is `8a9947ce` on that exact parent; backup `codex/p02-before-watchlist113-20260904` retains `b71ec45b`. No P02 runtime or test change was made. The completed task acceptance below was certified on1117b456; **the new-parent merge gate is being rerun locally and in CI before merge**. The prior full pass is not new-parent certification. All30 addressed review threads remain resolved; recheck for fresh feedback before merge. P03 still follows the actual PR95 merge, and no deployment of PR113 is performed here.
-
 ## Start Here
 
-PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Pinned Convex `shiny-newt-310` and matching frontend passed the Watchlist smoke check; automatic domain assignment is restored and all temporary deployment keys are revoked. Publication authority remains absent.
+PR109 is released. PR113 subsequently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the current direct parent. P02 implementation `6751a7d5586e2bc54651db4d03c49836173c3b90` includes canonical-admission repair `d9262973` and the actual public-store receipt/head corrections. **117 focused checks pass, zero skips**, plus all13 Convex public-store tests, affected lint/typechecks, docs, and the zero-finding standards ratchet. Task acceptance is complete; the corrected-head full local/CI phase gate is still required before merge. The earlier full pass on1117b456 is historical, not current certification.
 
-P02 implementation `69a1a8735d8484e96607e3f4d913198a04f20a45` is verified on that exact parent: 108 focused checks, 30 schema checks, and the full local `npm run verify:framework` passed, including both builds. PR95 remains open for final current-head CI and review resolution before the authorized merge. P03 is preserved locally on old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack, align, certify, and publish it separately after PR95 merges. Do not merge P03 or start later phases.
+Review corrections: unchanged generation is permitted only for `already_active` with the same expected active snapshot; newly applied activations still require a generation increment. Authenticated same-generation resume/sequence-only observations fence old owners and preserve monotonic accepted sequence. Definitive conflicts/refusals are classified by outcome/reason, not snapshot state; missing, successful, or expired activation evidence remains protected. The original integration fixture now models actual hold/resume version behavior.
 
-**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; P02 refreshing certification after PR113; 0/1 launch operations complete
+P03 remains local and blocked on the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
+
+**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; P02 current-head phase gate pending; 0/1 launch operations complete
 
 ## Context
 
@@ -158,10 +152,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Size exception:** Boundary review permits approximately 27 authored files and 3,000 authored changed lines after the P05 rebase. The boundary/recovery test modules certify inseparable admission-to-outbox, time-dependent readiness, and crash/expiry invariants while keeping the existing 470-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
-- **Verified parent:** `1117b456ac2d0c548dc9ac341b1d9aa521e413a0` (released PR109). Backup `codex/p02-before-watchlist-release-20260904` retains `843d8cdc`; the old P03 boundary `8409143c` is preserved.
-- **Verified implementation:** `69a1a8735d8484e96607e3f4d913198a04f20a45`; full local gate passed on tracker head `00a75396`. Subsequent delivery records are metadata-only.
-- **Delivery gate:** 108 focused and 30 schema checks passed, zero skips; full `npm run verify:framework` passed with audit, standards, lint/types, all tests/tooling, and both builds. Logs: `/tmp/packscout-p02-after-pr109-focused-no-cache-20260904.log`, `/tmp/packscout-p02-after-pr109-schema-no-cache-20260904.log`, `/tmp/packscout-p02-after-pr109-framework-20260904.log`. Local loader disk cache was disabled and Vitest used two workers on a private PostgreSQL instance; no assertion, timeout, audit, or gate was weakened.
-- **Merge condition:** final-head GitHub CI and fresh review resolution. This record does not claim the PR is merged. No browser/runtime activation in P02; P06 owns transport/worker E2E.
+- **Current direct parent:** `8125934bb39338f73501ac1bc9fef8950d462746` (PR113). Backup `codex/p02-before-watchlist113-20260904` retains b71ec45b; old P03 boundary8409143c is preserved.
+- **Implementation:** `6751a7d5586e2bc54651db4d03c49836173c3b90`; task acceptance and focused gates pass. Full current-head phase certification remains required.
+- **Evidence:** 117 focused checks,13 Convex public-store tests, affected lint/types/docs, and the zero-finding ratchet pass. Logs: `/tmp/packscout-p02-public-store-results-focused-release-20260904.log` and `/tmp/packscout-p02-public-store-results-convex-20260904.log`. Red proofs: `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log` and `/tmp/packscout-p02-public-store-results-red-20260904.log`.
+- **Merge condition:** corrected-head full local/CI gates and fresh base/review resolution. The earlier full pass on1117b456 and interrupted later attempts are not current certification. Local TSX cache is disabled, Vitest uses two workers, and PostgreSQL is private; no assertion, timeout, audit, or standards gate is weakened. P06 owns transport/worker E2E.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 

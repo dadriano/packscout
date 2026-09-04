@@ -8,19 +8,13 @@
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
 **Status:** done
 
-## Admission-order review repair — 2026-09-04
-
-`d9262973b1ebd619e0e5a35053b2bc84645c624e` addresses review3935344215 on parent `8125934bb39338f73501ac1bc9fef8950d462746`. Direct admission compares schema-parsed captured bytes with the existing shared canonicalizer and refuses changed contents/action/alias order before persistence; it does not silently rewrite a pinned request. Planner/evaluator normalization still works, and duplicate-invalid domain inputs keep their existing blocked behavior. Genuine red proof: `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log`; all112 focused checks pass, zero skips, in `/tmp/packscout-p02-canonical-admission-focused-20260904.log`. Affected lint/types, docs, and the zero-finding ratchet pass. Task acceptance is complete; **phase delivery still waits for the corrected-head full local/CI gate**, not the historical full pass below. The interrupted pre-fix new-parent run is not certification. P03 remains separate and unmerged.
-
-## Base refresh — 2026-09-04 15:12 UTC
-
-PR113 independently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`. P02 rebased without conflicts; all36 patches have identical range-diff. Current implementation is `8a9947ce` on that exact parent; backup `codex/p02-before-watchlist113-20260904` retains `b71ec45b`. No P02 runtime or test change was made. The completed task acceptance below was certified on1117b456; **the new-parent merge gate is being rerun locally and in CI before merge**. The prior full pass is not new-parent certification. All30 addressed review threads remain resolved; recheck for fresh feedback before merge. P03 still follows the actual PR95 merge, and no deployment of PR113 is performed here.
-
 ## Current checkpoint — 2026-09-04
 
-PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Pinned Convex `shiny-newt-310` and matching frontend passed the Watchlist smoke check; automatic domain assignment is restored and all temporary deployment keys are revoked. Publication authority remains absent.
+PR109 is released. PR113 subsequently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the current direct parent. P02 implementation `6751a7d5586e2bc54651db4d03c49836173c3b90` includes canonical-admission repair `d9262973` and the actual public-store receipt/head corrections. **117 focused checks pass, zero skips**, plus all13 Convex public-store tests, affected lint/typechecks, docs, and the zero-finding standards ratchet. Task acceptance is complete; the corrected-head full local/CI phase gate is still required before merge. The earlier full pass on1117b456 is historical, not current certification.
 
-P02 implementation `69a1a8735d8484e96607e3f4d913198a04f20a45` is verified on that exact parent: 108 focused checks, 30 schema checks, and the full local `npm run verify:framework` passed, including both builds. PR95 remains open for final current-head CI and review resolution before the authorized merge. P03 is preserved locally on old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack, align, certify, and publish it separately after PR95 merges. Do not merge P03 or start later phases.
+Review corrections: unchanged generation is permitted only for `already_active` with the same expected active snapshot; newly applied activations still require a generation increment. Authenticated same-generation resume/sequence-only observations fence old owners and preserve monotonic accepted sequence. Definitive conflicts/refusals are classified by outcome/reason, not snapshot state; missing, successful, or expired activation evidence remains protected. The original integration fixture now models actual hold/resume version behavior.
+
+P03 remains local and blocked on the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
 
 ## Start Here
 
@@ -126,6 +120,8 @@ There is no direct user-facing change. The resulting state machine ensures that 
 ### Recovery and bounded behavior
 
 - [x] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
+- [x] Public-store already-active receipts complete without an invented generation increment; same-generation resume/status observations preserve monotonic sequence and lease fencing.
+- [x] Definitive public-store conflicts/refusals release newer desired work regardless of the snapshot's ready/published/waiting state, while unknown/successful/expired activation results remain protected.
 - [x] An expired claimant cannot mutate work after a newer fence is issued.
 - [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
 - [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
@@ -139,7 +135,7 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ### Current delivery status
 
-Verified implementation `69a1a8735d8484e96607e3f4d913198a04f20a45`, direct parent `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Full local gate passed on `00a75396`; this delivery-only update does not change runtime or tests. PR95 is published, not yet merged; final-head CI and fresh review resolution remain the merge conditions.
+Implementation6751a7d5 on direct parent8125934b passes all117 focused checks and13 public-store tests, with affected static gates. The open PR95 still needs its full corrected-head local/CI gate and four final review resolutions. No external-write E2E is claimed; P06 owns that composition. Earlier30 discussions are resolved; the remaining canonical order, already-active, CAS-conflict, and same-version-resume findings are implemented and covered.
 
 ### Implemented invariants and review corrections
 
@@ -182,9 +178,9 @@ Related guidance reviewed: feature `tech-001` through `tech-005`, with P02 imple
 | Captured authority, false-ready refusal, maximum shared evidence, duplicate IDs, A→B→A, accepted/ambiguous receipt recovery below newer work, EV and unused-intent expiry | `packages/services/src/provider-pack-publication-boundaries.integration.test.ts` |
 | Role inventory, scoped references, immutable episodes, migration/schema consistency | `packages/database/prisma/distributed-schema-contract.test.ts` and migrated provider databases |
 
-On the verified implementation, **108 focused** contract/readiness/PostgreSQL checks and **30 schema** checks pass, zero skips. The full `npm run verify:framework` passed exit 0, including audit, standards, lint/types, all tests/tooling, 49 Convex files / 452 tests, and both builds. Logs: `/tmp/packscout-p02-after-pr109-focused-no-cache-20260904.log`, `/tmp/packscout-p02-after-pr109-schema-no-cache-20260904.log`, and `/tmp/packscout-p02-after-pr109-framework-20260904.log`.
+Current implementation6751a7d5: **117 focused checks pass, zero skips**, `/tmp/packscout-p02-public-store-results-focused-release-20260904.log`. All13 existing signed Convex public-store tests pass, `/tmp/packscout-p02-public-store-results-convex-20260904.log`; together they verify the actual already-active, CAS-conflict, and hold/resume shapes against real PostgreSQL persistence without claiming P06's end-to-end transport. Affected database/services lint/types, docs, and the zero-finding ratchet pass. Red logs for the latest repairs are `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log` and `/tmp/packscout-p02-public-store-results-red-20260904.log`.
 
-Local verification used `TSX_DISABLE_CACHE=1`, `VITEST_MAX_WORKERS=2`, and the owned private PostgreSQL fixture. These address local loader/resource contention without changing tests, assertions, timeouts, audit, or framework policy. Earlier interrupted attempts are not passes. Final GitHub CI status must be read from PR95 before merge.
+Full current-head certification is required at `/tmp/packscout-p02-public-store-results-framework-20260904.log`. The earlier1117b456 full local pass and30 schema checks are historical. Later local attempts were interrupted for review fixes. CI33888229047 failed during unchanged EV-test PostgreSQL teardown; it is not a pass. No unrelated runtime repair or weakened gate was made. Local runs use TSX_DISABLE_CACHE=1, VITEST_MAX_WORKERS=2, and the owned private PostgreSQL fixture.
 
 There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.
 
