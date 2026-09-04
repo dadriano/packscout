@@ -95,7 +95,7 @@ describe("authenticated saved items", () => {
       "AUTH_REQUIRED",
     );
     await expectErrorCode(
-      t.query(api.savedItems.getOwnerWatchlist, {}),
+      t.action(api.savedItems.getOwnerWatchlist, {}),
       "AUTH_REQUIRED",
     );
     await expectErrorCode(

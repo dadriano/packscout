@@ -21,6 +21,11 @@ import {
   V3_REPACK_ID_B,
 } from "./dataReleaseV3Fixture.test-support";
 import { buildMockDataReleaseV2 } from "./mockDataReleaseFixture";
+import {
+  activateRetentionRelease,
+  stageRetentionRelease,
+  unavailableRetentionDetail,
+} from "./dataReleaseV3Retention.test-support";
 import { MAX_SAVED_ITEMS_PER_KIND } from "./savedItems";
 import schema from "./schema";
 
@@ -44,6 +49,7 @@ const USER_B: TestIdentity = {
 };
 
 const MISSING_REPACK_ID = "40000000-0000-5000-8000-000000000999";
+const EXTRA_REPACK_ID = "40000000-0000-5000-8000-000000000888";
 const MISSING_COLLECTIBLE_ID = "30000000-0000-5000-8000-000000000999";
 const V3_PUBLIC_RELEASE_ID = "20000000-0000-4000-8000-000000000001";
 const CLOCK_BASE = V3_FIXTURE_NOW;
@@ -181,7 +187,7 @@ describe("owner watchlist read", () => {
     await seed(t);
 
     await expectErrorCode(
-      t.query(api.savedItems.getOwnerWatchlist, {}),
+      t.action(api.savedItems.getOwnerWatchlist, {}),
       "AUTH_REQUIRED",
     );
     await expectErrorCode(
@@ -191,7 +197,7 @@ describe("owner watchlist read", () => {
           issuer: "privy.io",
           tokenIdentifier: "",
         })
-        .query(api.savedItems.getOwnerWatchlist, {}),
+        .action(api.savedItems.getOwnerWatchlist, {}),
       "AUTH_IDENTITY_INVALID",
     );
   });
@@ -200,7 +206,7 @@ describe("owner watchlist read", () => {
     const t = createTest();
     await seed(t);
     await expect(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
     ).resolves.toEqual({
       savedRepacks: [],
       savedCollectibles: [],
@@ -223,7 +229,7 @@ describe("owner watchlist read", () => {
 
     const watchlist = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
 
     expect(watchlist.savedRepackCount).toBe(watchlist.savedRepacks.length);
     expect(watchlist.savedCollectibleCount).toBe(
@@ -290,7 +296,7 @@ describe("owner watchlist read", () => {
 
     const watchlist = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
     expect(watchlist.savedRepackCount).toBe(2);
     expect(watchlist.savedCollectibleCount).toBe(1);
     expect(watchlist.savedRepacks[0]).toEqual({
@@ -322,10 +328,10 @@ describe("owner watchlist read", () => {
 
     const userA = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
     const userB = await t
       .withIdentity(USER_B)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
 
     expect(userA.savedRepacks.map(({ publicRepackId }) => publicRepackId)).toEqual(
       [availableRepack.publicRepackId],
@@ -355,7 +361,7 @@ describe("owner watchlist read", () => {
 
     const watchlist = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
     expect(watchlist.savedRepackCount).toBe(MAX_SAVED_ITEMS_PER_KIND);
     expect(watchlist.savedRepacks).toHaveLength(MAX_SAVED_ITEMS_PER_KIND);
     expect(
@@ -375,7 +381,7 @@ describe("owner watchlist read", () => {
       });
     });
     await expectErrorCode(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
   });
@@ -391,7 +397,7 @@ describe("owner watchlist read", () => {
     });
 
     await expectErrorCode(
-      session.query(api.savedItems.getOwnerWatchlist, {}),
+      session.action(api.savedItems.getOwnerWatchlist, {}),
       "ACCOUNT_SUSPENDED",
     );
     await expectErrorCode(
@@ -410,7 +416,7 @@ describe("owner watchlist read", () => {
     const t = createTest();
     await seedLegacy(t);
     await expectErrorCode(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_RESOURCE_UNAVAILABLE",
     );
   });
@@ -427,7 +433,7 @@ describe("owner watchlist read", () => {
 
     const watchlist = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
     expect(watchlist.savedRepacks).toEqual([
       {
         publicRepackId: V3_REPACK_ID_A,
@@ -472,7 +478,7 @@ describe("owner watchlist read", () => {
     });
     await saver.repacks(USER_A.tokenIdentifier, [V3_REPACK_ID_A]);
     await expectErrorCode(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
   });
@@ -499,7 +505,7 @@ describe("owner watchlist read", () => {
     });
     await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
     await expectErrorCode(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
   });
@@ -517,12 +523,44 @@ describe("owner watchlist read", () => {
       });
     });
     await expectErrorCode(
-      t.withIdentity(USER_A).query(api.savedItems.getOwnerWatchlist, {}),
+      t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_RESOURCE_UNAVAILABLE",
     );
   });
 
-  test("returns the catalog displayed EV when stored detail reports unavailable", async () => {
+  test("marks a unique V3 document absent from the catalog projection as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Repacks").collect()).find(
+        (document) => document.publicRepackId === V3_REPACK_ID_A,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 repack.");
+      }
+      await ctx.db.insert("dataReleaseV3Repacks", {
+        releaseId: source.releaseId,
+        publicRepackId: EXTRA_REPACK_ID,
+        detail: { ...source.detail, publicRepackId: EXTRA_REPACK_ID },
+      });
+    });
+    await saver.repacks(USER_A.tokenIdentifier, [EXTRA_REPACK_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedRepacks).toEqual([
+      {
+        publicRepackId: EXTRA_REPACK_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        repack: null,
+      },
+    ]);
+  });
+
+  test("marks a V3 document whose detail diverges from catalog facts as unavailable", async () => {
     const t = createTest();
     await seed(t);
     const saver = createSaver(t);
@@ -544,25 +582,66 @@ describe("owner watchlist read", () => {
         },
       });
     });
-
     const watchlist = await t
       .withIdentity(USER_A)
-      .query(api.savedItems.getOwnerWatchlist, {});
+      .action(api.savedItems.getOwnerWatchlist, {});
     expect(watchlist.savedRepacks).toEqual([
       {
         publicRepackId: availableRepack.publicRepackId,
         savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        repack: null,
+      },
+    ]);
+  });
+
+  test("returns retained last-known EV when the active release reports unavailable", async () => {
+    const t = createTest();
+    const original = buildV3Detail();
+    await activateRetentionRelease(
+      t,
+      await stageRetentionRelease(t, 1, [original]),
+      null,
+    );
+    await activateRetentionRelease(
+      t,
+      await stageRetentionRelease(t, 2, [unavailableRetentionDetail()]),
+      1,
+    );
+    const saver = createSaver(t);
+    await saver.repacks(USER_A.tokenIdentifier, [original.publicRepackId]);
+    const later = V3_FIXTURE_NOW + 24 * 60 * 60_000;
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .query(internal.savedItems.getOwnerWatchlistAtTime, {
+        currentTime: later,
+      });
+    const expectedEv = watchlistEstimatedEv(original.evEstimates.packScout);
+    expect(watchlist.savedRepacks).toEqual([
+      {
+        publicRepackId: original.publicRepackId,
+        savedAt: savedAt(1),
         catalogStatus: "resolved",
         openable: true,
         repack: {
-          name: availableRepack.name,
-          vendorDisplayName: availableRepack.vendorDisplayName,
+          name: original.name,
+          vendorDisplayName: original.vendorDisplayName,
           availability: "available",
-          estimatedEv: watchlistEstimatedEv(
-            availableRepack.evEstimates.packScout,
-          ),
+          estimatedEv: { ...expectedEv, confidenceBand: "low" },
         },
       },
     ]);
+  });
+
+  test("refuses an invalid evaluation clock on the deterministic Watchlist read", async () => {
+    const t = createTest();
+    await seed(t);
+    await expectErrorCode(
+      t.withIdentity(USER_A).query(internal.savedItems.getOwnerWatchlistAtTime, {
+        currentTime: -1,
+      }),
+      "SAVED_RESOURCE_UNAVAILABLE",
+    );
   });
 });

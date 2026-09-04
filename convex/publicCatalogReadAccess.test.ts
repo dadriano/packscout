@@ -217,8 +217,9 @@ const OPEN_PUBLIC_QUERIES: Readonly<Record<string, string>> = Object.freeze({
     "belongs to closed-beta-access/004 and it returns only the caller's own " +
     "references",
   "savedItems.getOwnerWatchlist":
-    "the authenticated owner Watchlist read; it is save-gated (same standing " +
-    "policy as saving) and returns only the caller's own saved collections",
+    "the authenticated owner Watchlist action; Convex mints the evaluation " +
+    "clock, it is save-gated (same standing policy as saving), and it returns " +
+    "only the caller's own saved collections",
 });
 
 /**
@@ -262,9 +263,10 @@ function discoverPublicQueryExports(): ReadonlySet<string> {
       );
     }
     const moduleName = path.replace(/^\.\//u, "").replace(/\.ts$/u, "");
-    const registrationPattern = path.endsWith("/publicRepacksV3.ts")
-      ? /^export const (\w+) = (?:query|action)\(\{/gmu
-      : /^export const (\w+) = query\(\{/gmu;
+    const registrationPattern =
+      path.endsWith("/publicRepacksV3.ts") || path.endsWith("/savedItems.ts")
+        ? /^export const (\w+) = (?:query|action)\(\{/gmu
+        : /^export const (\w+) = query\(\{/gmu;
     for (const match of source.matchAll(registrationPattern)) {
       discovered.add(`${moduleName}.${match[1]!}`);
     }

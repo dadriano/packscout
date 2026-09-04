@@ -1,18 +1,25 @@
 import {
   canonicalJson,
   publicCollectibleIdSchema,
+  publicRepackDetailV3Schema,
   publicRepackIdSchema,
   type PackScoutDisplayedEvV3,
 } from "@packscout/contracts";
 import { ConvexError, v, type Infer } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
+  action,
+  internalQuery,
   mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
 import { loadValidatedCatalogManifest } from "./catalogManifestState";
+import { evFactsFromDetail } from "./dataReleaseV3EvFacts";
+import { isDataReleaseV3EvaluationTime } from "./dataReleaseV3Pagination";
+import { dataReleaseV3SearchRowMatchesDetail } from "./dataReleaseV3Search";
 import {
   PRODUCT_USER_READ_CAPABILITY,
   PRODUCT_USER_WRITE_CAPABILITY,
@@ -309,7 +316,28 @@ async function findActiveRepackForWatchlist(
   ) {
     refuse("SAVED_ITEMS_STATE_CONFLICT");
   }
-  return match ?? null;
+  if (match === undefined) return null;
+  const rawRow = catalog.storedRowByPublicId.get(publicRepackId);
+  if (rawRow === undefined) return null;
+  const parsed = publicRepackDetailV3Schema.safeParse(match.detail);
+  if (
+    !parsed.success ||
+    !dataReleaseV3SearchRowMatchesDetail(rawRow, parsed.data)
+  ) {
+    return null;
+  }
+  if (!catalog.legacyEvSnapshot) {
+    const displayedEstimate = catalog.evByPublicId.get(publicRepackId);
+    const facts = catalog.factsByPublicId.get(publicRepackId);
+    if (
+      displayedEstimate === undefined ||
+      facts === undefined ||
+      canonicalJson(evFactsFromDetail(parsed.data)) !== canonicalJson(facts)
+    ) {
+      return null;
+    }
+  }
+  return match;
 }
 
 async function findActiveCollectibleForWatchlist(
@@ -456,17 +484,17 @@ export const getSavedItemIds = query({
 });
 
 /**
- * The caller's Watchlist: both saved collections resolved against the same
- * active V3 catalog the public site serves, including its displayed EV
- * projection, newest first, with per-tab counts. Watchlist is a save-gated
- * destination, so it uses the same standing policy as saving: a suspended
- * account cannot load it, even while the closed beta is off. Missing V3
- * catalog references stay in the payload as unavailable, not-openable rows.
+ * Deterministic Watchlist read at a minted evaluation clock. Public callers
+ * use `getOwnerWatchlist`, which supplies Convex's clock the same way the
+ * buyer-facing V3 catalog actions do.
  */
-export const getOwnerWatchlist = query({
-  args: {},
+export const getOwnerWatchlistAtTime = internalQuery({
+  args: { currentTime: v.number() },
   returns: ownerWatchlistValidator,
-  handler: async (ctx): Promise<OwnerWatchlist> => {
+  handler: async (ctx, args): Promise<OwnerWatchlist> => {
+    if (!isDataReleaseV3EvaluationTime(args.currentTime)) {
+      refuse("SAVED_RESOURCE_UNAVAILABLE");
+    }
     const ownerTokenIdentifier = await requireAdmittedProductUser(
       ctx,
       PRODUCT_USER_WRITE_CAPABILITY,
@@ -493,7 +521,7 @@ export const getOwnerWatchlist = query({
       refuse("SAVED_ITEMS_STATE_CONFLICT");
     }
 
-    const catalog = await loadActiveDataReleaseV3(ctx, Date.now());
+    const catalog = await loadActiveDataReleaseV3(ctx, args.currentTime);
     if (catalog === null) {
       refuse("SAVED_RESOURCE_UNAVAILABLE");
     }
@@ -553,6 +581,20 @@ export const getOwnerWatchlist = query({
       savedCollectibleCount: resolvedCollectibles.length,
     };
   },
+});
+
+/**
+ * The caller's Watchlist. Convex mints the evaluation clock so retained EV
+ * confidence cannot freeze on a cached query. Missing V3 catalog references
+ * stay in the payload as unavailable, not-openable rows.
+ */
+export const getOwnerWatchlist = action({
+  args: {},
+  returns: ownerWatchlistValidator,
+  handler: async (ctx): Promise<OwnerWatchlist> =>
+    await ctx.runQuery(internal.savedItems.getOwnerWatchlistAtTime, {
+      currentTime: Date.now(),
+    }),
 });
 
 export const setSavedRepack = mutation({

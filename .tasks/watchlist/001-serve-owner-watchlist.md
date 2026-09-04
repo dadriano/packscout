@@ -91,5 +91,5 @@ Covered by `convex/ownerWatchlist.test.ts`. `npx vitest run convex/ownerWatchlis
 - Related specs reviewed: none
 - Alignment: implemented as specified
 - Divergences: none
-- Later sections: Watchlist uses the save-equivalent standing policy (`PRODUCT_USER_WRITE_CAPABILITY`) so a suspended account cannot read it while the closed beta is off. Rows resolve against the same active V3 catalog the public site serves (`loadActiveDataReleaseV3`), including its displayed EV projection, not the legacy provider tables. Duplicate public ids in that V3 release refuse `SAVED_ITEMS_STATE_CONFLICT`.
+- Later sections: Watchlist uses the save-equivalent standing policy (`PRODUCT_USER_WRITE_CAPABILITY`) so a suspended account cannot read it while the closed beta is off. The public read is an action that mints Convex's evaluation clock and resolves rows against the same active V3 catalog the public site serves (`loadActiveDataReleaseV3`), including displayed EV and row/detail/facts checks. Duplicate public ids in that V3 release refuse `SAVED_ITEMS_STATE_CONFLICT`.
 - Verification: owner watchlist read matrix, suspended/beta-off refusal, cross-provider duplicate refusal, capability-gate enumeration, public-query classification, Convex typecheck, framework ratchet

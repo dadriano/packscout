@@ -140,7 +140,7 @@ function capabilityCalls(
 ): ReadonlyArray<() => Promise<unknown>> {
   return [
     () => session.query(api.savedItems.getSavedItemIds, {}),
-    () => session.query(api.savedItems.getOwnerWatchlist, {}),
+    () => session.action(api.savedItems.getOwnerWatchlist, {}),
     () =>
       session.mutation(api.savedItems.setSavedRepack, {
         publicRepackId,
@@ -493,7 +493,7 @@ describe("the beta switch off preserves today's behavior", () => {
       savedCollectibleIds: [],
     });
     await expectErrorCode(
-      session.query(api.savedItems.getOwnerWatchlist, {}),
+      session.action(api.savedItems.getOwnerWatchlist, {}),
       SUSPENDED_CODE,
     );
 
@@ -524,7 +524,7 @@ describe("the beta switch off preserves today's behavior", () => {
       session.query(api.savedItems.getSavedItemIds, {}),
     ).resolves.toEqual({ savedRepackIds: [], savedCollectibleIds: [] });
     await expectErrorCode(
-      session.query(api.savedItems.getOwnerWatchlist, {}),
+      session.action(api.savedItems.getOwnerWatchlist, {}),
       "PRODUCT_USER_STATE_CONFLICT",
     );
     await expectErrorCode(
@@ -765,10 +765,29 @@ describe("authenticated entry-point enumeration", () => {
     // gated. If the registration style ever changes, this fails loudly
     // instead of the scan going quietly blind.
     expect(gatedByModule.get("savedItems.ts")?.sort()).toEqual([
-      "getOwnerWatchlist",
       "getSavedItemIds",
       "setSavedCollectible",
       "setSavedRepack",
     ]);
+    const savedItemsSource = sources.get("savedItems.ts") ?? "";
+    const watchlistAction = publicRegistrationsOf(savedItemsSource).find(
+      ({ name }) => name === "getOwnerWatchlist",
+    );
+    expect(watchlistAction?.kind).toBe("action");
+    expect(watchlistAction?.segment.includes("Date.now()")).toBe(true);
+    expect(watchlistAction?.segment.includes("getOwnerWatchlistAtTime")).toBe(
+      true,
+    );
+    expect(watchlistAction?.segment.includes(GATE_CALL)).toBe(false);
+    expect(watchlistAction?.segment.includes("ctx.db")).toBe(false);
+    expect(savedItemsSource).toContain(
+      "export const getOwnerWatchlistAtTime = internalQuery",
+    );
+    expect(
+      savedItemsSource
+        .split("export const getOwnerWatchlistAtTime")[1]
+        ?.split("export const getOwnerWatchlist")[0]
+        ?.includes(GATE_CALL),
+    ).toBe(true);
   });
 });
