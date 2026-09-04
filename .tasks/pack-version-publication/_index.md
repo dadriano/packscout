@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Finish current-head verification for PR96 and the economics-digest correction in PR95, then merge in that order. Task 003 / P03 remains a separate contract-consuming child of PR95. No publication processor is enabled.
+PR96 and PR95 corrections are pushed, but merge is blocked: npm audit failed locally and in PR96 CI, and the existing maximum-volume database test timed out locally. Restore the unchanged gates before merging PR96 then PR95. P03 remains a separate preserved child; no publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | building |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | blocked |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -148,10 +148,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Size exception:** The provider-local schema, impact plan, readiness decision, sequence allocation, and durable request form one transaction boundary; splitting them would leave an incomplete provider authority. Authored volume remains capped at the default threshold.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `codex/fix-chase-inspector-loading`, the separate frontend fix in https://github.com/dadriano/packscout/pull/96. Merge PR96 first, then retarget P02 to main.
-- **Current parent:** `5198bd4ad7b79bf61a383b7bf159cb30dca638be` (rebased PR96 on PR98/main; test-only correction, current CI pending).
+- **Current parent:** `ca375cc4960e90ba1e6e316e073be5bffda000ee` (PR96 test-only corrections, including the stale PR98 card-metric guard). Its preceding head's CI failed at npm audit; the latest rerun is pending and local audit still fails.
 - **Verified implementation:** `994ea17cf91e8248c98da6921cd7e6debe0845ea`; includes all three review corrections. The focused 32-check matrix and full `npm run verify:framework` gate passed on this parent.
-- **Delivery gate:** PR96's runtime fix has landed through PR98; its regression and CI-fixture corrections remain pending. PR95's economics-digest review correction is in progress; previous implementation evidence above is historical until current-head re-verification. Merge PR96 before restacking P02 onto main.
-- **Current correction evidence:** The coherently forged economics artifact fails closed; all 33 readiness/persistence checks, database/service lint and typechecks, docs, and zero-finding standards ratchet pass on the current parent. The required local full verifier was attempted and failed at npm's audit endpoint; other gate lanes are running separately, without disabling the audit. Do not merge until the unchanged full gate is green.
+- **Delivery gate:** PR96's runtime fix landed through PR98; its regression and CI-fixture corrections are pushed. PR95's economics correction is pushed in `2ab594fef399495793cba9bb7127b98ef593c8a3`, with its review reply posted. Prior full-gate evidence above is historical. Both PRs remain unmerged; merge PR96 before restacking/retargeting P02 onto main.
+- **Current correction evidence:** The coherently forged economics artifact fails closed; all 33 readiness/persistence checks, database/service lint and typechecks, docs, and zero-finding standards ratchet pass on the current parent. Local and PR96 CI full verification failed at npm audit; supplemental local verification also hit the unchanged maximum-volume database test's 30-second transaction limit, reproduced in isolation. No gate was weakened. See task 002 for the exact resume sequence.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -251,7 +251,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | blocked | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |

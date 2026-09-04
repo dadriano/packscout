@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** in_progress
+**Status:** blocked
 
 ## Start Here
 
@@ -118,6 +118,16 @@ There is no direct user-facing change. The resulting state machine ensures that 
 Named scenario: **Provider-local planning and persistence crash matrix** — drive direct and shared changes through two isolated provider databases, every readiness outcome, concurrent pack claims, an unreachable provider, and every durable commit boundary.
 
 ## Implementation and Spec Compliance
+
+### Current merge blocker — 2026-09-03
+
+The economics-digest correction is committed and pushed in `2ab594fef399495793cba9bb7127b98ef593c8a3` and its review thread has a fix reply. All 33 focused checks, database/service lint and typechecks, docs, and the zero-finding standards ratchet pass on parent `5198bd4ad7b79bf61a383b7bf159cb30dca638be`. No new automated review findings were reported for that correction.
+
+The unchanged `npm run verify:framework` was attempted locally and failed at npm audit. Parent PR96's [current-head CI run](https://github.com/dadriano/packscout/actions/runs/33820664988) independently failed at the same audit step (exit 2) before tests. Supplemental local verification passed the static and Prisma checks, all workspace lint/typechecks, and the ordinary database lane, then the existing exact-5,000-record test exceeded its 30-second transaction limit. An isolated rerun also timed out at about 32 seconds. No timeout, baseline, audit exception, or verifier was weakened. Neither PR96 nor PR95 is merged; no publication processor or production operation was enabled.
+
+Resume by obtaining a green unchanged full gate, including the maximum-volume database test, then merge PR96. Restack only P02-owned commits onto the resulting main, retarget PR95 to main, reverify, and merge only when its current gate is green. Preserve the separately implemented P03 worktree; it must inherit the final parent and pass its own gate before publication.
+
+PR98 also left the existing card source guard asserting superseded metric bindings. PR96 corrects that guard in `ca375cc4960e90ba1e6e316e073be5bffda000ee`, asserting all four gross/net dollar/percent metrics; all 527 frontend tests and frontend lint pass on that parent. This is test-only, with no UI or EV calculation change. P02 inherits it rather than duplicating the correction.
 
 Review follow-up (2026-09-03): PR95 discussion `3929197632` identified that the seal boundary compared declared economics hashes but did not recompute the canonical economics tuple. The new regression first failed with `Missing expected rejection`, despite passing the complete publication-envelope validator. The seal now recomputes the V1 tuple (price, full records, probability/valuation/EV-input digests, chase, and EV) before any writes. All 33 readiness/persistence checks pass, including zero artifact/batch/intent/operation/receipt writes, an unchanged inactive head, and a reusable lease after rejection. Prior full-gate evidence below is historical; current delivery remains pending restacking and current-head verification.
 
