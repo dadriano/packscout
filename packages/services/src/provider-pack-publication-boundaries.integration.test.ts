@@ -160,3 +160,95 @@ test("Pack publication preserves captured authority and maximum dependency evide
     });
   } finally { await harness.close(); }
 });
+
+test("Authoritative pack heads retire stale episodes without losing valid prepared builds", async suite => {
+  const harness = await createProviderHarness();
+  try {
+    const client = harness.client;
+    const { provider_id: providerId } = await client.database_identity.findUniqueOrThrow({ where: { singleton_key: true } });
+    const context = new ProviderPackPublicationContext(client, { organizationId: randomUUID(), providerId });
+    await context.initialize();
+    const requests = new ProviderPackBuildRequestRepository(context);
+    const snapshots = new ProviderPackSnapshotRepository(context);
+    const outbox = new ProviderPackPublicationOutboxRepository(context);
+    const evaluator = new ProviderPackReadinessEvaluator();
+    for (const kind of ["build", "activation"] as const) for (const change of ["generation", "epoch"] as const) {
+      for (const state of ["ready", "publishing", "retry_scheduled"] as const) {
+        await suite.test(`${change} change fences ${state} ${kind} work`, async () => {
+          const id = randomUUID();
+          await client.$transaction(async tx => {
+            await tx.packs.create({ data: { id, pack_key: id, display_name: id, pack_format: "repack",
+              availability: "available", content_evidence: "complete", packscout_ev_model_version: "weighted-value",
+              packscout_ev_confidence_policy_version: "packscout-ev-policy", source_updated_at: new Date() } });
+            await appendPromotionRange(tx, [{ entityType: "pack", entityId: id, entityVersion: 1n, operation: "upsert" }]);
+          });
+          const fixture = await freshPublicationFixture(providerId, id);
+          const value = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt: new Date().toISOString() });
+          const planned = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: id }));
+          let workId = planned.requestId;
+          if (kind === "activation") {
+            const claim = (await requests.claim(randomUUID()))[0]!;
+            workId = (await snapshots.sealAndEnqueueActivation(claim, fixture.built)).intent.intentId;
+          }
+          const repository = kind === "build" ? requests : outbox;
+          const owned = state === "ready" ? null : (await repository.claim(randomUUID()))[0]!;
+          if (state === "retry_scheduled") await context.defer(owned!, "retry_scheduled", "TRANSPORT_TIMEOUT");
+          const head = { providerId, publicRepackId: id, generation: 1, publicationEpoch: change === "epoch" ? 1 : 0,
+            held: false, holdReason: null, latestAcceptedPackPublicationSequence: planned.sequence,
+            activeSnapshot: fixture.built.snapshot.identity, previousSnapshot: null,
+            indexableSummary: fixture.built.snapshot.payload.summaryProjection, activatedAt: new Date().toISOString() };
+          await outbox.observeHead(head);
+          await outbox.observeHead(head);
+          if (owned) await assert.rejects(context.renew(owned), { code: "PACK_LEASE_LOST" });
+          const row = kind === "build" ? await client.pack_build_requests.findUniqueOrThrow({ where: { id: workId } }) :
+            await client.pack_activation_intents.findUniqueOrThrow({ where: { id: workId } });
+          if (kind === "build" && change === "generation") {
+            assert.equal(row.state, state);
+            await client.pack_build_requests.update({ where: { id: workId }, data: { available_at: new Date(0) } });
+            const replacement = (await requests.claim(randomUUID()))[0]!;
+            assert.equal(replacement.workId, workId);
+            await context.defer(replacement, "superseded", "ACTIVATION_CONFLICT");
+          } else {
+            assert.equal(row.state, "superseded");
+            assert.equal(row.reason_code, "ACTIVATION_CONFLICT");
+            assert.deepEqual(await repository.claim(randomUUID()), []);
+          }
+          assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: id } })).generation, 1n);
+        });
+      }
+    }
+    for (const changedBaseline of [false, true]) await suite.test(`lifecycle capture survives only an unchanged baseline: ${changedBaseline}`, async () => {
+      const id = randomUUID();
+      await client.$transaction(async tx => {
+        await tx.packs.create({ data: { id, pack_key: id, display_name: id, pack_format: "repack", availability: "available",
+          content_evidence: "complete", packscout_ev_model_version: "weighted-value",
+          packscout_ev_confidence_policy_version: "packscout-ev-policy", source_updated_at: new Date() } });
+        await appendPromotionRange(tx, [{ entityType: "pack", entityId: id, entityVersion: 1n, operation: "upsert" }]);
+      });
+      const fixture = await freshPublicationFixture(providerId, id);
+      const value = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt: new Date().toISOString() });
+      const first = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: id }));
+      await snapshots.sealAndEnqueueActivation((await requests.claim(randomUUID()))[0]!, fixture.built);
+      const head = { providerId, publicRepackId: id, generation: 1, publicationEpoch: 0, held: false, holdReason: null,
+        latestAcceptedPackPublicationSequence: first.sequence, activeSnapshot: fixture.built.snapshot.identity, previousSnapshot: null,
+        indexableSummary: fixture.built.snapshot.payload.summaryProjection, activatedAt: new Date().toISOString() };
+      await outbox.observeHead(head);
+      const lifecycle = await evaluator.evaluate({ candidate: { ...fixture.inputs, snapshotKind: "lifecycle_only",
+        lifecycleProvenanceIdentity: "lifecycle:head-test" }, previousSnapshot: fixture.built.snapshot, evaluatedAt: new Date().toISOString() });
+      assert.equal(lifecycle.readiness.outcome, "ready");
+      const pending = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...lifecycle, boundaryIdentity: `${id}:lifecycle` }));
+      const owned = (await requests.claim(randomUUID()))[0]!;
+      const replacement = changedBaseline ? await freshPublicationFixture(providerId, id) : fixture;
+      if (changedBaseline) assert.notEqual(replacement.built.snapshot.identity.publicPackSnapshotId, fixture.built.snapshot.identity.publicPackSnapshotId);
+      await outbox.observeHead({ ...head, generation: 2, activeSnapshot: replacement.built.snapshot.identity,
+        indexableSummary: replacement.built.snapshot.payload.summaryProjection });
+      await assert.rejects(requests.renew(owned), { code: "PACK_LEASE_LOST" });
+      const row = await client.pack_build_requests.findUniqueOrThrow({ where: { id: pending.requestId } });
+      assert.equal(row.state, changedBaseline ? "superseded" : "publishing");
+      const claims = await requests.claim(randomUUID());
+      if (changedBaseline) assert.deepEqual(claims, []);
+      else { assert.equal(claims[0]?.workId, pending.requestId); await context.defer(claims[0]!, "superseded", "ACTIVATION_CONFLICT"); }
+      assert.equal((await client.pack_build_requests.findUniqueOrThrow({ where: { id: first.requestId } })).state, "published");
+    });
+  } finally { await harness.close(); }
+});

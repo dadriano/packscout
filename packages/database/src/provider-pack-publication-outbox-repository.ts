@@ -104,7 +104,7 @@ export class ProviderPackPublicationOutboxRepository {
       await this.context.release(tx, claim);
     });
   }
-  /** Mirror an authenticated authoritative read; a changed epoch/hold invalidates local owners. */
+  /** Mirror an authenticated authoritative read; retire incompatible work before fencing owners. */
   async observeHead(input: ActivePackHead): Promise<void> {
     const head = await activePackHeadSchema.parseAsync(input);
     packInvariant(head.providerId === this.context.scope.providerId, "PACK_SCOPE_MISMATCH");
@@ -116,6 +116,19 @@ export class ProviderPackPublicationOutboxRepository {
         packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId && previous.held === head.held);
         return;
       }
+      // Every pending intent was sealed against the previous mirrored head. Keep
+      // its immutable evidence, but never reacquire that obsolete CAS episode.
+      await tx.pack_activation_intents.updateMany({ where: { ...this.context.where, public_repack_id: head.publicRepackId,
+        state: { in: ["waiting", "ready", "publishing", "retry_scheduled"] } },
+        data: { state: "superseded", reason_code: "ACTIVATION_CONFLICT" } });
+      // A full build can survive a generation-only change; epoch-bound and
+      // lifecycle-baseline-bound captures cannot. Prepared resume work survives.
+      await tx.$executeRaw`UPDATE pack_build_requests SET state = 'superseded', reason_code = 'ACTIVATION_CONFLICT'
+        WHERE organization_id = ${this.context.scope.organizationId}::uuid AND provider_id = ${this.context.scope.providerId}::uuid
+          AND public_repack_id = ${head.publicRepackId}::uuid AND state IN ('waiting','ready','publishing','retry_scheduled')
+          AND (expected_publication_epoch <> ${BigInt(head.publicationEpoch)}
+            OR (inputs_json->>'snapshotKind' = 'lifecycle_only'
+              AND inputs_json #>> '{lifecycleBaseline,identity,publicPackSnapshotId}' IS DISTINCT FROM ${head.activeSnapshot.publicPackSnapshotId}))`;
       await tx.pack_publication_heads.update({ where: { public_repack_id: head.publicRepackId }, data: {
         generation: head.generation, publication_epoch: head.publicationEpoch, held: head.held,
         active_snapshot_id: head.activeSnapshot.publicPackSnapshotId, lease_owner: null, lease_kind: null,

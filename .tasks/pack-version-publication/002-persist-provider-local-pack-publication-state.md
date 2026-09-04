@@ -122,6 +122,12 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Authoritative head invalidation review — 2026-09-03
+
+Discussion `3930246171` identified that clearing a lease alone allowed an obsolete publishing activation to be claimed again. An authenticated changed head now atomically supersedes nonterminal activation episodes with `ACTIVATION_CONFLICT`, preserves their immutable evidence and terminal history, and fences owners. Build requests are retired only when their expected epoch or pinned lifecycle baseline is incompatible; same-epoch full builds and lifecycle builds with an unchanged baseline remain usable, including work prepared while held for resume.
+
+The regression matrix covers ready, publishing, and retry-scheduled work across unheld generation and epoch changes, repeated authoritative observations, stale-owner refusal, lifecycle baseline changes, and retention of published history. The focused head matrix reproduced stale eligible work before the fix. All 75 combined contract/readiness/PostgreSQL checks now pass with zero skips, along with affected database/service lint and typechecks, docs, and the zero-finding standards ratchet. The prior full run was stopped before editing; a complete fresh gate remains required. No transport, worker, or public-head activation was added.
+
 ### Captured identity uniqueness review — 2026-09-03
 
 Discussion `3930246165` identified duplicate action IDs that readiness accepted but the sealed public contract rejected. Readiness now blocks duplicate action IDs, member profile snapshot IDs, and eligible valuation identities with `INVALID_DOMAIN_DATA`, matching the canonical-unique arrays in the public payload. Invalid captures remain durable blocked evidence with no build request JSON and cannot be claimed. Derived search projection and final document-size validation remain assembler responsibilities.
