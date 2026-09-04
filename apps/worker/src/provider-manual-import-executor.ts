@@ -341,6 +341,7 @@ export class ProviderManualImportExecutor {
 
       const finishHead = () => finishProviderImportHead({ database: this.dependencies.database,
         runId: runId!, workerId: this.#workerId, fence, leaseMilliseconds: this.#leaseMilliseconds,
+        transactionMilliseconds: this.#budget.transactionMilliseconds,
         signal, onStage: (next) => { stage = next; } });
       if (runningRun.reachedSourceHead) {
         const result = await finishHead();

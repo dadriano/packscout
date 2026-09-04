@@ -6,7 +6,8 @@ import type { ProviderManualImportStage } from "./provider-manual-import-diagnos
 
 export async function finishProviderImportHead(input: {
   database: ProviderPrismaClient; runId: string; workerId: string; fence: bigint;
-  leaseMilliseconds: number; signal: AbortSignal; onStage(stage: ProviderManualImportStage): void;
+  leaseMilliseconds: number; transactionMilliseconds: number; signal: AbortSignal;
+  onStage(stage: ProviderManualImportStage): void;
 }): Promise<ProviderManualImportExecutionResult> {
   if (input.signal.aborted) return { kind: "blocked", runId: input.runId, failureCode: "PROVIDER_CAPTURE_ABORTED" };
   input.onStage("lease_renewal");
@@ -17,6 +18,7 @@ export async function finishProviderImportHead(input: {
   input.onStage("head_reconciliation");
   const step = await new PrismaProviderHeadReconciliationRepository(input.database).step({
     runId: input.runId, workerId: input.workerId, workerFence: input.fence,
+    timeoutMilliseconds: input.transactionMilliseconds,
   });
   const runs = new PrismaProviderRunRepository(input.database);
   if (step === "progress") {

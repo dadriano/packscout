@@ -42,11 +42,56 @@ test("a head-reaching run that committed nothing retries on a transient failure"
   assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
 });
 
-test("a head-reaching run that committed pages is still refused as unsafe", () => {
+/**
+ * A run can also commit its head page and then fail during head reconciliation.
+ * The checkpoint is then exactly the head page's cursor, so a retry resumes from
+ * the same place a pre-head retry would. collector_crypt latched this way after
+ * every head-reaching run with committed pages, holding an intact checkpoint.
+ */
+test("a head-reaching run that committed pages retries when its head page is the checkpoint", () => {
   const s = snapshot();
   s.run.reachedHead = true;
+  s.run.pageCount = 1;
+  s.run.committedPageCount = 1;
   s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
-  assert.throws(() => policy.classifyBackfillCheckpoint(s),
+  s.lastPage = { number: 1, continuation: "head", hash: s.checkpointHash, matches: true };
+  assert.equal(policy.classifyBackfillCheckpoint(s), "transient_retry");
+  // An unknown commit outcome keeps its permanent policy even at an intact head page.
+  s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_INVALID";
+  assert.throws(() => policy.classifyBackfillCheckpoint(s), /BACKFILL_PERMANENT_FAILURE/);
+});
+
+test("a head-reaching run whose committed pages do not end at the checkpoint is still refused as unsafe", () => {
+  const lastPages = [
+    // The last committed page never reached head.
+    { number: 1, continuation: "more", hash: "a".repeat(64), matches: true },
+    // The checkpoint moved past the head page.
+    { number: 1, continuation: "head", hash: "d".repeat(64), matches: true },
+    // The page count disagrees with the committed pages.
+    { number: 2, continuation: "head", hash: "a".repeat(64), matches: true },
+    // The head page's cursor digest does not verify.
+    { number: 1, continuation: "head", hash: "a".repeat(64), matches: false },
+    null,
+  ];
+  for (const lastPage of lastPages) {
+    const s = snapshot();
+    s.run.reachedHead = true;
+    s.run.pageCount = 1;
+    s.run.committedPageCount = 1;
+    s.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+    s.lastPage = lastPage;
+    assert.throws(() => policy.classifyBackfillCheckpoint(s),
+      /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
+  }
+  // A committed page cannot leave the checkpoint where the run started.
+  const unmoved = snapshot();
+  unmoved.run.reachedHead = true;
+  unmoved.run.pageCount = 1;
+  unmoved.run.committedPageCount = 1;
+  unmoved.run.requestedHash = unmoved.checkpointHash;
+  unmoved.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  unmoved.lastPage = { number: 1, continuation: "head", hash: unmoved.checkpointHash, matches: true };
+  assert.throws(() => policy.classifyBackfillCheckpoint(unmoved),
     /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
 });
 

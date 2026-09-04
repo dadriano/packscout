@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { Prisma } from "../prisma/generated/provider/index.js";
 import type { ProviderPrismaClient, ProviderTransactionClient } from "./provider-database.ts";
 import { ProviderPageTransactionExpiredError, ProviderPageTransactionWindowError,
-  providerPageQueryExpiration, runProviderPageTransaction } from "./provider-page-transaction.ts";
+  providerPageQueryExpiration, providerPageTransactionExpiration,
+  runProviderPageTransaction } from "./provider-page-transaction.ts";
 
 function expiration(operation = "query") {
   return new Prisma.PrismaClientKnownRequestError("private query text", { code: "P2028", clientVersion: "6.19.3",
@@ -20,6 +21,26 @@ test("only the trusted expired-query template is classified positively, without 
     new Prisma.PrismaClientKnownRequestError("expired transaction", { code: "P2028", clientVersion: "test", meta: { error: "Transaction not found." } }),
     new Proxy({}, { getPrototypeOf() { throw new Error("private trap"); } })]) {
     assert.equal(providerPageQueryExpiration(error), null);
+  }
+});
+
+test("every expired-transaction template classifies for supervision while other P2028s stay unknown", () => {
+  for (const operation of ["query", "batch query", "commit", "rollback"]) {
+    const classified = providerPageTransactionExpiration(expiration(operation));
+    assert.ok(classified instanceof ProviderPageTransactionExpiredError);
+    assert.equal(classified.timeoutMilliseconds, 30_000);
+    assert.equal(classified.elapsedMilliseconds, 30_001);
+    assert.equal(classified.message.includes("private"), false);
+  }
+  const prefixed = new Prisma.PrismaClientKnownRequestError("private query text", { code: "P2028", clientVersion: "6.19.3",
+    meta: { error: "Transaction API error: Transaction already closed: A commit cannot be executed on an expired transaction. The timeout for this transaction was 480000 ms, however 480205 ms passed since the start of the transaction. Consider increasing the interactive transaction timeout or doing less work in the transaction." } });
+  assert.ok(providerPageTransactionExpiration(prefixed) instanceof ProviderPageTransactionExpiredError);
+  for (const error of [{ code: "P2028" },
+    new Prisma.PrismaClientKnownRequestError("expired transaction", { code: "P2028", clientVersion: "test", meta: { error: "Transaction not found." } }),
+    new Prisma.PrismaClientKnownRequestError("closed transaction", { code: "P2028", clientVersion: "test",
+      meta: { error: "Transaction already closed: A query cannot be executed on a committed transaction." } }),
+    new Proxy({}, { getPrototypeOf() { throw new Error("private trap"); } })]) {
+    assert.equal(providerPageTransactionExpiration(error), null);
   }
 });
 

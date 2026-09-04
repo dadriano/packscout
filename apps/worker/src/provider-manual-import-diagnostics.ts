@@ -1,5 +1,6 @@
 import { sourceAdapterFailureCodes } from "@packscout/contracts";
-import { ProviderPageTransactionExpiredError, ProviderPageTransactionWindowError } from "@packscout/database";
+import { ProviderPageTransactionExpiredError, ProviderPageTransactionWindowError,
+  providerPageTransactionExpiration } from "@packscout/database";
 import { ProviderCaptureSourceError } from "./provider-capture-source-contract.ts";
 import { ProviderDataforrestSourceError } from "./provider-dataforrest-mixed-page-source.ts";
 
@@ -89,9 +90,12 @@ function databaseCategory(error: unknown): string | null {
     case "P2011":
     case "P2014": return "CONSTRAINT_VIOLATION";
     case "P2024": return "POOL_TIMEOUT";
-    // P2028 covers multiple invalid/closed-transaction conditions, not just
-    // timeouts. P2034 does not distinguish serialization from deadlock.
-    case "P2028": return "TRANSACTION_INVALID";
+    // P2028 covers multiple invalid/closed-transaction conditions. Expired-transaction
+    // templates (query, batch query, commit, rollback) are safe to classify as expiry
+    // because page commits and head batches are digest-replayable; every other P2028
+    // stays permanent. P2034 does not distinguish serialization from deadlock.
+    case "P2028": return providerPageTransactionExpiration(error) === null
+      ? "TRANSACTION_INVALID" : "TRANSACTION_EXPIRED";
     case "P2034": return "TRANSACTION_CONFLICT";
     case "P2010": return "QUERY_FAILED";
     default: return null;

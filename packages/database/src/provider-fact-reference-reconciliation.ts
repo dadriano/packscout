@@ -18,7 +18,12 @@ export interface ProviderResolvedFactReferences {
 }
 
 export const PROVIDER_FACT_REFERENCE_TARGET_BATCH = 250;
-const FACT_REFERENCE_RECONCILIATION_LIMIT = 500;
+// Rows resolved per relationship per batch. Each batch is its own bounded
+// transaction, so this bounds one UPDATE, not the scan: a probe for 500 rows
+// measured 67 ms on the largest provider database while the fixed per-batch
+// round trips cost about 4 s, so a 7.2M-row backlog took ~14,400 batches (about
+// 16 hours of head reconciliation) at 500 and takes ~1,440 at this value.
+export const FACT_REFERENCE_RECONCILIATION_LIMIT = 5_000;
 type QueryClient = Pick<ProviderQueryClient, "$queryRaw">;
 type Target = Readonly<{ id: string; key: string }>;
 type Position = ProviderFactReferenceScanCursor["packs"];

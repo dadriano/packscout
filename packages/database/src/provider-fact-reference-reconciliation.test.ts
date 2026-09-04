@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
 import type { ProviderQueryClient } from "./provider-database.ts";
-import { resolveProviderFactReferencesBatch } from "./provider-fact-reference-reconciliation.ts";
+import { FACT_REFERENCE_RECONCILIATION_LIMIT,
+  resolveProviderFactReferencesBatch } from "./provider-fact-reference-reconciliation.ts";
 
 const target = (index: number) => ({
   id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
@@ -47,7 +48,7 @@ test("a no-match target page advances its keyset rather than falsely reporting c
 });
 
 test("full relationship batches keep the same target keyset until all fanout is drained", async () => {
-  const f = harness(1, 1, 500);
+  const f = harness(1, 1, FACT_REFERENCE_RECONCILIATION_LIMIT);
   const result = await resolveProviderFactReferencesBatch(f.client);
   assert.deepEqual(result.nextScanCursor, {
     packs: { afterKey: null, done: false }, collectibles: { afterKey: null, done: false },
@@ -64,7 +65,7 @@ test("indexed probes cap both catalog targets and fact updates, retaining locks 
   for (const query of f.queries.slice(2)) {
     assert.match(query.sql, /WITH targets\(id, key\) AS \(VALUES/u);
     assert.equal(query.values.length, 502); // 250 UUID/key pairs plus two fact limits.
-    assert.deepEqual(query.values.slice(-2), [500, 500]);
+    assert.deepEqual(query.values.slice(-2), [FACT_REFERENCE_RECONCILIATION_LIMIT, FACT_REFERENCE_RECONCILIATION_LIMIT]);
     assert.match(query.sql, /unresolved\.(?:pack|collectible)_id IS NULL/u);
     assert.match(query.sql, /FOR UPDATE OF unresolved SKIP LOCKED/u);
     assert.match(query.sql, /row_version = fact\.row_version \+ 1/u);
