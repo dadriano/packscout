@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -174,10 +177,14 @@ export function evaluateAuditReport(
   const expiredExceptions = configuration.exceptions.filter(
     (exception) => exception.expires.trim() < today,
   );
-  const staleExceptions = configuration.exceptions.filter((exception) => {
-    const key = `${exception.id.trim().toUpperCase()}|${exception.package.trim()}`;
-    return exception.expires.trim() >= today && !seenExceptions.has(key);
-  });
+  // Without advisory data every live exception would look unmatched, so
+  // staleness is only meaningful when a real report was fetched.
+  const staleExceptions = report.advisoriesUnavailable
+    ? []
+    : configuration.exceptions.filter((exception) => {
+        const key = `${exception.id.trim().toUpperCase()}|${exception.package.trim()}`;
+        return exception.expires.trim() >= today && !seenExceptions.has(key);
+      });
 
   return {
     configurationErrors,
@@ -253,32 +260,176 @@ function checkWorkspaceMetadata() {
   return errors;
 }
 
-function main() {
-  const metadataErrors = checkWorkspaceMetadata();
-  const configuration = JSON.parse(
-    readFileSync(path.join(repositoryRoot, "dependency-audit.json"), "utf8"),
-  );
-  const audit = spawnSync("npm", ["audit", "--json"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  });
+/**
+ * The npm advisory audit is the only network call in the whole verifier, and the
+ * bulk-advisory endpoint is intermittently unavailable: a failed call was
+ * observed to hang for 300s and then return 503, stalling the gate on
+ * infrastructure rather than on the change under review.
+ *
+ * The audit answer is a function of the dependency tree, so the report is cached
+ * against the lockfile hash and re-fetched only when the tree changes or the
+ * cached answer ages out.
+ */
+const auditCachePath = path.join(
+  repositoryRoot,
+  "node_modules/.cache/packscout/dependency-audit-report.json",
+);
+const auditMaxAgeHours = Number(
+  process.env.PACKSCOUT_AUDIT_MAX_AGE_HOURS ?? 24,
+);
+const auditFetchTimeoutSeconds = Number(
+  process.env.PACKSCOUT_AUDIT_TIMEOUT_SECONDS ?? 30,
+);
 
+function lockfileFingerprint() {
+  const lockfile = path.join(repositoryRoot, "package-lock.json");
+  if (!existsSync(lockfile)) throw new Error("package-lock.json is missing");
+  return createHash("sha256").update(readFileSync(lockfile)).digest("hex");
+}
+
+function readCachedAudit(fingerprint) {
+  if (!Number.isFinite(auditMaxAgeHours) || auditMaxAgeHours <= 0) return null;
+  if (!existsSync(auditCachePath)) return null;
+  let cached;
+  try {
+    cached = JSON.parse(readFileSync(auditCachePath, "utf8"));
+  } catch {
+    return null;
+  }
+  if (cached.fingerprint !== fingerprint) return null;
+  const ageHours = (Date.now() - Number(cached.fetchedAt ?? 0)) / 3_600_000;
+  if (!Number.isFinite(ageHours) || ageHours > auditMaxAgeHours) return null;
+  return cached.report ?? null;
+}
+
+function writeCachedAudit(fingerprint, report) {
+  try {
+    mkdirSync(path.dirname(auditCachePath), { recursive: true });
+    writeFileSync(
+      auditCachePath,
+      JSON.stringify({ fingerprint, fetchedAt: Date.now(), report }),
+    );
+  } catch {
+    // A cache that cannot be written must not fail the check.
+  }
+}
+
+function readCachedAuditAtAnyAge() {
+  if (!existsSync(auditCachePath)) return null;
+  try {
+    const cached = JSON.parse(readFileSync(auditCachePath, "utf8"));
+    return cached.report
+      ? { report: cached.report, fetchedAt: Number(cached.fetchedAt ?? 0) }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function fetchAuditReport() {
+  const audit = spawnSync(
+    "npm",
+    [
+      "audit",
+      "--json",
+      `--fetch-timeout=${auditFetchTimeoutSeconds * 1000}`,
+      "--fetch-retries=1",
+      "--no-fund",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: (auditFetchTimeoutSeconds + 30) * 1000,
+    },
+  );
+
+  if (audit.error?.code === "ETIMEDOUT" || audit.signal) {
+    throw new Error(
+      `npm audit exceeded ${auditFetchTimeoutSeconds}s and was terminated; the npm advisory endpoint is unreachable or throttled`,
+    );
+  }
   if (audit.error) {
-    console.error("check:dependencies could not run npm audit:", audit.error);
-    process.exit(2);
+    throw new Error(`could not run npm audit: ${audit.error.message}`);
   }
 
   let report;
   try {
     report = JSON.parse(audit.stdout);
   } catch {
-    console.error("check:dependencies received invalid npm audit output.");
-    console.error(audit.stderr);
-    process.exit(2);
+    throw new Error(`received invalid npm audit output.\n${audit.stderr ?? ""}`);
   }
   if (report.error) {
-    console.error("check:dependencies npm audit failed:", report.error.summary ?? report.error);
+    const summary =
+      report.error.summary ||
+      report.error.detail ||
+      report.error.code ||
+      "the npm registry did not return advisory data";
+    throw new Error(`npm audit failed: ${summary}`);
+  }
+  return report;
+}
+
+function loadAuditReport() {
+  const fingerprint = lockfileFingerprint();
+  const cached = readCachedAudit(fingerprint);
+  if (cached) {
+    console.log(
+      "check:dependencies reusing cached npm audit report (lockfile unchanged)",
+    );
+    return cached;
+  }
+
+  if (process.env.PACKSCOUT_SKIP_DEPENDENCY_AUDIT === "1") {
+    if (process.env.CI) {
+      throw new Error(
+        "PACKSCOUT_SKIP_DEPENDENCY_AUDIT is not honoured in CI; the advisory audit is a required gate",
+      );
+    }
+    console.warn(
+      "check:dependencies SKIPPING the npm advisory audit (PACKSCOUT_SKIP_DEPENDENCY_AUDIT=1) — CI still enforces it",
+    );
+    return { vulnerabilities: {}, advisoriesUnavailable: true };
+  }
+
+  try {
+    const report = fetchAuditReport();
+    writeCachedAudit(fingerprint, report);
+    return report;
+  } catch (error) {
+    // CI is the authoritative advisory gate and must never degrade.
+    if (process.env.CI) throw error;
+    console.warn(`check:dependencies ${error.message}`);
+
+    const stale = readCachedAuditAtAnyAge();
+    if (stale) {
+      const ageHours = Math.round((Date.now() - stale.fetchedAt) / 3_600_000);
+      console.warn(
+        `check:dependencies falling back to the cached audit report from ~${ageHours}h ago; it predates the current lockfile`,
+      );
+      return stale.report;
+    }
+
+    // A registry outage is infrastructure noise, not a defect in this change.
+    // Blocking local verification on it only teaches people to skip the gate.
+    console.warn(
+      "check:dependencies continuing WITHOUT advisory data — CI enforces the audit before merge",
+    );
+    return { vulnerabilities: {}, advisoriesUnavailable: true };
+  }
+}
+
+function main() {
+  const metadataErrors = checkWorkspaceMetadata();
+  const configuration = JSON.parse(
+    readFileSync(path.join(repositoryRoot, "dependency-audit.json"), "utf8"),
+  );
+
+  let report;
+  try {
+    report = loadAuditReport();
+  } catch (error) {
+    console.error(`check:dependencies ${error.message}`);
     process.exit(2);
   }
 
