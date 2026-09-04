@@ -2,11 +2,11 @@
 
 ## Start Here
 
-PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0` (2026-09-04 14:35:17 UTC), after full local and CI33882269333 passed on identical tree `1cda64de`. Verified pinned Convex `shiny-newt-310` now returns `displayedEv`; matching Vercel `dpl_9HLgApSfYLrB2CQxaHaJAtZuKNaq` is production. Original automatic domain assignment is restored and reload-verified. Fresh authenticated Watchlist preserved both saved repack IDs and the same chase card (2/1); numeric EV coverage remains automated because both saved repacks are unavailable. All three temporary deploy keys were revoked and their files/directories removed. No publication authority, processor, public head, seeding, recovery, or pruning was activated.
+PR109 is merged and released as `1117b456ac2d0c548dc9ac341b1d9aa521e413a0`. Pinned Convex `shiny-newt-310` and matching frontend passed the Watchlist smoke check; automatic domain assignment is restored and all temporary deployment keys are revoked. Publication authority remains absent.
 
-P02 is now rebased without conflicts onto released main `1117b456`, implementation `69a1a8735d8484e96607e3f4d913198a04f20a45`; range-diff preserves all 34 commits. Backup `codex/p02-before-watchlist-release-20260904` retains `843d8cdc`. The remote expected-head lease remains `946deb38433d995570c7ef939a427469215fecf1`. Focused/schema checks are running; current-parent full local/CI certification and final review-thread resolution are still required before merging PR95. P03 remains preserved, blocked on that merge; afterwards restack/certify/publish its separate PR, without merging it. P05/task005 remains merged. No later phase is authorized.
+P02 implementation `69a1a8735d8484e96607e3f4d913198a04f20a45` is verified on that exact parent: 108 focused checks, 30 schema checks, and the full local `npm run verify:framework` passed, including both builds. PR95 remains open for final current-head CI and review resolution before the authorized merge. P03 is preserved locally on old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack, align, certify, and publish it separately after PR95 merges. Do not merge P03 or start later phases.
 
-**Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
+**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; P02 published, final CI pending; 0/1 launch operations complete
 
 ## Context
 
@@ -105,7 +105,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 **Activation phase:** P10 launches the exact V1 release certified by P08 and protected by P09.
 
-**Merge order:** P01; P02–P05 may proceed in parallel; P06 waits for P02–P05; P07 may stack on P05; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09.
+**Merge order:** P01; P02, P04, and P05 may proceed independently; P03 follows P02; P06 waits for P02–P05; P07 may stack on P05; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09.
 
 **Additional application path:** none. `pack_catalog_v1` is the only application contract and the frontend calls it directly.
 
@@ -118,8 +118,8 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR96 merged | Provider-local crash and isolation matrix | building |
-| P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | published |
+| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | follows PR95 | Complete deterministic assembly | blocked |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05 | root after prerequisites merge | Publication ambiguity and recovery race | planned |
@@ -147,13 +147,13 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Every provider database can durably plan affected packs and record ready or blocked desired state; no publisher is enabled.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Leave new state unused and revert the disabled planner.
-- **Size exception:** Boundary review permits 26 authored files and approximately 2,900 authored changed lines after the P05 rebase. The boundary/recovery test modules certify inseparable admission-to-outbox, time-dependent readiness, and crash/expiry invariants while keeping the existing 470-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
+- **Size exception:** Boundary review permits approximately 27 authored files and 3,000 authored changed lines after the P05 rebase. The boundary/recovery test modules certify inseparable admission-to-outbox, time-dependent readiness, and crash/expiry invariants while keeping the existing 470-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
-- **Current parent:** `27c7f7ec894996747095aa97652cd95aaefdc4e3` (main including PR96, PR103–108, and PR110); `codex/p02-before-p05-merge-20260904` preserves the previously published `9b3fb05a`. The earlier pre-repair backup at `8409143c` is also retained.
-- **Implementation checkpoint:** `2b9874d1a1b84b9a470733a753da5020ed80021e`, with focused and static checks passed; subsequent handoff edits are documentation-only. Historical full passes do not certify this head.
-- **Delivery gate:** Recovery regressions for `3930633635` and `3930633637`, time-dependent readiness (`3933224053`), and lifecycle baseline timestamp protection (`3933383209`) pass. PR109 passes the full local gate on `f8110b34`; CI and coordinated live frontend/Convex release approval remain pending. Keep the guard/audit intact, safely release PR109, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
-- **Current correction evidence:** The cumulative 106-check contract/readiness/persistence matrix and all 30 schema checks pass on `2b9874d1`, with affected lint/typechecks and a zero-finding standards ratchet. The three time-transition regressions first failed on unchanged admission code, then passed without sleeps against an isolated PostgreSQL fixture. No gate was weakened. Full certification remains pending.
+- **Verified parent:** `1117b456ac2d0c548dc9ac341b1d9aa521e413a0` (released PR109). Backup `codex/p02-before-watchlist-release-20260904` retains `843d8cdc`; the old P03 boundary `8409143c` is preserved.
+- **Verified implementation:** `69a1a8735d8484e96607e3f4d913198a04f20a45`; full local gate passed on tracker head `00a75396`. Subsequent delivery records are metadata-only.
+- **Delivery gate:** 108 focused and 30 schema checks passed, zero skips; full `npm run verify:framework` passed with audit, standards, lint/types, all tests/tooling, and both builds. Logs: `/tmp/packscout-p02-after-pr109-focused-no-cache-20260904.log`, `/tmp/packscout-p02-after-pr109-schema-no-cache-20260904.log`, `/tmp/packscout-p02-after-pr109-framework-20260904.log`. Local loader disk cache was disabled and Vitest used two workers on a private PostgreSQL instance; no assertion, timeout, audit, or gate was weakened.
+- **Merge condition:** final-head GitHub CI and fresh review resolution. This record does not claim the PR is merged. No browser/runtime activation in P02; P06 owns transport/worker E2E.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -163,10 +163,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Review budget:** one task; 1–2 days; target at most 18 authored files and 2,000 authored lines.
 - **Rollback:** Revert the unused assembler and fixtures.
 - **Size exception:** none.
-- **Branch:** assigned by builder.
-- **Verified parent:** not recorded.
-- **Verified implementation:** not recorded.
-- **PR:** not opened.
+- **Branch:** `codex/pack-version-publication-p03-assembler`, local only.
+- **Parent boundary:** `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack after PR95 merges. It consumes P02's captured-input contract, without a database dependency at runtime.
+- **Verification:** historical only; P05 title/alias search and bounded wire-header alignment plus full current-parent certification remain required.
+- **PR:** not opened; publication is authorized, merge is not.
 
 #### P04 — Shared fan-out and profiles
 
@@ -254,8 +254,8 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
-| 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | done | 001 |
+| 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | blocked | 002 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
 
@@ -274,7 +274,7 @@ Total estimated builder/operator effort is 14–21 working days if serialized. P
 ## Build Order
 
 1. Merge P01 and its executable V1 contract fixtures.
-2. Build P02, P03, P04, and P05 as parallel sibling PRs from P01.
+2. Build P02, P04, and P05 independently from P01; P03 follows P02's captured-input contract.
 3. Build P06 after P02–P05 merge; build P07 as soon as P05 is reviewable.
 4. Build P08 after P06/P07 and P09 after P06.
 5. Execute P10 only against the exact commit certified by P08 and protected by P09.
@@ -284,7 +284,8 @@ Total estimated builder/operator effort is 14–21 working days if serialized. P
 | Group | Ready when | Tasks |
 |---|---|---|
 | A | immediately | 001 |
-| B | 001 complete | 002, 003, 004, 005 |
+| B | 001 complete | 002, 004, 005 |
+| B2 | 002 complete and merged for this resume | 003 |
 | C | 002–005 complete for 006; 005 complete for 007 | 006, 007 |
 | D | 006/007 complete for 008; 006 complete for 009 | 008, 009 |
 | E | 008 and 009 complete | 010 |
@@ -294,14 +295,14 @@ Total estimated builder/operator effort is 14–21 working days if serialized. P
 ```text
 P01 contract
  ├── P02 provider-local state ─┐
- ├── P03 assembler ────────────┤
+ │     └── P03 assembler ──────┤
  ├── P04 shared profiles ──────┼── P06 publisher/recovery ──┬── P08 operations/readiness ─┐
  └── P05 public store/API ─────┘                             └── P09 retention ────────────┼── P10 launch
             └── P07 frontend ────────────────────────────────────────> P08 ────────────────┘
 ```
 
-P02–P05 may merge in any order after P01. P06 branches from updated default after all four merge. P07 may stack on P05 and rebase after P05 merges. P08 waits for P06/P07; P09 may proceed independently after P06. P10 is an operation, not an implementation PR.
+P02, P04, and P05 may merge independently after P01; P03 follows P02. P06 branches from updated default after all four merge. P07 may stack on P05 and rebase after P05 merges. P08 waits for P06/P07; P09 may proceed independently after P06. P10 is an operation, not an implementation PR.
 
 ## Next Action
 
-Obtain approval for the coordinated frontend/Convex release of PR109 and require green CI on its locally certified `f8110b34`. After that prerequisite is safely merged, refresh/reverify and merge PR95, then restack/certify/publish P03 separately from its exact old P02 boundary `8409143c`. Adopt P05's title-plus-alias search and bounded snapshot header in P03. P05/PR108 and PR96 are already merged. No new phase, processor, manual deployment, or launch operation is authorized by this repair.
+Require current-head CI and fresh review resolution, then merge PR95 under the existing approval. Restack/certify/publish P03 separately from exact old P02 boundary `8409143c`, adopting P05 title-plus-alias search and the bounded wire header without changing canonical snapshot identity. Do not merge P03 or activate later phases. The earlier stop-agents instruction remains in force.

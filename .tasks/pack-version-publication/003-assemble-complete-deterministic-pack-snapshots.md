@@ -1,12 +1,16 @@
 # Task: Assemble Complete Deterministic Pack Snapshots
 
 **ID:** pack-version-publication/003
-**Depends on:** pack-version-publication/001
+**Depends on:** pack-version-publication/002
 **Blocks:** pack-version-publication/006
 **Delivery phase:** P03
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
-**Status:** todo
+**Status:** blocked
+
+## Current delivery checkpoint — 2026-09-04
+
+The existing local assembler is preserved on `codex/pack-version-publication-p03-assembler`; it is not part of this P02 PR. It consumes P02's immutable capture contract. After PR95 merges, restack only child-owned commits from `8409143c8cca71e63602e097adf3e8ba45d86a12`, adopt P05's title/alias search and bounded wire header while retaining the full canonical hash header, then verify and publish separately. Historical checks are not current certification. P03 merge is not authorized.
 
 ## Start Here
 
