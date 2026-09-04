@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged. P02 review corrections pass 84 contract/boundary checks and 30 schema checks, but the full gate is blocked by merged PR103's Watchlist EV inventory mismatch. Correct that upstream finding without an exemption, then re-run the full gate and merge PR95. P03 remains a separate local implementation; no publication processor is enabled.
+PR96 is merged. P02 has 84 passing contract/boundary checks and 30 schema checks, but two new P1 crash/partial-expiry findings remain unresolved and merged PR103's Watchlist EV inventory mismatch blocks the full gate. Fix the recovery gaps and the separate upstream guard without an exemption, then refresh/reverify before merging PR95. P03 remains a separate local implementation; no publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -150,7 +150,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
 - **Current parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (main with PR96 and independently merged PR103/104).
 - **Implementation checkpoint:** `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
-- **Delivery gate:** PR96 is merged. PR95 CI `33830594805` and the isolated local guard fail because PR103 introduced uninventoried EV tokens in `convex/savedItems.ts`. Resolve that upstream finding and require current-head full gates before merging PR95; P03 stays separate.
+- **Delivery gate:** PR96 is merged. New P1 discussions `3930633635` and `3930633637` reopen crash/partial-expiry recovery acceptance. Separately, CI `33830594805` and the current-head isolated guard fail on PR103's uninventoried EV tokens in `convex/savedItems.ts`. Resolve both recovery findings and the upstream gate before merging PR95; P03 stays separate.
 - **Current correction evidence:** All 84 contract/readiness/persistence checks and 30 schema checks pass, including complete capture/readiness authority, full shared evidence, recurring desired states, reconciliation below newer work, expiry recovery, and complete search-projection limits. Affected lint/typechecks and the zero-finding standards ratchet pass; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
@@ -301,4 +301,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Resolve the upstream Watchlist gate, reverify and merge PR95, then certify/publish the existing separate P03 implementation against its final parent. PR96 is already merged; publication stays disabled until P06 and launch authorization.
+Fix the two new P1 recovery findings and resolve the separate upstream Watchlist gate, then refresh/reverify and merge PR95 before certifying/publishing P03. PR96 is already merged; publication stays disabled until P06 and launch authorization.

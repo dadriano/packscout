@@ -110,10 +110,10 @@ There is no direct user-facing change. The resulting state machine ensures that 
 
 ### Recovery and bounded behavior
 
-- [x] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
+- [ ] Crash, duplicate delivery, lost lease, and receipt-before-completion cases converge without lost or duplicate logical publication.
 - [x] An expired claimant cannot mutate work after a newer fence is issued.
 - [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
-- [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
+- [ ] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
 - [x] Records, logs, and errors stay within declared bounds and contain no protected data.
 
 ## Verification
@@ -142,7 +142,7 @@ Full certification is blocked by the merged PR103 Watchlist change: the EV cutov
 - An expired intent with no persisted operation is retired and, only when still the latest desired work, creates a fresh request from preserved inputs. Still-valid evidence can reuse the artifact under a new intent; expired evidence waits for fresh inputs. Existing operation-bearing episodes remain available for receipt reconciliation, and older expiry never replaces newer desired work.
 - Scoped foreign keys, immutable operation/receipt evidence, fenced claims, bounded attempts, and explicit local runtime grants preserve provider/organization isolation. No transport, scheduler, or public activation is added.
 
-The latest cases address discussions `3930457571`, `3930457576`, `3930457580`, and `3930580327`. Red/green search regressions cover six long member names, exact 1,024-character and 100-category boundaries, overflow, and forged ready admission. Earlier capture, readiness, recurrence, and reconciliation corrections remain covered; chronological checkpoints remain in Git history.
+The latest fixes address discussions `3930457571`, `3930457576`, `3930457580`, and `3930580327`. Two new P1 findings remain unresolved: `3930633635` (crash after persisting an operation but before marking ambiguity, followed by newer desired work) and `3930633637` (expiry after partial remote execution). Recovery acceptance is reopened; the passing matrix does not yet cover these windows. Resolve them before merge, alongside the separate Watchlist gate. Chronological checkpoints and completed search-boundary evidence remain in Git history.
 
 ### Intentional adaptations and later owners
 
