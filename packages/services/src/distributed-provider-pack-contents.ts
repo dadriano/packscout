@@ -279,9 +279,10 @@ function project<TDetail extends { publicRepackId: string; categories: readonly 
     const contents = contentsByPack.get(pack.id) ?? [];
     const candidates = contents.filter((row) => row.contentRole !== "other" && row.availableQuantity !== 0n);
     const valuations = candidates.map(row => byLocalId.get(row.collectibleId)!.valuation);
-    const commonCurrency = new Set(valuations.map(value => value?.displayMoney?.currency)).size === 1
-      ? valuations[0]?.displayMoney?.currency : undefined;
-    const useSourceMoney = compareSourceMoney && commonCurrency !== undefined && valuations.some(value => value?.usdComparison.status !== "available");
+    const sourceCurrencies = new Set(valuations.flatMap(value => value?.displayMoney ? [value.displayMoney.currency] : []));
+    const commonCurrency = sourceCurrencies.size === 1 ? [...sourceCurrencies][0] : undefined;
+    const unlabelledUsdValue = valuations.some(value => value?.usdComparison.status === "available" && value.displayMoney === null);
+    const useSourceMoney = compareSourceMoney && !unlabelledUsdValue && commonCurrency !== undefined && valuations.some(value => value?.usdComparison.status !== "available");
     const value = (row: typeof candidates[number]) => {
       const valuation = byLocalId.get(row.collectibleId)!.valuation;
       // Comparing like-denominated vendor values needs no USD conversion. The

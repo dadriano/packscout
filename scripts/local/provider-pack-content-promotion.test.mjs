@@ -56,7 +56,7 @@ test("no membership leaves packs without fabricated chases", () => {
   assert.deepEqual(result.collectibles, []);
 });
 
-test("V3 chooses the higher USDC insured value while its USD comparison stays unknown", () => {
+test("V3 chooses the higher USDC insured value even alongside unvalued members", () => {
   const idFor = localCollectibleId => provisionalCollectiblePublicId({ providerId, localCollectibleId });
   const lowerId = Array.from({ length: 99 }, (_, index) => `30000000-0000-5000-8000-${String(index + 2).padStart(12, "0")}`)
     .find(id => idFor(id) < idFor(cardId));
@@ -64,9 +64,14 @@ test("V3 chooses the higher USDC insured value while its USD comparison stays un
   const low = { ...contents.collectibles[0], id: lowerId, collectibleKey: "card:low", valuationAmount: "42200" };
   const lowMembership = { ...contents.memberships[0], id: "40000000-0000-5000-8000-000000000002",
     collectibleId: lowerId, statedValueAmount: "42200", displayOrder: 1 };
+  const unknown = { ...contents.collectibles[0], id: "30000000-0000-5000-8000-000000000100", collectibleKey: "card:unknown",
+    valuationAmount: null, valuationCurrency: null, valuationUsdAmount: null, valuationType: null,
+    valuationObservedAt: null, valuationUnavailableReason: "VALUATION_UNAVAILABLE" };
+  const unknownMembership = { ...contents.memberships[0], id: "40000000-0000-5000-8000-000000000003",
+    collectibleId: unknown.id, statedValueAmount: null, statedValueCurrency: null, displayOrder: 2 };
   const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
     publicAssetOrigins: [], packs: [pack], repacks: [detail], identity,
-    contents: { ...contents, collectibles: [low, ...contents.collectibles], memberships: [lowMembership, ...contents.memberships] } });
+    contents: { ...contents, collectibles: [unknown, low, ...contents.collectibles], memberships: [unknownMembership, lowMembership, ...contents.memberships] } });
   assert.equal(result.repacks[0].topChase.publicCollectibleId, idFor(cardId));
   assert.deepEqual(result.repacks[0].topChase.collectible.valuation.displayMoney, { minorUnits: 4500000, currency: "USDC" });
   assert.deepEqual(result.repacks[0].topChase.collectible.valuation.usdComparison,
@@ -77,4 +82,15 @@ test("membership without its retained snapshot refuses promotion", async () => {
   const client = { query: async () => ({ rows: [{ snapshotId: null }] }) };
   await assert.rejects(readProviderPackContents(client, [packId]),
     /PROVIDER_CONTENT_SNAPSHOT_INVALID/u);
+});
+
+test("USDC source values do not replace an available USD-only comparison", () => {
+  const usdOnly = { ...contents.collectibles[0], id: "30000000-0000-5000-8000-000000000099", collectibleKey: "card:usd",
+    valuationAmount: null, valuationCurrency: null, valuationUsdAmount: "100", valuationUnavailableReason: null };
+  const member = { ...contents.memberships[0], id: "40000000-0000-5000-8000-000000000099",
+    collectibleId: usdOnly.id, statedValueAmount: null, statedValueCurrency: null, displayOrder: 1 };
+  const result = projectProviderPackContents({ providerId, platformKey: "collector_crypt", readAt,
+    publicAssetOrigins: [], packs: [pack], repacks: [detail], identity,
+    contents: { ...contents, collectibles: [...contents.collectibles, usdOnly], memberships: [...contents.memberships, member] } });
+  assert.equal(result.repacks[0].topChase.publicCollectibleId, provisionalCollectiblePublicId({ providerId, localCollectibleId: usdOnly.id }));
 });
