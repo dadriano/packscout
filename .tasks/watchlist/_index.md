@@ -103,8 +103,8 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Rollback:** Revert the route and nav item. The owner read can remain unused.
 - **Size exception:** none
 - **Branch:** `codex/watchlist-p02-page-and-lists`
-- **Verified parent:** not recorded
-- **Verified implementation:** not recorded
+- **Verified parent:** `1b75a4b56defc3436566dac56d4c0ce03166a465` (`codex/watchlist-p01-chased-repacks`)
+- **Verified implementation:** `21bf39f7ef6d02c5633053de11b21f70a0b4c450`
 - **PR:** not opened
 
 #### P03 — Act from a row
