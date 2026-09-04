@@ -4,7 +4,7 @@
 
 Begin P01 with `watchlist/001`. Ship an owner-only watchlist read that returns both saved collections, resolved against the current catalog, with per-collection counts for the tab pips.
 
-**Progress:** 1/4 tasks complete; 1/3 phases merged; chased-repack follow-up in flight
+**Progress:** 1/4 tasks complete; 1/3 phases merged; chased-repack follow-up published
 
 ## Context
 
@@ -94,7 +94,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Branch:** `codex/watchlist-p01-chased-repacks`
 - **Verified parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (`origin/main`)
 - **Verified implementation:** `623992f472684d94cf53a4d6683dae532f964918`
-- **PR:** https://github.com/dadriano/packscout/pull/103 (merged as `a63d98a9`); chased-repack follow-up not opened
+- **PR:** https://github.com/dadriano/packscout/pull/103 (merged as `a63d98a9`); follow-up https://github.com/dadriano/packscout/pull/106
 
 #### P02 — Watchlist page and lists
 
@@ -147,7 +147,7 @@ No two numbered tasks are safe to implement in parallel. P02 still publishes 002
 ```text
 default
  └── P01 owner watchlist read (#103, merged)
-      └── P01 chased-repack proof (follow-up)
+      └── P01 chased-repack proof (#106)
            └── P02 Watchlist page and lists
                 └── P03 unsave and open from a row
 ```
