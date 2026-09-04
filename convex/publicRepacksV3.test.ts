@@ -2,6 +2,8 @@
 
 import {
   buildPublicCollectibleSearchText,
+  dashboardKpisSchema,
+  displayedEvMedianSourcesV3Schema,
   normalizePublicSearchText,
   publicCollectibleSchema,
   publicRepackChaseSchema,
@@ -460,6 +462,9 @@ describe("data_release_v3 public reads", () => {
     expect(data.vendorSummaries[0]?.medianPackScoutEvPercent.basisPoints).toBe(
       -1_000,
     );
+    expect(displayedEvMedianSourcesV3Schema.parse(
+      (result as unknown as { evMedianSources: unknown }).evMedianSources,
+    ).overall).toBe("packscout");
   });
 
   test("EV-dollar ties rank deterministically by public id", async () => {
@@ -644,6 +649,15 @@ describe("data_release_v3 public reads", () => {
         expect(data.vendorSummaries.map(row => row.medianPackScoutEvPercent.basisPoints)).toEqual([basisPoints]);
         expect(data.categorySummaries.map(row => row.medianPackScoutEvPercent.basisPoints)).toEqual([basisPoints]);
         expect(data.kpis.highConfidenceRepacks).toBe(minMinor === 15_000 ? 0 : 1);
+        // Provenance stays outside data so deployed strict KPI clients still parse.
+        expect(dashboardKpisSchema.safeParse(data.kpis).success).toBe(true);
+        const sources = displayedEvMedianSourcesV3Schema.parse(
+          (result as unknown as { evMedianSources: unknown }).evMedianSources,
+        );
+        const source = minMinor === 15_000 ? "provider_reported" : "mixed";
+        expect(sources.overall).toBe(source);
+        expect(sources.vendors).toEqual([{ key: vendorKey, source }]);
+        expect(sources.categories.map(group => group.source)).toEqual([source]);
       };
       // Six eligible displayed values: [-10000, -1500, -621, 0, 800, 2500].
       // Missing D and sold-out E never contribute, and C keeps independent EV.

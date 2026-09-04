@@ -19,6 +19,7 @@ import {
   publicRepackViewSummaryV3FromDetail,
   searchPublicCollectiblesInputSchema,
   type DashboardKpis,
+  type DisplayedEvMedianSource,
   type DataReleaseV3Identity,
   type ListPublicRepacksInput,
   type PublicCollectible,
@@ -511,14 +512,16 @@ function purchasableRepackRows(
  * counts the catalog the filters matched, and all four states stay
  * discoverable there.
  */
-function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: DisplayedEvMedianContext): DashboardKpis {
+function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: DisplayedEvMedianContext):
+  Readonly<{ kpis: DashboardKpis; source: DisplayedEvMedianSource | null }> {
   const purchasableRows = purchasableRepackRows(rows);
   const chaseValues = purchasableRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
-  return {
+  const median = medianDisplayedEvPercent(purchasableRows, context);
+  return { source: median.source, kpis: {
     totalRepacks: rows.length,
-    medianPackScoutEvPercent: medianDisplayedEvPercent(purchasableRows, context),
+    medianPackScoutEvPercent: median.metric,
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
     highConfidenceRepacks: purchasableRows.filter(
@@ -526,7 +529,7 @@ function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: Display
         row.packScoutConfidenceBasisPoints !== null &&
         row.packScoutConfidenceBasisPoints >= 8_000,
     ).length,
-  };
+  } };
 }
 
 function repackSummaries(
@@ -556,20 +559,24 @@ function repackSummaries(
       }
     });
   }
-  return [...groups]
-    .map(([key, value]) => ({
-      key,
-      label: value.label,
-      repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianDisplayedEvPercent(
-        purchasableRepackRows(value.rows), context,
-      ),
-    }))
+  const summaries = [...groups]
+    .map(([key, value]) => {
+      const median = medianDisplayedEvPercent(purchasableRepackRows(value.rows), context);
+      return {
+        key,
+        label: value.label,
+        repackCount: value.rows.length,
+        medianPackScoutEvPercent: median.metric,
+        source: median.source,
+      };
+    })
     .sort(
       (left, right) =>
         right.repackCount - left.repackCount || left.key.localeCompare(right.key),
     )
     .slice(0, 5);
+  return { groups: summaries.map(({ source: _source, ...group }) => group),
+    sources: summaries.map(({ key, source }) => ({ key, source })) };
 }
 
 function contextualFacets(
@@ -894,11 +901,14 @@ export const getDashboardBundleV3AtTime = internalQuery({
       selectedRepack,
     });
     if (!bundle.success) return publicReadError("RELEASE_UNAVAILABLE");
-    return success({
+    const kpis = dashboardKpis(matchingRows, active);
+    const vendors = repackSummaries(matchingRows, "vendor", active);
+    const categories = repackSummaries(matchingRows, "category", active);
+    return { ...success({
       ...bundle.data,
-      kpis: dashboardKpis(matchingRows, active),
-      vendorSummaries: repackSummaries(matchingRows, "vendor", active),
-      categorySummaries: repackSummaries(matchingRows, "category", active),
+      kpis: kpis.kpis,
+      vendorSummaries: vendors.groups,
+      categorySummaries: categories.groups,
       facets: contextualFacets(
         allRows,
         allRows,
@@ -907,7 +917,7 @@ export const getDashboardBundleV3AtTime = internalQuery({
         active.categoryByPublicId,
       ),
       activeFilters: request.filters,
-    });
+    }), evMedianSources: { overall: kpis.source, vendors: vendors.sources, categories: categories.sources } };
   },
 });
 

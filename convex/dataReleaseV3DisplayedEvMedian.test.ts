@@ -16,12 +16,14 @@ test.each([false, true])("displayed medians resolve source EV with legacy snapsh
   const row = dataReleaseV3SearchRowFromDetail(detail);
   const context = { legacyEvSnapshot,
     evByPublicId: new Map(legacyEvSnapshot ? [] : [[detail.publicRepackId, unavailable]]) };
-  expect(medianDisplayedEvPercent([row], context)).toEqual({ status: "available", basisPoints: 800 });
+  expect(medianDisplayedEvPercent([row], context)).toEqual({
+    metric: { status: "available", basisPoints: 800 }, source: "provider_reported",
+  });
   expect(medianDisplayedEvPercent([], context)).toEqual({
-    status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE",
+    metric: { status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE" }, source: null,
   });
   if (!legacyEvSnapshot) {
     // Missing migrated display authority must not admit a source fallback.
-    expect(medianDisplayedEvPercent([row], { ...context, evByPublicId: new Map() }).status).toBe("unavailable");
+    expect(medianDisplayedEvPercent([row], { ...context, evByPublicId: new Map() }).metric.status).toBe("unavailable");
   }
 });

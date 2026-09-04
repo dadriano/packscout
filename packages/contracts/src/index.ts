@@ -27,6 +27,7 @@ export * from "./provider-source-canonical-content-v1.ts";
 export * from "./provider-source-canonical-lifecycle.ts";
 export * from "./dataforrest-events-v1.ts";
 export * from "./public-repacks.ts";
+export * from "./displayed-ev-median-sources-v3.ts";
 export * from "./public-pack-availability-v1.ts";
 export * from "./repack-heat.ts";
 export * from "./repack-heat-publication.ts";

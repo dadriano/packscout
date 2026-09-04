@@ -1,4 +1,4 @@
-import type { DashboardKpis, PackScoutDisplayedEvV3 } from "@packscout/contracts";
+import type { DashboardKpis, DisplayedEvMedianSource, PackScoutDisplayedEvV3 } from "@packscout/contracts";
 import {
   displayedEvMetricFromDataReleaseV3SearchRow,
   type DataReleaseV3SearchRow,
@@ -13,19 +13,23 @@ export type DisplayedEvMedianContext = Readonly<{
 export function medianDisplayedEvPercent(
   rows: readonly DataReleaseV3SearchRow[],
   context: DisplayedEvMedianContext,
-): DashboardKpis["medianPackScoutEvPercent"] {
+): Readonly<{ metric: DashboardKpis["medianPackScoutEvPercent"]; source: DisplayedEvMedianSource | null }> {
+  const sources = new Set<DisplayedEvMedianSource>();
   const values = rows.flatMap((row) => {
     const value = displayedEvMetricFromDataReleaseV3SearchRow(
       row, "packScoutEvPercentBasisPoints",
       context.evByPublicId.get(row.publicRepackId), context.legacyEvSnapshot,
     );
-    return value === null ? [] : [value];
+    if (value === null) return [];
+    sources.add(row.packScoutEvPercentBasisPoints === null ? "provider_reported" : "packscout");
+    return [value];
   }).sort((left, right) => left - right);
   if (values.length === 0) {
-    return { status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE" };
+    return { metric: { status: "unavailable", basisPoints: null, reason: "ESTIMATE_UNAVAILABLE" }, source: null };
   }
   const middle = Math.floor(values.length / 2);
   const basisPoints = values.length % 2 === 1 ? values[middle]!
     : Math.round((values[middle - 1]! + values[middle]!) / 2);
-  return { status: "available", basisPoints };
+  return { metric: { status: "available", basisPoints },
+    source: sources.size > 1 ? "mixed" : sources.has("packscout") ? "packscout" : "provider_reported" };
 }
