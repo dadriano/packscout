@@ -265,10 +265,16 @@
 
 .metricState,
 .unavailableReason,
+.sourceLabel,
 .confidence {
   color: var(--color-text-muted);
   font-size: 0.58rem;
   line-height: 1.35;
+}
+
+.sourceLabel {
+  display: block;
+  margin-top: 0.16rem;
 }
 
 .metricState {

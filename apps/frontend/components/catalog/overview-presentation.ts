@@ -9,6 +9,7 @@ import {
   formatMoneyMinorUnits,
   isSimulatedRepackListing,
   presentBuybackSummaryV3,
+  presentGrossEvV3,
   presentPackScoutEvV3,
   presentRepackPrice,
   presentSignedEvPercentMetric,
@@ -16,6 +17,7 @@ import {
   type MetricSemanticState,
   type MetricTone,
   type MetricValuePresentation,
+  type GrossEvV3Presentation,
   type PackScoutEvV3Presentation,
 } from "@/lib/packscout-ev-presentation";
 import { getPublicReasonCopy } from "@/lib/metric-vocabulary";
@@ -48,6 +50,7 @@ export type OpportunityPresentation = Readonly<{
   simulated: boolean;
   packPrice: MetricValuePresentation;
   packScoutEv: PackScoutEvV3Presentation;
+  displayedEv: GrossEvV3Presentation;
   buyback: MetricValuePresentation;
   topChaseValue: MetricValuePresentation;
 }>;
@@ -133,14 +136,20 @@ export function presentDashboardKpis(
 
 /**
  * Presents one server-ranked opportunity row. The rank comes from the
- * server's signed-EV-dollar ordering, and `estimate` is the clock-resolved
- * PackScout estimate for the row (defaults to the served projection).
+ * server's displayed-EV-dollar ordering, and `estimate` is the clock-resolved
+ * PackScout estimate for independent confidence (defaults to the served projection).
  */
 export function presentOpportunityRow(
   repack: PublicRepackViewSummaryV3,
   rank: number,
   estimate: PackScoutDisplayedEvV3 = repack.evEstimates.packScout,
 ): OpportunityPresentation {
+  const packScoutEv = presentPackScoutEvV3({
+    estimate,
+    price: repack.price,
+    availability: repack.availability,
+    repackName: repack.name,
+  });
   return Object.freeze({
     rank,
     publicRepackId: repack.publicRepackId,
@@ -152,12 +161,8 @@ export function presentOpportunityRow(
     primaryImage: repack.primaryImage,
     simulated: isSimulatedRepackListing(repack.name),
     packPrice: presentRepackPrice(repack.price),
-    packScoutEv: presentPackScoutEvV3({
-      estimate,
-      price: repack.price,
-      availability: repack.availability,
-      repackName: repack.name,
-    }),
+    packScoutEv,
+    displayedEv: presentGrossEvV3(repack, packScoutEv),
     buyback: presentBuybackSummaryV3(repack.buyback),
     topChaseValue: presentTopChaseValue(repack.topChase),
   });

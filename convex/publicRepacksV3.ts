@@ -878,22 +878,23 @@ export const getDashboardBundleV3AtTime = internalQuery({
     const matchingRows = allRows.filter((row) =>
       rowMatchesFilters(row, request.filters),
     );
-    // Opportunities are actionable buys: only available repacks with a
-    // last-known PackScout estimate rank, by signed EV dollars
-    // descending. Sold-out, unavailable, and unknown packs stay visible in the
-    // catalog and never rank here.
+    // Use the same displayed EV source for eligibility and sorting as All
+    // Repacks, without making non-purchasable or frozen history actionable.
     const opportunityRows = [...matchingRows]
       .filter(
         (row) =>
           packIsPurchasable(row.availability) &&
-          row.packScoutEvDollarsMinor !== null,
+          displayedEvMetricFromDataReleaseV3SearchRow(
+            row, "packScoutEvDollarsMinor", active.evByPublicId.get(row.publicRepackId),
+            active.legacyEvSnapshot,
+          ) !== null,
       )
       .sort((left, right) =>
         compareRows(left, right, {
           search: "",
           sort: "packscout_ev_dollars",
           direction: "desc",
-        }),
+        }, active.evByPublicId, active.legacyEvSnapshot),
       )
       .slice(0, 6);
     const details = await hydrateRepackViews(ctx, active, opportunityRows, health);

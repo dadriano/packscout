@@ -89,7 +89,7 @@ function renderInspector(detail = buildV3ViewDetail()): string {
 
 const EXPECTED_METRIC_VALUES = ["$85.00", "85.00%", "-$15.00", "-15.00%"] as const;
 
-test("table, mobile cards, and detail show source-derived Gross EV with platform attribution", () => {
+test("all four catalog surfaces show source-derived EV with platform attribution", () => {
   for (const [vendorKey, vendorDisplayName] of [
     ["phygitals", "Phygitals"], ["collector_crypt", "Collector Crypt"], ["courtyard", "Courtyard"],
   ]) {
@@ -102,15 +102,21 @@ test("table, mobile cards, and detail show source-derived Gross EV with platform
           observedAt: "2026-08-19T10:00:00.000Z" },
       },
     });
-    for (const markup of [renderAllRepacksTable([detail]), renderAllRepacksCards([detail]), renderInspector(detail)]) {
-      assert.ok(markup.includes("$93.79"), vendorKey);
-      assert.ok(markup.includes("93.79%"), vendorKey);
+    const opportunity = renderOpportunityTable(detail);
+    const grossEvSurfaces = [renderAllRepacksTable([detail]), renderAllRepacksCards([detail]), renderInspector(detail)];
+    for (const markup of [opportunity, ...grossEvSurfaces]) {
       assert.ok(markup.includes("-$6.21"), vendorKey);
       assert.ok(markup.includes("-6.21%"), vendorKey);
       assert.ok(markup.includes(`Calculated from ${vendorDisplayName}-reported EV × buyback.`), vendorKey);
       assert.ok(markup.includes("EV confidence"), vendorKey);
       assert.equal(markup.includes("High · 100%"), false, vendorKey);
     }
+    for (const markup of grossEvSurfaces) {
+      assert.ok(markup.includes("$93.79"), vendorKey);
+      assert.ok(markup.includes("93.79%"), vendorKey);
+    }
+    assert.ok(opportunity.includes("Platform EV × buyback"), vendorKey);
+    assert.ok(opportunity.includes("EV confidence: Unavailable"), vendorKey);
     assert.ok(renderInspector(detail).includes('aria-label="EV from platform data"'));
   }
 });
@@ -150,6 +156,41 @@ test("the opportunity surface is labeled as ranked by EV $ from the server", () 
   assert.match(markup, /aria-label="Top opportunities comparison"/);
   assert.match(markup, /tabindex="0"/i);
   assert.match(markup, /aria-pressed="true"/);
+});
+
+test("mixed-source opportunities retain server order and the selected repack", () => {
+  const platform = buildV3ViewDetail({
+    publicRepackId: "4f886b23-61a2-5041-bd26-45d5b64304f3",
+    name: "Starter Pokémon",
+    vendorKey: "collector_crypt",
+    vendorDisplayName: "Collector Crypt",
+    buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
+    evEstimates: {
+      packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+      vendorReported: {
+        status: "available",
+        sourceMoney: { minorUnits: 10_421, currency: "USD" },
+        usdComparison: { status: "available", value: { minorUnits: 10_421, currency: "USD" } },
+        observedAt: "2026-08-19T10:00:00.000Z",
+      },
+    },
+  });
+  const independent = buildV3ViewDetail({ name: "Core Pack" });
+  const markup = renderStatic(
+    <OpportunityTable
+      onSelectOpportunity={noop}
+      opportunities={[platform, independent].map(publicRepackViewSummaryV3FromDetail)}
+      repacksHref="/packs"
+      selectedPublicRepackId={platform.publicRepackId}
+    />,
+  );
+
+  assert.ok(markup.indexOf("Starter Pokémon") < markup.indexOf("Core Pack"));
+  assert.match(markup, /aria-label="Inspect Starter Pokémon, selected" aria-pressed="true"/);
+  assert.match(markup, /aria-label="Inspect Core Pack" aria-pressed="false"/);
+  assert.ok(markup.includes("-$6.21"));
+  assert.ok(markup.includes("-$15.00"));
+  assert.equal(markup.match(/High · 100%/g)?.length, 1);
 });
 
 test("unavailable estimates render the reason on every surface, never zero or vendor EV", () => {

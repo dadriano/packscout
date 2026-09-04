@@ -7,6 +7,7 @@ import type {
 import {
   buildV3CurrentEv,
   buildV3LastKnownEv,
+  buildV3UnavailableEv,
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
@@ -91,10 +92,48 @@ test("overview opportunity rows retain server-presented last-known EV", () => {
   assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 50%");
   assert.equal(row.packScoutEv.tone, "negative");
   assert.equal(row.packScoutEv.confidence.tone, "caution");
+  assert.equal(row.displayedEv.source, "packscout");
+  assert.equal(row.displayedEv.evDollars, row.packScoutEv.evDollars);
   assert.match(
     row.packScoutEv.freshness.dataAsOfLabel,
     /^Source evidence last observed /,
   );
+});
+
+test("opportunities present source-derived EV without inventing independent confidence", () => {
+  for (const [vendorKey, vendorDisplayName] of [
+    ["phygitals", "Phygitals"],
+    ["collector_crypt", "Collector Crypt"],
+    ["courtyard", "Courtyard"],
+  ]) {
+    const repack = buildV3ViewSummary({
+      vendorKey,
+      vendorDisplayName,
+      buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
+      evEstimates: {
+        packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+        vendorReported: {
+          status: "available",
+          sourceMoney: { minorUnits: 10_421, currency: "USD" },
+          usdComparison: {
+            status: "available",
+            value: { minorUnits: 10_421, currency: "USD" },
+          },
+          observedAt: "2026-08-19T10:00:00.000Z",
+        },
+      },
+    });
+    const row = presentOpportunityRow(repack, 2);
+
+    assert.equal(row.rank, 2);
+    assert.equal(row.displayedEv.source, "vendor_reported");
+    assert.equal(row.displayedEv.evDollars.displayValue, "-$6.21");
+    assert.equal(row.displayedEv.evPercent.displayValue, "-6.21%");
+    assert.equal(row.displayedEv.sourceLabel, "Platform EV × buyback");
+    assert.equal(row.displayedEv.sourceNote, `Calculated from ${vendorDisplayName}-reported EV × buyback.`);
+    assert.equal(row.packScoutEv.evDollars.availability, "unavailable");
+    assert.equal(row.packScoutEv.confidence.availability, "unavailable");
+  }
 });
 
 test("presents server-ranked opportunities without re-sorting or recomputing", () => {
@@ -110,6 +149,10 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.packScoutEv.grossEvDollars.displayValue, "$85.00");
   assert.equal(row.packScoutEv.confidence.displayValue, "High · 100%");
   assert.equal(row.packScoutEv.confidence.tone, "positive");
+  assert.equal(row.displayedEv.source, "packscout");
+  assert.equal(row.displayedEv.evDollars, row.packScoutEv.evDollars);
+  assert.equal(row.displayedEv.evPercent, row.packScoutEv.evPercent);
+  assert.equal(row.displayedEv.sourceNote, null);
   assert.equal(row.buyback.displayValue, "85%");
   assert.equal(row.topChaseValue.displayValue, "$850.00");
   assert.equal(row.simulated, false);

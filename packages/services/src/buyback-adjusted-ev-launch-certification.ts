@@ -795,7 +795,7 @@ export const PACKSCOUT_BUYBACK_EV_CERTIFICATION_MANIFEST_V1: readonly PackScoutB
         {
           file: "apps/frontend/components/catalog/overview-presentation.test.ts",
           testName:
-            "presents the three nonpositive-policy overview KPIs",
+            "presents the three overview KPIs using displayed EV",
         },
         {
           file: "apps/frontend/components/catalog/overview-presentation.test.ts",
