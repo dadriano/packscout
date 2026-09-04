@@ -120,10 +120,14 @@ export function classifyBackfillCheckpoint(snapshot: BackfillSnapshot): "head" |
   // again on a committed head page whose head reconciliation failed.
   const headWithoutCommit = run.reachedHead && run.pageCount === 0 &&
     run.requestedHash === snapshot.checkpointHash;
+  // A full replay (no requested cursor) that dies at head still owes the
+  // quarantine phase only full replays run; a retry queued from the checkpoint
+  // would skip it and report success, so that shape stays with an operator.
   const committedPagesIntact = run.pageCount > 0 && snapshot.lastPage?.matches === true &&
     snapshot.lastPage.number === run.pageCount &&
     snapshot.lastPage.continuation === (run.reachedHead ? "head" : "more") &&
-    snapshot.lastPage.hash === snapshot.checkpointHash && run.requestedHash !== snapshot.checkpointHash;
+    snapshot.lastPage.hash === snapshot.checkpointHash && run.requestedHash !== snapshot.checkpointHash &&
+    (!run.reachedHead || run.requestedHash !== null);
   if (run.state !== "failed" || !run.finishedAt || snapshot.state !== "error" ||
     snapshot.activeRunIds.length !== 0 || snapshot.actionableCommands.length !== 0 ||
     !run.finalMatches || run.finalHash !== snapshot.checkpointHash || !snapshot.checkpointHash ||

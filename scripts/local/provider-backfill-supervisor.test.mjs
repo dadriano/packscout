@@ -83,6 +83,17 @@ test("a head-reaching run whose committed pages do not end at the checkpoint is 
     assert.throws(() => policy.classifyBackfillCheckpoint(s),
       /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
   }
+  // A full replay owes the quarantine phase that only a full replay runs; a
+  // retry from the checkpoint would skip it, so it stays with an operator.
+  const replay = snapshot();
+  replay.run.reachedHead = true;
+  replay.run.pageCount = 1;
+  replay.run.committedPageCount = 1;
+  replay.run.requestedHash = null;
+  replay.run.failureCode = "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED";
+  replay.lastPage = { number: 1, continuation: "head", hash: replay.checkpointHash, matches: true };
+  assert.throws(() => policy.classifyBackfillCheckpoint(replay),
+    /BACKFILL_TERMINAL_CHECKPOINT_UNSAFE/);
   // A committed page cannot leave the checkpoint where the run started.
   const unmoved = snapshot();
   unmoved.run.reachedHead = true;
