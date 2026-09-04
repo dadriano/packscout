@@ -161,3 +161,28 @@ test("gateway retains explicit destination-approved plaintext behavior for local
     assert.equal(url.searchParams.has("sslaccept"), false);
   } finally { await state.gateway.close(); }
 });
+
+test("an operation that never settles retires its slot instead of poisoning the provider for the process lifetime", async () => {
+  const state = fixture({ operationTimeoutMs: 1000 });
+
+  // A query hung on a dropped connection never settles. The gateway abandons it
+  // at the deadline, but it must not keep holding the cached entry's reference:
+  // that made every later call short-circuit to database_unreachable and made the
+  // entry unclosable, wedging all three import residents until a process restart.
+  const hung = await state.gateway.runWithCachedProviderDatabase(
+    route, () => new Promise<never>(() => {}));
+  assert.equal(hung.state, "unreachable");
+  assert.equal(hung.state === "unreachable" ? hung.failureCode : null, "database_unreachable");
+
+  // The very next call must succeed on a FRESH lifecycle, exactly as a restarted
+  // process would. Before the fix this returned unreachable forever.
+  const after = await state.gateway.runWithCachedProviderDatabase(route, async () => "recovered");
+  assert.equal(after.state, "reachable");
+  assert.equal(after.state === "reachable" ? after.value : null, "recovered");
+  assert.equal(state.opened.length, 2, "the poisoned lifecycle must be replaced, not reused");
+
+  // And a third call keeps working, so recovery is not a one-shot.
+  const again = await state.gateway.runWithCachedProviderDatabase(route, async () => "still-working");
+  assert.equal(again.state, "reachable");
+  assert.equal(state.opened.length, 2, "a healthy cached lifecycle is still reused");
+});

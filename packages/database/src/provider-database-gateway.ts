@@ -477,9 +477,25 @@ export class BoundedProviderDatabaseGateway {
     );
     const settledOperation = await settleBefore(operationPromise, deadline);
     if (settledOperation.state === "timed_out") {
+      // The operation is abandoned the moment we return unavailable, so its
+      // reference must be dropped HERE rather than deferred to a promise that may
+      // never settle. A query hung on a dropped connection never settles, so the
+      // old `void operationPromise.then(release, release)` left references above
+      // zero forever: acquire() then short-circuited every later call on this
+      // provider to database_unreachable, and beginClose() refused to reclaim a
+      // referenced entry, so the slot stayed poisoned for the life of the process.
+      // That is exactly how all three import residents wedged - only a restart
+      // cleared it. Closing the lifecycle now also tears down the connection the
+      // hung query is stuck on, which is the right thing to do with an abandoned
+      // operation and bounds how long it can hold a connection.
       acquired.state = "retiring";
       acquired.retireFailureCode = "database_unreachable";
-      void operationPromise.then(release, release);
+      // Drop the poisoned entry from the cache so the NEXT acquire builds a fresh
+      // lifecycle instead of short-circuiting on this one, then release, which
+      // closes it once no caller still holds it.
+      this.#cache.delete(route.target.providerId);
+      release();
+      void operationPromise.catch(() => undefined);
       return unavailable(route.target.providerId, this.#now(), "database_unreachable");
     }
     release();
