@@ -200,7 +200,9 @@ test("Authoritative pack heads retire stale episodes without losing valid prepar
     const snapshots = new ProviderPackSnapshotRepository(context);
     const outbox = new ProviderPackPublicationOutboxRepository(context);
     const evaluator = new ProviderPackReadinessEvaluator();
-    const newFixture = async () => {
+    const future = new ProviderPackPublicationContext(client, context.scope), readNow = future.now.bind(future);
+    future.now = async tx => new Date((await readNow(tx)).getTime() + 25 * 3_600_000);
+    const newFixture = async (evLifetimeMs?: number) => {
       const id = randomUUID();
       await client.$transaction(async tx => {
         await tx.packs.create({ data: { id, pack_key: id, display_name: id, pack_format: "repack", availability: "available",
@@ -208,7 +210,7 @@ test("Authoritative pack heads retire stale episodes without losing valid prepar
           packscout_ev_confidence_policy_version: "packscout-ev-policy", source_updated_at: new Date() } });
         await appendPromotionRange(tx, [{ entityType: "pack", entityId: id, entityVersion: 1n, operation: "upsert" }]);
       });
-      return freshPublicationFixture(providerId, id);
+      return freshPublicationFixture(providerId, id, evLifetimeMs);
     };
     for (const kind of ["build", "activation"] as const) for (const change of ["generation", "epoch"] as const) {
       for (const state of ["ready", "publishing", "retry_scheduled"] as const) {
@@ -302,13 +304,33 @@ test("Authoritative pack heads retire stale episodes without losing valid prepar
       const operation = { operationId: randomUUID(), organizationId: context.scope.organizationId, intent,
         idempotencyKey: intent.idempotencyKey, kind: "activate_head" as const, batchIndex: null, payloadSha256: await publicationHash(intent) };
       const requestSha256 = await outbox.recordOperation(owned, operation);
+      assert.equal(await new ProviderPackPublicationOutboxRepository(future).recordOperation(owned, operation), requestSha256);
+      const newer = await evaluator.evaluate({ candidate: { ...fixture.inputs, title: "Newer desired pack" }, evaluatedAt: new Date().toISOString() });
+      const newerWork = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...newer, boundaryIdentity: `${id}:newer` }));
+      await context.defer(owned, "retry_scheduled", "RECEIPT_AMBIGUOUS");
+      await client.pack_activation_intents.update({ where: { id: owned.workId }, data: { available_at: new Date(0) } });
+      assert.deepEqual(await requests.claim(randomUUID()), [], "ambiguous persisted operations also precede newer work");
+      const reconciling = (await outbox.claim(randomUUID()))[0]!; assert.equal(reconciling.workId, owned.workId);
       const head = { providerId, publicRepackId: id, generation: 1, publicationEpoch: 0, held: false, holdReason: null,
         latestAcceptedPackPublicationSequence: owned.sequence, activeSnapshot: intent.snapshot, previousSnapshot: null,
         indexableSummary: fixture.built.snapshot.payload.summaryProjection, activatedAt: new Date().toISOString() };
       await outbox.observeHead(head); await outbox.observeHead(head);
-      await assert.rejects(outbox.renew(owned), { code: "PACK_LEASE_LOST" });
-      const resumed = (await outbox.claim(randomUUID()))[0]!;
+      await assert.rejects(outbox.renew(reconciling), { code: "PACK_LEASE_LOST" });
+      assert.deepEqual(await requests.claim(randomUUID()), [], "reconcile the accepted episode before newer work for this pack");
+      const other = await newFixture();
+      const otherValue = await evaluator.evaluate({ candidate: other.inputs, evaluatedAt: new Date().toISOString() });
+      await context.transaction(tx => requests.enqueueInTransaction(tx, { ...otherValue, boundaryIdentity: "other:independent" }));
+      const independent = await requests.claim(randomUUID(), 25);
+      assert.deepEqual(independent.map(claim => claim.publicRepackId), [other.inputs.publicRepackId]);
+      await context.defer(independent[0]!, "superseded", "ACTIVATION_CONFLICT");
+      let resumed = (await outbox.claim(randomUUID()))[0]!;
       assert.equal(resumed?.workId, owned.workId);
+      for (const state of ["retry_scheduled", "waiting"] as const) {
+        await context.defer(resumed, state, "RECEIPT_AMBIGUOUS");
+        await client.pack_activation_intents.update({ where: { id: owned.workId }, data: { available_at: new Date(0) } });
+        assert.deepEqual(await requests.claim(randomUUID()), []);
+        resumed = (await outbox.claim(randomUUID()))[0]!; assert.equal(resumed.workId, owned.workId);
+      }
       assert.deepEqual((await outbox.readOperation(resumed, operation.operationId))?.operation, operation);
       await outbox.recordReceipt(resumed, { operationId: operation.operationId, requestSha256,
         result: { outcome: "applied", state: "published", reasonCode: null }, completedAt: new Date().toISOString() });
@@ -316,6 +338,51 @@ test("Authoritative pack heads retire stale episodes without losing valid prepar
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: intent.intentId } })).state, "published");
       assert.equal(await client.pack_publication_operations.count({ where: { intent_id: intent.intentId } }), 1);
       assert.deepEqual(await outbox.claim(randomUUID()), []);
+      const nextBuild = (await requests.claim(randomUUID()))[0]!;
+      assert.equal(nextBuild.workId, newerWork.requestId);
+      await context.defer(nextBuild, "superseded", "ACTIVATION_CONFLICT");
+    });
+    await suite.test("queued EV expiry commits waiting state without sealing or consuming retries", async () => {
+      const fixture = await newFixture(), id = fixture.inputs.publicRepackId;
+      const value = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt: new Date().toISOString() });
+      const work = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: id }));
+      const claim = (await requests.claim(randomUUID()))[0]!;
+      await assert.rejects(new ProviderPackSnapshotRepository(future).sealAndEnqueueActivation(claim, fixture.built), { code: "PACK_STATE_CONFLICT" });
+      const row = await client.pack_build_requests.findUniqueOrThrow({ where: { id: work.requestId } });
+      assert.equal(row.state, "waiting"); assert.equal(row.reason_code, "EV_INPUTS_PENDING"); assert.equal(row.attempts, 1);
+      assert.equal(await client.pack_snapshot_artifacts.count({ where: { public_repack_id: id } }), 0);
+      assert.equal(await client.pack_activation_intents.count({ where: { public_repack_id: id } }), 0);
+      assert.deepEqual(await requests.claim(randomUUID()), []);
+    });
+    for (const [lifetime, hasNewer] of [[3_600_000, false], [72 * 3_600_000, false], [72 * 3_600_000, true]] as const) await suite.test(`unused intent expiry: lifetime ${lifetime}, newer ${hasNewer}`, async () => {
+      const fixture = await newFixture(lifetime), id = fixture.inputs.publicRepackId;
+      const value = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt: new Date().toISOString() });
+      const work = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: id }));
+      await snapshots.sealAndEnqueueActivation((await requests.claim(randomUUID()))[0]!, fixture.built);
+      const claim = (await outbox.claim(randomUUID()))[0]!, intent = await outbox.load(claim);
+      const newer = hasNewer ? await evaluator.evaluate({ candidate: { ...fixture.inputs, title: "Latest desired capture" }, evaluatedAt: new Date().toISOString() }) : null;
+      const newerWork = newer ? await context.transaction(tx => requests.enqueueInTransaction(tx, { ...newer, boundaryIdentity: `${id}:latest` })) : null;
+      const operation = { operationId: randomUUID(), organizationId: context.scope.organizationId, intent,
+        idempotencyKey: intent.idempotencyKey, kind: "activate_head" as const, batchIndex: null, payloadSha256: await publicationHash(intent) };
+      await assert.rejects(new ProviderPackPublicationOutboxRepository(future).recordOperation(claim, operation), { code: "PACK_STATE_CONFLICT" });
+      assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: intent.intentId } })).state, "superseded");
+      assert.equal(await client.pack_publication_operations.count({ where: { intent_id: intent.intentId } }), 0);
+      const replacement = await client.pack_build_requests.findFirstOrThrow({ where: { public_repack_id: id }, orderBy: { pack_publication_sequence: "desc" } });
+      assert.notEqual(replacement.id, work.requestId); assert.ok(replacement.pack_publication_sequence > BigInt(work.sequence));
+      assert.equal(replacement.state, lifetime === 3_600_000 ? "waiting" : "ready");
+      if (replacement.state === "waiting") assert.equal(replacement.reason_code, "EV_INPUTS_PENDING");
+      else if (newerWork) {
+        assert.equal(replacement.id, newerWork.requestId);
+        assert.equal(await client.pack_build_requests.count({ where: { public_repack_id: id } }), 2);
+        await context.defer((await requests.claim(randomUUID()))[0]!, "superseded", "ACTIVATION_CONFLICT");
+      } else {
+        const renewed = await new ProviderPackSnapshotRepository(future).sealAndEnqueueActivation((await requests.claim(randomUUID()))[0]!, fixture.built);
+        assert.equal(renewed.artifact, "reused"); assert.notEqual(renewed.intent.intentId, intent.intentId);
+        assert.ok(Date.parse(renewed.intent.createdAt) > Date.parse(intent.expiresAt));
+        const available = (await outbox.claim(randomUUID()))[0]!; assert.equal(available.workId, renewed.intent.intentId);
+        await context.defer(available, "superseded", "ACTIVATION_CONFLICT");
+      }
+      assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: id } })).active_snapshot_id, null);
     });
   } finally { await harness.close(); }
 });

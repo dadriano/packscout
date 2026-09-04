@@ -1,10 +1,12 @@
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, activePackHeadSchema, hashPackCatalogValue, packActivationIntentSchema,
   packCatalogCanonicalJson, packCatalogOperationReceiptSchema, packCatalogUuidSchema, packPublicationLimits,
+  providerPackBuildInputsSchema, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, deriveProviderPackReadinessDecision,
   providerPackPublicationOperationSchema, type ActivePackHead, type PackActivationIntent,
   type ProviderPackPublicationOperation,
 } from "@packscout/contracts";
 import { ProviderPackPublicationContext, packInvariant, type PackWorkClaim } from "./provider-pack-publication-context.ts";
+import { ProviderPackBuildRequestRepository } from "./provider-pack-build-request-repository.ts";
 
 const equal = (a: unknown, b: unknown) => packCatalogCanonicalJson(a) === packCatalogCanonicalJson(b);
 const hash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
@@ -22,7 +24,7 @@ export class ProviderPackPublicationOutboxRepository {
     });
   }
   async recordOperation(claim: PackWorkClaim, input: ProviderPackPublicationOperation): Promise<string> {
-    return this.context.transaction(async tx => {
+    const recorded = await this.context.transaction(async tx => {
       const head = await this.context.lockLease(tx, claim, "activation");
       const operation = providerPackPublicationOperationSchema.parse(input);
       packInvariant(operation.organizationId === this.context.scope.organizationId &&
@@ -35,9 +37,26 @@ export class ProviderPackPublicationOutboxRepository {
         intent_id_idempotency_key: { intent_id: claim.workId, idempotency_key: operation.idempotencyKey } } });
       // An expired operation remains readable for receipt reconciliation; it cannot be re-created.
       if (existing) { packInvariant(existing.request_sha256 === digest && equal(existing.request_json, operation)); return digest; }
+      const now = await this.context.now(tx);
+      if (Date.parse(operation.intent.expiresAt) <= now.getTime()) {
+        // No persisted operation means no authorized remote attempt could exist.
+        // Retire this immutable episode; preserve any operation-bearing episode for reconciliation.
+        if (await tx.pack_publication_operations.count({ where: { intent_id: claim.workId } }) === 0) {
+          await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: { state: "superseded", reason_code: "OPERATION_EXPIRED" } });
+          await this.context.release(tx, claim);
+          if (head.latest_sequence === BigInt(claim.sequence) && head.publication_epoch === BigInt(operation.intent.expectedHead.publicationEpoch)) {
+            const source = await tx.pack_build_requests.findUniqueOrThrow({ where: { id: intent.build_request_id } });
+            const inputs = providerPackBuildInputsSchema.parse(source.inputs_json), digests = await deriveProviderPackInputDigests(inputs);
+            const readiness = { ...digests, ...await deriveProviderPackReadinessDecision(inputs, digests.evInputsSha256, now.toISOString()),
+              requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs) };
+            await new ProviderPackBuildRequestRepository(this.context).enqueueInTransaction(tx, {
+              inputs, readiness, boundaryIdentity: `renew:${claim.workId}` });
+          }
+        }
+        return null;
+      }
       packInvariant(!head.held && head.latest_sequence === BigInt(claim.sequence) &&
-        head.publication_epoch === BigInt(operation.intent.expectedHead.publicationEpoch) &&
-        Date.parse(operation.intent.expiresAt) > (await this.context.now(tx)).getTime());
+        head.publication_epoch === BigInt(operation.intent.expectedHead.publicationEpoch));
       const artifact = await tx.pack_snapshot_artifacts.findUniqueOrThrow({ where: { public_pack_snapshot_id: intent.public_pack_snapshot_id } });
       let expectedPayload: unknown = operation.kind === "activate_head" ? operation.intent : artifact.descriptor_json;
       if (operation.kind === "stage_batch") {
@@ -52,6 +71,8 @@ export class ProviderPackPublicationOutboxRepository {
         request_sha256: digest, request_json: operation } });
       return digest;
     });
+    packInvariant(recorded !== null);
+    return recorded;
   }
   async recordReceipt(claim: PackWorkClaim, input: unknown): Promise<void> {
     await this.context.transaction(async tx => {
@@ -100,6 +121,7 @@ export class ProviderPackPublicationOutboxRepository {
       await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: { state: "published", reason_code: null } });
       await tx.pack_publication_heads.update({ where: { public_repack_id: claim.publicRepackId }, data: {
         generation: head.generation, publication_epoch: head.publicationEpoch, held: head.held,
+        accepted_sequence: BigInt(head.latestAcceptedPackPublicationSequence),
         active_snapshot_id: head.activeSnapshot.publicPackSnapshotId } });
       await this.context.release(tx, claim);
     });
@@ -113,7 +135,8 @@ export class ProviderPackPublicationOutboxRepository {
       const previous = await tx.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: head.publicRepackId } });
       packInvariant(BigInt(head.generation) >= previous.generation && BigInt(head.publicationEpoch) >= previous.publication_epoch);
       if (BigInt(head.generation) === previous.generation && BigInt(head.publicationEpoch) === previous.publication_epoch) {
-        packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId && previous.held === head.held);
+        packInvariant(previous.active_snapshot_id === head.activeSnapshot.publicPackSnapshotId && previous.held === head.held &&
+          previous.accepted_sequence === BigInt(head.latestAcceptedPackPublicationSequence));
         return;
       }
       // Preserve the exact successful episode for lost-receipt reconciliation;
@@ -134,6 +157,7 @@ export class ProviderPackPublicationOutboxRepository {
               AND inputs_json #>> '{lifecycleBaseline,identity,publicPackSnapshotId}' IS DISTINCT FROM ${head.activeSnapshot.publicPackSnapshotId}))`;
       await tx.pack_publication_heads.update({ where: { public_repack_id: head.publicRepackId }, data: {
         generation: head.generation, publication_epoch: head.publicationEpoch, held: head.held,
+        accepted_sequence: BigInt(head.latestAcceptedPackPublicationSequence),
         active_snapshot_id: head.activeSnapshot.publicPackSnapshotId, lease_owner: null, lease_kind: null,
         lease_work_id: null, lease_expires_at: null, lease_fence: { increment: 1 } } });
     });

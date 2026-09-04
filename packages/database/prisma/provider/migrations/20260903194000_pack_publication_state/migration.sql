@@ -23,6 +23,7 @@ CREATE TABLE pack_publication_heads (
   public_repack_id uuid PRIMARY KEY REFERENCES packs(id) ON DELETE RESTRICT,
   organization_id uuid NOT NULL, provider_id uuid NOT NULL,
   latest_sequence bigint NOT NULL DEFAULT 0 CHECK (latest_sequence >= 0),
+  accepted_sequence bigint NOT NULL DEFAULT 0 CHECK (accepted_sequence >= 0),
   publication_epoch bigint NOT NULL DEFAULT 0 CHECK (publication_epoch >= 0),
   generation bigint NOT NULL DEFAULT 0 CHECK (generation >= 0),
   held boolean NOT NULL DEFAULT false, active_snapshot_id text,
@@ -119,6 +120,7 @@ CREATE TABLE pack_activation_intents (
   CHECK (octet_length(intent_json::text) <= 18000000)
 );
 CREATE INDEX pack_activation_intents_claim_idx ON pack_activation_intents(state, available_at, public_repack_id, pack_publication_sequence);
+CREATE INDEX pack_activation_intents_sequence_idx ON pack_activation_intents(public_repack_id, pack_publication_sequence);
 CREATE TABLE pack_publication_operations (
   id uuid PRIMARY KEY, organization_id uuid NOT NULL, provider_id uuid NOT NULL, public_repack_id uuid NOT NULL,
   intent_id uuid NOT NULL, idempotency_key varchar(200) NOT NULL, request_sha256 varchar(64) NOT NULL,

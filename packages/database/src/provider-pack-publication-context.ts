@@ -73,8 +73,8 @@ export class ProviderPackPublicationContext {
     packInvariant(["build", "activation"].includes(kind) && claim.kind === kind, "PACK_LEASE_LOST");
     for (const id of [claim.publicRepackId, claim.workId, claim.owner]) packCatalogUuidSchema.parse(id);
     packCatalogSequenceSchema.parse(claim.fence); packCatalogSequenceSchema.parse(claim.sequence);
-    const rows = await tx.$queryRaw<Array<{ latest_sequence: bigint; publication_epoch: bigint; generation: bigint; held: boolean; active_snapshot_id: string | null }>>`
-      SELECT latest_sequence, publication_epoch, generation, held, active_snapshot_id FROM pack_publication_heads
+    const rows = await tx.$queryRaw<Array<{ latest_sequence: bigint; accepted_sequence: bigint; publication_epoch: bigint; generation: bigint; held: boolean; active_snapshot_id: string | null }>>`
+      SELECT latest_sequence, accepted_sequence, publication_epoch, generation, held, active_snapshot_id FROM pack_publication_heads
       WHERE organization_id = ${this.scope.organizationId}::uuid AND provider_id = ${this.scope.providerId}::uuid
         AND public_repack_id = ${claim.publicRepackId}::uuid AND lease_work_id = ${claim.workId}::uuid
         AND lease_owner = ${claim.owner}::uuid AND lease_fence = ${BigInt(claim.fence)} AND lease_kind = ${kind}
@@ -100,13 +100,22 @@ export class ProviderPackPublicationContext {
     boundedPackInteger(limit, packPublicationLimits.claimBatch);
     boundedPackInteger(leaseSeconds, packPublicationLimits.maximumLeaseSeconds);
     return this.transaction(async tx => {
+      const reconciliation = Prisma.sql`SELECT r.id FROM pack_activation_intents r
+        WHERE r.public_repack_id = h.public_repack_id
+          AND (r.intent_json #>> '{expectedHead,publicationEpoch}')::bigint = h.publication_epoch
+          AND r.state IN ('ready','publishing','retry_scheduled','waiting')
+          AND ((r.pack_publication_sequence = h.accepted_sequence AND r.public_pack_snapshot_id = h.active_snapshot_id)
+            OR (r.reason_code = 'RECEIPT_AMBIGUOUS' AND EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = r.id)))`;
+      const latest = Prisma.sql`w.pack_publication_sequence = h.latest_sequence
+        AND w.state IN ('ready','retry_scheduled','publishing') AND NOT EXISTS (${reconciliation})`;
+      const eligible = kind === "activation" ? Prisma.sql`((${latest}) OR w.id IN (${reconciliation}))` : latest;
       const rows = await tx.$queryRaw<Array<{ public_repack_id: string; id: string; pack_publication_sequence: bigint; attempts: number }>>(Prisma.sql`
         SELECT h.public_repack_id, w.id, w.pack_publication_sequence, w.attempts
         FROM pack_publication_heads h JOIN ${packWorkTable(kind)} w
-          ON w.public_repack_id = h.public_repack_id AND w.pack_publication_sequence = h.latest_sequence
+          ON w.public_repack_id = h.public_repack_id
         WHERE h.organization_id = ${this.scope.organizationId}::uuid AND h.provider_id = ${this.scope.providerId}::uuid
           AND NOT h.held AND (h.lease_expires_at IS NULL OR h.lease_expires_at <= clock_timestamp())
-          AND w.state IN ('ready','retry_scheduled','publishing') AND w.available_at <= clock_timestamp()
+          AND (${eligible}) AND w.state IN ('ready','retry_scheduled','publishing','waiting') AND w.available_at <= clock_timestamp()
         ORDER BY w.available_at, w.pack_publication_sequence LIMIT ${limit} FOR UPDATE OF h SKIP LOCKED`);
       const result: PackWorkClaim[] = [];
       for (const row of rows) {
@@ -147,7 +156,9 @@ export class ProviderPackPublicationContext {
     boundedPackInteger(retrySeconds, packPublicationLimits.maximumRetrySeconds);
     await this.transaction(async tx => {
       const head = await this.lockLease(tx, claim, claim.kind);
-      const nextState = head.latest_sequence > BigInt(claim.sequence) ? "superseded" : state;
+      const reconciling = claim.kind === "activation" &&
+        (head.accepted_sequence === BigInt(claim.sequence) || reason === "RECEIPT_AMBIGUOUS");
+      const nextState = head.latest_sequence > BigInt(claim.sequence) && !reconciling ? "superseded" : state;
       await tx.$executeRaw(Prisma.sql`UPDATE ${packWorkTable(claim.kind)} SET state = ${nextState}, reason_code = ${reason},
         available_at = clock_timestamp() + ${retrySeconds} * interval '1 second' WHERE id = ${claim.workId}::uuid`);
       await this.release(tx, claim);

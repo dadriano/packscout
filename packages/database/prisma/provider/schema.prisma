@@ -982,6 +982,7 @@ model pack_publication_heads {
   organization_id String @db.Uuid
   provider_id String @db.Uuid
   latest_sequence BigInt @default(0)
+  accepted_sequence BigInt @default(0)
   publication_epoch BigInt @default(0)
   generation BigInt @default(0)
   held Boolean @default(false)
@@ -1093,6 +1094,7 @@ model pack_activation_intents {
   @@unique([organization_id, provider_id, public_repack_id, id])
   @@unique([organization_id, provider_id, public_repack_id, build_request_id], map: "pack_activation_request_scope_key")
   @@index([state, available_at, public_repack_id, pack_publication_sequence], map: "pack_activation_intents_claim_idx")
+  @@index([public_repack_id, pack_publication_sequence], map: "pack_activation_intents_sequence_idx")
 }
 
 model pack_publication_operations {

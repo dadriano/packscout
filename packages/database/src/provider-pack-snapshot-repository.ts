@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packActivationIntentSchema, packBuildRequestSchema,
   packCatalogCanonicalJson, packPublicationEnvelopeSchema, providerPackBuildInputsSchema,
-  packCatalogUuidSchema, preservesPackLifecycleBaseline,
+  packCatalogUuidSchema, preservesPackLifecycleBaseline, deriveProviderPackReadinessDecision,
   type PackActivationIntent, type PublicPackSnapshot, type PublicPackSnapshotDescriptor, type PublicPackSnapshotBatch,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -20,7 +20,7 @@ export class ProviderPackSnapshotRepository {
   async sealAndEnqueueActivation(claim: PackWorkClaim, built: BuiltPublicPackSnapshot): Promise<{
     artifact: "created" | "reused"; intent: PackActivationIntent;
   }> {
-    return this.context.transaction(async tx => {
+    const sealed = await this.context.transaction(async tx => {
       const head = await this.context.lockLease(tx, claim, "build");
       const row = await tx.pack_build_requests.findUniqueOrThrow({ where: { id: claim.workId } });
       const request = packBuildRequestSchema.parse(row.request_json);
@@ -51,6 +51,13 @@ export class ProviderPackSnapshotRepository {
         packInvariant(preservesPackLifecycleBaseline(inputs, previous) && payload.economicsSha256 === previous.payload.economicsSha256, "PACK_INPUT_INVALID");
       }
       const createdAt = await this.context.now(tx);
+      const decision = await deriveProviderPackReadinessDecision(inputs, request.evInputsSha256, createdAt.toISOString());
+      if (decision.outcome !== "ready") {
+        packInvariant(decision.outcome === "waiting" || decision.outcome === "blocked");
+        await tx.pack_build_requests.update({ where: { id: claim.workId }, data: { state: decision.outcome, reason_code: decision.reasonCode } });
+        await this.context.release(tx, claim);
+        return null;
+      }
       const expectedHead = { generation: Number(head.generation), publicationEpoch: Number(head.publication_epoch), activeSnapshotId: head.active_snapshot_id };
       const intent = packActivationIntentSchema.parse({ intentId: randomUUID(), idempotencyKey: `activate:${request.requestId}`,
         snapshot: built.snapshot.identity, packPublicationSequence: request.packPublicationSequence, evidence: request.evidence,
@@ -77,8 +84,10 @@ export class ProviderPackSnapshotRepository {
         pack_publication_sequence: row.pack_publication_sequence, intent_json: intent, state: "ready" } });
       await tx.pack_build_requests.update({ where: { id: claim.workId }, data: { state: "published", reason_code: null } });
       await this.context.release(tx, claim);
-      return { artifact: existing ? "reused" : "created", intent };
+      return { artifact: existing ? "reused" as const : "created" as const, intent };
     });
+    packInvariant(sealed !== null);
+    return sealed;
   }
   async findActivationForRequest(requestId: string): Promise<PackActivationIntent | null> {
     packCatalogUuidSchema.parse(requestId);
