@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
-import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicPackSnapshotSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
 const payload = publicPackSnapshotPayloadSchema.shape;
@@ -94,6 +94,40 @@ export async function deriveProviderPackInputDigests(inputs: ProviderPackBuildIn
     probabilityInputsSha256, valuationInputsSha256,
     evInputsSha256: await hash({ price: inputs.price, probabilityInputsSha256, valuationsSha256: valuationInputsSha256,
       evMethodIdentity: inputs.evMethodIdentity, evPolicyIdentity: inputs.evPolicyIdentity }) };
+}
+
+/** Pure readiness rules shared by evaluation and independent durable admission.
+ * Inputs are normalized captured bytes; the clock and derived EV digest are explicit. */
+export async function deriveProviderPackReadinessDecision(inputs: ProviderPackBuildInputs, evInputsSha256: string,
+  evaluatedAt: string): Promise<Pick<ProviderPackReadiness, "outcome" | "reasonCode">> {
+  const now = Date.parse(packCatalogTimestampSchema.parse(evaluatedAt));
+  const result = (outcome: ProviderPackReadiness["outcome"], reasonCode: ProviderPackReadiness["reasonCode"]) => ({ outcome, reasonCode });
+  if (inputs.evFailure === "invalid_domain") return result("blocked", "INVALID_DOMAIN_DATA");
+  if (inputs.snapshotKind === "lifecycle_only") {
+    if (!inputs.lifecycleBaseline) return result("waiting", "INCOMPLETE_CONTENTS");
+    const previous = await publicPackSnapshotSchema.parseAsync(inputs.lifecycleBaseline);
+    if (!preservesPackLifecycleBaseline(inputs, previous)) return result("blocked", "INVALID_DOMAIN_DATA");
+  }
+  if (!inputs.contentsComplete || inputs.contents.length === 0) return result("waiting", "INCOMPLETE_CONTENTS");
+  if (new Set(inputs.contents.map(row => row.publicCollectibleId)).size !== inputs.contents.length ||
+    inputs.contents.reduce((total, row) => total + row.probabilityMicros, 0) !== 1_000_000) return result("blocked", "INVALID_PROBABILITIES");
+  if (!inputs.providerProfileSnapshotId || inputs.contents.some(row => !row.collectibleProfileSnapshotId)) return result("waiting", "PROFILE_HEAD_MISSING");
+  if (inputs.contents.some(row => !publicPackContentSchema.safeParse(row).success)) return result("blocked", "INVALID_DOMAIN_DATA");
+  // These identities become canonical-unique arrays in the sealed payload.
+  const profileIds = inputs.contents.map(row => row.collectibleProfileSnapshotId);
+  const valuationIds = inputs.contents.filter(row => row.eligibleForChase).map(row => row.valuation.valuationIdentity);
+  if (new Set(inputs.actions.map(action => action.actionId)).size !== inputs.actions.length ||
+    new Set(profileIds).size !== profileIds.length || new Set(valuationIds).size !== valuationIds.length) return result("blocked", "INVALID_DOMAIN_DATA");
+  const actionable = inputs.lifecycle.availability === "available" && inputs.lifecycle.retirement === "active";
+  const disabledReason = inputs.lifecycle.retirement === "retired" ? "PACK_RETIRED" : actionable ? null : "PACK_UNAVAILABLE";
+  if (inputs.actions.some(action => action.enabled !== actionable || action.disabledReason !== disabledReason) ||
+    inputs.contents.some(row => row.valuation.status === "available" && row.valuation.amount.currency !== inputs.price.currency) ||
+    (inputs.ev?.status === "available" && inputs.ev.amount.currency !== inputs.price.currency)) return result("blocked", "INVALID_DOMAIN_DATA");
+  if (packCatalogCanonicalJson(inputs.expectedDependencies) !== packCatalogCanonicalJson(inputs.observedDependencies)) return result("waiting", "EV_INPUTS_PENDING");
+  if (inputs.evFailure === "technical") return result("waiting", "EV_TECHNICAL_RETRY");
+  if (!inputs.ev || inputs.evFailure === "pending" || inputs.evInputsSha256 !== evInputsSha256 ||
+    Date.parse(inputs.ev.evaluatedAt) > now || Date.parse(inputs.ev.validUntil) <= now) return result("waiting", "EV_INPUTS_PENDING");
+  return result("ready", null);
 }
 
 /** Lifecycle revisions may change availability/provenance and action eligibility,

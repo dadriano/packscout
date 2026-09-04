@@ -68,6 +68,34 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.equal(await client.pack_publication_change_receipts.count(), 0);
       assert.equal((await client.pack_publication_scopes.findUniqueOrThrow({ where: { provider_id: providerId } })).shared_change_sequence, 0n);
     });
+    await suite.test("admission independently verifies readiness outcomes and reasons", async () => {
+      const mutations: Array<[string, (inputs: ProviderPackBuildInputs) => void]> = [
+        ["dependencies", inputs => { inputs.observedDependencies = [{ kind: "ev_policy", identity: "other", contentSha256: "a".repeat(64) }]; }],
+        ["contents", inputs => { inputs.contentsComplete = false; }],
+        ["pending EV", inputs => { inputs.evFailure = "pending"; }],
+        ["technical EV", inputs => { inputs.evFailure = "technical"; }],
+        ["invalid EV", inputs => { inputs.evFailure = "invalid_domain"; }],
+        ["duplicate actions", inputs => { inputs.actions.push({ ...inputs.actions[0]! }); }],
+      ];
+      const guardedClient = client.$extends({ query: { pack_publication_change_receipts: { async create() {
+        throw new Error("rollback unexpected forged readiness acceptance");
+      } } } }) as unknown as ProviderPrismaClient;
+      for (const [name, mutate] of mutations) {
+        const planner = new ProviderPackImpactRepository(new ProviderPackPublicationContext(guardedClient, scope), {
+          async capture(tx, input) { const candidate = await capture.capture(tx, input); mutate(candidate); return candidate; },
+          async evaluate(input) { const result = await evaluator.evaluate(input);
+            assert.notEqual(result.readiness.outcome, "ready", name);
+            return { ...result, readiness: { ...result.readiness, outcome: "ready", reasonCode: null } }; },
+        });
+        await assert.rejects(planner.plan({ kind: "provider" }), { code: "PACK_INPUT_INVALID" }, name);
+      }
+      const valid = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt: new Date().toISOString() });
+      await assert.rejects(context.transaction(tx => requests.enqueueInTransaction(tx, { ...valid, boundaryIdentity: "forged:reason",
+        readiness: { ...valid.readiness, reasonCode: "EV_TECHNICAL_RETRY" } })), { code: "PACK_INPUT_INVALID" });
+      assert.equal(await client.pack_build_requests.count(), 0);
+      assert.equal(await client.pack_publication_heads.count(), 0);
+      assert.equal(await client.pack_publication_change_receipts.count(), 0);
+    });
     await suite.test("later mutation of evaluator-owned objects cannot change admitted capture bytes", async () => {
       let returnedInputs: ProviderPackBuildInputs | null = null;
       let writes = 0;

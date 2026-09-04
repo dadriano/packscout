@@ -7,7 +7,7 @@ import {
   type PackInputCapture, type ProviderPrismaClient, type ProviderTransactionClient,
 } from "@packscout/database";
 import { createProviderHarness } from "@packscout/database/test-support";
-import { derivePublicPackSnapshotId, packPublicationEnvelopeSchema, providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
+import { derivePublicPackSnapshotId, packBuildRequestSchema, packPublicationEnvelopeSchema, providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
 import { sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
@@ -292,14 +292,30 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: sealed.intent.intentId } })).state, "blocked");
       assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: ids[0] } })).lease_work_id, null);
     });
-    await suite.test("seal rejects a forged ready lifecycle request that changes frozen metadata", async () => {
+    await suite.test("admission and seal independently reject forged ready lifecycle metadata", async () => {
       const fixture = fixtures[0]!;
       const value = await evaluator.evaluate({ candidate: { ...fixture.inputs, title: "Changed metadata" }, evaluatedAt: new Date().toISOString() });
       value.inputs.snapshotKind = "lifecycle_only";
       value.inputs.lifecycleBaseline = fixture.built.snapshot;
       value.inputs.lifecycleProvenanceIdentity = "lifecycle:forged";
       value.readiness.desiredStateSha256 = await publicationHash(value.inputs);
-      await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: "lifecycle:forged" }));
+      const beforeRequests = await client.pack_build_requests.count();
+      await assert.rejects(context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: "lifecycle:forged" })), { code: "PACK_INPUT_INVALID" });
+      assert.equal(await client.pack_build_requests.count(), beforeRequests);
+      // Deliberately seed a corrupt ready row through the test database, bypassing
+      // repository admission (not database constraints), to retain the seal's independent regression.
+      const previous = await client.pack_build_requests.findFirstOrThrow({ where: { public_repack_id: ids[0] }, orderBy: { pack_publication_sequence: "desc" } });
+      const priorRequest = packBuildRequestSchema.parse(previous.request_json);
+      await context.transaction(async tx => {
+        const [allocated] = await tx.$queryRaw<Array<{ sequence: bigint }>>`SELECT nextval('pack_build_requests_pack_publication_sequence_seq') AS sequence`;
+        const sequence = allocated!.sequence, id = randomUUID();
+        const request = packBuildRequestSchema.parse({ ...priorRequest, requestId: id, packPublicationSequence: sequence.toString(),
+          desiredStateSha256: value.readiness.desiredStateSha256, evidence: { ...priorRequest.evidence, packPublicationSequence: sequence.toString() } });
+        await tx.pack_build_requests.create({ data: { ...context.where, id, public_repack_id: ids[0]!,
+          pack_publication_sequence: sequence, desired_state_sha256: value.readiness.desiredStateSha256,
+          expected_publication_epoch: previous.expected_publication_epoch, inputs_json: value.inputs, request_json: request, state: "ready" } });
+        await tx.pack_publication_heads.update({ where: { public_repack_id: ids[0] }, data: { latest_sequence: sequence } });
+      });
       const claim = (await requests.claim(randomUUID(), 25)).find(item => item.publicRepackId === ids[0]);
       assert.ok(claim);
       const payload = structuredClone(fixture.built.snapshot.payload);

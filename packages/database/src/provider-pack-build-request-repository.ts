@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   PACK_CATALOG_V1, PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packBuildRequestSchema,
   providerPackBuildInputsSchema, providerPackReadinessSchema, packCatalogTextSchema, packCatalogUuidSchema,
-  assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, packCatalogCanonicalByteCount, packPublicationLimits,
+  assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites, deriveProviderPackReadinessDecision,
+  packCatalogCanonicalByteCount, packCatalogCanonicalJson, packPublicationLimits,
   type PackBuildRequest, type ProviderPackBuildInputs, type ProviderPackReadiness,
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
@@ -35,6 +36,14 @@ export class ProviderPackBuildRequestRepository {
     const requiredProfileSnapshotIds = deriveProviderPackProfilePrerequisites(inputs);
     packInvariant(requiredProfileSnapshotIds.length === readiness.requiredProfileSnapshotIds.length &&
       requiredProfileSnapshotIds.every((id, index) => id === readiness.requiredProfileSnapshotIds[index]), "PACK_INPUT_INVALID");
+    if (inputs.snapshotKind === "lifecycle_only") {
+      const head = await tx.pack_publication_heads.findUnique({ where: { public_repack_id: inputs.publicRepackId } });
+      const artifact = head?.active_snapshot_id ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
+      packInvariant(packCatalogCanonicalJson(inputs.lifecycleBaseline) === packCatalogCanonicalJson(artifact?.snapshot_json ?? null), "PACK_INPUT_INVALID");
+    }
+    const decision = await deriveProviderPackReadinessDecision(inputs, digests.evInputsSha256, (await this.context.now(tx)).toISOString());
+    packInvariant((readiness.outcome === decision.outcome || (readiness.outcome === "no_change" && decision.outcome === "ready")) &&
+      readiness.reasonCode === decision.reasonCode, "PACK_INPUT_INVALID");
     return this.persist(tx, { publicRepackId: inputs.publicRepackId, digest: readiness.desiredStateSha256,
       state: readiness.outcome, reasonCode: readiness.reasonCode, inputsJson: inputs,
       request: async (head, id, sequence) => {

@@ -122,6 +122,12 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Independently verified readiness admission — 2026-09-03
+
+Discussion `3930330107` showed that correct hashes and unchanged captured bytes did not establish a correct evaluator verdict. Pure `deriveProviderPackReadinessDecision` rules now live alongside the V1 capture contract and are shared by the service evaluator and independently executed during database admission using database time. Admission compares both outcome and reason, and checks any lifecycle baseline against the stored active artifact. This avoids a database-to-service dependency or a duplicated rule set. `no_change` still requires a ready decision and an existing represented request in persistence.
+
+The injected false-ready regression first reproduced acceptance. All 76 combined boundary tests pass, including mismatched dependencies, incomplete contents, pending/technical/invalid EV, duplicate actions, and a forged reason with unchanged hashes. The lifecycle corruption test now proves admission refusal and separately seeds a corrupt test row to retain independent seal refusal; no database constraint is disabled. Contract/database/service lint and typechecks, docs, and the zero-finding ratchet pass. Full current-head verification remains required.
+
 ### Authoritative head invalidation review — 2026-09-03
 
 Discussion `3930246171` identified that clearing a lease alone allowed an obsolete publishing activation to be claimed again. An authenticated changed head now atomically supersedes nonterminal activation episodes with `ACTIVATION_CONFLICT`, preserves their immutable evidence and terminal history, and fences owners. Build requests are retired only when their expected epoch or pinned lifecycle baseline is incompatible; same-epoch full builds and lifecycle builds with an unchanged baseline remain usable, including work prepared while held for resume.

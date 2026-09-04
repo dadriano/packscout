@@ -1,8 +1,6 @@
 import {
   assertPublicPackCatalogBytes, deriveProviderPackInputDigests, deriveProviderPackProfilePrerequisites,
-  normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
-  packCatalogTimestampSchema, packPublicationLimits, preservesPackLifecycleBaseline,
-  publicPackContentSchema, publicPackSnapshotSchema,
+  deriveProviderPackReadinessDecision, normalizeProviderPackBuildInputs, packCatalogCanonicalByteCount, packPublicationLimits,
   type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackSnapshot,
 } from "@packscout/contracts";
 
@@ -15,7 +13,6 @@ export class ProviderPackReadinessEvaluator {
     representedDigest?: string | null;
   }): Promise<{ inputs: ProviderPackBuildInputs; readiness: ProviderPackReadiness }> {
     const inputs = normalizeProviderPackBuildInputs(input.candidate, input.previousSnapshot);
-    const now = Date.parse(packCatalogTimestampSchema.parse(input.evaluatedAt));
     assertPublicPackCatalogBytes(inputs);
     if (packCatalogCanonicalByteCount(inputs) > packPublicationLimits.maximumInputBytes) {
       throw new TypeError("pack.inputs_too_large");
@@ -25,46 +22,8 @@ export class ProviderPackReadinessEvaluator {
       ...await deriveProviderPackInputDigests(inputs),
       requiredProfileSnapshotIds: deriveProviderPackProfilePrerequisites(inputs),
     };
-    const result = (outcome: ProviderPackReadiness["outcome"], reasonCode: ProviderPackReadiness["reasonCode"]) =>
-      ({ inputs, readiness: { ...readiness, outcome, reasonCode } });
-    if (inputs.evFailure === "invalid_domain") return result("blocked", "INVALID_DOMAIN_DATA");
-    if (inputs.snapshotKind === "lifecycle_only") {
-      if (!inputs.lifecycleBaseline) return result("waiting", "INCOMPLETE_CONTENTS");
-      const previous = await publicPackSnapshotSchema.parseAsync(inputs.lifecycleBaseline);
-      if (!preservesPackLifecycleBaseline(inputs, previous)) {
-        return result("blocked", "INVALID_DOMAIN_DATA");
-      }
-    }
-    if (!inputs.contentsComplete || inputs.contents.length === 0) return result("waiting", "INCOMPLETE_CONTENTS");
-    if (new Set(inputs.contents.map(row => row.publicCollectibleId)).size !== inputs.contents.length ||
-      inputs.contents.reduce((total, row) => total + row.probabilityMicros, 0) !== 1_000_000) {
-      return result("blocked", "INVALID_PROBABILITIES");
-    }
-    if (!inputs.providerProfileSnapshotId || inputs.contents.some(row => !row.collectibleProfileSnapshotId)) {
-      return result("waiting", "PROFILE_HEAD_MISSING");
-    }
-    if (inputs.contents.some(row => !publicPackContentSchema.safeParse(row).success)) return result("blocked", "INVALID_DOMAIN_DATA");
-    // These identities become canonical-unique arrays in the sealed payload.
-    const profileIds = inputs.contents.map(row => row.collectibleProfileSnapshotId);
-    const valuationIds = inputs.contents.filter(row => row.eligibleForChase).map(row => row.valuation.valuationIdentity);
-    if (new Set(inputs.actions.map(action => action.actionId)).size !== inputs.actions.length ||
-      new Set(profileIds).size !== profileIds.length || new Set(valuationIds).size !== valuationIds.length) {
-      return result("blocked", "INVALID_DOMAIN_DATA");
-    }
-    const actionable = inputs.lifecycle.availability === "available" && inputs.lifecycle.retirement === "active";
-    const disabledReason = inputs.lifecycle.retirement === "retired" ? "PACK_RETIRED" : actionable ? null : "PACK_UNAVAILABLE";
-    if (inputs.actions.some(action => action.enabled !== actionable || action.disabledReason !== disabledReason) ||
-      inputs.contents.some(row => row.valuation.status === "available" && row.valuation.amount.currency !== inputs.price.currency) ||
-      (inputs.ev?.status === "available" && inputs.ev.amount.currency !== inputs.price.currency)) return result("blocked", "INVALID_DOMAIN_DATA");
-    if (packCatalogCanonicalJson(inputs.expectedDependencies) !== packCatalogCanonicalJson(inputs.observedDependencies)) {
-      return result("waiting", "EV_INPUTS_PENDING");
-    }
-    if (inputs.evFailure === "technical") return result("waiting", "EV_TECHNICAL_RETRY");
-    if (!inputs.ev || inputs.evFailure === "pending" || inputs.evInputsSha256 !== readiness.evInputsSha256 ||
-      Date.parse(inputs.ev.evaluatedAt) > now || Date.parse(inputs.ev.validUntil) <= now) {
-      return result("waiting", "EV_INPUTS_PENDING");
-    }
-    if (input.representedDigest === readiness.desiredStateSha256) return result("no_change", null);
+    Object.assign(readiness, await deriveProviderPackReadinessDecision(inputs, readiness.evInputsSha256, input.evaluatedAt));
+    if (readiness.outcome === "ready" && input.representedDigest === readiness.desiredStateSha256) readiness.outcome = "no_change";
     return { inputs, readiness };
   }
 }
