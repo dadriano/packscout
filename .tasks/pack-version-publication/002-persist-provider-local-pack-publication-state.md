@@ -120,6 +120,16 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Captured authority and evidence capacity review — 2026-09-03
+
+Discussions `3929985053`, `3929985060`, `3929985062`, and `3929985065` exposed boundary cases in lifecycle admission, evaluated identities, and JSONB evidence capacity. The new real-PostgreSQL boundary suite first failed all three scenarios. Lifecycle readiness now pins only the stored active artifact supplied as `previousSnapshot`; a caller-supplied baseline with no active artifact remains `waiting` and unclaimable. Impact planning isolates delivered dependency evidence from callback mutation and rechecks evaluated provider, pack, source revision, and dependencies against the original boundary before enqueueing or checkpointing.
+
+Request, intent, and operation JSONB bounds now use the same bounded 18,000,000-byte storage allowance as captured inputs (16 MiB canonical admission plus JSONB formatting headroom). This preserves the existing 10,000-dependency contract rather than rejecting valid evidence later in persistence. The regression carries 10,000 maximum-length multibyte named dependencies through admission, sealing, outbox recording, and exact replay; no public-store call or processor is enabled.
+
+The preceding implementation `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the complete unchanged `npm run verify:framework`, including npm audit, the 5,000-record database maximum, every test lane, and both production builds. That result supersedes the historical audit/volume failures below, but does not certify these newer corrections or the refreshed main parent. Current task status remains `in_progress` until their full gate passes.
+
+The new combined contract/readiness/PostgreSQL regressions pass 54 checks with zero skips, including maximum-length multibyte dependency evidence. Database/service lint and typechecks, the zero-finding standards ratchet, and documentation checks pass. Current full-gate verification is being repeated after the parent refresh.
+
 ### Additional review corrections — 2026-09-03
 
 Discussions `3929802770`, `3929802774`, and `3929904797` are covered by red/green regressions. UUID-resolved shared category/collectible/valuation identities now use the native UUID contract (including lowercase normalization), while named policy/profile dependencies retain their text identity. The shared-delivery sequence alone is constrained to positive signed-64-bit range, matching the provider persistence columns; the general V1 sequence grammar is unchanged. Malformed values return validation failures rather than conversion exceptions. Planning converts these refusals to `PACK_INPUT_INVALID` before transaction/progress writes.

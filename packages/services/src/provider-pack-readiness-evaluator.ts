@@ -16,7 +16,7 @@ export class ProviderPackReadinessEvaluator {
   }): Promise<{ inputs: ProviderPackBuildInputs; readiness: ProviderPackReadiness }> {
     const inputs = providerPackBuildInputsSchema.parse(input.candidate);
     const now = Date.parse(packCatalogTimestampSchema.parse(input.evaluatedAt));
-    if (inputs.snapshotKind === "lifecycle_only") inputs.lifecycleBaseline = input.previousSnapshot ?? inputs.lifecycleBaseline;
+    if (inputs.snapshotKind === "lifecycle_only") inputs.lifecycleBaseline = input.previousSnapshot ?? null;
     inputs.contents.sort((a, b) => compareCanonicalStrings(a.publicCollectibleId, b.publicCollectibleId));
     inputs.aliases.sort(compareCanonicalStrings);
     inputs.actions.sort((a, b) => compareCanonicalStrings(a.actionId, b.actionId));

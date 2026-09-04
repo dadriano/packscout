@@ -93,7 +93,7 @@ export class ProviderPackImpactRepository {
         const pack = await tx.packs.findUniqueOrThrow({ where: { id: publicRepackId }, select: { row_version: true } });
         const sourceRevisionIdentity = `pack:${publicRepackId}:${pack.row_version}:${boundarySha256}`;
         const candidate = await this.capture.capture(tx, { providerId: this.context.scope.providerId, publicRepackId,
-          sourceRevisionIdentity, sharedDependencies: delivery?.sharedDependencies ?? [] });
+          sourceRevisionIdentity, sharedDependencies: structuredClone(delivery?.sharedDependencies ?? []) });
         packInvariant(candidate.publicRepackId === publicRepackId && candidate.providerId === this.context.scope.providerId &&
           candidate.sourceRevisionIdentity === sourceRevisionIdentity, "PACK_SCOPE_MISMATCH");
         let valid = providerPackBuildInputsSchema.safeParse(candidate).success;
@@ -119,6 +119,14 @@ export class ProviderPackImpactRepository {
         const previousArtifact = head?.active_snapshot_id ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
         const result = await this.capture.evaluate({ candidate, evaluatedAt,
           previousSnapshot: previousArtifact?.snapshot_json as unknown as import("@packscout/contracts").PublicPackSnapshot | null });
+        // Callbacks may return replacements or mutate their argument. Bind the
+        // result to the original page identity and unaliased delivery evidence.
+        packInvariant(result.inputs.publicRepackId === publicRepackId && result.inputs.providerId === this.context.scope.providerId &&
+          result.inputs.sourceRevisionIdentity === sourceRevisionIdentity, "PACK_SCOPE_MISMATCH");
+        for (const dependency of delivery?.sharedDependencies ?? []) {
+          packInvariant(result.inputs.expectedDependencies.some(item => item.kind === dependency.kind &&
+            item.identity === dependency.identity && item.contentSha256 === dependency.contentSha256), "PACK_INPUT_INVALID");
+        }
         outcomes.push(await this.#requests.enqueueInTransaction(tx, { ...result, boundaryIdentity }));
       }
       const acknowledgmentDigest = await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, { previousDigest: progress.result_sha256, outcomes });

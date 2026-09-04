@@ -46,7 +46,9 @@ CREATE TABLE pack_build_requests (
   CONSTRAINT pack_build_requests_desired_epoch_key UNIQUE (public_repack_id, desired_state_sha256, expected_publication_epoch),
   UNIQUE (public_repack_id, pack_publication_sequence),
   CHECK (desired_state_sha256 ~ '^[a-f0-9]{64}$'),
-  CHECK (octet_length(inputs_json::text) <= 18000000 AND octet_length(request_json::text) <= 2000000)
+  -- Full dependency evidence follows the admitted 16 MiB input budget, with
+  -- bounded headroom for PostgreSQL JSONB formatting, through every work record.
+  CHECK (octet_length(inputs_json::text) <= 18000000 AND octet_length(request_json::text) <= 18000000)
 );
 CREATE INDEX pack_build_requests_claim_idx ON pack_build_requests(state, available_at, public_repack_id, pack_publication_sequence);
 
@@ -115,7 +117,7 @@ CREATE TABLE pack_activation_intents (
     REFERENCES pack_snapshot_artifacts(organization_id, provider_id, public_repack_id, public_pack_snapshot_id),
   UNIQUE (organization_id, provider_id, public_repack_id, id),
   CONSTRAINT pack_activation_request_scope_key UNIQUE (organization_id, provider_id, public_repack_id, build_request_id),
-  CHECK (octet_length(intent_json::text) <= 2000000)
+  CHECK (octet_length(intent_json::text) <= 18000000)
 );
 CREATE INDEX pack_activation_intents_claim_idx ON pack_activation_intents(state, available_at, public_repack_id, pack_publication_sequence);
 CREATE TABLE pack_publication_operations (
@@ -125,7 +127,7 @@ CREATE TABLE pack_publication_operations (
   FOREIGN KEY (organization_id, provider_id, public_repack_id, intent_id)
     REFERENCES pack_activation_intents(organization_id, provider_id, public_repack_id, id),
   UNIQUE (intent_id, idempotency_key), UNIQUE (organization_id, provider_id, public_repack_id, intent_id, id),
-  CHECK (request_sha256 ~ '^[a-f0-9]{64}$' AND octet_length(request_json::text) <= 100000)
+  CHECK (request_sha256 ~ '^[a-f0-9]{64}$' AND octet_length(request_json::text) <= 18000000)
 );
 CREATE TABLE pack_publication_receipts (
   operation_id uuid PRIMARY KEY, organization_id uuid NOT NULL, provider_id uuid NOT NULL, public_repack_id uuid NOT NULL,
