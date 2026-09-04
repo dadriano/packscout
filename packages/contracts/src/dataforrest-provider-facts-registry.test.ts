@@ -19,6 +19,7 @@ import {
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_VERSION,
 } from "./dataforrest-events-v1-adapter-versions.ts";
 import { readDataforrestProviderFacts } from
@@ -189,6 +190,9 @@ test("each new distributed version reads a card identically to its predecessor",
       // Must use an inventory wrapper: V2 delegates chase/asset straight to V1,
       // so a chase payload cannot distinguish the two readers.
       { inventory: { title: "Sample Inventory Card" } }],
+    ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION,
+      DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION,
+      { inventory: { title: "Sample Inventory Card" } }],
     ["collector_crypt", DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
       DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
       { provider_label: "Sample Card" }],
@@ -206,6 +210,7 @@ test("each new distributed adapter version resolves both a card and a pack reade
   const distributedPackReaders = [
     ["courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION],
     ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION],
+    ["phygitals", DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION],
     [
       "collector_crypt",
       DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,

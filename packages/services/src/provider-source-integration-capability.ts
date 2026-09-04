@@ -13,6 +13,7 @@ import {
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import {
@@ -204,6 +205,13 @@ ProviderSourceIntegrationCapabilityRegistry {
     providerSourceIntegrationCapability(
       "phygitals",
       dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion,
+    ),
+    // Distributed-v4 binds the Phygitals rarity distribution as a
+    // probability-only EV input; admitted before activation for the same
+    // admission-gate reason as the versions above.
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion,
     ),
   ]);
 }
