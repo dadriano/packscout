@@ -76,22 +76,9 @@ export class ProviderPackPublicationOutboxRepository {
     const expired = Date.parse(intent.expiresAt) <= now.getTime();
     if ((!expired && head.latest_sequence <= BigInt(claim.sequence)) || head.held ||
       head.publication_epoch !== BigInt(intent.expectedHead.publicationEpoch) || head.accepted_sequence === BigInt(claim.sequence)) return false;
-    // Select bounded receipt evidence, not up to 100 copies of the full captured intent.
-    const operations = await tx.$queryRaw<Array<{ kind: string; request_sha256: string; receipt_json: unknown }>>`
-      SELECT o.request_json->>'kind' AS kind, o.request_sha256, r.receipt_json
-      FROM pack_publication_operations o LEFT JOIN pack_publication_receipts r ON r.operation_id = o.id
-      WHERE o.intent_id = ${claim.workId}::uuid LIMIT ${packPublicationLimits.maximumOperations + 1}`;
-    packInvariant(operations.length <= packPublicationLimits.maximumOperations, "PACK_LIMIT_EXCEEDED");
-    for (const operation of operations) {
-      const receipt = packCatalogOperationReceiptSchema.safeParse(operation.receipt_json);
-      if (!receipt.success || receipt.data.requestSha256 !== operation.request_sha256) return false;
-      const { outcome, state, reasonCode } = receipt.data.result;
-      if (["published", "rolled_back"].includes(state)) return false;
-      // An expired replay record is not proof its activation never succeeded.
-      if (operation.kind === "activate_head" &&
-        (!["conflict", "refused"].includes(outcome) || !["blocked", "superseded"].includes(state) || reasonCode === null)) return false;
-      if (!["start_snapshot", "stage_batch", "finalize_snapshot", "activate_head"].includes(operation.kind)) return false;
-    }
+    // Check indexed, bounded operation evidence without loading full captured intents.
+    packInvariant(await tx.pack_publication_operations.count({ where: { intent_id: claim.workId } }) <= packPublicationLimits.maximumOperations, "PACK_LIMIT_EXCEEDED");
+    if (await this.context.operationsNeedReconciliation(tx, claim.workId)) return false;
     await tx.pack_activation_intents.update({ where: { id: claim.workId }, data: {
       state: "superseded", reason_code: expired ? "OPERATION_EXPIRED" : "ACTIVATION_CONFLICT" } });
     await this.context.release(tx, claim);

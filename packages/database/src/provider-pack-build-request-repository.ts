@@ -8,7 +8,7 @@ import {
 } from "@packscout/contracts";
 import { Prisma } from "../prisma/generated/provider/index.js";
 import type { ProviderTransactionClient } from "./provider-database.ts";
-import { ProviderPackPublicationContext, packInvariant, type PackWorkClaim } from "./provider-pack-publication-context.ts";
+import { ProviderPackPublicationContext, packInvariant, unreconciledPackOperations, type PackWorkClaim } from "./provider-pack-publication-context.ts";
 
 export interface PackPlanningOutcome {
   publicRepackId: string;
@@ -110,7 +110,7 @@ export class ProviderPackBuildRequestRepository {
     await tx.$executeRaw`UPDATE pack_activation_intents intent SET state = 'superseded'
       WHERE intent.public_repack_id = ${publicRepackId}::uuid AND intent.pack_publication_sequence < ${allocation!.sequence}
       AND intent.state IN ('waiting','ready','retry_scheduled','blocked') AND intent.id IS DISTINCT FROM ${head.lease_work_id}::uuid
-      AND NOT EXISTS (SELECT 1 FROM pack_publication_operations operation WHERE operation.intent_id = intent.id)`;
+      AND NOT ${unreconciledPackOperations(Prisma.sql`intent.id`)}`;
     await tx.pack_publication_heads.update({ where: { public_repack_id: publicRepackId }, data: { latest_sequence: allocation!.sequence } });
     return { publicRepackId, outcome: "change", sequence, requestId: id };
   }

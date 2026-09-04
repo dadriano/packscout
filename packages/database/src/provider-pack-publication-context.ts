@@ -29,6 +29,19 @@ export function boundedPackInteger(value: number, maximum: number): number {
 }
 export const packWorkTable = (kind: PackWorkKind) => Prisma.raw(kind === "build" ? "pack_build_requests" : "pack_activation_intents");
 
+/** Receipts are immutable and validated on admission. Expired activation replay is not failure proof. */
+export function unreconciledPackOperations(intentId: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`EXISTS (SELECT 1 FROM pack_publication_operations pack_op
+    LEFT JOIN pack_publication_receipts pack_receipt ON pack_receipt.operation_id = pack_op.id WHERE pack_op.intent_id = ${intentId}
+    AND (pack_receipt.operation_id IS NULL OR pack_receipt.receipt_json->>'requestSha256' IS DISTINCT FROM pack_op.request_sha256
+      OR COALESCE(pack_op.request_json->>'kind', '') NOT IN ('start_snapshot','stage_batch','finalize_snapshot','activate_head')
+      OR COALESCE(pack_receipt.receipt_json #>> '{result,state}', '') NOT IN ('waiting','ready','publishing','retry_scheduled','blocked','superseded')
+      OR (pack_op.request_json->>'kind' = 'activate_head' AND NOT (
+        COALESCE(pack_receipt.receipt_json #>> '{result,outcome}', '') IN ('conflict','refused')
+        AND COALESCE(pack_receipt.receipt_json #>> '{result,state}', '') IN ('blocked','superseded')
+        AND pack_receipt.receipt_json #>> '{result,reasonCode}' IS NOT NULL))))`;
+}
+
 /** One trusted, provisioned organization/provider binding. Never accepts a connection target. */
 export class ProviderPackPublicationContext {
   readonly scope: PackPublicationScope;
@@ -69,6 +82,11 @@ export class ProviderPackPublicationContext {
     const [row] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     return row!.now;
   }
+  async operationsNeedReconciliation(tx: ProviderTransactionClient, intentId: string): Promise<boolean> {
+    const [row] = await tx.$queryRaw<Array<{ required: boolean }>>(Prisma.sql`
+      SELECT ${unreconciledPackOperations(Prisma.sql`${intentId}::uuid`)} AS required`);
+    return row!.required;
+  }
   async lockLease(tx: ProviderTransactionClient, claim: PackWorkClaim, kind: PackWorkKind) {
     packInvariant(["build", "activation"].includes(kind) && claim.kind === kind, "PACK_LEASE_LOST");
     for (const id of [claim.publicRepackId, claim.workId, claim.owner]) packCatalogUuidSchema.parse(id);
@@ -105,7 +123,7 @@ export class ProviderPackPublicationContext {
           AND (r.intent_json #>> '{expectedHead,publicationEpoch}')::bigint = h.publication_epoch
           AND r.state IN ('ready','publishing','retry_scheduled','waiting','blocked')
           AND ((r.pack_publication_sequence = h.accepted_sequence AND r.public_pack_snapshot_id = h.active_snapshot_id)
-            OR EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = r.id))`;
+            OR ${unreconciledPackOperations(Prisma.sql`r.id`)})`;
       const latest = Prisma.sql`w.pack_publication_sequence = h.latest_sequence
         AND w.state IN ('ready','retry_scheduled','publishing') AND NOT EXISTS (${reconciliation})`;
       const eligible = kind === "activation" ? Prisma.sql`((${latest}) OR w.id IN (${reconciliation}))` : latest;
@@ -129,7 +147,7 @@ export class ProviderPackPublicationContext {
         // Only explicit receipt/head reconciliation may retire those episodes.
         for (const staleKind of ["build", "activation"] as const) {
           const safe = staleKind === "activation"
-            ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM pack_publication_operations o WHERE o.intent_id = stale.id)` : Prisma.empty;
+            ? Prisma.sql`AND NOT ${unreconciledPackOperations(Prisma.sql`stale.id`)}` : Prisma.empty;
           await tx.$executeRaw(Prisma.sql`UPDATE ${packWorkTable(staleKind)} stale SET state = 'superseded'
             WHERE stale.public_repack_id = ${row.public_repack_id}::uuid AND stale.state = 'publishing'
               AND stale.pack_publication_sequence < ${row.pack_publication_sequence} ${safe}`);
@@ -160,8 +178,7 @@ export class ProviderPackPublicationContext {
     await this.transaction(async tx => {
       const head = await this.lockLease(tx, claim, claim.kind);
       const reconciling = claim.kind === "activation" &&
-        (head.accepted_sequence === BigInt(claim.sequence) || reason === "RECEIPT_AMBIGUOUS" ||
-          await tx.pack_publication_operations.count({ where: { intent_id: claim.workId } }) > 0);
+        (head.accepted_sequence === BigInt(claim.sequence) || await this.operationsNeedReconciliation(tx, claim.workId));
       packInvariant(!reconciling || state !== "superseded");
       const nextState = head.latest_sequence > BigInt(claim.sequence) && !reconciling ? "superseded" : state;
       await tx.$executeRaw(Prisma.sql`UPDATE ${packWorkTable(claim.kind)} SET state = ${nextState}, reason_code = ${reason},

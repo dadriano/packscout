@@ -106,6 +106,19 @@ test("Persisted publication operations survive crashes and expire only with reco
       assert.deepEqual(await outbox.claim(randomUUID()), []);
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: claim.workId } })).state, "blocked");
     });
+    await suite.test("a definitive refusal does not strand a later source correction behind blocked history", async () => {
+      const { fixture, id, claim, operation } = await prepare();
+      const activation = await operation("activate_head");
+      const requestSha256 = await outbox.recordOperation(claim, activation);
+      await outbox.recordReceipt(claim, { operationId: activation.operationId, requestSha256, completedAt: new Date().toISOString(),
+        result: { outcome: "refused", state: "blocked", reasonCode: "INVALID_DOMAIN_DATA" } });
+      await context.defer(claim, "blocked", "INVALID_DOMAIN_DATA");
+      const next = await enqueue({ ...fixture.inputs, title: "Corrected source input" });
+      assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: claim.workId } })).state, "superseded");
+      const build = (await requests.claim(randomUUID()))[0]!; assert.equal(build.workId, next.requestId);
+      await context.defer(build, "superseded", "ACTIVATION_CONFLICT");
+      assert.equal(await client.pack_publication_receipts.count({ where: { public_repack_id: id } }), 1);
+    });
     for (const [lifetime, newerDesired] of [[72 * 3_600_000, false], [3_600_000, false], [72 * 3_600_000, true]] as const) {
       await suite.test(`partial expiry reconciles all operations before replacement: EV ${lifetime}, newer ${newerDesired}`, async () => {
         const { fixture, id, claim, intent, operation } = await prepare(lifetime);

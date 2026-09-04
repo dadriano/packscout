@@ -151,7 +151,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Current parent:** `86e2a142` (main with PR96 and PR103–105); a backup preserves pre-repair P02 `8409143c`.
 - **Implementation checkpoint:** `c7421b1f29a04fbcb35e0d93cafc52bf38ef1109`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
 - **Delivery gate:** Recovery regressions for `3930633635` and `3930633637` pass. PR109 repairs the separate Watchlist vocabulary failure with a strengthened guard. Merge the verified prerequisite, refresh P02, run its full gate, and close the review findings before merging PR95; P03 stays separate.
-- **Current correction evidence:** The cumulative 99-check contract/readiness/persistence matrix passed, followed by one additional passing atomic-renewal rollback regression (100 combined, 16 in the new recovery suite). All 30 schema checks, affected lint/typechecks, docs, and the zero-finding standards ratchet pass; no gate was weakened. Full certification remains pending.
+- **Current correction evidence:** The cumulative 101-check contract/readiness/persistence matrix passes, including 17 checks in the new recovery suite. All 30 schema checks, affected lint/typechecks, docs, and the zero-finding standards ratchet pass; no gate was weakened. Full certification remains pending.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
