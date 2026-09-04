@@ -5,6 +5,7 @@ import {
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_JSON_NODES,
   dataforrestEventsJsonNodeBudget,
@@ -13,6 +14,7 @@ import {
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestEventRecordV1Schema,
   dataforrestEventsV1SourceAdapterManifests,
   normalizeDataforrestEventRecordForAdapter,
@@ -56,10 +58,18 @@ test("Courtyard response budget stays isolated to v2-derived immutable profiles"
   assert.deepEqual(distributedV3.supportedProviders, manifest.supportedProviders);
   assert.equal(dataforrestEventsJsonNodeBudget(distributedV3.adapterVersion), 640_000);
   assert.equal(dataforrestEventsV1SourceAdapterManifests.includes(distributedV3), true);
+  // Distributed-v4 changes retained odds interpretation, preserving V3's exact capacity admission.
+  const distributedV4 = dataforrestCourtyardDistributedV4SourceAdapterManifest;
+  assert.equal(distributedV4.adapterVersion, DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION);
+  assert.equal(distributedV4.adapterVersion, "dataforrest-courtyard-distributed-adapter-v4");
+  assert.deepEqual(distributedV4.requestBounds, manifest.requestBounds);
+  assert.deepEqual(distributedV4.supportedProviders, manifest.supportedProviders);
+  assert.equal(dataforrestEventsJsonNodeBudget(distributedV4.adapterVersion), 640_000);
+  assert.equal(dataforrestEventsV1SourceAdapterManifests.includes(distributedV4), true);
   for (const historical of dataforrestEventsV1SourceAdapterManifests.filter(
     (candidate) =>
       candidate !== manifest && candidate !== catalog && candidate !== catalogV2
-      && candidate !== distributedV3,
+      && candidate !== distributedV3 && candidate !== distributedV4,
   )) {
     assert.equal(historical.requestBounds.maximumResponseBytes, 8 * 1024 * 1024);
     assert.equal(dataforrestEventsJsonNodeBudget(historical.adapterVersion), 480_000);

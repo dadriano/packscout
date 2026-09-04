@@ -1,6 +1,8 @@
 import { providerPackEvEvidenceV1Schema, type PackScoutBuybackEvEvidenceOutcomeV1 } from "@packscout/contracts";
 import { normalizeClutchpacksPromotionEvEvidenceV1 } from "./clutchpacks/promotion-ev-evidence.ts";
 import { normalizePhygitalsPromotionEvEvidenceV1 } from "./phygitals/promotion-ev-evidence.ts";
+import { normalizeCourtyardPromotionEvEvidenceV1 } from "./courtyard/promotion-ev-evidence.ts";
+import { normalizeCollectorCryptPromotionEvEvidenceV1 } from "./collector-crypt/promotion-ev-evidence.ts";
 
 export class ProviderPromotionEvEvidenceError extends Error {
   constructor(readonly code: "EVIDENCE_INVALID") {
@@ -41,6 +43,12 @@ export async function normalizeProviderPromotionEvEvidenceV1(input: Readonly<{
   }
   if (parsed.data.providerKey === "phygitals") {
     return normalizePhygitalsPromotionEvEvidenceV1(input);
+  }
+  if (parsed.data.providerKey === "courtyard") {
+    return normalizeCourtyardPromotionEvEvidenceV1(input);
+  }
+  if (parsed.data.providerKey === "collector_crypt") {
+    return normalizeCollectorCryptPromotionEvEvidenceV1(input);
   }
   return null;
 }

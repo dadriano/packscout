@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { provisionalCollectiblePublicId, publicRepackDetailSchema, publicRepackDetailV3Schema } from "@packscout/contracts";
+import { launchProviderKeys, provisionalCollectiblePublicId, publicRepackDetailSchema, publicRepackDetailV3Schema } from "@packscout/contracts";
 import { projectApprovedProviderPackContentsV1, projectProvisionalProviderPackContentsV1, projectProvisionalProviderPackContentsV3 } from "./distributed-provider-pack-contents.ts";
 import { DistributedProviderPackContentsError, type DistributedProviderCollectibleRow } from "./distributed-provider-pack-contents-types.ts";
 
@@ -93,7 +93,17 @@ test("approved identity persists through collectible, chase, and top-chase proje
   assert.equal(result.repacks[0]!.publicRepackId, source.packs[0]!.detail.publicRepackId);
 });
 
-test("data_release_v3 content projection preserves calculated PackScout EV", () => {
+test("provider art keeps its approved public identity under the public other classification", () => {
+  const source = { ...input(), collectibles: [card({ collectibleType: "art" })] };
+  const mappings = projectProvisionalProviderPackContentsV1(source).collectibleMappings;
+  const result = projectApprovedProviderPackContentsV1({
+    ...source, identityPolicy: "approved_public_catalog_v1", collectibleMappings: mappings,
+  });
+  assert.equal(result.collectibles[0]!.collectibleType, "other");
+  assert.equal(result.collectibles[0]!.publicCollectibleId, mappings[0]!.publicCollectibleId);
+});
+
+function inputV3(): Parameters<typeof projectProvisionalProviderPackContentsV3>[0] {
   const source = input();
   const current = {
     status: "current" as const,
@@ -130,14 +140,64 @@ test("data_release_v3 content projection preserves calculated PackScout EV", () 
       },
     },
   });
-  const result = projectProvisionalProviderPackContentsV3({
+  return {
     ...source,
     identityPolicy: "provider_provisional_v1",
     packs: [{ ...source.packs[0]!, detail }],
-  });
-  assert.deepEqual(result.repacks[0]!.evEstimates.packScout, current);
+  };
+}
+
+test("data_release_v3 content projection preserves calculated PackScout EV", () => {
+  const source = inputV3();
+  const result = projectProvisionalProviderPackContentsV3(source);
+  assert.deepEqual(result.repacks[0]!.evEstimates.packScout, source.packs[0]!.detail.evEstimates.packScout);
   assert.equal(result.repacks[0]!.contentSummary.knownCollectibleCount, 1);
   assert.ok(result.repacks[0]!.topChase);
+});
+
+test("all launch providers publish every canonical collectible type with absent source valuation", () => {
+  for (const platformKey of launchProviderKeys) {
+    for (const collectibleType of ["card", "watch", "art", "coin", "sealed_product", "memorabilia", "other"] as const) {
+      const source = inputV3();
+      const result = projectProvisionalProviderPackContentsV3({
+        ...source, platformKey,
+        packs: source.packs.map((pack) => ({ ...pack, detail: { ...pack.detail, vendorKey: platformKey } })),
+        collectibles: [card({ collectibleType,
+          valuationAmount: null, valuationCurrency: null, valuationUsdAmount: null,
+          valuationType: null, valuationObservedAt: null, valuationUnavailableReason: "source_unavailable",
+        })],
+      });
+      const expectedType = collectibleType === "art" ? "other" : collectibleType;
+      assert.equal(result.collectibles[0]!.collectibleType, expectedType, platformKey);
+      assert.equal(result.collectibles[0]!.valuation, null, platformKey);
+      assert.equal(result.repacks[0]!.topChase?.collectible.collectibleType, expectedType, platformKey);
+      assert.deepEqual(result.repacks[0]!.collectibleTypes, [expectedType], platformKey);
+      assert.match(result.collectibles[0]!.searchText, /charizard/);
+    }
+  }
+});
+
+test("ClutchPacks canonical formatted price is public vendor-reported valuation", () => {
+  const result = projectProvisionalProviderPackContentsV3({
+    ...inputV3(), collectibles: [card({ valuationType: "clutchpacks_formatted_current_price" })],
+  });
+  assert.equal(result.collectibles[0]!.valuation?.valuationType, "vendor_reported");
+  assert.equal(result.repacks[0]!.topChase?.collectible.valuation?.displayMoney?.minorUnits, 12_346);
+});
+
+test("canonical valuation normalization refuses unsupported, mismatched, and contradictory metadata", () => {
+  for (const [platformKey, overrides] of [
+    ["clutchpacks", { valuationType: "unreviewed_provider_price" }],
+    ["phygitals", { valuationType: "clutchpacks_formatted_current_price" }],
+    ["clutchpacks", { valuationType: null }],
+    ["clutchpacks", { valuationUnavailableReason: "source_unavailable" }],
+    ["clutchpacks", { valuationAmount: null, valuationCurrency: null, valuationUsdAmount: null,
+      valuationType: null, valuationObservedAt: null, valuationUnavailableReason: "unreviewed_reason" }],
+  ] as const) {
+    assert.throws(() => projectProvisionalProviderPackContentsV3({
+      ...inputV3(), platformKey, collectibles: [card(overrides)],
+    }), DistributedProviderPackContentsError);
+  }
 });
 
 test("approved projection refuses missing, cross-provider, duplicate, and type-conflicting mappings", () => {

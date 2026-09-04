@@ -57,7 +57,6 @@ import {
   MAX_ROWS_PER_DATA_RELEASE_V3_SHARD,
   SignedConvexDataReleaseV3PublicationClient,
   normalizeProviderPromotionEvEvidenceV1,
-  projectProvisionalProviderPackContentsV3,
   type DistributedProviderCollectibleInstanceRow,
   type DistributedProviderCollectibleRow,
   type DistributedProviderPackContentRow,
@@ -101,6 +100,10 @@ import {
   resolvePublicCategories,
   summarizePlan,
 } from "./promote-provider-data-release-v3-plan.mjs";
+import {
+  projectProviderPromotionContents,
+  type ProviderPromotionContentSnapshot,
+} from "./promote-provider-data-release-v3-contents.mts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -333,6 +336,7 @@ interface ProviderSnapshot {
   readonly collectibles: readonly DistributedProviderCollectibleRow[];
   readonly instances: readonly DistributedProviderCollectibleInstanceRow[];
   readonly memberships: readonly DistributedProviderPackContentRow[];
+  readonly latestContentSnapshots: readonly ProviderPromotionContentSnapshot[];
 }
 
 interface ProviderPackRow extends Record<string, unknown> {
@@ -409,6 +413,15 @@ async function readProviderSnapshot(
       databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectible types`, error),
     );
     const packIds = packs.rows.map((row) => String(row.id));
+    const latestContentSnapshots = await client.query(
+      `select distinct on (pack_id) pack_id, completeness, effective_at
+         from pack_content_snapshots
+        where pack_id = any($1::uuid[])
+        order by pack_id, effective_at desc`,
+      [packIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} membership snapshots`, error),
+    );
     const memberships = await client.query(
       `select id, row_version::text, pack_id, collectible_id,
               collectible_instance_id, total_quantity::text,
@@ -486,6 +499,10 @@ async function readProviderSnapshot(
       ) as ProviderPackRow[],
       categories: categories.rows,
       collectibleTypes: types.rows.map((row) => String(row.collectible_type)),
+      latestContentSnapshots: latestContentSnapshots.rows.map((row) => ({
+        packId: String(row.pack_id), completeness: row.completeness,
+        effectiveAt: databaseDate(row.effective_at, `${platformKey} membership snapshot time`),
+      })),
       collectibles: collectibles.rows.map((row) => ({
         id: String(row.id),
         rowVersion: BigInt(row.row_version),
@@ -885,7 +902,7 @@ async function main(): Promise<void> {
       projected.repacks.map((detail: unknown) =>
         publicRepackDetailV3Schema.parse(detail),
       );
-    if (snapshot.memberships.length > 0) {
+    if (snapshot.memberships.length > 0 || snapshot.latestContentSnapshots.length > 0) {
       const detailById = new Map(
         projected.repacks.map((detail) => [detail.publicRepackId, detail]),
       );
@@ -896,57 +913,29 @@ async function main(): Promise<void> {
           ),
         );
         if (detail === undefined) return [];
-        const evidenceCompleteness: "complete" | "partial" | "unknown" =
-          pack.content_evidence === "complete" ||
-          pack.content_evidence === "partial"
-            ? pack.content_evidence
-            : "unknown";
         return [{
           id: pack.id,
           rowVersion: BigInt(pack.row_version),
           packKey: pack.pack_key,
           detail: publicRepackDetailV3Schema.parse(detail),
-          evidenceCompleteness,
         }];
       });
-      const includedPackIds = new Set(contentPacks.map(({ id }) => id));
-      const memberships = snapshot.memberships.filter(({ packId }) =>
-        includedPackIds.has(packId),
-      );
-      const collectibleIds = new Set(
-        memberships.map(({ collectibleId }) => collectibleId),
-      );
-      const instanceIds = new Set(
-        memberships.flatMap(({ collectibleInstanceId }) =>
-          collectibleInstanceId === null ? [] : [collectibleInstanceId],
-        ),
-      );
-      if (memberships.length > 0) {
-        if (publicImageOrigins.length === 0) {
-          refuse(
-            "PUBLIC_IMAGE_ORIGINS_REQUIRED",
-            `${snapshot.platform.platformKey} has canonical pack contents`,
-          );
-        }
-        const content = projectProvisionalProviderPackContentsV3({
-          identityPolicy: "provider_provisional_v1",
-          providerId: snapshot.platform.providerId,
-          platformKey: snapshot.platform.platformKey,
-          snapshotAt: new Date(snapshot.snapshotAt),
-          publicAssetOrigins: publicImageOrigins,
-          packs: contentPacks,
-          collectibles: snapshot.collectibles.filter(({ id }) =>
-            collectibleIds.has(id),
-          ),
-          instances: snapshot.instances.filter(({ id }) => instanceIds.has(id)),
-          memberships,
-        });
-        providerRepacks = content.repacks;
-        for (const collectible of content.collectibles) {
-          collectiblesById.set(collectible.publicCollectibleId, collectible);
-        }
-        chases.push(...content.repackChases);
+      const content = projectProviderPromotionContents({
+        providerId: snapshot.platform.providerId,
+        platformKey: snapshot.platform.platformKey,
+        snapshotAt: new Date(snapshot.snapshotAt),
+        publicAssetOrigins: publicImageOrigins,
+        packs: contentPacks,
+        latestSnapshots: snapshot.latestContentSnapshots,
+        collectibles: snapshot.collectibles,
+        instances: snapshot.instances,
+        memberships: snapshot.memberships,
+      });
+      providerRepacks = content.repacks;
+      for (const collectible of content.collectibles) {
+        collectiblesById.set(collectible.publicCollectibleId, collectible);
       }
+      chases.push(...content.repackChases);
     }
     repacks.push(...providerRepacks);
     skipped.push(

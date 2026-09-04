@@ -6,6 +6,8 @@ import { collectorCryptCardProviderFactsV1 } from
   "./dataforrest-collector-crypt-card-v1.ts";
 import { collectorCryptPackProviderFactsV1 } from
   "./dataforrest-collector-crypt-pack-v1.ts";
+import { collectorCryptPackProviderFactsV2 } from
+  "./dataforrest-collector-crypt-pack-v2.ts";
 import { phygitalsCardProviderFactsV1 } from
   "./dataforrest-phygitals-card-v1.ts";
 import { phygitalsCardProviderFactsV2 } from
@@ -18,6 +20,8 @@ import { courtyardCardProviderFactsV1 } from
   "./dataforrest-courtyard-card-v1.ts";
 import { courtyardPackProviderFactsV1 } from
   "./dataforrest-courtyard-pack-v1.ts";
+import { courtyardPackProviderFactsV2 } from
+  "./dataforrest-courtyard-pack-v2.ts";
 import {
   DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION,
@@ -26,11 +30,13 @@ import {
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
   DATAFORREST_EVENTS_V1_ADAPTER_VERSION,
   DATAFORREST_EVENTS_V1_LEGACY_ADAPTER_VERSION,
@@ -58,6 +64,14 @@ type ProviderFactsAdapter = Readonly<{
  * falls back to its provider-declared display-name field only.
  */
 const providerFactsAdapters = Object.freeze([
+  { adapterVersion: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "collector_crypt", kind: "card", read: collectorCryptCardProviderFactsV1 },
+  { adapterVersion: DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "collector_crypt", kind: "pack", read: collectorCryptPackProviderFactsV2 },
+  { adapterVersion: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "courtyard", kind: "card", read: courtyardCardProviderFactsV1 },
+  { adapterVersion: DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
+    provider: "courtyard", kind: "pack", read: courtyardPackProviderFactsV2 },
   {
     adapterVersion: DATAFORREST_EVENTS_V1_ADAPTER_V2_VERSION,
     provider: "clutchpacks",
@@ -251,11 +265,13 @@ const supportedAdapterVersions: ReadonlySet<string> = new Set([
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_LAUNCH_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
