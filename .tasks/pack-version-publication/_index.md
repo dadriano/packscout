@@ -177,10 +177,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** Authenticated staging, finalization, heads, holds, and the sole V1 API are complete but not publicly routed.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
 - **Rollback:** Keep public routing absent and revert unused store/read code.
-- **Size exception:** The store and read API share one schema-bound integrity thesis; separating them would permit unverified public shapes to diverge from stored snapshot evidence. Delivered at 33 authored files and 4,962 added authored lines (about 1,440 in tests and test support), over the 25-file / 2,500-line target and inside the 5,000-line / 40-file hard stop; the protocol contract, store, read API, and their boundary tests form one review thesis.
+- **Size exception:** The store and read API share one schema-bound integrity thesis; separating them would permit unverified public shapes to diverge from stored snapshot evidence. Delivered at 34 authored code files and 5,125 added lines (about 1,540 in tests and test support), over the 25-file / 2,500-line target and slightly over the 5,000-line figure P01 cited as its hard stop; the protocol contract, store, read API, and their boundary tests form one review thesis.
 - **Branch:** `codex/pack-version-publication-p05-store`.
 - **Verified parent:** `86e2a142` (`origin/main`, including merged #96 and #105).
-- **Verified implementation:** `cba917ab`.
+- **Verified implementation:** `cba917ab`; review fixes `af924572`.
 - **Contract correction:** pack search text is title plus aliases; the measured P01 fixture exceeds its 1,024-character bound at 50 contents and the Convex document bound at 8,000. P03's assembler adopts the rule at rebase. See task 005.
 - **PR:** https://github.com/dadriano/packscout/pull/108
 
