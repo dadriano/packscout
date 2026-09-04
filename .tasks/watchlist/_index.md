@@ -93,7 +93,7 @@ Watchlist is the missing destination: a signed-in primary-nav page with two tabs
 - **Size exception:** none
 - **Branch:** `codex/watchlist-p01-owner-read`
 - **Verified parent:** `4862700852c7db4a76ec5592ba7e4f8cabf20916` (`origin/main`)
-- **Verified implementation:** `5b584ddb12157a1a94b59eea0a83e85a432f4059`
+- **Verified implementation:** `19505ba410beb926fff72f6f75f94ebf678760ca`
 - **PR:** https://github.com/dadriano/packscout/pull/103
 
 #### P02 — Watchlist page and lists
