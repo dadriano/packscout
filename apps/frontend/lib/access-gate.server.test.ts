@@ -9,6 +9,7 @@ import {
   resolveAccessRoute,
   resolveGatedRoute,
   resolveRootRoute,
+  resolveWatchlistRoute,
   robotsPolicyForGateStatus,
   rootRouteMetadata,
   shellSurfaceForDecision,
@@ -259,6 +260,22 @@ test("routing outcomes are explicit and total for every decision", () => {
     destination: "/access",
   });
 
+  assert.deepEqual(resolveWatchlistRoute(decision("public")), { kind: "render" });
+  assert.deepEqual(resolveWatchlistRoute(decision("admitted")), {
+    kind: "render",
+  });
+  assert.deepEqual(resolveWatchlistRoute(decision("signed_out")), {
+    kind: "render",
+  });
+  assert.deepEqual(resolveWatchlistRoute(decision("held")), {
+    kind: "redirect",
+    destination: "/access",
+  });
+  assert.deepEqual(resolveWatchlistRoute(decision("undetermined")), {
+    kind: "redirect",
+    destination: "/access",
+  });
+
   assert.deepEqual(resolveAccessRoute(decision("held")), {
     kind: "hold",
     reason: "awaiting_review",
@@ -342,7 +359,13 @@ test("an unknown switch keeps the crawler exclusions in place", () => {
   for (const status of [true, null]) {
     const policy = robotsPolicyForGateStatus(status);
     const rule = Array.isArray(policy.rules) ? policy.rules[0] : policy.rules;
-    assert.deepEqual(rule?.disallow, ["/access", "/api/", "/learn", "/packs"]);
+    assert.deepEqual(rule?.disallow, [
+      "/access",
+      "/api/",
+      "/learn",
+      "/packs",
+      "/watchlist",
+    ]);
     assert.equal(rule?.allow, "/");
   }
 });

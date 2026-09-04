@@ -207,6 +207,8 @@ export function AuthenticatedSavedItemsProvider({
         };
       },
       accountNotice,
+      accountSavingAvailable:
+        signedIn && savedItemIds !== undefined && accountNotice === null,
     }),
     [
       accountNotice,

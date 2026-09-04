@@ -6,6 +6,7 @@ import {
   MetricPresentationConsistencyError,
   formatMoneyMinorUnits,
   formatSignedEvPercent,
+  formatWatchlistRepackEvSummary,
   isSimulatedRepackListing,
   packScoutMetricConsistencyIssuesV3,
   presentBuybackSummaryV3,
@@ -515,6 +516,14 @@ test("shared formatters keep tabular-safe precision and explicit signs", () => {
   assert.equal(formatSignedEvPercent(-1_500), "-15.00%");
   assert.equal(formatSignedEvPercent(0), "0.00%");
   assert.equal(formatSignedEvPercent(1_500), "+15.00%");
+  assert.match(
+    formatWatchlistRepackEvSummary({
+      evDollarsMinorUnits: 1_250,
+      grossReturnBasisPoints: -250,
+      confidenceBand: "medium",
+    }),
+    /medium confidence/,
+  );
 });
 
 test("server aggregates format through the same signed-percent presentation", () => {

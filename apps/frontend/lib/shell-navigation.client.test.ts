@@ -11,6 +11,7 @@ import {
 test("shell navigation marks only the approved route families", () => {
   assert.equal(resolveGlobalDestination("/"), "dashboard");
   assert.equal(resolveGlobalDestination("/packs"), "dashboard");
+  assert.equal(resolveGlobalDestination("/watchlist"), "watchlist");
   assert.equal(resolveGlobalDestination("/learn"), "learn");
   assert.equal(resolveGlobalDestination("/learn/expected-value"), "learn");
   assert.equal(resolveGlobalDestination("/learn/packscout-methodology"), "learn");
@@ -18,6 +19,7 @@ test("shell navigation marks only the approved route families", () => {
 
   assert.equal(resolveDashboardView("/"), "overview");
   assert.equal(resolveDashboardView("/packs"), "all-repacks");
+  assert.equal(resolveDashboardView("/watchlist"), null);
   assert.equal(resolveDashboardView("/learn"), null);
 });
 

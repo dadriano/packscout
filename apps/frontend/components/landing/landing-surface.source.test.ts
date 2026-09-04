@@ -105,6 +105,7 @@ test("nothing on the surface points a signed-out visitor at a gated route", () =
   for (const source of allLandingSources) {
     assert.equal(source.includes('"/learn'), false);
     assert.equal(source.includes('"/packs'), false);
+    assert.equal(source.includes('"/watchlist'), false);
   }
   // The only navigation target is the root, where the access decision lives.
   assert.match(presentationSource, /href: "\/"/);

@@ -258,7 +258,7 @@ the named automated check.
 | The landing page at the root: what PackScout is, that the beta is closed, one sign-in action, no catalog data, no email capture | `apps/frontend/components/landing/landing-surface.source.test.ts`, `apps/frontend/lib/landing-content.test.ts` |
 | The beta on/off boolean, anonymously | `convex/productUserAccess.test.ts` ("reports gate status to unauthenticated callers and nothing else") |
 | The frontend health probe (`/api/health`), liveness only | `apps/frontend/app/api/health/route.behavior.test.ts`; `apps/frontend/app/route-access-gate.source.test.ts` ("catalog search is guarded before its handler and the health probe stays open") |
-| The crawler policy (`/robots.txt`): allow the root, exclude `/access`, `/api/`, `/learn`, `/packs` while on or unknown | `apps/frontend/app/robots.behavior.test.ts`; `apps/frontend/lib/access-gate.server.test.ts` |
+| The crawler policy (`/robots.txt`): allow the root, exclude `/access`, `/api/`, `/learn`, `/packs`, `/watchlist` while on or unknown | `apps/frontend/app/robots.behavior.test.ts`; `apps/frontend/lib/access-gate.server.test.ts` |
 | Fixed-vocabulary acknowledgements from the telemetry intakes (write-only, same-origin-locked) | `apps/frontend/app/route-access-gate.source.test.ts` ("telemetry intake stays a write-only surface with fixed responses") |
 | Signed-in but unadmitted: their own access state and own verified identifiers on the holding surface, nothing about anyone else | `convex/publicCatalogReadAccess.test.ts` ("the authenticated self-reads stay reachable for a held identity"); `apps/frontend/lib/access-holding-content.test.ts` |
 
