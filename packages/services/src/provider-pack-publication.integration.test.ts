@@ -7,8 +7,8 @@ import {
   type PackInputCapture, type ProviderPrismaClient, type ProviderTransactionClient,
 } from "@packscout/database";
 import { createProviderHarness } from "@packscout/database/test-support";
-import { derivePublicPackSnapshotId, packBuildRequestSchema, packPublicationEnvelopeSchema, providerPackBuildInputsSchema, publicPackSummaryCore, normalizePackCatalogSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
-import { sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog";
+import { derivePublicPackSnapshotId, packBuildRequestSchema, packPublicationEnvelopeSchema, providerPackBuildInputsSchema, publicPackSummaryCore, packSearchText, type ActivePackHead, type SharedProviderChangeDelivery } from "@packscout/contracts";
+import { sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
 
@@ -292,9 +292,10 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       assert.equal((await client.pack_activation_intents.findUniqueOrThrow({ where: { id: sealed.intent.intentId } })).state, "blocked");
       assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: ids[0] } })).lease_work_id, null);
     });
-    await suite.test("admission and seal independently reject forged ready lifecycle metadata", async () => {
+    for (const field of ["title", "dataAsOf"] as const) await suite.test(`admission and seal independently reject forged ready lifecycle ${field}`, async () => {
       const fixture = fixtures[0]!;
-      const value = await evaluator.evaluate({ candidate: { ...fixture.inputs, title: "Changed metadata" }, evaluatedAt: new Date().toISOString() });
+      const value = await evaluator.evaluate({ candidate: { ...fixture.inputs,
+        [field]: field === "title" ? "Changed metadata" : "2026-09-03T18:01:00.000Z" }, evaluatedAt: new Date().toISOString() });
       value.inputs.snapshotKind = "lifecycle_only";
       value.inputs.lifecycleBaseline = fixture.built.snapshot;
       value.inputs.lifecycleProvenanceIdentity = "lifecycle:forged";
@@ -319,17 +320,17 @@ test("Provider-local planning and persistence crash matrix", async suite => {
       const claim = (await requests.claim(randomUUID(), 25)).find(item => item.publicRepackId === ids[0]);
       assert.ok(claim);
       const payload = structuredClone(fixture.built.snapshot.payload);
-      payload.snapshotKind = "lifecycle_only"; payload.title = value.inputs.title;
+      payload.snapshotKind = "lifecycle_only"; payload[field] = value.inputs[field];
       payload.lifecycleFreeze = { previousSnapshotId: fixture.built.snapshot.identity.publicPackSnapshotId,
         retainedEconomicsSha256: payload.economicsSha256, provenanceIdentity: "lifecycle:forged" };
       payload.summaryProjection = publicPackSummaryCore(payload);
-      payload.searchProjection.normalizedText = normalizePackCatalogSearchText([payload.title,
-        ...payload.contents.map(item => item.displayName), ...payload.searchProjection.aliases].join(" "));
+      payload.searchProjection.normalizedText = packSearchText(payload.title, payload.searchProjection.aliases);
       const { snapshot, descriptor, batches } = await sealFixturePack(payload);
       const before = await client.pack_snapshot_artifacts.count();
       await assert.rejects(snapshots.sealAndEnqueueActivation(claim, { snapshot, descriptor, batches }), { code: "PACK_INPUT_INVALID" });
       assert.equal(await client.pack_snapshot_artifacts.count(), before);
       assert.equal(await snapshots.findActivationForRequest(claim.workId), null);
+      await context.defer(claim, "superseded", "ACTIVATION_CONFLICT");
     });
     await suite.test("the greatest valid shared sequence is durably acknowledged and replayable", async () => {
       const delivery: SharedProviderChangeDelivery = { ...scope, centralChangeIdentity: "boundary:max-int64",

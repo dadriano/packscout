@@ -2,7 +2,7 @@ import {
   PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, providerPackBuildInputsSchema, publicPackSummaryCore,
   type ProviderPackBuildInputs, type PublicPackSnapshotPayload,
 } from "@packscout/contracts";
-import { createPackCatalogV1Fixture, sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog";
+import { createPackCatalogV1Fixture, sealFixturePack } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 
 export const publicationHash = (value: unknown) => hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, value);
 

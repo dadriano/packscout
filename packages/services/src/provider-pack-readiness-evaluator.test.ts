@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deriveProviderPackInputDigests, normalizePackCatalogSearchText, type ProviderPackBuildInputs } from "@packscout/contracts";
+import { deriveProviderPackInputDigests, packSearchText, type ProviderPackBuildInputs } from "@packscout/contracts";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
 
@@ -58,6 +58,7 @@ test("Provider-local planning and persistence crash matrix: deterministic readin
   });
   await context.test("lifecycle-only freezes metadata, profiles, aliases, policy and action definitions", async () => {
     const changes: Array<(value: ProviderPackBuildInputs) => void> = [
+      value => { value.dataAsOf = "2026-09-03T18:01:00.000Z"; },
       value => { value.title = "Changed"; }, value => { value.imageUrl = "https://example.com/changed.jpg"; },
       value => { value.category.label = "Changed"; }, value => { value.providerProfileSnapshotId = `ppfs_${"e".repeat(64)}`; },
       value => { value.contents[0]!.collectibleProfileSnapshotId = `ppfs_${"e".repeat(64)}`; },
@@ -80,21 +81,20 @@ test("Provider-local planning and persistence crash matrix: deterministic readin
       await assert.rejects(evaluate({ ...inputs, aliases }));
     }
   });
-  await context.test("complete search text must fit without dropping members or aliases", async () => {
-    for (const [lastAliasLength, outcome] of [[106, "ready"], [107, "blocked"]] as const) {
+  await context.test("P05 pack title and alias search stays bounded independently of full contents", async () => {
+    for (const [lastAliasLength, outcome] of [[115, "ready"], [116, "blocked"]] as const) {
       const candidate = structuredClone(inputs);
       candidate.title = "t".repeat(200);
       candidate.contents.forEach(row => { row.displayName = "m".repeat(200); });
-      candidate.aliases = ["a".repeat(104), "b".repeat(104), "c".repeat(104), "d".repeat(lastAliasLength)];
-      assert.equal(normalizePackCatalogSearchText([candidate.title, ...candidate.contents.map(row => row.displayName),
-        ...candidate.aliases].join(" ")).length, lastAliasLength === 106 ? 1_024 : 1_025);
+      candidate.aliases = [...["a", "b", "c", "d", "e", "f"].map(letter => letter.repeat(117)), "g".repeat(lastAliasLength)];
+      assert.equal(packSearchText(candidate.title, candidate.aliases).length, lastAliasLength === 115 ? 1_024 : 1_025);
       const result = await evaluate(candidate);
       assert.equal(result.readiness.outcome, outcome);
       assert.equal(result.readiness.reasonCode, outcome === "ready" ? null : "INVALID_DOMAIN_DATA");
     }
   });
-  await context.test("aggregate member search limits include the pack category", async () => {
-    for (const [count, longNames, outcome] of [[6, true, "blocked"], [99, false, "ready"], [100, false, "blocked"]] as const) {
+  await context.test("complete category projection stays bounded while member names remain independently searchable", async () => {
+    for (const [count, longNames, outcome] of [[6, true, "ready"], [99, false, "ready"], [100, false, "blocked"]] as const) {
       const candidate = structuredClone(inputs);
       candidate.title = "pack"; candidate.aliases = [];
       candidate.contents = Array.from({ length: count }, (_, index) => ({ ...structuredClone(inputs.contents[0]!),

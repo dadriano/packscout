@@ -45,12 +45,12 @@ export class ProviderPackBuildRequestRepository {
     packInvariant((readiness.outcome === decision.outcome || (readiness.outcome === "no_change" && decision.outcome === "ready")) &&
       readiness.reasonCode === decision.reasonCode, "PACK_INPUT_INVALID");
     return this.persist(tx, { publicRepackId: inputs.publicRepackId, digest: readiness.desiredStateSha256,
-      state: readiness.outcome, reasonCode: readiness.reasonCode, inputsJson: inputs,
+      state: decision.outcome, reasonCode: decision.reasonCode, inputsJson: inputs,
       request: async (head, id, sequence) => {
         const evidence = { providerId: inputs.providerId, publicRepackId: inputs.publicRepackId,
           packPublicationSequence: sequence, providerChangeIdentity: input.boundaryIdentity,
           sourceRevisionIdentity: inputs.sourceRevisionIdentity, sharedDependencies: inputs.expectedDependencies };
-        return readiness.outcome === "ready" ? packBuildRequestSchema.parse({
+        return decision.outcome === "ready" ? packBuildRequestSchema.parse({
           requestId: id, schemaVersion: PACK_CATALOG_V1, providerId: inputs.providerId, publicRepackId: inputs.publicRepackId,
           packPublicationSequence: sequence, desiredStateSha256: readiness.desiredStateSha256,
           contentsSha256: readiness.contentsSha256, probabilityInputsSha256: readiness.probabilityInputsSha256,
@@ -88,7 +88,12 @@ export class ProviderPackBuildRequestRepository {
       public_repack_id: publicRepackId, pack_publication_sequence: head.latest_sequence } }, include: { activation: { select: { state: true } } } });
     // A digest identifies desired bytes, not an eternal episode. A -> B -> A
     // needs a new sequence; neither superseded work nor its intent is reopened.
+    // A waiting marker is not an assembly command when readiness advances.
+    // Existing commands still coalesce through retry/blocked states, preserving attempt caps.
+    const sameReadiness = previous?.state === input.state && previous.reason_code === input.reasonCode;
+    const representedReady = input.state === "ready" && previous?.request_json != null;
     if (previous?.desired_state_sha256 === input.digest && previous.expected_publication_epoch === head.publication_epoch &&
+      (sameReadiness || representedReady) &&
       !["superseded", "rolled_back"].includes(previous.state) && !["superseded", "rolled_back"].includes(previous.activation?.state ?? "")) {
       return { publicRepackId, outcome: "no_change", sequence: previous.pack_publication_sequence.toString(), requestId: previous.id };
     }

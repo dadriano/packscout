@@ -10,6 +10,83 @@ import { createProviderHarness } from "@packscout/database/test-support";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { freshPublicationFixture, publicationHash } from "./provider-pack-publication.test-support.ts";
 
+test("Time-dependent readiness advances immutable episodes without resetting blocked attempts", async suite => {
+  const harness = await createProviderHarness();
+  try {
+    const client = harness.client;
+    const { provider_id: providerId } = await client.database_identity.findUniqueOrThrow({ where: { singleton_key: true } });
+    const context = new ProviderPackPublicationContext(client, { organizationId: randomUUID(), providerId });
+    await context.initialize();
+    const databaseNow = context.now.bind(context);
+    let clockOffset = 0;
+    context.now = async tx => new Date((await databaseNow(tx)).getTime() + clockOffset);
+    const requests = new ProviderPackBuildRequestRepository(context), evaluator = new ProviderPackReadinessEvaluator();
+    const prepare = async () => {
+      const id = randomUUID();
+      await client.$transaction(async tx => {
+        await tx.packs.create({ data: { id, pack_key: id, display_name: id, pack_format: "repack",
+          availability: "available", content_evidence: "complete", packscout_ev_model_version: "weighted-value",
+          packscout_ev_confidence_policy_version: "packscout-ev-policy", source_updated_at: new Date() } });
+        await appendPromotionRange(tx, [{ entityType: "pack", entityId: id, entityVersion: 1n, operation: "upsert" }]);
+      });
+      return freshPublicationFixture(providerId, id);
+    };
+    const enqueue = async (fixture: Awaited<ReturnType<typeof freshPublicationFixture>>, representedDigest?: string) => {
+      const evaluatedAt = await context.transaction(async tx => (await context.now(tx)).toISOString());
+      const value = await evaluator.evaluate({ candidate: fixture.inputs, evaluatedAt, representedDigest });
+      const work = await context.transaction(tx => requests.enqueueInTransaction(tx, { ...value, boundaryIdentity: randomUUID() }));
+      return { value, work };
+    };
+    for (const representedHint of [false, true]) await suite.test(`future EV becomes claimable with identical bytes; represented hint ${representedHint}`, async () => {
+      const fixture = await prepare(), id = fixture.inputs.publicRepackId;
+      clockOffset = -120_000; // Evidence is ahead of the database clock, without a wall-clock sleep.
+      const initial = await enqueue(fixture);
+      assert.equal(initial.value.readiness.outcome, "waiting");
+      const waiting = await client.pack_build_requests.findUniqueOrThrow({ where: { id: initial.work.requestId } });
+      assert.equal(waiting.request_json, null);
+      assert.equal((await enqueue(fixture)).work.outcome, "no_change");
+      assert.deepEqual(await requests.claim(randomUUID()), []);
+      clockOffset = 0;
+      const advanced = await enqueue(fixture, representedHint ? initial.value.readiness.desiredStateSha256 : undefined);
+      assert.equal(advanced.value.readiness.outcome, representedHint ? "no_change" : "ready");
+      assert.equal(advanced.work.outcome, "change");
+      assert.notEqual(advanced.work.requestId, initial.work.requestId);
+      assert.ok(BigInt(advanced.work.sequence) > BigInt(initial.work.sequence));
+      const ready = await client.pack_build_requests.findUniqueOrThrow({ where: { id: advanced.work.requestId } });
+      assert.equal(ready.state, "ready"); assert.ok(ready.request_json);
+      assert.equal(ready.desired_state_sha256, waiting.desired_state_sha256);
+      assert.deepEqual(ready.inputs_json, waiting.inputs_json);
+      assert.equal((await client.pack_build_requests.findUniqueOrThrow({ where: { id: waiting.id } })).state, "superseded");
+      assert.equal((await enqueue(fixture)).work.requestId, ready.id);
+      const [claim] = await requests.claim(randomUUID()); assert.equal(claim?.workId, ready.id);
+      assert.equal((await requests.load(claim!)).request.requestId, ready.id);
+      await client.pack_build_requests.update({ where: { id: ready.id }, data: { attempts: packPublicationLimits.maximumAttempts } });
+      await context.defer(claim!, "blocked", "OPERATION_EXPIRED");
+      assert.equal((await enqueue(fixture)).work.requestId, ready.id, "same inputs do not reset exhausted attempts");
+      assert.deepEqual(await requests.claim(randomUUID()), []);
+      assert.equal(await client.pack_build_requests.count({ where: { public_repack_id: id } }), 2);
+      assert.equal((await client.pack_build_requests.findUniqueOrThrow({ where: { id: ready.id } })).attempts, packPublicationLimits.maximumAttempts);
+      assert.equal((await client.pack_publication_heads.findUniqueOrThrow({ where: { public_repack_id: id } })).active_snapshot_id, null);
+    });
+    await suite.test("expired readiness records a waiting episode once and leaves other packs independent", async () => {
+      clockOffset = 0;
+      const fixture = await prepare(), initial = await enqueue(fixture);
+      assert.equal(initial.value.readiness.outcome, "ready");
+      clockOffset = 2 * 3_600_000;
+      const expired = await enqueue(fixture);
+      assert.equal(expired.value.readiness.outcome, "waiting"); assert.equal(expired.work.outcome, "change");
+      assert.equal((await enqueue(fixture)).work.outcome, "no_change");
+      const row = await client.pack_build_requests.findUniqueOrThrow({ where: { id: expired.work.requestId } });
+      assert.equal(row.request_json, null); assert.equal(row.reason_code, "EV_INPUTS_PENDING");
+      assert.equal((await client.pack_build_requests.findUniqueOrThrow({ where: { id: initial.work.requestId } })).state, "superseded");
+      clockOffset = 0;
+      const independent = await prepare(), next = await enqueue(independent);
+      const [claim] = await requests.claim(randomUUID()); assert.equal(claim?.workId, next.work.requestId);
+      await context.defer(claim!, "superseded", "ACTIVATION_CONFLICT");
+    });
+  } finally { await harness.close(); }
+});
+
 test("Persisted publication operations survive crashes and expire only with reconciliation evidence", async suite => {
   const harness = await createProviderHarness();
   try {

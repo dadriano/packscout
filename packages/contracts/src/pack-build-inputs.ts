@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, normalizePackCatalogSearchText, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
-import { publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicPackSnapshotSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue, packCatalogCanonicalJson, packCatalogSha256Schema, packCatalogTextSchema, packCatalogTimestampSchema, packCatalogUuidSchema } from "./pack-catalog-v1.ts";
+import { packSearchText, publicPackContentSchema, publicPackSearchProjectionSchema, publicPackSnapshotIdentitySchema, publicPackSnapshotPayloadSchema, publicPackSnapshotSchema, publicProfileSnapshotIdSchema, type PublicPackSnapshot } from "./pack-catalog-domain.ts";
 import { packBuildRequestSchema, packSnapshotEvidenceSchema, publicationReasonCodeSchema } from "./pack-publication.ts";
 
 const payload = publicPackSnapshotPayloadSchema.shape;
@@ -115,7 +115,7 @@ export async function deriveProviderPackReadinessDecision(inputs: ProviderPackBu
   if (inputs.contents.some(row => !publicPackContentSchema.safeParse(row).success)) return result("blocked", "INVALID_DOMAIN_DATA");
   // Complete projections must fit the public contract; never truncate captured members.
   if (!publicPackSearchProjectionSchema.safeParse({ publicRepackId: inputs.publicRepackId, aliases: inputs.aliases,
-    normalizedText: normalizePackCatalogSearchText([inputs.title, ...inputs.contents.map(row => row.displayName), ...inputs.aliases].join(" ")),
+    normalizedText: packSearchText(inputs.title, inputs.aliases),
     categoryIds: [...new Set([inputs.category.publicCategoryId, ...inputs.contents.map(row => row.category.publicCategoryId)])].sort(compareCanonicalStrings),
   }).success) return result("blocked", "INVALID_DOMAIN_DATA");
   // These identities become canonical-unique arrays in the sealed payload.
@@ -139,7 +139,7 @@ export async function deriveProviderPackReadinessDecision(inputs: ProviderPackBu
  * never the baseline's metadata, profiles, display or numeric economics. */
 export function preservesPackLifecycleBaseline(inputs: ProviderPackBuildInputs, previous: PublicPackSnapshot): boolean {
   const equal = (left: unknown, right: unknown) => packCatalogCanonicalJson(left) === packCatalogCanonicalJson(right);
-  const fields = ["providerId", "publicRepackId", "title", "imageUrl", "category", "price", "contents",
+  const fields = ["providerId", "publicRepackId", "dataAsOf", "title", "imageUrl", "category", "price", "contents",
     "providerProfileSnapshotId", "evMethodIdentity", "evPolicyIdentity", "evInputsSha256", "ev"] as const;
   const actionDefinitions = (actions: ProviderPackBuildInputs["actions"]) => actions.map(({ actionId, kind, label, url }) => ({ actionId, kind, label, url }));
   return inputs.lifecycleProvenanceIdentity !== null && fields.every(key => equal(inputs[key], previous.payload[key])) &&
