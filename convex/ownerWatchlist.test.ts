@@ -21,6 +21,7 @@ import {
   V3_REPACK_ID_B,
 } from "./dataReleaseV3Fixture.test-support";
 import { buildMockDataReleaseV2 } from "./mockDataReleaseFixture";
+import { MAX_DESIRED_CHASES_PER_COLLECTIBLE } from "./publicRepacksV3";
 import {
   activateRetentionRelease,
   stageRetentionRelease,
@@ -508,6 +509,75 @@ describe("owner watchlist read", () => {
       t.withIdentity(USER_A).action(api.savedItems.getOwnerWatchlist, {}),
       "SAVED_ITEMS_STATE_CONFLICT",
     );
+  });
+
+  test("marks a collectible with duplicate chase repack entries as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Chases").collect()).find(
+        (document) => document.publicCollectibleId === V3_COLLECTIBLE_ID,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 chase.");
+      }
+      await ctx.db.insert("dataReleaseV3Chases", {
+        releaseId: source.releaseId,
+        publicRepackId: source.publicRepackId,
+        publicCollectibleId: source.publicCollectibleId,
+        detail: source.detail,
+      });
+    });
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedCollectibles).toEqual([
+      {
+        publicCollectibleId: V3_COLLECTIBLE_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        collectible: null,
+      },
+    ]);
+  });
+
+  test("marks a collectible with too many chase rows as unavailable", async () => {
+    const t = createTest();
+    await seed(t);
+    const saver = createSaver(t);
+    await t.run(async (ctx) => {
+      const source = (await ctx.db.query("dataReleaseV3Chases").collect()).find(
+        (document) => document.publicCollectibleId === V3_COLLECTIBLE_ID,
+      );
+      if (source === undefined) {
+        throw new Error("Expected the seeded V3 chase.");
+      }
+      for (let index = 0; index < MAX_DESIRED_CHASES_PER_COLLECTIBLE; index += 1) {
+        const publicRepackId = boundedPublicId(index + 1);
+        await ctx.db.insert("dataReleaseV3Chases", {
+          releaseId: source.releaseId,
+          publicRepackId,
+          publicCollectibleId: V3_COLLECTIBLE_ID,
+          detail: buildV3Chase(publicRepackId),
+        });
+      }
+    });
+    await saver.collectibles(USER_A.tokenIdentifier, [V3_COLLECTIBLE_ID]);
+    const watchlist = await t
+      .withIdentity(USER_A)
+      .action(api.savedItems.getOwnerWatchlist, {});
+    expect(watchlist.savedCollectibles).toEqual([
+      {
+        publicCollectibleId: V3_COLLECTIBLE_ID,
+        savedAt: savedAt(1),
+        catalogStatus: "unavailable",
+        openable: false,
+        collectible: null,
+      },
+    ]);
   });
 
   test("refuses when the active V3 release fails the public catalog validation", async () => {

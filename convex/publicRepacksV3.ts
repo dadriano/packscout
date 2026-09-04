@@ -89,7 +89,7 @@ import {
  * heat state rather than borrowing a v2-aligned signal.
  */
 
-const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
+export const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
 
 type Success<T> = { readonly ok: true; readonly data: T };
 type PublicResult<T> = Success<T> | PublicReadError;
@@ -701,7 +701,7 @@ function collectibleDisplay(detail: PublicCollectible) {
   };
 }
 
-async function loadDesiredChases(
+export async function loadDesiredChases(
   ctx: QueryCtx,
   release: ActiveDataReleaseV3,
   publicCollectibleId: string,

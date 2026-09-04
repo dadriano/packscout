@@ -32,6 +32,7 @@ import {
 } from "./publicRepackValidation";
 import {
   loadActiveDataReleaseV3,
+  loadDesiredChases,
   type ActiveDataReleaseV3,
 } from "./publicRepacksV3";
 
@@ -364,7 +365,11 @@ async function findActiveCollectibleForWatchlist(
   ) {
     refuse("SAVED_ITEMS_STATE_CONFLICT");
   }
-  return match ?? null;
+  if (match === undefined) return null;
+  if ((await loadDesiredChases(ctx, catalog, publicCollectibleId)) === null) {
+    return null;
+  }
+  return match;
 }
 
 function newestSavedFirst<TRow>(
