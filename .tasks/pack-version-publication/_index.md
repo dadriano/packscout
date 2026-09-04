@@ -2,7 +2,7 @@
 
 ## Start Here
 
-All 56 P02 boundary checks pass, including complete captured-input authority across evaluation and admission awaits. PR96's dashboard response-fixture correction passes the entire tooling suite and both builds, and is pushed for fresh CI. P02's full gate is being repeated on that exact parent. Merge order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
+All 60 P02 boundary checks pass, including complete captured-input authority and durable blocking of duplicate public identities. PR96's dashboard response-fixture correction passes the entire tooling suite and both builds locally; its CI is retrying an npm audit failure before code checks. P02's full gate is being repeated on that exact parent. Merge order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -151,7 +151,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Current parent:** `744bed7e124bce9ae36cd56a93bf70590a82d778` (PR96 regression/evidence/readback-fixture corrections on main `48627008`, including PR97/99/100/101).
 - **Verified implementation:** Prior `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the full framework gate on parent `ca375cc4960e90ba1e6e316e073be5bffda000ee`. Newer corrections and the refreshed parent require a fresh full gate; this is not current-head approval.
 - **Delivery gate:** Both PRs remain unmerged. Require current-head green gates, merge PR96, then restack/retarget only P02-owned commits onto main before merging PR95.
-- **Current correction evidence:** All 56 contract/readiness/persistence checks pass, including trusted lifecycle baselines, full captured-input preservation across evaluation/awaits, captured profile prerequisites, and 10,000 multibyte dependencies through shared progress, paged acknowledgment, request/intent/operation replay. Current-parent full verification remains pending; no gate was weakened.
+- **Current correction evidence:** All 60 contract/readiness/persistence checks pass, including trusted lifecycle baselines, full captured-input preservation across evaluation/awaits, unique public identities, captured profile prerequisites, and 10,000 multibyte dependencies through shared progress, paged acknowledgment, request/intent/operation replay. Current-parent full verification remains pending; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 

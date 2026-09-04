@@ -25,6 +25,10 @@ test("Provider-local planning and persistence crash matrix: deterministic readin
     ["stale dependency waits", value => { value.expectedDependencies = [{ kind: "valuation", identity: value.contents[0]!.publicCollectibleId, contentSha256: "f".repeat(64) }]; }, "waiting", "EV_INPUTS_PENDING"],
     ["missing lifecycle baseline waits", value => { value.snapshotKind = "lifecycle_only"; }, "waiting", "INCOMPLETE_CONTENTS"],
     ["action eligibility is sealed", value => { value.actions[0]!.enabled = false; value.actions[0]!.disabledReason = "PACK_UNAVAILABLE"; }, "blocked", "INVALID_DOMAIN_DATA"],
+    ["duplicate action identities block", value => { value.actions = [value.actions[0]!, { ...value.actions[0]! }]; }, "blocked", "INVALID_DOMAIN_DATA"],
+    ["duplicate member profile identities block", value => { value.contents[1]!.collectibleProfileSnapshotId = value.contents[0]!.collectibleProfileSnapshotId; }, "blocked", "INVALID_DOMAIN_DATA"],
+    ["duplicate eligible valuation identities block", value => { value.contents[1]!.eligibleForChase = true;
+      value.contents[1]!.valuation.valuationIdentity = value.contents[0]!.valuation.valuationIdentity; }, "blocked", "INVALID_DOMAIN_DATA"],
   ];
   for (const [name, mutate, outcome, reasonCode] of cases) await context.test(name, async () => {
     const candidate = structuredClone(inputs); mutate(candidate);

@@ -122,6 +122,12 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
+### Captured identity uniqueness review — 2026-09-03
+
+Discussion `3930246165` identified duplicate action IDs that readiness accepted but the sealed public contract rejected. Readiness now blocks duplicate action IDs, member profile snapshot IDs, and eligible valuation identities with `INVALID_DOMAIN_DATA`, matching the canonical-unique arrays in the public payload. Invalid captures remain durable blocked evidence with no build request JSON and cannot be claimed. Derived search projection and final document-size validation remain assembler responsibilities.
+
+All three new readiness cases first reproduced incorrect ready outcomes. After correction, the combined contract/readiness/PostgreSQL matrix passes 60 tests with zero skips, including a native pack update and ledger delivery that persist duplicate-action captures only as blocked work. Service lint/typechecks, docs, and the zero-finding standards ratchet pass. Full current-head verification is still required; the previous run was stopped before these edits. PR96 CI attempt one on `744bed7e` failed at npm audit without vulnerability details before any code checks; the unchanged gate is being retried.
+
 ### Complete captured-input authority review — 2026-09-03
 
 Discussion `3930154949` broadened the identity-only callback guard to the complete capture. `normalizeProviderPackBuildInputs` now defines the shared schema, ordering, and stored-baseline normalization for readiness and planning. Planning records the canonical normalized bytes before evaluation, rejects any other returned data, and passes a private copy of those preserved bytes into admission. Callback-owned objects cannot change queued data during later database awaits.

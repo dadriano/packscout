@@ -139,5 +139,24 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.deepEqual((await outbox.readOperation(activation, operation.operationId))?.operation, operation);
       assert.equal(await client.pack_publication_operations.count(), 1);
     });
+    await suite.test("duplicate action identities become durable blocked work, never claimable builds", async () => {
+      await client.$transaction(async tx => {
+        const changed = await Promise.all(ids.map(id => tx.packs.update({ where: { id }, data: { display_name: `${id}:changed`, row_version: { increment: 1 } },
+          select: { id: true, row_version: true } })));
+        await appendPromotionRange(tx, changed.map(row => ({ entityType: "pack" as const,
+          entityId: row.id, entityVersion: row.row_version, operation: "upsert" as const })));
+      });
+      const planner = new ProviderPackImpactRepository(context, { ...capture, async capture(tx, input) {
+        const candidate = await capture.capture(tx, input);
+        candidate.actions = [candidate.actions[0]!, { ...candidate.actions[0]! }];
+        return candidate;
+      } });
+      const planned = await planner.plan({ kind: "provider" });
+      assert.equal(planned?.complete, true);
+      const rows = await client.pack_build_requests.findMany({ where: { id: { in: planned!.outcomes.map(row => row.requestId) } } });
+      assert.equal(rows.length, 2);
+      assert.ok(rows.every(row => row.state === "blocked" && row.reason_code === "INVALID_DOMAIN_DATA" && row.request_json === null));
+      assert.deepEqual(await requests.claim(randomUUID()), []);
+    });
   } finally { await harness.close(); }
 });

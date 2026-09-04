@@ -44,6 +44,13 @@ export class ProviderPackReadinessEvaluator {
       return result("waiting", "PROFILE_HEAD_MISSING");
     }
     if (inputs.contents.some(row => !publicPackContentSchema.safeParse(row).success)) return result("blocked", "INVALID_DOMAIN_DATA");
+    // These identities become canonical-unique arrays in the sealed payload.
+    const profileIds = inputs.contents.map(row => row.collectibleProfileSnapshotId);
+    const valuationIds = inputs.contents.filter(row => row.eligibleForChase).map(row => row.valuation.valuationIdentity);
+    if (new Set(inputs.actions.map(action => action.actionId)).size !== inputs.actions.length ||
+      new Set(profileIds).size !== profileIds.length || new Set(valuationIds).size !== valuationIds.length) {
+      return result("blocked", "INVALID_DOMAIN_DATA");
+    }
     const actionable = inputs.lifecycle.availability === "available" && inputs.lifecycle.retirement === "active";
     const disabledReason = inputs.lifecycle.retirement === "retired" ? "PACK_RETIRED" : actionable ? null : "PACK_UNAVAILABLE";
     if (inputs.actions.some(action => action.enabled !== actionable || action.disabledReason !== disabledReason) ||
