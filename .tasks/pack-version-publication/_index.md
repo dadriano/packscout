@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 is merged after its full CI gate passed. P02-only commits are now based on main and require fresh full local/PR certification before PR95 merges. The correction matrix passes 78 boundary checks and 30 schema checks; P03 remains a separate local implementation. No publication processor is enabled.
+PR96 is merged. P02 review corrections pass 82 boundary checks and 30 schema checks, but the full gate is blocked by merged PR103's Watchlist EV inventory mismatch. Correct that upstream finding without an exemption, then re-run the full gate and merge PR95. P03 remains a separate local implementation; no publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -116,7 +116,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | on PR96 frontend prerequisite | Provider-local crash and isolation matrix | building |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR96 merged | Provider-local crash and isolation matrix | blocked |
 | P03 | Deterministic complete pack snapshot assembly | 003 | P01 | sibling from P01 | Complete deterministic assembly | planned |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | in review |
@@ -149,9 +149,9 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
 - **Current parent:** `1e79ff9ca961b569ca4b191e617b60dc315cc390` (main with PR96 and independently merged PR103/104).
-- **Verified implementation:** Prior `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the full framework gate on parent `ca375cc4960e90ba1e6e316e073be5bffda000ee`. Newer corrections and the refreshed parent require a fresh full gate; this is not current-head approval.
-- **Delivery gate:** PR96 is merged. Require current-head full local and main-targeted CI gates before merging PR95; P03 stays separate.
-- **Current correction evidence:** All 78 contract/readiness/persistence checks and 30 schema checks pass, including independently derived readiness, full capture preservation, public identities, profile prerequisites, recurring desired states, authoritative head reconciliation, and 10,000 multibyte dependencies through shared progress, acknowledgment, and operation replay. Current-parent full verification remains pending; no gate was weakened.
+- **Implementation checkpoint:** `cd470095b28b6306c8dc64a3a18624e6ce4c4659`, with focused and static checks passed. Historical `f699d11b` passed a full gate before later corrections; it does not certify the current head.
+- **Delivery gate:** PR96 is merged. PR95 CI `33830594805` and the isolated local guard fail because PR103 introduced uninventoried EV tokens in `convex/savedItems.ts`. Resolve that upstream finding and require current-head full gates before merging PR95; P03 stays separate.
+- **Current correction evidence:** All 82 contract/readiness/persistence checks and 30 schema checks pass, including complete capture/readiness authority, full shared evidence, recurring desired states, reconciliation below newer work, per-pack independence, queued EV expiry, and safe unused-intent replacement. Affected lint/typechecks and the zero-finding standards ratchet pass; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -251,7 +251,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
-| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | in_progress | 001 |
+| 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | blocked | 001 |
 | 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | todo | 001 |
 | 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
@@ -301,4 +301,4 @@ P02–P05 may merge in any order after P01. P06 branches from updated default af
 
 ## Next Action
 
-Build P03 against P02's captured-input contract in a separate child PR. Merge order starts PR96 then PR95; publication stays disabled until P06 and launch authorization.
+Resolve the upstream Watchlist gate, reverify and merge PR95, then certify/publish the existing separate P03 implementation against its final parent. PR96 is already merged; publication stays disabled until P06 and launch authorization.

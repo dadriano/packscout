@@ -6,7 +6,7 @@
 **Delivery phase:** P02
 **Estimated scope:** medium
 **Estimated effort:** 2–3 days for one builder after P01, including provider-schema, planning, readiness, isolation, and crash-boundary verification
-**Status:** in_progress
+**Status:** blocked
 
 ## Start Here
 
@@ -122,113 +122,53 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ## Implementation and Spec Compliance
 
-### Prerequisite merged; main-based certification — 2026-09-03
+### Current delivery status
 
-PR96's unchanged full CI gate passed on `744bed7e124bce9ae36cd56a93bf70590a82d778` (run `33827531502`, retry two). PR96 merged at `1e79ff9ca961b569ca4b191e617b60dc315cc390`. P02-only commits are now restacked onto that main commit, including independently merged PR103/104, without changing their phase diff. Current implementation checkpoint is `205a1e251420f87b1cac4058669f1cc5751ae74b`; full local and main-targeted PR certification remain required before PR95 merges. The stack no longer depends on an open prerequisite PR. No publication processor is activated.
+PR96 merged at `1e79ff9ca961b569ca4b191e617b60dc315cc390` after its complete CI gate passed on `744bed7e` (run `33827531502`, retry two). PR95 now targets that main base, including independently merged PR103/104. The latest recovery implementation checkpoint is `cd470095b28b6306c8dc64a3a18624e6ce4c4659`; P03 remains a separate local branch.
 
-### Episode recurrence and receipt reconciliation review — 2026-09-03
+Full certification is blocked by the merged PR103 Watchlist change: the EV cutover guard reports `convex/savedItems.ts (estimatedEv, EstimatedEv)` missing from its inventory. PR95 CI run `33830594805` and the isolated local inventory test reproduce that exact failure. P02 changes neither that Convex file nor the inventory. Correct the upstream mismatch without exempting or baselining the finding, then repeat the unchanged full gate before merging PR95. No publication processor or ingestion cutover is enabled.
 
-Discussions `3930353110` and `3930353122` corrected episode identity and authoritative-head reconciliation. Coalescing now checks only the current latest request and compatible non-superseded episode; historical matching bytes can allocate a new sequence. The unmerged V1 migration no longer globally uniquifies a desired digest/epoch across all history. Existing pack/sequence uniqueness and head locking serialize allocation, and terminal rows remain immutable.
+### Implemented invariants and review corrections
 
-Head observation preserves the exact intent matching the authoritative snapshot, accepted sequence, and epoch so a remote success with a lost local receipt can be reclaimed and completed. Conflicting episodes are still retired. Red/green tests cover A→B→A, current duplicate coalescing, replacement of a superseded latest episode, and remote success followed by observation before receipt persistence; exactly one operation is retained and completed. All 78 combined boundary checks and 30 schema checks pass, plus affected lint/typechecks, docs, and the zero-finding ratchet. Full current-head verification remains pending.
+- Native and shared impact expansion uses transaction-local membership, bounded keyset pages, hash-chained receipts, and acknowledgment only after every affected pack has durable work or an exact current no-op.
+- Captured bytes are schema-normalized and preserved before evaluator callbacks. Admission compares the complete capture and persists a private copy, including across later database awaits.
+- Admission independently derives every input digest, the exact sorted profile prerequisite set, and readiness outcome/reason from preserved bytes and database time. The pure V1 decision rules are shared with the service evaluator; no database-to-service dependency or duplicated rule set is introduced.
+- Native shared identities use UUIDs; shared delivery sequences fit signed PostgreSQL bigint. Public action/member-profile/eligible-valuation identities are unique; aliases follow public bounds. Invalid captures remain unclaimable.
+- Canonical captures retain the 16,000,000-byte limit. Shared progress, requests, intents, and operations allow 18,000,000 JSONB bytes for formatting headroom. Full 10,000-item multibyte dependency evidence survives paging and exact replay.
+- Lifecycle-only requests pin the stored active artifact and preserve complete metadata, contents, profiles, display, and economics. Admission and sealing independently reject forged lifecycle metadata. Sealing recomputes the full economics tuple before persistence.
+- Coalescing applies only to the latest compatible episode. A→B→A and replacement of superseded work allocate new sequences without reopening terminal rows. The unapplied V1 migration no longer globally uniquifies desired digests across history.
+- `accepted_sequence` is distinct from the newest desired sequence. Exact accepted or explicitly ambiguous operation-bearing episodes remain reconcilable below a newer desired sequence, including retry/waiting states. Reconciliation precedes new work for that pack while unrelated packs continue. Conflicting epochs/heads retire incompatible work and fence owners.
+- Sealing rechecks readiness at database time. Queued EV expiry durably becomes `waiting / EV_INPUTS_PENDING`, releases its lease, and produces no artifact or intent.
+- An expired intent with no persisted operation is retired and, only when still the latest desired work, creates a fresh request from preserved inputs. Still-valid evidence can reuse the artifact under a new intent; expired evidence waits for fresh inputs. Existing operation-bearing episodes remain available for receipt reconciliation, and older expiry never replaces newer desired work.
+- Scoped foreign keys, immutable operation/receipt evidence, fenced claims, bounded attempts, and explicit local runtime grants preserve provider/organization isolation. No transport, scheduler, or public activation is added.
 
-### Independently verified readiness admission — 2026-09-03
+The latest recovery cases address discussions `3930457571`, `3930457576`, and `3930457580`. Earlier capture, readiness, recurrence, and reconciliation corrections remain covered by the combined regression matrix and their GitHub review replies. Detailed chronological checkpoints remain in Git history rather than repeated stale status notes here.
 
-Discussion `3930330107` showed that correct hashes and unchanged captured bytes did not establish a correct evaluator verdict. Pure `deriveProviderPackReadinessDecision` rules now live alongside the V1 capture contract and are shared by the service evaluator and independently executed during database admission using database time. Admission compares both outcome and reason, and checks any lifecycle baseline against the stored active artifact. This avoids a database-to-service dependency or a duplicated rule set. `no_change` still requires a ready decision and an existing represented request in persistence.
+### Intentional adaptations and later owners
 
-The injected false-ready regression first reproduced acceptance. All 76 combined boundary tests pass, including mismatched dependencies, incomplete contents, pending/technical/invalid EV, duplicate actions, and a forged reason with unchanged hashes. The lifecycle corruption test now proves admission refusal and separately seeds a corrupt test row to retain independent seal refusal; no database constraint is disabled. Contract/database/service lint and typechecks, docs, and the zero-finding ratchet pass. Full current-head verification remains required.
+Related guidance reviewed: feature `tech-001` through `tech-005`, with P02 implementation centered on `tech-002`.
 
-### Authoritative head invalidation review — 2026-09-03
-
-Discussion `3930246171` identified that clearing a lease alone allowed an obsolete publishing activation to be claimed again. An authenticated changed head now atomically supersedes nonterminal activation episodes with `ACTIVATION_CONFLICT`, preserves their immutable evidence and terminal history, and fences owners. Build requests are retired only when their expected epoch or pinned lifecycle baseline is incompatible; same-epoch full builds and lifecycle builds with an unchanged baseline remain usable, including work prepared while held for resume.
-
-The regression matrix covers ready, publishing, and retry-scheduled work across unheld generation and epoch changes, repeated authoritative observations, stale-owner refusal, lifecycle baseline changes, and retention of published history. The focused head matrix reproduced stale eligible work before the fix. All 75 combined contract/readiness/PostgreSQL checks now pass with zero skips, along with affected database/service lint and typechecks, docs, and the zero-finding standards ratchet. The prior full run was stopped before editing; a complete fresh gate remains required. No transport, worker, or public-head activation was added.
-
-### Captured identity uniqueness review — 2026-09-03
-
-Discussion `3930246165` identified duplicate action IDs that readiness accepted but the sealed public contract rejected. Readiness now blocks duplicate action IDs, member profile snapshot IDs, and eligible valuation identities with `INVALID_DOMAIN_DATA`, matching the canonical-unique arrays in the public payload. Invalid captures remain durable blocked evidence with no build request JSON and cannot be claimed. Derived search projection and final document-size validation remain assembler responsibilities.
-
-All three new readiness cases first reproduced incorrect ready outcomes. After correction, the combined contract/readiness/PostgreSQL matrix passes 60 tests with zero skips, including a native pack update and ledger delivery that persist duplicate-action captures only as blocked work. Service lint/typechecks, docs, and the zero-finding standards ratchet pass. Full current-head verification is still required; the previous run was stopped before these edits. PR96 CI attempt one on `744bed7e` failed at npm audit without vulnerability details before any code checks; the unchanged gate is being retried.
-
-### Complete captured-input authority review — 2026-09-03
-
-Discussion `3930154949` broadened the identity-only callback guard to the complete capture. `normalizeProviderPackBuildInputs` now defines the shared schema, ordering, and stored-baseline normalization for readiness and planning. Planning records the canonical normalized bytes before evaluation, rejects any other returned data, and passes a private copy of those preserved bytes into admission. Callback-owned objects cannot change queued data during later database awaits.
-
-Red/green regressions cover title, price, member display, profile, and EV substitution even with matching newly derived evidence, plus delayed mutation during admission. Legitimate reordered inputs, lifecycle baselines, and full shared-delivery paging still succeed. The combined suite passes 56 checks with zero skips; affected contract/database/service lint and typechecks, documentation checks, and the zero-finding standards ratchet pass. Current full verification remains pending; PR96's latest CI reached tooling and exposed a PR101 dashboard response-fixture omission that is being fixed in its owning prerequisite.
-
-The prerequisite fixture correction is now pushed in PR96 `744bed7e124bce9ae36cd56a93bf70590a82d778`. All eight readback cases, the complete tooling suite (1,442 passes plus three embedded checks; nine existing skips), and both production builds pass locally. The public parser and production recovery safeguards are unchanged. P02 inherits this exact parent and must pass its fresh full gate before merge.
-
-### Profile prerequisite admission review — 2026-09-03
-
-Discussion `3930112517` showed that declared profile prerequisites needed the same captured-input binding as digests. `deriveProviderPackProfilePrerequisites` is now shared by readiness and durable admission. Admission validates the exact deduplicated, sorted provider/member profile IDs before allocation and builds the request from that derived set. The regression first failed and now refuses unrelated, empty, missing, and extra prerequisites with no request/head writes. The combined focused suite passes 55 checks, zero skipped. No profile publisher, activation behavior, or second contract is added.
-
-The normal-settings full verifier passed audit again, then was stopped before edits to incorporate this newly reported invariant on a stable checkout. Current-head full verification must run again; no incomplete run is reported as a pass.
-
-### Captured authority and evidence capacity review — 2026-09-03
-
-Discussions `3929985053`, `3929985060`, `3929985062`, and `3929985065` exposed boundary cases in lifecycle admission, evaluated identities, and JSONB evidence capacity. The new real-PostgreSQL boundary suite first failed all three scenarios. Lifecycle readiness now pins only the stored active artifact supplied as `previousSnapshot`; a caller-supplied baseline with no active artifact remains `waiting` and unclaimable. Impact planning isolates delivered dependency evidence from callback mutation and rechecks evaluated provider, pack, source revision, and dependencies against the original boundary before enqueueing or checkpointing.
-
-Shared progress, request, intent, and operation JSONB bounds now use the same bounded 18,000,000-byte storage allowance as captured inputs (16,000,000-byte canonical admission plus JSONB formatting headroom). This preserves the existing 10,000-dependency contract rather than rejecting valid evidence later in persistence. The regression carries 10,000 maximum-length multibyte named dependencies through shared delivery, paged planning, acknowledgment, admission, sealing, outbox recording, and exact replay; no public-store call or processor is enabled.
-
-The preceding implementation `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the complete unchanged `npm run verify:framework`, including npm audit, the 5,000-record database maximum, every test lane, and both production builds. That result supersedes the historical audit/volume failures below, but does not certify these newer corrections or the refreshed main parent. Current task status remains `in_progress` until their full gate passes.
-
-The new combined contract/readiness/PostgreSQL regressions pass 54 checks with zero skips, including maximum-length multibyte dependency evidence. Database/service lint and typechecks, the zero-finding standards ratchet, and documentation checks pass. Current full-gate verification is being repeated after the parent refresh.
-
-Follow-up `3930060753` identified the remaining 4 MB shared-progress column limit. Extending the regression to start at shared delivery reproduced its failure before page processing. The corrected progress allowance matches the bounded evidence records; dependency membership validation now uses linear-time maps at capture and evaluation boundaries. Descriptor, batch, and receipt bounds remain unchanged: those contracts carry bounded manifests/records/results, not the full dependency vector. The refreshed-parent full verifier passed the database maximum but found a PR101-renamed overview test still referenced by the existing launch evidence manifest; that prerequisite correction belongs to PR96. That failed run was stopped before edits, and must be repeated on the corrected parent.
-
-### Additional review corrections — 2026-09-03
-
-Discussions `3929802770`, `3929802774`, and `3929904797` are covered by red/green regressions. UUID-resolved shared category/collectible/valuation identities now use the native UUID contract (including lowercase normalization), while named policy/profile dependencies retain their text identity. The shared-delivery sequence alone is constrained to positive signed-64-bit range, matching the provider persistence columns; the general V1 sequence grammar is unchanged. Malformed values return validation failures rather than conversion exceptions. Planning converts these refusals to `PACK_INPUT_INVALID` before transaction/progress writes.
-
-`deriveProviderPackInputDigests` is the one pure V1 definition used by readiness and durable admission. Admission recomputes desired-state, contents, probability, valuation, and EV-input hashes from the captured bytes before allocating a request, instead of trusting a caller's declared evidence. This does not calculate EV or change canonical snapshot bytes. Tests refuse each forged digest with no head/request writes and prove that the maximum valid shared sequence is acknowledged and replayable.
-
-The combined P01 contract, shared-boundary, readiness, and PostgreSQL matrix passes 50 checks with zero skips; affected contract/database/service lint and typechecks plus the standards ratchet pass. The audit endpoint subsequently responded successfully and a fresh full `npm run verify:framework` is in progress. Task completion and merge approval are still pending that full result and current PR96 CI. The older blocker/evidence records below remain historical, not current approval.
-
-### Historical merge blocker — 2026-09-03
-
-The economics-digest correction is committed and pushed in `2ab594fef399495793cba9bb7127b98ef593c8a3` and its review thread has a fix reply. All 33 focused checks, database/service lint and typechecks, docs, and the zero-finding standards ratchet pass on parent `5198bd4ad7b79bf61a383b7bf159cb30dca638be`. No new automated review findings were reported for that correction.
-
-The unchanged `npm run verify:framework` was attempted locally and failed at npm audit. Parent PR96's [current-head CI run](https://github.com/dadriano/packscout/actions/runs/33820664988) independently failed at the same audit step (exit 2) before tests. Supplemental local verification passed the static and Prisma checks, all workspace lint/typechecks, and the ordinary database lane, then the existing exact-5,000-record test exceeded its 30-second transaction limit. An isolated rerun also timed out at about 32 seconds. No timeout, baseline, audit exception, or verifier was weakened. Neither PR96 nor PR95 is merged; no publication processor or production operation was enabled.
-
-Resume by obtaining a green unchanged full gate, including the maximum-volume database test, then merge PR96. Restack only P02-owned commits onto the resulting main, retarget PR95 to main, reverify, and merge only when its current gate is green. Preserve the separately implemented P03 worktree; it must inherit the final parent and pass its own gate before publication.
-
-PR98 also left the existing card source guard asserting superseded metric bindings. PR96 corrects that guard in `ca375cc4960e90ba1e6e316e073be5bffda000ee`, asserting all four gross/net dollar/percent metrics; all 527 frontend tests and frontend lint pass on that parent. This is test-only, with no UI or EV calculation change. P02 inherits it rather than duplicating the correction.
-
-Review follow-up (2026-09-03): PR95 discussion `3929197632` identified that the seal boundary compared declared economics hashes but did not recompute the canonical economics tuple. The new regression first failed with `Missing expected rejection`, despite passing the complete publication-envelope validator. The seal now recomputes the V1 tuple (price, full records, probability/valuation/EV-input digests, chase, and EV) before any writes. All 33 readiness/persistence checks pass, including zero artifact/batch/intent/operation/receipt writes, an unchanged inactive head, and a reusable lease after rejection. Prior full-gate evidence below is historical; current delivery remains pending restacking and current-head verification.
-
-Review corrections (2026-09-03): lifecycle-only admission and seal now share a complete baseline-preservation rule, captured aliases use the public 120-character/unique constraint, and shared boundary keys hash the full external identity before adding their namespace. The focused matrix passes 32 checks, including direct seal refusal of forged lifecycle metadata and replay of a 200-character shared identity. `npm run verify:framework` passed in full on implementation `994ea17cf91e8248c98da6921cd7e6debe0845ea`, with direct parent `90097845ba0b3078e24ff22e7317a2846c9ea452` (PR96). The earlier upstream lint blocker below is resolved on this stack; no check was weakened.
-
-P02 implements provider-local persistence and deterministic readiness only. It adds no scheduler, worker registration, public-store client, deployment command, compatibility adapter, or alternate catalog version. P03 assembles snapshots; P04 produces profile/shared dependencies; P06 binds transaction-local input readers and authenticated public-store transport to these repositories.
-
-Intentional adaptations to `tech-002`, grounded in merged main:
-
-- Separate provider clients, the bounded gateway, and immutable database identity already exist. No PR66 code needs to be ported again.
-- Native canonical writes already have a database-enforced transactional `promotion_changes` ledger. The planner consumes that durable ledger and owns a separate publication checkpoint, rather than adding hooks to the superseded ingestion repository. Canonical source progress is protected by the existing ledger transaction; publication progress moves only after every affected pack has a durable request or exact no-op. There is no notification dependency or second EV queue.
-- `PackInputCapture` is an explicit transaction-bound composition port. P02 persists its complete allowlisted bytes before assembly, validates scope/source/dependency identities, and never performs lazy reads during sealing. P06 must bind the native and P04 readers through the supplied transaction, without network calls or EV recalculation. The port is deliberately not backed by a provider-wide release adapter.
-- Missing prerequisites remain sequenced `waiting`/`blocked` desired-state rows, with no claimable assembly command until complete inputs exist. Invalid input captures retain only a bounded native identity/reason marker, never rejected payloads. Later observations allocate new immutable requests.
-- Large impact boundaries persist keyset page progress and hash-chained page receipts. A result with `complete: false` has no acknowledgment digest; callers resume the same boundary. P04 delivers shared shards in increasing provider sequence, retries the same identity after lost responses, and never acknowledges an incomplete result. Each cycle bounds affected packs and total captured input bytes.
-- Coalescing includes the publication epoch. A hold/resume can prepare a fresh request and activation intent for identical bytes under a new epoch, without reopening terminal work. Source identities include the immutable change-boundary digest so a later return to earlier content still gets a new activation episode.
-- The one per-pack build/activation lease uses a deferred, scoped SQL reference guard for its polymorphic target. Organization/provider authority is bound once against `database_identity`; all downstream records use composite scoped foreign keys. Public head reads remain authoritative; the local head is only a scheduling mirror.
-- Polling durable state is sufficient; no wake table or notification processor is added while this phase is dormant.
+- Separate provider clients, the bounded gateway, and immutable database identity already exist; no PR66 adapter needs to be ported.
+- The existing transactional `promotion_changes` ledger protects canonical source progress. Publication owns a separate checkpoint and moves it only after durable outcomes; no notification dependency or second EV queue is added.
+- `PackInputCapture` is a transaction-bound composition port. P06 binds native/P04 readers through its supplied transaction, without network calls, EV recalculation, or lazy sealing reads.
+- Missing prerequisites retain sequenced waiting/blocked evidence without a claimable assembly command. Protected or malformed captures retain only bounded identity/reason markers, not rejected payloads.
+- P04 delivers shared shards in increasing provider sequence, resumes `complete: false` pages, and retries exact identities after lost responses. Incomplete boundaries have no acknowledgment digest.
+- Coalescing includes publication epoch, so hold/resume can prepare a new episode for identical bytes. Native change-boundary identities also distinguish source observations.
+- The per-pack build/activation lease uses a deferred scoped SQL reference guard. Public head reads are authoritative; the local head remains only a scheduling/reconciliation mirror.
+- Polling durable state is sufficient; no wake table or notification processor is introduced while dormant.
+- P03 owns pure assembly, P04 owns shared/profile production, and P06 owns authenticated transport, worker scheduling, operation-status reconciliation, and cumulative runtime activation.
 
 ### Automated evidence
 
 | Acceptance area | Evidence |
 |---|---|
-| Complete/missing/invalid inputs, EV unavailable/technical/expired/mismatched, lifecycle baseline/freeze, exact no-change, protected fields | `packages/services/src/provider-pack-readiness-evaluator.test.ts` |
-| Exact direct/shared membership, non-top valuation dependency, aliases, contents/odds/snapshot ownership, irrelevant pulls/profile-only changes | `packages/services/src/provider-pack-publication.integration.test.ts` |
-| Enqueue/checkpoint/seal/batch/intent/receipt/complete crash boundaries; immutable replay; artifact reuse; independent claims and providers; simulated unavailability | Same PostgreSQL integration suite |
-| 251-pack paged expansion, poison isolation, scope/source mismatches, stale shared delivery, expired lease, hold/epoch fencing and bounded retries | Same PostgreSQL integration suite |
-| Exact role inventory, scoped local references, immutable episode and progress guards | `packages/database/prisma/distributed-schema-contract.test.ts` plus real migrated provider databases |
+| Complete/missing/invalid inputs, explicit EV unavailability, pending/technical/expired EV, lifecycle freeze, protected fields | `packages/services/src/provider-pack-readiness-evaluator.test.ts` |
+| Direct/shared membership, crash boundaries, atomic sealing, immutable replay, independent providers, 251-pack paging, lease and hold/epoch fencing | `packages/services/src/provider-pack-publication.integration.test.ts` |
+| Captured authority, false-ready refusal, maximum shared evidence, duplicate IDs, A→B→A, accepted/ambiguous receipt recovery below newer work, EV and unused-intent expiry | `packages/services/src/provider-pack-publication-boundaries.integration.test.ts` |
+| Role inventory, scoped references, immutable episodes, migration/schema consistency | `packages/database/prisma/distributed-schema-contract.test.ts` and migrated provider databases |
 
-### Verification result — 2026-09-03
+On the latest recovery implementation, all **82** combined contract/readiness/PostgreSQL checks and **30** schema checks pass, with zero skips. Provider schema generation/validation, affected contract/database/service lint and typechecks, documentation checks, and the zero-finding standards ratchet pass. The time-controlled expiry tests preserve database constraints; the lifecycle corruption fixture deliberately bypasses repository admission to retain an independent seal refusal test.
 
-`npm run verify:framework` passed on implementation `a03129f5a8f84d5ccdb9930a840a4908206cdd8e`. The gate found an omitted local runtime grant list; the explicit ten-table list and publication sequence grant were added and the unweakened provisioning tests passed. The final run passed all product/tooling lanes and production builds.
+Historical full local verification passed on `f699d11b`, before later review corrections and main updates. That is not current certification. The current full gate remains required and blocked by the independently reproduced Watchlist inventory failure; no audit exception, timeout, baseline, or verifier has been weakened.
 
-Main then included the independent frontend-only PR94. P02 was rebased onto `0d73ff3970aa2c8e4dec9dd4905caf6380997567`; `git range-diff` proved both implementation patches unchanged. Rebased implementation `0727718d6fde3e0da94382796b11a7d2c81da4de` passed `check:framework`, the standards ratchet, all workspace typechecks, all 521 frontend tests, and production builds again. The focused P02 readiness/crash matrix passed 29 checks, and the focused local provisioning suite passed 12.
-
-Main advanced again with PR93 before publication. P02 was rebased onto `3db9ba77d84ca7a828e513ff59955041bfb94175`; `git range-diff` again proved the implementation patches unchanged (`1dc7fbde8c699cc0523c73c0de190a38e80b285d`). The full framework gate was rerun and passed framework/Prisma/ratchet checks and all non-frontend lint lanes, but failed at the existing PR94 inspector's `react-hooks/set-state-in-effect` error in `apps/frontend/components/catalog/ChaseCollectibleInspector.client.tsx:123`. That file has no P02 changes; [main CI reports the same failure](https://github.com/dadriano/packscout/actions/runs/33808683512). Current full-gate status is failed. All workspace typechecks and the 29-check P02 matrix passed again on this base. Phase delivery remains blocked and the PR must stay draft until the upstream lint failure is fixed and the full gate passes.
-
-After the blocked full gate, all workspace typechecks, the 29-check P02 matrix, the complete tooling lane (1,440 passing checks, nine existing skips, plus three embedded-admin checks), and production builds passed on the current base. No check was disabled or weakened. Draft PR: https://github.com/dadriano/packscout/pull/95.
-
-No browser acceptance surface exists in P02, and no environment was deployed or enabled. The phase-only implementation spans 23 authored files and approximately 1,700 changed lines including tracker metadata, with no generated diff.
+There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.
