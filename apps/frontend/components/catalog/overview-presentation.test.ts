@@ -18,7 +18,7 @@ import {
   resolveOverviewSelection,
 } from "./overview-presentation";
 
-test("presents the three nonpositive-policy overview KPIs", () => {
+test("presents the three overview KPIs using displayed EV", () => {
   const kpis: DashboardKpis = {
     totalRepacks: 1_248,
     medianPackScoutEvPercent: { status: "available", basisPoints: -180 },
@@ -38,14 +38,28 @@ test("presents the three nonpositive-policy overview KPIs", () => {
   );
   assert.equal(
     presentation[1]?.helper,
-    "Known current + last-known EV · 500 high confidence",
+    "Displayed EV · 500 high confidence",
   );
   assert.equal(
     presentation[1]?.accessibleLabel,
-    "Median EV %: -1.80%. Negative. Includes known current and last-known estimates. 500 high-confidence repacks.",
+    "Median EV %: -1.80%. Negative. Includes displayed EV. 500 high-confidence repacks.",
   );
   assert.equal(presentation[1]?.tone, "positive");
   assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
+});
+
+test("positive source-derived medians remain visible in headline and group summaries", () => {
+  const metric = { status: "available" as const, basisPoints: 800 };
+  const kpis = presentDashboardKpis({ totalRepacks: 1, medianPackScoutEvPercent: metric,
+    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 });
+  const summaries = presentCatalogSummaries([{ key: "phygitals", label: "Phygitals",
+    repackCount: 1, medianPackScoutEvPercent: metric }]);
+  assert.equal(kpis[1]?.value, "+8.00%");
+  assert.equal(kpis[1]?.tone, "positive");
+  assert.equal(kpis[1]?.state, "plain");
+  assert.equal(summaries[0]?.medianEvPercent.displayValue, "+8.00%");
+  assert.equal(summaries[0]?.medianEvPercent.tone, "positive");
+  assert.match(summaries[0]!.accessibleLabel, /Median displayed EV %: \+8\.00%/);
 });
 
 test("overview opportunity rows retain server-presented last-known EV", () => {

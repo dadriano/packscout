@@ -911,10 +911,8 @@ export function presentSignedEvPercentMetric(
   if (metric.status === "unavailable") {
     return unavailableMetric(label, "evPercent", metric.reason);
   }
-  if (metric.basisPoints > 0) {
-    return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
-  }
-  const state = semanticStateForSignedBasisPoints(metric.basisPoints);
+  const state = metric.basisPoints > 0 ? undefined
+    : semanticStateForSignedBasisPoints(metric.basisPoints);
   const tone = evToneForSignedBasisPoints(metric.basisPoints);
   return availableMetric(
     label,

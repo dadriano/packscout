@@ -95,8 +95,8 @@ export function presentDashboardKpis(
       id: "medianEv",
       label: "Median EV",
       value: median.displayValue,
-      helper: `Known current + last-known EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
-      accessibleLabel: `${median.accessibleLabel} Includes known current and last-known estimates. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
+      helper: `Displayed EV · ${countLabel(kpis.highConfidenceRepacks)} high confidence`,
+      accessibleLabel: `${median.accessibleLabel} Includes displayed EV. ${countLabel(kpis.highConfidenceRepacks)} high-confidence repacks.`,
       state: median.semanticState ?? "plain",
       stateLabel: median.semanticLabel,
       tone: median.tone,
@@ -190,7 +190,7 @@ export function presentCatalogSummaries(
         repackCountLabel: repacks,
         barRatio: largestCount === 0 ? 0 : summary.repackCount / largestCount,
         medianEvPercent: median,
-        accessibleLabel: `${summary.label}: ${repacks} repacks. Median known current and last-known EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
+        accessibleLabel: `${summary.label}: ${repacks} repacks. Median displayed EV %: ${median.displayValue}. ${median.semanticLabel ?? "Available"}.${reasonCopy ? ` ${reasonCopy}` : ""}`,
       };
     }),
   );

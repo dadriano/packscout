@@ -534,12 +534,14 @@ test("server aggregates format through the same signed-percent presentation", ()
   assert.equal(unavailable.displayValue, "Unavailable");
   assert.equal(unavailable.tone, "unavailable");
 
-  const forbiddenPositive = presentSignedEvPercentMetric(
+  const positive = presentSignedEvPercentMetric(
     { status: "available", basisPoints: 100 },
     "Median EV %",
   );
-  assert.equal(forbiddenPositive.availability, "unavailable");
-  assert.equal(forbiddenPositive.displayValue, "Unavailable");
+  assert.equal(positive.availability, "available");
+  assert.equal(positive.displayValue, "+1.00%");
+  assert.equal(positive.semanticState, undefined);
+  assert.equal(positive.tone, "positive");
 });
 
 test("presentation output never carries protected calculation evidence", () => {

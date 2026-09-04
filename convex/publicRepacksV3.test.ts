@@ -628,6 +628,28 @@ describe("data_release_v3 public reads", () => {
       expect(await sortedIds("packscout_confidence", "desc")).toEqual([
         V3_REPACK_ID_C, V3_REPACK_ID_A, V3_REPACK_ID_B, V3_REPACK_ID_D, V3_REPACK_ID_E, V3_REPACK_ID_F, positiveId, neutralId,
       ]);
+      const expectDashboardMedian = async (minMinor: number | null, basisPoints: number) => {
+        const result = await t.query(internal.publicRepacksV3.getDashboardBundleV3AtTime, {
+          filters: { availability: "all", vendors: [vendorKey],
+            ...(minMinor === null ? {} : { price: { mode: "narrowed", minMinor, maxMinor: 1_200_000 } }) },
+          currentTime: NOW,
+        }) as AnyResult;
+        expect(result.ok).toBe(true);
+        const data = result.data as {
+          kpis: { medianPackScoutEvPercent: { basisPoints: number }; highConfidenceRepacks: number };
+          vendorSummaries: { medianPackScoutEvPercent: { basisPoints: number } }[];
+          categorySummaries: { medianPackScoutEvPercent: { basisPoints: number } }[];
+        };
+        expect(data.kpis.medianPackScoutEvPercent).toEqual({ status: "available", basisPoints });
+        expect(data.vendorSummaries.map(row => row.medianPackScoutEvPercent.basisPoints)).toEqual([basisPoints]);
+        expect(data.categorySummaries.map(row => row.medianPackScoutEvPercent.basisPoints)).toEqual([basisPoints]);
+        expect(data.kpis.highConfidenceRepacks).toBe(minMinor === 15_000 ? 0 : 1);
+      };
+      // Six eligible displayed values: [-10000, -1500, -621, 0, 800, 2500].
+      // Missing D and sold-out E never contribute, and C keeps independent EV.
+      await expectDashboardMedian(null, -310);
+      await expectDashboardMedian(5_000, -621); // Five values after excluding A.
+      await expectDashboardMedian(15_000, 800); // Source-only positive median.
       // Sorting works against existing immutable shards whose independently
       // calculated Gross EV is still null; no release regeneration is needed.
       await t.run(async (ctx) => {

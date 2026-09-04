@@ -53,6 +53,7 @@ import {
 } from "./dataReleaseV3Search";
 import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
 import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { medianDisplayedEvPercent, type DisplayedEvMedianContext } from "./dataReleaseV3DisplayedEvMedian";
 import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
 import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
@@ -497,31 +498,6 @@ function compareRows(
   return compareText(left.publicRepackId, right.publicRepackId);
 }
 
-function medianPackScoutEvPercent(
-  rows: readonly DataReleaseV3SearchRow[],
-): DashboardKpis["medianPackScoutEvPercent"] {
-  const values = rows
-    .flatMap((row) =>
-      row.packScoutEvPercentBasisPoints === null
-        ? []
-        : [row.packScoutEvPercentBasisPoints],
-    )
-    .sort((left, right) => left - right);
-  if (values.length === 0) {
-    return {
-      status: "unavailable",
-      basisPoints: null,
-      reason: "ESTIMATE_UNAVAILABLE",
-    };
-  }
-  const middle = Math.floor(values.length / 2);
-  const basisPoints =
-    values.length % 2 === 1
-      ? values[middle]!
-      : Math.round((values[middle - 1]! + values[middle]!) / 2);
-  return { status: "available", basisPoints };
-}
-
 function purchasableRepackRows(
   rows: readonly DataReleaseV3SearchRow[],
 ): DataReleaseV3SearchRow[] {
@@ -535,14 +511,14 @@ function purchasableRepackRows(
  * counts the catalog the filters matched, and all four states stay
  * discoverable there.
  */
-function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
+function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: DisplayedEvMedianContext): DashboardKpis {
   const purchasableRows = purchasableRepackRows(rows);
   const chaseValues = purchasableRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
   return {
     totalRepacks: rows.length,
-    medianPackScoutEvPercent: medianPackScoutEvPercent(purchasableRows),
+    medianPackScoutEvPercent: medianDisplayedEvPercent(purchasableRows, context),
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
     highConfidenceRepacks: purchasableRows.filter(
@@ -556,6 +532,7 @@ function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
 function repackSummaries(
   rows: readonly DataReleaseV3SearchRow[],
   group: "vendor" | "category",
+  context: DisplayedEvMedianContext,
 ) {
   const groups = new Map<
     string,
@@ -584,8 +561,8 @@ function repackSummaries(
       key,
       label: value.label,
       repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianPackScoutEvPercent(
-        purchasableRepackRows(value.rows),
+      medianPackScoutEvPercent: medianDisplayedEvPercent(
+        purchasableRepackRows(value.rows), context,
       ),
     }))
     .sort(
@@ -919,9 +896,9 @@ export const getDashboardBundleV3AtTime = internalQuery({
     if (!bundle.success) return publicReadError("RELEASE_UNAVAILABLE");
     return success({
       ...bundle.data,
-      kpis: dashboardKpis(matchingRows),
-      vendorSummaries: repackSummaries(matchingRows, "vendor"),
-      categorySummaries: repackSummaries(matchingRows, "category"),
+      kpis: dashboardKpis(matchingRows, active),
+      vendorSummaries: repackSummaries(matchingRows, "vendor", active),
+      categorySummaries: repackSummaries(matchingRows, "category", active),
       facets: contextualFacets(
         allRows,
         allRows,
