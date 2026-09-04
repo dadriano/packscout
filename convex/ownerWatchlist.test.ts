@@ -30,8 +30,8 @@ import {
 import { MAX_DATA_RELEASE_V3_REPACKS } from "./dataReleaseV3Search";
 import {
   MAX_SAVED_ITEMS_PER_KIND,
-  WATCHLIST_CATALOG_REPACK_PROOF_BATCH,
   WATCHLIST_CHASE_VALIDATION_BATCH,
+  WATCHLIST_REPACK_PROOF_BATCH,
 } from "./savedItems";
 import schema from "./schema";
 
@@ -188,9 +188,10 @@ afterEach(() => {
 });
 
 describe("owner watchlist read", () => {
-  test("shares one catalog pack proof across saved collectibles", () => {
+  test("proves only chased packs in small document pages", () => {
     expect(WATCHLIST_CHASE_VALIDATION_BATCH).toBeGreaterThan(1);
-    expect(WATCHLIST_CATALOG_REPACK_PROOF_BATCH).toBeGreaterThanOrEqual(
+    expect(WATCHLIST_REPACK_PROOF_BATCH).toBeGreaterThan(0);
+    expect(WATCHLIST_REPACK_PROOF_BATCH).toBeLessThan(
       MAX_DATA_RELEASE_V3_REPACKS,
     );
   });
