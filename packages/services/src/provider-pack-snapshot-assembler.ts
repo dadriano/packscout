@@ -1,6 +1,6 @@
 import {
   PACK_CATALOG_V1, PACK_SNAPSHOT_HASH_DOMAIN, compareCanonicalStrings, hashPackCatalogValue,
-  normalizePackCatalogSearchText, normalizePublicPackSnapshotPayload, packCatalogCanonicalJson,
+  packSearchText, normalizePublicPackSnapshotPayload, packCatalogCanonicalJson,
   publicPackContentSchema, publicPackEvResultSchema, publicPackSnapshotSchema, publicPackSummaryCore,
   publicProfileSnapshotIdSchema, type ProviderPackBuildInputs, type ProviderPackReadiness, type PublicPackContent,
 } from "@packscout/contracts";
@@ -41,7 +41,7 @@ async function fullPayload(inputs: ProviderPackBuildInputs, readiness: ProviderP
     lifecycleFreeze: null, actions: inputs.actions };
   return normalizePublicPackSnapshotPayload({ ...core, summaryProjection: publicPackSummaryCore(core), searchProjection: {
     publicRepackId: inputs.publicRepackId, aliases: inputs.aliases,
-    normalizedText: normalizePackCatalogSearchText([inputs.title, ...contents.map(row => row.displayName), ...inputs.aliases].join(" ")),
+    normalizedText: packSearchText(inputs.title, inputs.aliases),
     categoryIds: [...new Set([inputs.category.publicCategoryId, ...contents.map(row => row.category.publicCategoryId)])].sort(compareCanonicalStrings),
   } });
 }

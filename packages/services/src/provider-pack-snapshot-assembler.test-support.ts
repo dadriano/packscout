@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { packBuildRequestSchema, type ProviderPackBuildInputs } from "@packscout/contracts";
-import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog";
+import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { ProviderPackReadinessEvaluator } from "./provider-pack-readiness-evaluator.ts";
 import { inputsFromPayload, publicationHash } from "./provider-pack-publication.test-support.ts";
 

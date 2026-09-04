@@ -25,7 +25,9 @@ export const packSnapshotAssemblyLimits = Object.freeze({
   maximumDocumentBytes: PACK_SNAPSHOT_BATCH_MAX_BYTES,
   maximumBatches: 32,
   maximumDepth: 16,
-  maximumNodes: 500_000,
+  // 8,000 members across capture/baseline/reuse plus 10,000 shared dependencies
+  // in capture and request require about 593,000 nodes; byte/depth bounds still apply.
+  maximumNodes: 650_000,
 });
 
 export class PackSnapshotAssemblyError extends Error {

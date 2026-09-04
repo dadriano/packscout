@@ -1,7 +1,7 @@
 import {
   PACK_SNAPSHOT_BATCH_MAX_BYTES, PACK_SNAPSHOT_BATCH_MAX_ITEMS, PACK_SNAPSHOT_HASH_DOMAIN,
   assertPublicPackCatalogBytes, derivePublicPackSnapshotId, hashPackCatalogValue,
-  normalizePublicPackSnapshotPayload, packCatalogCanonicalByteCount, packCatalogCanonicalJson,
+  normalizePublicPackSnapshotPayload, packCatalogCanonicalByteCount, packCatalogCanonicalJson, packSnapshotHeaderFromPayload,
   publicPackSnapshotBatchSchema, publicPackSnapshotDescriptorSchema, publicPackSnapshotIdentitySchema,
   publicPackSnapshotSchema, type PublicPackSnapshotBatch,
 } from "@packscout/contracts";
@@ -23,7 +23,8 @@ export async function sealPackAssembly(payloadInput: unknown) {
     valuationsSha256, topChase: payload.topChase, evInputsSha256, ev: payload.ev });
   requireAssembly(payload.probabilityInputsSha256 === probabilityInputsSha256 && payload.valuationsSha256 === valuationsSha256 &&
     payload.evInputsSha256 === evInputsSha256 && payload.economicsSha256 === economicsSha256);
-  requireAssembly(packCatalogCanonicalByteCount(header) <= limits.maximumDocumentBytes);
+  // The public store derives dependency vectors from batches; canonical hashing still uses the complete header.
+  requireAssembly(packCatalogCanonicalByteCount(packSnapshotHeaderFromPayload(payload).header) <= limits.maximumDocumentBytes);
   const canonicalBytes = packCatalogCanonicalJson(payload);
   requireAssembly(new TextEncoder().encode(canonicalBytes).byteLength <= limits.maximumSnapshotBytes);
 
