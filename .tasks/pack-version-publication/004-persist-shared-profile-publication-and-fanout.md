@@ -68,12 +68,6 @@ Not started in this workflow; no owning branch, PR, or verification is recorded.
 
 Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
 
-## Handoff — 2026-09-04
-
-Not started in this workflow; no owning branch, PR, or verification is recorded. P01, P02, and P05 are merged, so this remains an independent foundation opportunity, not part of the completed 002/003 implementation. Use P05's merged signed profile-store protocol rather than rebuilding it. Reuse P02's shared-delivery identity/sequence bounds and resumable acknowledgment contract; P06 owns runtime processing. Read `tech-001` and `tech-002` before implementation.
-
-Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
-
 ## Start Here
 
 Define one fixture where a shared collectible change affects packs in two providers, make one provider unavailable, and record the exact durable shard, local expansion, profile intent, checkpoint, and initial-head results expected for both providers.
