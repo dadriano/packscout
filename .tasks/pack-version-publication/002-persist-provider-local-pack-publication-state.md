@@ -10,11 +10,11 @@
 
 ## Current checkpoint — 2026-09-04
 
-PR109 is released. PR113 subsequently advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the current direct parent. P02 implementation `6751a7d5586e2bc54651db4d03c49836173c3b90` includes canonical-admission repair `d9262973` and the actual public-store receipt/head corrections. **117 focused checks pass, zero skips**, plus all13 Convex public-store tests, affected lint/typechecks, docs, and the zero-finding standards ratchet. Task acceptance is complete; the corrected-head full local/CI phase gate is still required before merge. The earlier full pass on1117b456 is historical, not current certification.
+PR109 is released. PR113 advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the direct parent. P02 implementation `b5482a96570f71de46d2c87d849e2b3e11bcce2c` includes the canonical-admission, actual public-store outcome, and large-lifecycle capacity repairs. **118 focused checks and 30 schema checks pass, zero skips**, along with affected lint/types, docs, and the zero-finding standards ratchet. The 13 existing signed Convex public-store tests also passed. Task acceptance is complete; the final capacity change still requires current-head full local/CI certification before merge.
 
-Review corrections: unchanged generation is permitted only for `already_active` with the same expected active snapshot; newly applied activations still require a generation increment. Authenticated same-generation resume/sequence-only observations fence old owners and preserve monotonic accepted sequence. Definitive conflicts/refusals are classified by outcome/reason, not snapshot state; missing, successful, or expired activation evidence remains protected. The original integration fixture now models actual hold/resume version behavior.
+The predecessor `486c68aa` passed both the full local verifier and [CI33890801868](https://github.com/dadriano/packscout/actions/runs/33890801868). Its four remaining review threads are resolved. Only the latest lifecycle-capacity discussion remains open pending full certification. Its genuine red regression is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`; the corrected 6,000-member pack stores and reloads its complete baseline, seals the lifecycle update, and leaves the next pack pageable. Capture and baseline each retain a 16 MB limit; only their combined JSONB storage allowance grows, to 36 MB including formatting headroom. No public snapshot, batch, or request limit is relaxed.
 
-P03 remains local and blocked on the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
+P03 remains local and waits for the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
 
 ## Start Here
 
@@ -125,6 +125,7 @@ There is no direct user-facing change. The resulting state machine ensures that 
 - [x] An expired claimant cannot mutate work after a newer fence is issued.
 - [x] Byte-identical artifacts reuse one sealed snapshot while later activation episodes keep distinct immutable intents and sequences.
 - [x] A newer local sequence supersedes stale unclaimed work while preserving bounded audit evidence.
+- [x] A 6,000-member lifecycle request persists its complete pinned baseline, seals, and leaves the following pack pageable; neither capture nor baseline can borrow the other's 16 MB allowance.
 - [x] Records, logs, and errors stay within declared bounds and contain no protected data.
 
 ## Verification
@@ -135,7 +136,7 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ### Current delivery status
 
-Implementation6751a7d5 on direct parent8125934b passes all117 focused checks and13 public-store tests, with affected static gates. The open PR95 still needs its full corrected-head local/CI gate and four final review resolutions. No external-write E2E is claimed; P06 owns that composition. Earlier30 discussions are resolved; the remaining canonical order, already-active, CAS-conflict, and same-version-resume findings are implemented and covered.
+Implementation `b5482a96` on parent `8125934b` passes 118 focused checks, 30 schema checks, and affected static gates. Predecessor486c68aa passed full local and CI; its 34 reviewed findings are resolved. The capacity finding is repaired and awaits final full certification. PR95 is not merged; P06 owns external-write E2E.
 
 ### Implemented invariants and review corrections
 
@@ -178,13 +179,13 @@ Related guidance reviewed: feature `tech-001` through `tech-005`, with P02 imple
 | Captured authority, false-ready refusal, maximum shared evidence, duplicate IDs, A→B→A, accepted/ambiguous receipt recovery below newer work, EV and unused-intent expiry | `packages/services/src/provider-pack-publication-boundaries.integration.test.ts` |
 | Role inventory, scoped references, immutable episodes, migration/schema consistency | `packages/database/prisma/distributed-schema-contract.test.ts` and migrated provider databases |
 
-Current implementation6751a7d5: **117 focused checks pass, zero skips**, `/tmp/packscout-p02-public-store-results-focused-release-20260904.log`. All13 existing signed Convex public-store tests pass, `/tmp/packscout-p02-public-store-results-convex-20260904.log`; together they verify the actual already-active, CAS-conflict, and hold/resume shapes against real PostgreSQL persistence without claiming P06's end-to-end transport. Affected database/services lint/types, docs, and the zero-finding ratchet pass. Red logs for the latest repairs are `/tmp/packscout-p02-canonical-admission-red-confirmed-20260904.log` and `/tmp/packscout-p02-public-store-results-red-20260904.log`.
+Current implementation `b5482a96`: **118 focused checks pass, zero skips**, `/tmp/packscout-p02-lifecycle-capacity-focused-20260904.log`. All 30 schema checks, affected contracts/database/services lint and types, docs, and the zero-finding ratchet pass. The 13 existing signed Convex public-store tests passed on the unchanged public store (`/tmp/packscout-p02-public-store-results-convex-20260904.log`), without claiming P06's combined transport E2E.
 
-Full current-head certification is required at `/tmp/packscout-p02-public-store-results-framework-20260904.log`. The earlier1117b456 full local pass and30 schema checks are historical. Later local attempts were interrupted for review fixes. CI33888229047 failed during unchanged EV-test PostgreSQL teardown; it is not a pass. No unrelated runtime repair or weakened gate was made. Local runs use TSX_DISABLE_CACHE=1, VITEST_MAX_WORKERS=2, and the owned private PostgreSQL fixture.
+The capacity red log is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`. The new PostgreSQL capacity test covers independently bounded full capture and baseline, combined JSONB storage above the old 18 MB ceiling, actual page bytes, immutable reload, lifecycle seal, and subsequent independent-pack progress. Full current-head certification targets `/tmp/packscout-p02-lifecycle-capacity-framework-20260904.log`. Predecessor486c68aa passed full local and CI33890801868; earlier interrupted/superseded runs are not current passes. Local TSX cache is disabled and Vitest uses two workers with owned private PostgreSQL; no gate or timeout is weakened.
 
 There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.
 
-### Latest review repair — 2026-09-04
+### Earlier review repair history — 2026-09-04
 
 Discussions `3933953815` and `3933953820` are implemented in `b34e50b7`, included in the certified current-parent head. `listOperations(claim)` exposes at most 100 deterministically ordered metadata records (operation ID, request digest, receipt presence), protected by the current activation lease and tenant scope. P06 discovers these IDs after reclaim, reads each exact command through `readOperation`, and reconciles/replays its persisted bytes; it must not generate a replacement UUID for an existing command. Listing never materializes the potentially large captured intent per row.
 
