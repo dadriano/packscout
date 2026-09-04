@@ -46,7 +46,7 @@ CREATE TABLE pack_build_requests (
   CONSTRAINT pack_build_requests_desired_epoch_key UNIQUE (public_repack_id, desired_state_sha256, expected_publication_epoch),
   UNIQUE (public_repack_id, pack_publication_sequence),
   CHECK (desired_state_sha256 ~ '^[a-f0-9]{64}$'),
-  -- Full dependency evidence follows the admitted 16 MiB input budget, with
+  -- Full dependency evidence follows the admitted 16 MB input budget, with
   -- bounded headroom for PostgreSQL JSONB formatting, through every work record.
   CHECK (octet_length(inputs_json::text) <= 18000000 AND octet_length(request_json::text) <= 18000000)
 );
@@ -80,7 +80,7 @@ CREATE TABLE pack_publication_impact_progress (
   PRIMARY KEY (organization_id, provider_id, boundary_identity),
   FOREIGN KEY (organization_id, provider_id) REFERENCES pack_publication_scopes(organization_id, provider_id),
   CHECK ((through_sequence IS NULL) <> (shared_sequence IS NULL)),
-  CHECK (octet_length(references_json::text) <= 4000000),
+  CHECK (octet_length(references_json::text) <= 18000000),
   CHECK (boundary_sha256 ~ '^[a-f0-9]{64}$' AND result_sha256 ~ '^[a-f0-9]{64}$')
 );
 CREATE UNIQUE INDEX pack_publication_one_provider_boundary_idx ON pack_publication_impact_progress(provider_id)

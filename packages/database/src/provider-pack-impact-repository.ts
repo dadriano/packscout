@@ -30,6 +30,13 @@ export interface PackImpactResult {
   outcomes: PackPlanningOutcome[];
 }
 
+function assertDeliveredDependencies(inputs: ProviderPackBuildInputs, dependencies: SharedProviderChangeDelivery["sharedDependencies"]) {
+  const expected = new Map(inputs.expectedDependencies.map(item => [`${item.kind}:${item.identity}`, item.contentSha256]));
+  for (const dependency of dependencies) {
+    packInvariant(expected.get(`${dependency.kind}:${dependency.identity}`) === dependency.contentSha256, "PACK_INPUT_INVALID");
+  }
+}
+
 /** Consumes the native, transactional change ledger; no legacy ingestion adapter. */
 export class ProviderPackImpactRepository {
   readonly #requests: ProviderPackBuildRequestRepository;
@@ -111,10 +118,7 @@ export class ProviderPackImpactRepository {
           break;
         }
         capturedBytes += inputBytes;
-        for (const dependency of delivery?.sharedDependencies ?? []) {
-          packInvariant(candidate.expectedDependencies.some(item => item.kind === dependency.kind &&
-            item.identity === dependency.identity && item.contentSha256 === dependency.contentSha256), "PACK_INPUT_INVALID");
-        }
+        assertDeliveredDependencies(candidate, delivery?.sharedDependencies ?? []);
         const head = await tx.pack_publication_heads.findUnique({ where: { public_repack_id: publicRepackId } });
         const previousArtifact = head?.active_snapshot_id ? await tx.pack_snapshot_artifacts.findUnique({ where: { public_pack_snapshot_id: head.active_snapshot_id } }) : null;
         const result = await this.capture.evaluate({ candidate, evaluatedAt,
@@ -123,10 +127,7 @@ export class ProviderPackImpactRepository {
         // result to the original page identity and unaliased delivery evidence.
         packInvariant(result.inputs.publicRepackId === publicRepackId && result.inputs.providerId === this.context.scope.providerId &&
           result.inputs.sourceRevisionIdentity === sourceRevisionIdentity, "PACK_SCOPE_MISMATCH");
-        for (const dependency of delivery?.sharedDependencies ?? []) {
-          packInvariant(result.inputs.expectedDependencies.some(item => item.kind === dependency.kind &&
-            item.identity === dependency.identity && item.contentSha256 === dependency.contentSha256), "PACK_INPUT_INVALID");
-        }
+        assertDeliveredDependencies(result.inputs, delivery?.sharedDependencies ?? []);
         outcomes.push(await this.#requests.enqueueInTransaction(tx, { ...result, boundaryIdentity }));
       }
       const acknowledgmentDigest = await hashPackCatalogValue(PACK_SNAPSHOT_HASH_DOMAIN, { previousDigest: progress.result_sha256, outcomes });

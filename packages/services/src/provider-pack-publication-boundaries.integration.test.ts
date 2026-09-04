@@ -69,7 +69,7 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.ok(rows.every(row => row.state === "waiting" && row.reason_code === "INCOMPLETE_CONTENTS"));
       assert.deepEqual(await requests.claim(randomUUID()), []);
     });
-    await suite.test("maximum allowed dependencies persist through request, intent and immutable operation replay", async () => {
+    await suite.test("maximum shared delivery persists progress, request, intent and immutable operation replay", async () => {
       const inputs = structuredClone(fixture.inputs);
       inputs.expectedDependencies = Array.from({ length: 10_000 }, (_, index) => ({ kind: "ev_policy" as const,
         identity: `${String(index).padStart(5, "0")}:${"界".repeat(194)}`, contentSha256: "c".repeat(64) }));
@@ -77,7 +77,18 @@ test("Pack publication preserves captured authority and maximum dependency evide
       assert.ok(packCatalogCanonicalByteCount(inputs) < packPublicationLimits.maximumInputBytes);
       const result = await evaluator.evaluate({ candidate: inputs, evaluatedAt: new Date().toISOString() });
       assert.equal(result.readiness.outcome, "ready");
-      await context.transaction(tx => requests.enqueueInTransaction(tx, { ...result, boundaryIdentity: "maximum:dependencies" }));
+      const planner = new ProviderPackImpactRepository(context, capture);
+      const delivery = { ...scope, centralChangeIdentity: "maximum:dependencies", providerChangeSequence: "1",
+        sharedDependencies: inputs.expectedDependencies, payloadSha256: "d".repeat(64), leaseIdentity: randomUUID(), acknowledgmentIdentity: null };
+      const firstPage = await planner.plan({ kind: "shared", delivery });
+      assert.equal(firstPage?.complete, false); assert.equal(firstPage?.outcomes.length, 1);
+      assert.equal(firstPage?.acknowledgmentDigest, null);
+      const progress = await client.pack_publication_impact_progress.findFirstOrThrow({ where: { shared_sequence: 1n } });
+      assert.ok(packCatalogCanonicalByteCount(progress.references_json) > 4_000_000);
+      const secondPage = await planner.plan({ kind: "shared", delivery });
+      assert.equal(secondPage?.complete, true); assert.equal(secondPage?.outcomes.length, 1);
+      assert.ok(secondPage?.acknowledgmentDigest);
+      assert.deepEqual((await planner.plan({ kind: "shared", delivery }))?.outcomes, []);
       const claim = (await requests.claim(randomUUID()))[0]!;
       const { request } = await requests.load(claim);
       assert.ok(packCatalogCanonicalByteCount(request) > 2_000_000);

@@ -2,7 +2,7 @@
 
 ## Start Here
 
-PR96 has been refreshed onto main after PR97/99/100/101. PR95's preceding implementation passed the full framework gate; the latest lifecycle, evaluated-identity, and evidence-capacity corrections are being verified before restacking onto that parent. Do not merge until current-head gates pass; order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
+PR96 now includes the empty-TMPDIR fixture and PR101 evidence-name corrections. All 54 P02 boundary checks pass, including the complete maximum-dependency shared-delivery path. The full framework gate is being repeated on the corrected parent before merge; order remains PR96 then PR95, with P03 preserved separately. No publication processor is enabled.
 
 **Progress:** 2/10 tasks complete; 2/9 implementation phases merged; P05 merged in PR108; P02 certification pending; 0/1 launch operations complete
 
@@ -148,10 +148,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Size exception:** Boundary review permits 26 authored files (one over the 25-file target), remaining below 2,500 authored changed lines. The extra small test module covers inseparable admission-to-outbox invariants and keeps the existing 439-line crash suite within the repository's file-size limit. Splitting those regressions from their fixes would leave the same transaction boundary uncertified; runtime scope is unchanged. No generated files are added.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `codex/fix-chase-inspector-loading`, the separate frontend fix in https://github.com/dadriano/packscout/pull/96. Merge PR96 first, then retarget P02 to main.
-- **Current parent:** `bfb626843a20ae8b1b07b10901b13681bd356b00` (PR96 test-only corrections on main `48627008`, including PR97/99/100/101).
+- **Current parent:** `fcb8a42dd1c7cb2e2434c5a6a45bc7c3a31280dc` (PR96 regression/evidence corrections on main `48627008`, including PR97/99/100/101).
 - **Verified implementation:** Prior `f699d11b0f98c4873826b222ce0f00d9f58c3f12` passed the full framework gate on parent `ca375cc4960e90ba1e6e316e073be5bffda000ee`. Newer corrections and the refreshed parent require a fresh full gate; this is not current-head approval.
 - **Delivery gate:** Both PRs remain unmerged. Require current-head green gates, merge PR96, then restack/retarget only P02-owned commits onto main before merging PR95.
-- **Current correction evidence:** All 54 contract/readiness/persistence checks pass, including trusted lifecycle baselines, post-evaluation pack/source/dependency binding, and 10,000 multibyte dependencies through request/intent/operation replay. Database/service lint and typechecks, docs, and the zero-finding standards ratchet pass. Current-parent full verification remains pending; no gate was weakened.
+- **Current correction evidence:** All 54 contract/readiness/persistence checks pass, including trusted lifecycle baselines, post-evaluation pack/source/dependency binding, and 10,000 multibyte dependencies through shared progress, paged acknowledgment, request/intent/operation replay. Database/service lint and typechecks, docs, and the zero-finding standards ratchet pass. Current-parent full verification remains pending; no gate was weakened.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
