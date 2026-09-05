@@ -1,7 +1,78 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { packCatalogCanonicalJson } from "@packscout/contracts";
 import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
+
+test("profile assembly normalizes decomposed public text before canonical hashing", async suite => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const existing of [fixture.provider, fixture.collectibles[0]!]) {
+    const result = await assemblePublicProfileSnapshot(existing.profile);
+    assert.deepEqual(result.profile, existing.profile, "already canonical profile hashes must remain unchanged");
+    assert.deepEqual(result.batch, existing.batch);
+    assert.deepEqual(result.descriptor, existing.descriptor);
+  }
+  const provider = (text: string) => ({ ...structuredClone(fixture.provider.profile), displayName: text,
+    identity: { ...fixture.provider.profile.identity, sourceIdentity: `profile:${text}` },
+    brandAssets: [{ kind: "logo" as const, url: "https://example.com/logo.svg", alt: text }],
+    promotions: [{ promotionId: "offer", label: text, copy: `Discover ${text}`, url: `https://example.com/${text}` }],
+  });
+  const collectible = (text: string) => ({ ...structuredClone(fixture.collectibles[0]!.profile), displayName: text,
+    identity: { ...fixture.collectibles[0]!.profile.identity, sourceIdentity: `profile:${text}` },
+    category: { ...fixture.collectibles[0]!.profile.category, label: text }, aliases: ["Zebra", `${text} card`],
+    imageUrl: `https://example.com/${text}.png`,
+  });
+  for (const [kind, create] of [["provider", provider], ["collectible", collectible]] as const) {
+    await suite.test(kind, async () => {
+      const raw = create("Cafe\u0301"), before = structuredClone(raw);
+      const result = await assemblePublicProfileSnapshot(raw);
+      const canonical = await assemblePublicProfileSnapshot(create("Caf\u00e9"));
+      assert.equal(result.profile.displayName, "Caf\u00e9");
+      assert.deepEqual(result, canonical, "equivalent text must produce identical profiles, batches, descriptors and hashes");
+      assert.equal(packCatalogCanonicalJson(result), packCatalogCanonicalJson(canonical));
+      assert.deepEqual(raw, before, "assembly must not mutate captured source text");
+    });
+  }
+  const imageAbsent = await assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile, imageUrl: null });
+  assert.ok("imageUrl" in imageAbsent.profile);
+  assert.equal(imageAbsent.profile.imageUrl, null);
+  const promotions = await assemblePublicProfileSnapshot({ ...fixture.provider.profile, promotions: [
+    { promotionId: "first", label: "First", copy: "First offer", url: "https://example.com/Cafe\u0301" },
+    { promotionId: "second", label: "Second", copy: "Second offer", url: "https://example.com/Caf\u00e9" },
+  ] });
+  assert.ok("promotions" in promotions.profile);
+  assert.deepEqual(promotions.profile.promotions.map(({ promotionId, url }) => ({ promotionId, url })), [
+    { promotionId: "first", url: "https://example.com/Caf\u00e9" }, { promotionId: "second", url: "https://example.com/Caf\u00e9" },
+  ], "URL normalization must not collapse distinct promotion identities");
+});
+
+test("profile normalization retains raw credential, unknown-field and collision refusals", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const text of ["Cafe\u0301 password: private-marker", 'Cafe\u0301 {"\\u0070assword":"private-marker"}']) {
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, displayName: text }),
+      /PUBLIC_CATALOG_PROTECTED_TEXT|protected field/u);
+  }
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, displayName: "Cafe\u0301",
+    rawProviderPayload: "private-marker" } as never), /protected field/u);
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, displayName: "Cafe\u0301",
+    unexpected: "public" } as never), { name: "ZodError" });
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile,
+    searchText: "Cafe\u0301 password: private-marker" }), /PUBLIC_CATALOG_PROTECTED_TEXT/u);
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile,
+    displayName: "Authorization:", aliases: ["Bearer abc123"] }), /PUBLIC_CATALOG_PROTECTED_TEXT/u);
+  for (const url of ["https://example.com/Cafe\u0301?access_token=private-marker",
+    "https://alice:private-marker@example.com/Cafe\u0301", "https://127.1/Cafe\u0301"]) {
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile,
+      promotions: [{ promotionId: "offer", label: "Offer", copy: "Offer", url }] }), TypeError);
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile, imageUrl: url }), TypeError);
+  }
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile,
+    aliases: ["Caf\u00e9", "Cafe\u0301"] }), { name: "ZodError" });
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, brandAssets: [
+    { kind: "logo", url: "https://example.com/Caf\u00e9.svg", alt: "First" },
+    { kind: "logo", url: "https://example.com/Cafe\u0301.svg", alt: "Second" },
+  ] }), { name: "ZodError" });
+});
 
 test("profile assembly preserves numeric captions but refuses private hosts and path credentials", async () => {
   const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));

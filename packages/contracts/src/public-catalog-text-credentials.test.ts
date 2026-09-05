@@ -2,6 +2,28 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertPublicCatalogText, assertPublicCatalogUrl } from "./public-catalog-text.ts";
 
+test("explicit cookie authentication context rejects short header values", () => {
+  for (const text of ["Cookie: session_id=private-marker", "Set-Cookie: auth=private-marker",
+    "Documentation COOKIE: a=b", "Set Cookie: a = b; Secure; HttpOnly", "Cookie: \"a=b\"",
+    "Documentation %63ookie: a=b", 'Documentation "Set-Cookie": "a=b"',
+    '{"\\u0063ookie":"a=b"}', '{"headers":{"Set-Cookie":"a=b"}}']) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+  }
+});
+
+test("cookie names and natural colon labels do not imply authentication", () => {
+  for (const text of ["Cookie Monster", "Chocolate cookie collection", "Cookie: Chocolate edition",
+    "Cookie: [1/1] edition", "Cookie: https://example.com/recipe", "Cookie:", "Set-Cookie:",
+    "Documentation Cookie: recipe", "Bearer a", "session_id=a", "auth=public-label",
+    "Visit https://example.com/products/cookie/chocolate-chip",
+    "Visit https://example.com/products/%63ookie/chocolate-chip"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
 test("explicit authorization rejects short credentials across prose and nested values", () => {
   for (const text of ["Authorization: Bearer abc123", "authorization=bearer a", "Details Authorization: BEARER\tZg==",
     'Documentation "authorization"="Bearer a+/._~-="', 'Documentation "Authorization": "Bearer a"',

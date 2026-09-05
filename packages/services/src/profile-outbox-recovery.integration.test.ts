@@ -1,12 +1,124 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { packCatalogCanonicalJson, packCatalogPublicationRequestSchema, packCatalogReceiptDigest, type PackCatalogPublicationRequest } from "@packscout/contracts";
+import { evaluatePublicationReplay, packCatalogCanonicalJson, packCatalogPublicationRequestSchema, packCatalogReceiptDigest, type PackCatalogPublicationRequest } from "@packscout/contracts";
 import { CentralProfilePublicationContext, CentralProfilePublicationOutboxRepository, ProviderProfileSnapshotRepository,
   CollectibleProfileSnapshotRepository, SharedPackFanoutRepository, type ProfileWorkClaim } from "@packscout/database";
 import { createMigratedCentralTestDatabase } from "@packscout/database/test-support";
 import { faultCentralClient, fixtureProfiles, makeProfileEnvelope, profileRequest, seedCentralScope, successfulProfileReceipt } from "./shared-profile-publication.test-support.ts";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
+
+test("Terminal profile intents yield to corrections without crossing recovery barriers", async suite => {
+  const harness = await createMigratedCentralTestDatabase();
+  const pair = async () => {
+    const providerId = randomUUID(), organizationId = await seedCentralScope(harness.client, [providerId]);
+    const context = new CentralProfilePublicationContext(harness.client, organizationId, "local");
+    const snapshots = new ProviderProfileSnapshotRepository(context), outbox = new CentralProfilePublicationOutboxRepository(context);
+    const { provider, collectible } = await fixtureProfiles(providerId);
+    const correction = await makeProfileEnvelope({ ...provider.profile, displayName: "Corrected profile" });
+    await snapshots.sealAndEnqueueActivation(provider); await snapshots.sealAndEnqueueActivation(correction);
+    const [first] = await outbox.claim(randomUUID()); assert.ok(first);
+    assert.equal(first.intentId, provider.intent.intentId);
+    return { providerId, organizationId, context, outbox, provider, collectible, correction, first };
+  };
+  try {
+    await suite.test("permanent blocked work does not prevent a fresh same-profile activation", async () => {
+      const { outbox, first, correction, organizationId } = await pair();
+      await outbox.block(first, "INVALID_DOMAIN_DATA");
+      const independent = await harness.createIndependentLifecycle();
+      const recovered = new CentralProfilePublicationOutboxRepository(new CentralProfilePublicationContext(independent.client, organizationId, "local"));
+      const [next] = await recovered.claim(randomUUID()); assert.ok(next);
+      assert.equal(next.intentId, correction.intent.intentId); assert.ok(BigInt(next.fence) > BigInt(first.fence));
+      await assert.rejects(outbox.renew(first), { code: "SHARED_LEASE_LOST" });
+      const request = profileRequest(next, correction), digest = await recovered.recordOperation(next, request);
+      await recovered.recordReceipt(next, await successfulProfileReceipt(request, digest, correction));
+      await recovered.complete(next, request.operationId);
+      assert.equal((await harness.client.profile_activation_intents.findFirstOrThrow({ where: { id: first.intentId } })).state, "blocked");
+      assert.equal((await harness.client.profile_publication_heads.findFirstOrThrow({ where: { organization_id: organizationId } })).generation, 1n);
+    });
+    await suite.test("attempt exhaustion fences the expired owner and releases only its later correction", async () => {
+      const { outbox, first, correction, organizationId } = await pair();
+      await harness.client.profile_activation_intents.updateMany({ where: { id: first.intentId }, data: { attempts: 100 } });
+      assert.deepEqual(await outbox.claim(randomUUID()), [], "a live lease still owns the profile");
+      await harness.client.$executeRaw`UPDATE profile_publication_heads SET lease_expires_at = clock_timestamp() - interval '1 second'
+        WHERE organization_id = ${organizationId}::uuid`;
+      assert.deepEqual(await outbox.claim(randomUUID()), [], "one bounded claim records exhaustion first");
+      const [next] = await outbox.claim(randomUUID()); assert.ok(next);
+      assert.equal(next.intentId, correction.intent.intentId);
+      for (const action of [() => outbox.load(first), () => outbox.block(first, "INVALID_DOMAIN_DATA"),
+        () => outbox.scheduleRetry(first, "TRANSPORT_TIMEOUT")]) await assert.rejects(action(), { code: "SHARED_LEASE_LOST" });
+      const terminal = await harness.client.profile_activation_intents.findFirstOrThrow({ where: { id: first.intentId } });
+      assert.equal(terminal.state, "blocked"); assert.equal(terminal.reason_code, "OPERATION_EXPIRED"); assert.equal(terminal.attempts, 100);
+    });
+    await suite.test("current P05 exact status replay cannot recover a lost activation refusal", async () => {
+      const { outbox, first, provider, providerId } = await pair();
+      const activation = profileRequest(first, provider), activationDigest = await outbox.recordOperation(first, activation);
+      const lostRefusal = { ...await successfulProfileReceipt(activation, activationDigest, provider), profileHead: null,
+        result: { outcome: "refused" as const, state: "blocked" as const, reasonCode: "AUTHORIZATION_REFUSED" as const } };
+      const status = packCatalogPublicationRequestSchema.parse({ ...profileRequest(first, provider), operationKind: "profile_publication_status",
+        serviceIdentity: { ...profileRequest(first, provider).serviceIdentity, operations: ["read_receipt"] },
+        body: { profile: { profileKind: "provider", providerId }, publicProfileSnapshotId: provider.profile.identity.publicProfileSnapshotId,
+          operation: { operationId: activation.operationId, requestSha256: activationDigest } } });
+      // describeOperation uses this evaluator, not the original receipt's refusal.
+      const replay = evaluatePublicationReplay({ record: {
+        operationId: activation.operationId, idempotencyKey: activation.idempotencyKey,
+        authorizationScopeSha256: activation.serviceIdentity.authorizationSha256,
+        entityIdentity: `provider_profile:${providerId}`, snapshotIdentity: provider.profile.identity.publicProfileSnapshotId,
+        requestSha256: activationDigest, state: lostRefusal.result.state,
+        completedAt: lostRefusal.completedAt, expiresAt: lostRefusal.expiresAt,
+      }, requestSha256: activationDigest, now: new Date().toISOString() });
+      assert.deepEqual(replay, { outcome: "already_applied", state: "blocked", reasonCode: null });
+      const response = { ...await successfulProfileReceipt(status, await outbox.recordOperation(first, status), provider),
+        result: { outcome: "applied" as const, state: "ready" as const, reasonCode: null },
+        profileHead: null, statusOperation: { found: true, result: replay } };
+      await outbox.recordReceipt(first, { ...response, receiptDigest: await packCatalogReceiptDigest(response) });
+      await assert.rejects(outbox.supersede(first), { code: "SHARED_STATE_CONFLICT" });
+      await outbox.block(first, "AUTHORIZATION_REFUSED");
+      assert.deepEqual(await outbox.claim(randomUUID()), [], "non-definitive status evidence must preserve the barrier");
+    });
+    await suite.test("the direct original refusal receipt releases the later same-profile correction", async () => {
+      const { outbox, first, provider, correction } = await pair();
+      const activation = profileRequest(first, provider), digest = await outbox.recordOperation(first, activation);
+      const refusal = { ...await successfulProfileReceipt(activation, digest, provider), profileHead: null,
+        result: { outcome: "refused" as const, state: "blocked" as const, reasonCode: "AUTHORIZATION_REFUSED" as const } };
+      await outbox.recordReceipt(first, { ...refusal, receiptDigest: await packCatalogReceiptDigest(refusal) });
+      await outbox.block(first, "AUTHORIZATION_REFUSED");
+      assert.equal((await outbox.claim(randomUUID()))[0]!.intentId, correction.intent.intentId);
+    });
+    for (const barrier of ["hold", "ambiguity", "unresolved_operation", "expired_receipt", "retry", "waiting"] as const) {
+      await suite.test(`${barrier} remains ordered while another profile and organization proceed`, async () => {
+        const { outbox, first, provider, collectible, context, organizationId } = await pair();
+        if (barrier === "unresolved_operation" || barrier === "expired_receipt") {
+          const request = profileRequest(first, provider), digest = await outbox.recordOperation(first, request);
+          if (barrier === "expired_receipt") {
+            const expired = { ...await successfulProfileReceipt(request, digest, provider), profileHead: null,
+              result: { outcome: "operation_expired" as const, state: "ready" as const, reasonCode: "OPERATION_EXPIRED" as const } };
+            await outbox.recordReceipt(first, { ...expired, receiptDigest: await packCatalogReceiptDigest(expired) });
+          }
+        }
+        if (barrier === "retry") await outbox.scheduleRetry(first, "TRANSPORT_TIMEOUT", 60);
+        else if (barrier === "waiting") {
+          await harness.client.profile_activation_intents.updateMany({ where: { id: first.intentId }, data: { state: "waiting" } });
+          await harness.client.profile_publication_heads.updateMany({ where: { organization_id: organizationId },
+            data: { lease_owner: null, lease_intent_id: null, lease_expires_at: null } });
+        } else await outbox.block(first, barrier === "hold" ? "OPERATOR_HOLD" : barrier === "ambiguity" ? "RECEIPT_AMBIGUOUS" : "INVALID_DOMAIN_DATA");
+        await new CollectibleProfileSnapshotRepository(context).sealAndEnqueueActivation(collectible);
+        const claims = await outbox.claim(randomUUID(), 2);
+        assert.equal(claims.length, 1); assert.equal(claims[0]!.profileKind, "collectible");
+        assert.deepEqual(await outbox.claim(randomUUID(), 2), []);
+        const foreign = await pair();
+        await foreign.outbox.block(foreign.first, "INVALID_DOMAIN_DATA");
+        const [foreignNext] = await foreign.outbox.claim(randomUUID()); assert.ok(foreignNext);
+        assert.equal(foreignNext.organizationId, foreign.organizationId);
+        await assert.rejects(outbox.load(foreignNext), { code: "SHARED_SCOPE_MISMATCH" });
+        if (barrier === "retry") {
+          await harness.client.profile_activation_intents.updateMany({ where: { id: first.intentId }, data: { available_at: new Date(0) } });
+          assert.equal((await outbox.claim(randomUUID()))[0]!.intentId, first.intentId);
+        }
+      });
+    }
+  } finally { await harness.close(); }
+});
 
 test("Profile artifacts and exact operation journals survive faults and ownership changes", async suite => {
   const harness = await createMigratedCentralTestDatabase();

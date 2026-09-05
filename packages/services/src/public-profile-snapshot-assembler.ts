@@ -14,12 +14,19 @@ export type PublicProfileAssemblyInput = ProfileInput<PublicProviderProfile> | P
 const hash = (value: unknown) => hashPackCatalogValue(PROFILE_SNAPSHOT_HASH_DOMAIN, value);
 const normalized = (value: string) => value.trim().normalize("NFC");
 function protect(value: unknown): void {
-  assertPublicPackCatalogBytes(value);
   const visit = (item: unknown): void => {
     if (typeof item === "string") {
       assertPublicCatalogText(item);
       for (const match of item.matchAll(/https?:\/\/[^\s<>"']+/giu)) assertPublicCatalogUrl(match[0]);
-    } else if (item !== null && typeof item === "object") Object.values(item).forEach(visit);
+    } else if (Array.isArray(item)) item.forEach(visit);
+    else if (item !== null && typeof item === "object") {
+      for (const [key, nested] of Object.entries(item)) {
+        // Inspect original field names without requiring raw display values to
+        // be canonical before the profile schema can normalize them.
+        assertPublicPackCatalogBytes({ [key]: null });
+        visit(nested);
+      }
+    }
   };
   visit(value);
 }
@@ -33,17 +40,18 @@ export async function assemblePublicProfileSnapshot(raw: PublicProfileAssemblyIn
   const ordered = "brandAssets" in input ? { ...input,
     brandAssets: input.brandAssets.map(asset => ({ ...asset, url: normalized(asset.url), alt: normalized(asset.alt) }))
       .sort((a, b) => compareCanonicalStrings(`${a.kind}:${a.url}`, `${b.kind}:${b.url}`)),
-    promotions: input.promotions.map(promotion => ({ ...promotion, promotionId: normalized(promotion.promotionId) }))
+    promotions: input.promotions.map(promotion => ({ ...promotion, promotionId: normalized(promotion.promotionId), url: normalized(promotion.url) }))
       .sort((a, b) => compareCanonicalStrings(a.promotionId, b.promotionId)),
-  } : { ...input, aliases: input.aliases.map(normalized).sort(compareCanonicalStrings),
+  } : { ...input, imageUrl: input.imageUrl === null ? null : normalized(input.imageUrl), aliases: input.aliases.map(normalized).sort(compareCanonicalStrings),
     searchText: normalizePackCatalogSearchText([normalized(input.displayName), ...input.aliases.map(normalized).sort(compareCanonicalStrings)].join(" ")) };
   const parsed = input.identity.profileKind === "provider"
     ? publicProviderProfileSchema.parse({ ...ordered, identity }) : publicCollectibleProfileSchema.parse({ ...ordered, identity });
+  assertPublicPackCatalogBytes(parsed);
+  protect(parsed);
   const { identity: temporary, ...fields } = parsed;
   const { contentSha256: _hash, publicProfileSnapshotId: _id, ...source } = temporary; void _hash; void _id;
   const contentSha256 = await hash({ ...source, ...fields });
   const profile = { ...parsed, identity: { ...source, contentSha256, publicProfileSnapshotId: derivePublicProfileSnapshotId(contentSha256) } };
-  protect(profile);
   const body = { kind: "profile_batch", profile };
   const batch = publicProfileSnapshotBatchSchema.parse({ profile, publicProfileSnapshotId: profile.identity.publicProfileSnapshotId,
     batchIndex: 0, recordCount: 1, byteCount: packCatalogCanonicalByteCount(body), batchSha256: await hash(body) });

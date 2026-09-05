@@ -7,6 +7,7 @@ import {
   type PackCatalogPublicationRequest, type PublicationReasonCode,
 } from "@packscout/contracts";
 import type { CentralTransactionClient } from "./central-database.ts";
+import { Prisma } from "../prisma/generated/central/index.js";
 import { CentralProfilePublicationContext, captureSharedInput, sharedBound, sharedEqual, sharedInvariant, sharedParse, sharedPublicationLimits, type ProfileWorkClaim } from "./central-profile-publication-context.ts";
 import { loadProfileEnvelope } from "./profile-snapshot-repository.ts";
 
@@ -29,7 +30,10 @@ export class CentralProfilePublicationOutboxRepository {
           AND (h.lease_expires_at IS NULL OR h.lease_expires_at <= clock_timestamp())
           AND w.state IN ('ready','publishing','retry_scheduled') AND w.available_at <= clock_timestamp()
           AND w.sequence = (SELECT min(p.sequence) FROM profile_activation_intents p WHERE p.organization_id = h.organization_id
-            AND p.profile_kind = h.profile_kind AND p.entity_id = h.entity_id AND p.state NOT IN ('published','superseded','rolled_back'))
+            AND p.profile_kind = h.profile_kind AND p.entity_id = h.entity_id AND p.state NOT IN ('published','superseded','rolled_back')
+            AND (p.state <> 'blocked' OR p.reason_code IS NULL OR p.reason_code IN ('OPERATOR_HOLD','RECEIPT_AMBIGUOUS') OR
+              ${this.unresolvedPredicate(Prisma.sql`o.organization_id = p.organization_id AND o.profile_kind = p.profile_kind
+                AND o.entity_id = p.entity_id AND o.intent_id = p.id`)}))
         ORDER BY w.available_at, w.sequence LIMIT ${limit} FOR UPDATE OF h SKIP LOCKED`;
       const result: ProfileWorkClaim[] = [];
       for (const row of rows) {
@@ -162,14 +166,14 @@ export class CentralProfilePublicationOutboxRepository {
         receipt: receipt ? packCatalogPublicationReceiptSchema.parse(receipt.receipt_json) : null };
     });
   }
-  /** Neither missing receipts nor expired replay prove that a previously sent activation failed. */
-  private async unresolved(tx: CentralTransactionClient, claim: ProfileWorkClaim) {
-    const [row] = await tx.$queryRaw<Array<{ required: boolean }>>`SELECT EXISTS (
+  /** A blocked intent is obsolete only without a hold or unresolved operation.
+   * Claims and supersession share the same exact reconciliation evidence rule. */
+  private unresolvedPredicate(scope: Prisma.Sql) {
+    return Prisma.sql`EXISTS (
       SELECT 1 FROM profile_publication_operations o LEFT JOIN profile_publication_receipts r ON
         r.organization_id = o.organization_id AND r.profile_kind = o.profile_kind AND r.entity_id = o.entity_id
         AND r.intent_id = o.intent_id AND r.operation_id = o.id
-      WHERE o.organization_id = ${this.context.organizationId}::uuid AND o.profile_kind = ${claim.profileKind}
-        AND o.entity_id = ${claim.entityId}::uuid AND o.intent_id = ${claim.intentId}::uuid
+      WHERE ${scope}
         AND o.request_json->>'operationKind' <> 'profile_publication_status'
         AND NOT EXISTS (SELECT 1 FROM profile_publication_operations lookup JOIN profile_publication_receipts proof ON
           proof.organization_id = lookup.organization_id AND proof.profile_kind = lookup.profile_kind AND proof.entity_id = lookup.entity_id
@@ -186,7 +190,13 @@ export class CentralProfilePublicationOutboxRepository {
                 AND proof.receipt_json #>> '{statusOperation,result,outcome}' IN ('applied','already_applied','already_active','conflict','refused'))))
         AND (r.operation_id IS NULL OR (o.request_json->>'operationKind' = 'activate_profile_snapshot'
           AND NOT (COALESCE(r.receipt_json #>> '{result,outcome}', '') IN ('conflict','refused')
-            AND r.receipt_json #>> '{result,reasonCode}' IS NOT NULL)))) AS required`;
+            AND r.receipt_json #>> '{result,reasonCode}' IS NOT NULL))))`;
+  }
+  /** Neither missing receipts nor expired replay prove that a previously sent activation failed. */
+  private async unresolved(tx: CentralTransactionClient, claim: ProfileWorkClaim) {
+    const [row] = await tx.$queryRaw<Array<{ required: boolean }>>(Prisma.sql`SELECT ${this.unresolvedPredicate(Prisma.sql`
+      o.organization_id = ${this.context.organizationId}::uuid AND o.profile_kind = ${claim.profileKind}
+      AND o.entity_id = ${claim.entityId}::uuid AND o.intent_id = ${claim.intentId}::uuid`)} AS required`);
     return row!.required;
   }
   private defer(claim: ProfileWorkClaim, state: "retry_scheduled" | "blocked" | "superseded", reason: PublicationReasonCode, retrySeconds: number) {

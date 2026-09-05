@@ -1,7 +1,7 @@
 import { assertPublicPackCatalogBytes } from "./pack-catalog-v1.ts";
 import { normalizeProtectedPublicationFieldKey } from "./protected-publication-fields.ts";
 
-const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl", "databaseurl",
+const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl", "databaseurl",
   "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance", "userid", "userdata",
   "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 // Bearer is ordinary public prose unless a protected field or authorization
@@ -19,6 +19,13 @@ function hasPrivateUriTarget(value: string, start: number): boolean {
 }
 const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
 type OAuthContext = { authentication: boolean; code: boolean };
+function hasCookiePair(text: string, start: number): boolean {
+  // Header names alone are public prose; a name/value pair establishes context.
+  // Sticky matching avoids copying or searching an unrelated suffix.
+  const pair = /[!#$%&'*+.^_\x60|~a-z0-9-]+\s*=\s*\S/iyu;
+  pair.lastIndex = start;
+  return pair.test(text);
+}
 const reject = () => { throw new TypeError("PUBLIC_CATALOG_PROTECTED_TEXT"); };
 
 /** Public strings must be safe after display/search normalization as well as before it. */
@@ -107,17 +114,20 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (depth > 6 || ++nodes > 1_000 || text.length > 32_768 || (bytes += encoder.encode(text).length) > 65_536) reject();
     assertPublicCatalogLexicalText(text);
   };
-  const inspectKey = (text: string, depth: number, context: OAuthContext, colonTarget?: boolean): boolean => {
+  const inspectKey = (text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathSegment = false): boolean => {
     const normalized = text.normalize("NFKC");
     const key = normalizeProtectedPublicationFieldKey(normalized);
+    // A product path is not an HTTP header field; retain its traversal charge.
+    if (pathSegment && (key === "cookie" || key === "setcookie")) { charge(text, depth); return false; }
     let protectedName = privateKeys.has(key);
     if (colonTarget !== undefined && !protectedName) {
       try { assertPublicPackCatalogBytes({ [normalized]: null }); } catch { protectedName = true; }
     }
     // Unquoted Actor is a public credit label. Host identifies topology only
     // when its value has connection syntax; quoted/URL/JSON fields stay strict.
-    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host");
-    if (publicLabel) protectedName = key === "host" && colonTarget === true;
+    const cookieHeader = key === "cookie" || key === "setcookie";
+    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host" || cookieHeader);
+    if (publicLabel) protectedName = cookieHeader ? cookieTarget : key === "host" && colonTarget === true;
     // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
     // candidate names still decode under the same charged depth/byte budget.
     if (colonTarget !== undefined && !protectedName && !text.includes("%")) return publicLabel;
@@ -128,7 +138,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       assertPublicPackCatalogBytes({ [normalized]: null });
     }
     const decoded = decodeLayer(normalized);
-    return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget) : publicLabel;
+    return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
   };
   const inspectProseAssignments = (text: string, depth: number): void => {
     // Quotes establish the whole assigned name, including punctuation that the
@@ -154,6 +164,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         while (valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
       }
       const colonTarget = colon ? hasPrivateUriTarget(text, valueStart) : undefined;
+      const cookieTarget = colon && hasCookiePair(text, valueStart);
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -166,7 +177,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        const publicLabel = inspectKey(key, depth + 1, { authentication: false, code: false }, colonTarget);
+        const publicLabel = inspectKey(key, depth + 1, { authentication: false, code: false }, colonTarget, cookieTarget);
         // A recognized public credit/host label ends the name; preceding prose
         // must not manufacture a different protected field.
         if (publicLabel) break;
@@ -187,7 +198,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     for (const match of normalized.matchAll(/[^/]+/gu)) {
       let next = match.index + match[0].length;
       while (normalized[next] === "/") next += 1;
-      if (next < normalized.length) inspectKey(match[0], depth + 1, context);
+      if (next < normalized.length) inspectKey(match[0], depth + 1, context, undefined, false, true);
     }
     // Decode only the pathname component, preserving the URL's authority/query
     // boundaries while exposing encoded path-name/value separators.
@@ -295,6 +306,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   const inspectFragment = (text: string, depth: number, context: OAuthContext): void => {
     charge(text, depth);
+    inspectProseAssignments(text, depth);
     // Padding contains no named field or data beyond separators. Do not turn
     // each '=' into another form layer; all non-padding payloads still traverse.
     if (/^=+$/u.test(text)) return;
