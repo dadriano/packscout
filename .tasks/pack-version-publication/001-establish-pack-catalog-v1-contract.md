@@ -8,6 +8,12 @@
 **Estimated effort:** 1–2 days for one builder, including executable contract fixtures and boundary verification
 **Status:** done
 
+## Handoff — 2026-09-04
+
+Complete and merged in [PR88](https://github.com/dadriano/packscout/pull/88), merge `c66f8666229455fd95d7dca58d3d85a391c01f21`. Do not rebuild it. P02, P04, and P05 start from this foundation; P03 additionally depends on P02's captured-input contract. P05 is also merged; its task record documents the shared search/header/provider-profile read contract corrections that later phases must consume. Historical verification and spec adaptations are below.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
 
 Define one executable fixture containing two independently managed packs, their provider and collectible profiles, every lifecycle state, a valid EV-unavailable result, and a signed two-page query; record the exact snapshot, head, and cursor outcomes.
@@ -26,7 +32,7 @@ A pack snapshot ID names a domain-state revision within `pack_catalog_v1`; it do
 
 ## Delivery Context
 
-P01 is the root contract phase and branches from the repository default branch. Its review promise is executable types, fixtures, validation rules, and invariants only. After merge, no database, public head, route, schedule, credential, or user-visible behavior changes; P02, P03, P04, and P05 may proceed as sibling phases from this contract.
+P01 is the merged root contract phase. Its review promise is executable types, fixtures, validation rules, and invariants only. It changes no database, public head, route, schedule, credential, or user-visible behavior. P02, P04, and P05 are sibling foundations; P03 additionally depends on P02's executable captured-input contract.
 
 ## Requirements
 

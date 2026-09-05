@@ -1,18 +1,30 @@
 # Task: Render Pack Catalog V1 in the Frontend
 
 **ID:** pack-version-publication/007
-**Depends on:** pack-version-publication/005
+**Depends on:** pack-version-publication/005, pack-version-publication/011, pack-version-publication/012
 **Blocks:** pack-version-publication/008
 **Delivery phase:** P07
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder after dependencies are complete, including browser, accessibility, query-state, and saved-item verification
 **Status:** todo
 
+## Active build — 2026-09-04
+
+The measured14-file loader/save foundation is now owned by task012/P07A in `.worktrees/pack-version-publication-p07-frontend`, branch `codex/pack-version-publication-p07a-frontend-foundation`, from verified maincd9c2da8. Task007 itself remains todo: all visible catalog routes must switch atomically after011 full-data coverage and012 verification. No operation-by-operation coexistence, old-DTO adapter, cutover, or PR is claimed.
+
+## Historical handoff before the all-tasks request
+
+Not started. P05/PR108 is merged, so its dependency is now available, but starting 007 is outside the current 002/003 repair authorization. Other frontend/Watchlist PRs are not completion evidence for this task. Preserve all six journeys, stable IDs and saves, complete lifecycle contents, direct V1 reads, and no Heat. Use P05's merged provider-profile joins, title-plus-alias pack search, and exact membership discovery. Keep frontend independent of admin and server implementations; do not introduce an alternate read path.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
 
 Map the six catalog journeys to one `pack_catalog_v1` fixture, then record the expected URL, saved identity, query state, focus state, and rendered result for success, empty, and structured-error outcomes.
 
 ## Objective
+
+User clarification on 2026-09-04: support every data point currently used by the frontend. Task011/P05A supplies the necessary native V1 contract, snapshot, read, and Watchlist corrections before the visible switch. Independent native loader/state work may proceed while that contract is finalized.
 
 Render the complete public catalog directly from `pack_catalog_v1` while preserving stable identities, URLs, saves, and user query intent for every supported journey.
 

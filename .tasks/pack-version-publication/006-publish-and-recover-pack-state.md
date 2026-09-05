@@ -1,12 +1,18 @@
 # Task: Publish and Recover Pack State
 
 **ID:** pack-version-publication/006
-**Depends on:** pack-version-publication/002, pack-version-publication/003, pack-version-publication/004, pack-version-publication/005
+**Depends on:** pack-version-publication/002, pack-version-publication/003, pack-version-publication/004, pack-version-publication/005, pack-version-publication/011
 **Blocks:** pack-version-publication/008, pack-version-publication/009
 **Delivery phase:** P06
 **Estimated scope:** large
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including crash, network, fencing, retry, rollback, authorization, and isolation verification
 **Status:** todo
+
+## Handoff — 2026-09-04
+
+Not started. P02 and P05 are merged; P03 is locally certified and published in PR114 but not merged, and all of P04 remains unimplemented. These remain prerequisites; do not begin P06 merely because 005 merged. P02's crash/partial-expiry persistence fixes now have direct regression evidence in PR95; they remain owned by P02, not deferred here. This phase owns authenticated remote status reconciliation, transaction-local capture composition, worker registration, and the full external-write crash matrix. Reconcile persisted operations even without an ambiguity marker; use P02's `retireReconciled` only with authenticated non-activation evidence, never a missing receipt or expired replay. The shared handoff records the P02/P03 seam and certification gates. Workers and credentials remain disabled until separate launch authorization.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
 
 ## Start Here
 

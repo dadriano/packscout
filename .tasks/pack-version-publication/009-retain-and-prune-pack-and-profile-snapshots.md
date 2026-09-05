@@ -8,6 +8,12 @@
 **Estimated effort:** 1 day for one builder after dependencies are complete, including protection-root, dry-run, authorization, and interrupted-prune verification
 **Status:** todo
 
+## Handoff — 2026-09-04
+
+Not started; requires P06's final receipt/recovery behavior. Include unresolved and partially executed operations in retention-root reasoning; P02's repaired recovery primitives preserve immutable operation/receipt evidence even when no ambiguity marker exists. An expired replay is not proof of non-activation. Keep active/previous/held/in-flight/replay-protected roots and the minimum 30-day policy. Implement and verify dry-run classification before any apply path; no production deletion is authorized.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
 
 Create pack, provider-profile, and collectible-profile fixtures covering active, previous, recently superseded, held recovery target, staged, failed, replay-protected, old unreachable, and ambiguous snapshots, then classify each at the 30-day boundary.
