@@ -2,7 +2,13 @@
 
 ## Start Here
 
-Authoritative continuation2026-09-05 15:02UTC: the user approved121→114→119→120 after green current checks/clear review, then remaining work, and requested verified Admin/monitoring screenshots plus a management guide. PR121 is merged as0ea6145470a276807a0e9590d759d9fad85e9226; main now includes the neutral core. New114 P1(JSON after prose) and120 P2(pending save across auth refresh) are being repaired in parallel; root propagates the P04 invariant and restacks siblings. Counts4/13 accepted,4/12 phases merged.012 is reopened;003/004/011/012 in_progress. All earlier full passes remain historical for new repairs. P08 owns the V1 guide/screenshot set, P10 adds exact-launch evidence; no public activation occurred.
+Authoritative continuation, September 5: the user authorized the foundation merges once current checks and review clear, then all remaining work, plus Admin/monitoring screenshots and a management guide. PR121 and PR120 are merged; current main advanced through unrelated PR122 to b96b43691b48170d64bdd541e4a42cb15f096ecf. Its chosen/reordered All Repacks columns and account preferences must survive011/007. Counts: 5/13 accepted, 5/12 phases merged; 003/004/011 in progress. Remaining authorized foundation merges: 114 then 119.
+
+Latest review refinements are committed: P03 runtime5bba8e4f and P04 runtime4e6b3386 protect encoded prose/quoted assignments and ODBC credentials while accepting public account/host routes and unrelated itemPWD fields. Exact private keys and syntactic identifier/endpoint context remain strict; recognition normalizes without rewriting payload/URL bytes. Complete focused matrices pass138/138 and114/114 with zero skips; affected static checks and ratchet0 pass. Independent316/316 adjusted probes per guard,19 actual pack assemblies and depth17 refusal pass. P04 additionally proves correctly hashed/schema-valid hostile provider and collectible envelopes are rejected without any durable mutation. Fresh full certification/publication/review replies remain. Previous c17a4fe8/e4288458 passed full CI33985161669/33985162253; P03 full local also passed that older runtime, not the new source. No activation occurred.
+
+Capacity clarification requested18:33UTC, not yet answered: retain the existing1,000-pack/512-category catalog limit or support the proposed8,000-pack catalog with a more involved lossless query layout. Both preserve all frontend datapoints and8,000 full content members per pack. No capacity reduction or new architecture is approved pending the answer; foundation repairs continue independently.
+
+The user-requested current-admin visual tour and management-guide index now exist at `output/pack-publication-current-admin-20260905/README.md`, with three fresh synthetic-source screenshots from main-equivalent 33cdfe96. They are explicitly not production or V1 publication evidence. P08 still owns the actual V1 guide and monitoring screenshot set; P10 adds exact-launch certification. Lower checkpoints are historical unless explicitly refreshed.
 
 ### Previous verification checkpoint
 
@@ -14,7 +20,7 @@ The user requested `build-from-tasks all` and full coverage of every current fro
 
 P04 and P07A remain independent main siblings. P05B/task013 now owns the measured8-file/2,225-line neutral EV calculation/public-value extraction from011. It depends only on merged main and preserves formulas/current consumers. The two incomplete native economics files remain backed up for011. P05A resumes after003/004/005/013 merge: the read-only resume audit confirms004's not-yet-main profile assembler is also an actual dependency. Every frontend datapoint and complete-pack readiness remain required.
 
-**Progress:** 5/13 tasks acceptance-complete (001/002/005/012/013); 3/12 implementation phases merged.003/004 are verifying review fixes;011 waits merged003/004/005/013.006–010 remain todo. After011,006 publication/recovery and007 frontend cutover may run in parallel;009 follows006 and008 follows006/007.010 is the coordinated operational launch. Existing006/007 task files contain disjoint implementation/acceptance briefs. No new phase, merge or live activation occurred in this build.
+**Progress:** 5/13 tasks acceptance-complete (001/002/005/012/013); 5/12 implementation phases merged. 003/004 are verifying review fixes; 011 waits for merged 003/004/005/013. 006–010 remain todo. After 011, publication/recovery 006 and frontend cutover 007 may run in parallel; 009 follows 006 and 008 follows 006/007. Task 010 is the coordinated operational launch. Existing 006/007 files contain disjoint implementation briefs. PR121/120 merged during this continuation; no live activation occurred.
 
 ## Context
 
@@ -127,13 +133,13 @@ Provider databases remain isolated and authoritative for provider-owned history.
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
 | P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | merged |
-| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 |96 focused tests pass; account/direct-JSON full gate pending | building |
-| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; independent worktree | Offline-provider fan-out and profile matrix | building |
+| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 | 138 focused tests pass; final encoded/ODBC full gate pending | building |
+| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; PR119 | 114 focused tests pass; final encoded/ODBC full gate pending | building |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
 | P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | merged PR121 | Exact parity/full gate; merge0ea61454 | merged |
 | P05A | Preserve every current frontend data point in native V1 | 011 | P03, P04, P05, P05B | root after prerequisites merge | Source-to-snapshot-to-frontend data parity | building |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05, P05A | root after prerequisites merge | Publication ambiguity and recovery race | planned |
-| P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | independent sibling on main; PR120 | New auth-refresh review repair; prior594/fullCI historical | building |
+| P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | PR120 mergedf852a166 | Auth-refresh repair certified:654 frontend tests, full local and CI33974274282 pass | merged |
 | P07 | Direct V1 frontend across every catalog journey | 007 | P05, P05A, P07A | atomic switch after full data parity | Full frontend data parity and browser proof | planned |
 | P08 | Bounded monitoring, read-only Admin, alerts, and launch-plan/readiness evaluation | 008 | P06, P07 | root after prerequisites merge | Operational readiness and fault drill | planned |
 | P09 | Root-safe snapshot retention and bounded pruning | 009 | P06 | sibling from P06 | Retention and active-head race | planned |
@@ -311,7 +317,7 @@ P05B/task013 is a separate prerequisite of P05A, not extra publisher scope.
 |---|---|---|---|---|---|---|
 | 011 | Preserve every frontend data point in V1 | P05A | large | scope from field inventory | in_progress | 003, 004, 005, 013 |
 | 013 | Share neutral existing EV calculation core | P05B | medium | measured extraction | done | 001, 005 |
-| 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | in_progress | 005 |
+| 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | done | 005 |
 | 006 | Publish and recover pack state | P06 | large | 2–3 days | todo | 002, 003, 004, 005, 011 |
 | 007 | Render Pack Catalog V1 in the frontend | P07 | medium | field-driven scope | todo | 005, 011, 012 |
 | 008 | Operate and observe pack publication | P08 | medium | 1.5–2 days | todo | 006, 007 |

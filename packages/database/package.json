@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./protected-evidence": "./src/protected-evidence.ts",
-    "./test-support": "./src/test-support.ts"
+    "./test-support": "./src/test-support.ts",
+    "./publication-input": "./src/central-publication-input.ts"
   },
   "scripts": {
     "lint": "eslint src prisma",

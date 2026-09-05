@@ -70,3 +70,4 @@ export * from "./pack-catalog-publication-protocol.ts";
 export { providerPackListingUrl } from "./provider-pack-listing-url.ts";
 export * from "./pack-publication-operation.ts";
 export * from "./table-column-layout.ts";
+export * from "./public-catalog-text.ts";
