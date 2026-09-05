@@ -26,6 +26,8 @@ Root's four-file correction passed62/62 focused tests with zero skips, including
 
 Resolved user policy mirrors003: ordinary Bearer words and token-shaped prose remain public without explicit authorization/credential context. Root owns the analogous repair in existing P04 guard/test files, including contextualizing the old derived-search rejection fixture. Preserve `Card bearer collection` and all prior benign-success assertions. Published runtime e34660f9/headc003c027 passed fullCI33945458835; the new repair still needs certification and119 remains draft. No runtime activation. The following original review report is historical; no blanket Bearer heuristic will be added.
 
+Policy pause mirrors003: arbitrary short Bearer recognition also rejects the existing valid `Card bearer collection` control. The proposed short-token/normalized-assignment changes are frozen uncommitted in the two existing guard/test files; do not alter that positive test without resolving the intended policy. Published runtime remains e34660f9/headc003c027, draft. No proposal was pushed.
+
 PR114's latest P1s3939489239/3939489244 require short Bearer token and ordinary protected-assignment coverage. P04 has the same20-character Bearer floor; its literal assignment recognition already covers the reported api_key case. The agent is reproducing and fixing only analogous policy gaps in the two existing guard/test files. Runtime e34660f9/current fullCI33945458835 is superseded for forthcoming repair certification. Keep004 in_progress/119 draft; no new file or runtime activation.
 
 ## Earlier public-label refinement
