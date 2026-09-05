@@ -61,6 +61,59 @@ test("nested form names use the same whitespace normalization as direct URL keys
   }
 });
 
+test("structured URL payloads reject protected JSON names, including escapes and overwritten duplicate values", async () => {
+  for (const payload of ['{"access_token":"private-marker"}', '[{"authorization_code":"private-marker"}]',
+    '{"items":[{"nested":{"sig":"private-marker"}}]}', '{"\\u0061ccess_token":"private-marker"}',
+    '{"caption":{"access_token":"private-marker"},"caption":"safe"}',
+    '{"%2561ccess_token":"private-marker"}', '{"account id":"private-marker"}',
+    JSON.stringify('{"access_token":"private-marker"}')]) {
+    for (const prefix of ["?data=", "#data=", "#"]) {
+      const url = `https://example.com/${prefix}${encodeURIComponent(payload)}`;
+      refuses({ url }); refuses({ title: `Visit ${url}` });
+      const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("structured URL payloads recursively inspect JSON strings, forms and URL values", () => {
+  for (const payload of [JSON.stringify({ next: 'data={"access_token":"private-marker"}' }),
+    JSON.stringify(["https://example.com/?access_token=private-marker"]),
+    JSON.stringify({ next: "https://example.com/?data=" + encodeURIComponent('{"sig":"private-marker"}') }),
+    'data=' + encodeURIComponent('{"next":"authorization code=private-marker"}'),
+    '{"next":"https:\\/\\/example.com\\/?\\u0061ccess_token=private-marker"}']) {
+    refuses({ url: `https://example.com/?data=${encodeURIComponent(payload)}` });
+  }
+});
+
+test("malformed recognized structured URL payloads fail closed", () => {
+  for (const payload of ['{"access_token":"private-marker"', '[{"access_token":"private-marker"}',
+    '{"caption":"safe",}', '{"caption":"unterminated}', '{"caption":"\\u00GG"}']) {
+    refuses({ url: `https://example.com/?data=${encodeURIComponent(payload)}` });
+  }
+});
+
+test("structured URL payloads share the existing depth budget across serialization layers", () => {
+  refuses({ url: "https://example.com/?data=" + encodeURIComponent("[".repeat(17) + "null" + "]".repeat(17)) });
+  let payload = "safe";
+  for (let index = 0; index < 12; index += 1) payload = JSON.stringify({ nested: payload });
+  refuses({ url: `https://example.com/?data=${encodeURIComponent(payload)}` });
+});
+
+test("benign structured URL values preserve captions, literal separators and scalar types", async () => {
+  for (const payload of [JSON.stringify({ caption: "Fish & Actor", nested: { label: "A+B", rate: "100%" } }),
+    JSON.stringify([1.5, true, false, null, "public@example.com", "caption=Fish%26Actor"]),
+    JSON.stringify({ next: "https://example.com/card?caption=Fish%26Actor" }),
+    JSON.stringify('{"caption":"Fish%26Actor"}'), '{"caption":"first","caption":"second"}']) {
+    for (const prefix of ["?data=", "#data=", "#"]) {
+      const url = `https://example.com/${prefix}${encodeURIComponent(payload)}`;
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+      const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+});
+
 test("the final normalized projection also refuses URI and query credentials synthesized by search normalization", async () => {
   for (const title of ["Visit ａｍｑｐｓ://alice:private-marker@example.com", "Visit ｈｔｔｐｓ://example.com/?%61uthorization_code=private-marker"]) {
     assert.doesNotThrow(() => assertPackAssemblyPublicData({ title })); // NFC display is not the NFKC search projection.

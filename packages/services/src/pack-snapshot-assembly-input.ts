@@ -69,8 +69,42 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     while (end > start && withoutControls.charCodeAt(end - 1) <= 32) end -= 1;
     return withoutControls.slice(start, end).replaceAll("\\", "/");
   }
+  const isStructuredText = (text: string) => /^[{["]/u.test(text);
+  function inspectStructuredText(text: string, depth: number): void {
+    // Inspect every token before parsing the document: JSON.parse alone would
+    // discard protected values hidden by duplicate object keys. Charge this
+    // same traversal before allocating a parsed document or descending further.
+    let nesting = 0, index = 0;
+    while (index < text.length) {
+      const start = index, character = text[index++]!;
+      if (/\s|[,:]/u.test(character)) continue;
+      if (character === "{" || character === "[") {
+        nesting += 1; chargeUrlText(character, depth + nesting); continue;
+      }
+      if (character === "}" || character === "]") { requireAssembly(nesting > 0); nesting -= 1; continue; }
+      if (character === '"') {
+        while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
+        requireAssembly(index < text.length); index += 1;
+        const token = text.slice(start, index);
+        let decoded: string;
+        try { decoded = JSON.parse(token) as string; }
+        catch { requireAssembly(false); return; }
+        let next = index;
+        while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+        if (text[next] === ":") inspectUrlKey(decoded, depth + nesting + 1);
+        else inspectUrlText(decoded, depth + nesting + 1);
+      } else {
+        while (index < text.length && !/[\s{}[\]",:]/u.test(text[index]!)) index += 1;
+        chargeUrlText(text.slice(start, index), depth + nesting + 1);
+      }
+    }
+    requireAssembly(nesting === 0);
+    try { JSON.parse(text); }
+    catch { requireAssembly(false); }
+  }
   function inspectFragment(text: string, depth: number): void {
     const normalized = chargeUrlText(text, depth);
+    if (isStructuredText(normalized)) { inspectStructuredText(normalized, depth); return; }
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), equals = candidate.indexOf("=");
       return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.\.?[/]/iu.test(candidate) ||
@@ -90,6 +124,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectUrlText(text: string, depth = 0, required = false): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
+    if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth); return; }
     // Dispatch a form by its leading assignment, even when its value contains
     // a literal question mark or fragment marker. URL paths retain precedence.
     const assignment = candidate.indexOf("="), marker = candidate.search(/[?#]/u);
