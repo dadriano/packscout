@@ -7,7 +7,7 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
-const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{20,})/iu;
+const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bauthorization["']?\s*:\s*\S)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -86,6 +86,35 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     const decoded = decodeLayer(normalized);
     if (decoded !== normalized) inspectUrlKey(decoded, depth + 1, context);
   }
+  function inspectProseAssignments(text: string, depth: number): void {
+    // Quoted names are explicit fields, including punctuation and whitespace.
+    // Consume each complete quoted span and charge its full name without truncation.
+    for (const match of text.matchAll(/"([^"]*)"\s*=|'([^']*)'\s*=/gu)) {
+      inspectUrlKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
+    }
+    // Consume full runs even without '='; bounded suffixes recognize spaced or
+    // quoted names without treating ordinary colon labels as structured fields.
+    for (const match of text.matchAll(/[a-z0-9%_.-]+(?:[ \t]+[a-z0-9%_.-]+)*/giu)) {
+      let end = match.index + match[0].length;
+      if (text[end] === '"' || text[end] === "'") end += 1;
+      while (end < text.length && /\s/u.test(text[end]!)) end += 1;
+      if (text[end] !== "=") continue;
+      const words = match[0].split(/\s+/u);
+      let key = "";
+      for (let index = words.length - 1; index >= 0; index -= 1) {
+        // Do not turn preceding prose ("Secret edition code=SUMMER") into
+        // part of the assigned name. Quoted names are explicitly structural.
+        if (index < words.length - 1 && !/["']/u.test(text[match.index - 1] ?? "")) {
+          try { assertPublicPackCatalogBytes({ [words[index]!]: null }); } catch { break; }
+        }
+        key = words[index]! + (key === "" ? "" : ` ${key}`);
+        if (key.length > 256) break;
+        // URL/form parsing owns contextual OAuth codes; lexical assignment
+        // discovery must not join separate URLs into one authentication context.
+        inspectUrlKey(key, depth + 1, { authentication: false, code: false });
+      }
+    }
+  }
   function urlRecognition(normalized: string): string {
     // Match WHATWG scheme/authority recognition, without changing query-value structure.
     const withoutControls = normalized.replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "");
@@ -154,6 +183,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectUrlText(text: string, depth = 0, required = false, context: OAuthContext = { authentication: false, code: false }): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
+    if (!required) inspectProseAssignments(normalized, depth);
     if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
     // Dispatch a form by its leading assignment, even when its value contains
     // a literal question mark or fragment marker. URL paths retain precedence.
@@ -189,6 +219,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       bytes += encoder.encode(item).byteLength;
       const urlField = field === "url" || field === "imageUrl";
       rejectCredentialText(item, urlField ? undefined : target => inspectUrlText(target));
+      if (!urlField) inspectProseAssignments(item.trim().normalize("NFC"), 0);
       if (urlField) {
         inspectUrlText(item, 0, true);
       }

@@ -17,11 +17,84 @@ test("public text rejects reusable Basic authorization credentials regardless of
   }
 });
 
-test("recognized Bearer credentials include the standard plus slash and padding alphabet", async () => {
-  for (const title of ["Bearer abcdefghijklmno+/pqrs", "Bearer dXNlcjpwYXNzd29yZA=="]) {
+test("explicit authorization context protects credentials regardless of token length or alphabet", async () => {
+  for (const title of ["Authorization: Bearer abcdefghijklmno+/pqrs", "Authorization: Bearer dXNlcjpwYXNzd29yZA==",
+    "Authorization: Bearer abc123", "authorization: bearer a", "Details Authorization:\tBEARER Zg==",
+    "Authorization: Bearer a+/._~-=", "Authorization: a", 'Documentation "Authorization": "Bearer a"']) {
     refuses({ title });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
     const { input } = await assemblyFixture(); input.inputs.title = title;
     await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
+test("Bearer names and opaque-looking prose remain public without credential context", async () => {
+  for (const title of ["Bearer of the Heavens", "Bearer of good news", "Card bearer collection", "Bearer abc123", "bearer a",
+    "Bearer abcdefghijklmno+/pqrs", "Bearer dXNlcjpwYXNzd29yZA==", "Bearer a+/._~-=", "Details BEARER\tZg==", "==="]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: title })) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("protected credential assignments in public prose use normalized field names", async () => {
+  for (const assignment of ["api_key=a", "api_key=sk_live_private_marker", "api.key=private-marker", "api__key=private-marker",
+    "api  key=private-marker", '"api_key"="private-marker"', "authorization_code=reusable-code",
+    "code_verifier=reusable-verifier", "X-Amz-Signature=private-marker", "sig=private-marker",
+    "credentials=private-marker", "%61pi_key=a", "authorization=Bearer a", '"Authorization"="Bearer a"',
+    '"secret alias"="a"']) {
+    const title = `Documentation ${assignment}`;
+    refuses({ title });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: title })) });
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  for (const value of ["a", "Bearer a", "Bearer abc123"]) {
+    refuses({ authorization: value });
+    refuses({ url: "https://example.com/?%2541uthorization=" + encodeURIComponent(value) });
+  }
+});
+
+test("ordinary prose labels and public promotion assignments remain publishable", async () => {
+  for (const title of ["Actor: Keanu Reeves", "Host: Public Speaker", "A signature collection",
+    "Promotion code=SUMMER", "Secret edition code=SUMMER", "Actor collection code=SUMMER",
+    "Documentation caption=Fish%26Actor", "Email contact=support@example.com",
+    "Bolt: Premium Edition", "Pulsar:First Edition", "MySQL: The Guide", "Basic edition"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("quoted assignments inspect the complete normalized name without dropping punctuation or long keys", async () => {
+  for (const key of ["api/key", "authorization/code", "secret/alias", "api💫key", "authorization／code", "api\nkey",
+    "public/".repeat(40) + "api/key"]) {
+    for (const quote of ['"', "'"]) {
+      const title = `Documentation ${quote}${key}${quote}=${quote}a${quote}`;
+      refuses({ title });
+      refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+      refuses({ url: "https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: title })) });
+      const { input } = await assemblyFixture();
+      input.inputs.imageUrl = "https://example.com/?caption=" + encodeURIComponent(title);
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("benign quoted assignment names retain public promotion text and shared limits", async () => {
+  for (const key of ["campaign/name", "campaign💫name", "campaign\nname", "public/".repeat(40) + "campaign/name"]) {
+    for (const quote of ['"', "'"]) {
+      const title = `Documentation ${quote}${key}${quote}=${quote}SUMMER${quote}`;
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: title })) }));
+      const { input } = await assemblyFixture();
+      input.inputs.imageUrl = "https://example.com/?caption=" + encodeURIComponent(title);
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
   }
 });
 
@@ -222,12 +295,14 @@ test("benign structured URL values preserve captions, literal separators and sca
   }
 });
 
-test("the final normalized projection also refuses URI and query credentials synthesized by search normalization", async () => {
-  for (const title of ["Visit ａｍｑｐｓ://alice:private-marker@example.com", "Visit ｈｔｔｐｓ://example.com/?%61uthorization_code=private-marker"]) {
+test("the final normalized projection also refuses URI credentials synthesized by search normalization", async () => {
+  for (const title of ["Visit ａｍｑｐｓ://alice:private-marker@example.com", "Visit ｈｔｔｐｓ://alice:private-marker@example.com"]) {
     assert.doesNotThrow(() => assertPackAssemblyPublicData({ title })); // NFC display is not the NFKC search projection.
     const { input } = await assemblyFixture(); input.inputs.title = title;
     await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
   }
+  // Protected assignments are recognizable even before the fullwidth scheme is normalized.
+  refuses({ title: "Visit ｈｔｔｐｓ://example.com/?%61uthorization_code=private-marker" });
 });
 
 test("benign embedded links, email, URI paths and encoded form values retain their literal structure", async () => {

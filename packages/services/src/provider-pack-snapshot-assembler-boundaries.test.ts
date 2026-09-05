@@ -221,7 +221,7 @@ test("credential-bearing public text is scanned after schema-equivalent normaliz
   assert.equal((await assembler.assemble(padded)).snapshot.payload.title, "Padded title");
 
   const cases = [
-    { value: `Bearer ${"A".repeat(20)}`, set: (input: ProviderPackBuildInputs, value: string) => { input.title = value; } },
+    { value: `Authorization: Bearer ${"A".repeat(20)}`, set: (input: ProviderPackBuildInputs, value: string) => { input.title = value; } },
     { value: "postgres://user:pass@host/database", set: (input: ProviderPackBuildInputs, value: string) => { input.contents[0]!.displayName = value; } },
   ];
   for (const { value, set } of cases) {
@@ -232,7 +232,7 @@ test("credential-bearing public text is scanned after schema-equivalent normaliz
     await reject(pinned);
   }
   for (const { value, set } of [
-    { value: `Promo Bearer ${"A".repeat(20)}`, set: cases[0]!.set },
+    { value: `Promo Authorization: Bearer ${"A".repeat(20)}`, set: cases[0]!.set },
     { value: "Database: postgres://user:pass@host/database", set: cases[1]!.set },
   ]) {
     const { input } = await assemblyFixture();
@@ -247,9 +247,9 @@ test("derived search text cannot combine separate public fields into credentials
   input.inputs.aliases = ["Scout pack"];
   const benign = await assembler.assemble(await requestFor(input.inputs));
   assert.equal(benign.snapshot.payload.searchProjection.normalizedText, "bearer scout pack");
-  for (const title of ["Bearer", "Promo Bearer", "  Bearer\t"]) {
+  for (const title of ["Authorization:", "Promo Authorization:", "  Authorization:\t"]) {
     input.inputs.title = title;
-    input.inputs.aliases = ["12345678901234567890"];
+    input.inputs.aliases = ["Bearer abc123"];
     await reject(await requestFor(input.inputs));
   }
 });
