@@ -40,10 +40,13 @@ export function AuthenticatedSavedItemsProvider({ children }: Readonly<{ childre
   const mutationState = useSyncExternalStore(mutations.subscribe, mutations.getSnapshot, mutations.getServerSnapshot);
 
   // Cached IDs can enable controls on the first commit, before passive effects.
+  // Loading can be a same-identity token refresh: pause new UI actions without
+  // losing issued writes. The parent's identity key still isolates other users.
   useLayoutEffect(() => {
     if (signedIn) mutations.activate();
-    return () => mutations.dispose();
-  }, [mutations, signedIn]);
+    else if (auth.status !== "loading") mutations.dispose();
+  }, [auth.status, mutations, signedIn]);
+  useLayoutEffect(() => () => mutations.dispose(), [mutations]);
 
   const serverRepackIds = useMemo(() => new Set(savedItemIds?.savedRepackIds ?? []), [savedItemIds?.savedRepackIds]);
   const serverCollectibleIds = useMemo(() => new Set(savedItemIds?.savedCollectibleIds ?? []), [savedItemIds?.savedCollectibleIds]);
