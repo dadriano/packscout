@@ -16,6 +16,12 @@ Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context
 
 ## Start Here
 
+### Parallel implementation brief after prerequisites merge
+
+Run independently of007 from the same verified011 parent. Own the pack/profile publisher and recovery services, transactional native PackInputCapture adapter, shared-delivery worker, P02/P04 repository and worker-gate wiring, `apps/worker` composition/runtime configuration, and environment-scoped seed/recovery/gate commands. Reuse `packages/services/src/convex-pack-catalog-publication-client.ts` and P05 HTTP routes rather than creating another transport. Keep schedules/credentials/commands disabled in production.
+
+Consume011's sealed complete build inputs/private evidence/hash association, `BuiltPublicPackSnapshot` and profile envelope; do not recompute economics or modify frontend consumers. Root serializes contract/database/service exports and any required Convex store/schema/generated corrections. Verify the two-provider/two-pack/profile ambiguity and epoch-recovery matrix, including lost responses without an ambiguity marker, gate/lease/hold/seed isolation, then full framework checks. Combined post-merge proof updates and rolls back one pack while another stays byte-identical in the browser.
+
 Drive two packs and one profile through crashes before assembly, after snapshot seal, before send, after an unknown response, during activation, and during protected rollback, then record the exact durable state and recovery outcome at every boundary.
 
 ## Objective
