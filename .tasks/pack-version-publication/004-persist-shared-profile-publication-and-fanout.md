@@ -8,6 +8,14 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
+## Current DSN and PGP propagation — 2026-09-05
+
+Independent580-probe cross-boundary review found no new actionable defect or helper divergence. Its13 P04 nested-label refusals match exact pre-DSN fbafabde in13/13 baseline comparisons; direct benign labels remain public. Four P03 raw-normalization differences are independently confirmed to reject at actual final assembly. The580 count includes both guards, not580 profile unit tests.
+
+Runtime `aa6a7c3cb2586e64697c9be1f5f068646fd8fb4b` propagates114's contextual DSN/private-PGP protection into the independently owned profile boundary on mainb96b4369. Adjacent endpoint/catalog assignments reject without expanding generic protected-field names; encoded public source attribution and public key armor remain valid. Existing NFKC inspection, budgets and Bearer/Cookie prose policies stay unchanged.
+
+Root complete six-file matrix106/106 passes0skip, including privatePG fan-out/recovery and production Admin bundle/SPA/two engines (`/tmp/packscout-p04-dsn-pgp-complete-focused-20260905.log`). Pure guard62/62, contracts lint/types and ratchet0 pass. Guard SHA-256722179ec5269de345ab0887344e5d0d2a1634868a6f22b0f17a8844bc2058c5c. Independent final cross-review is finishing; fresh publication/full certification remain. Prior119 terminal-job/NFC threads have fixing-SHA replies3941609327/3941609374 and are resolved. Previousfbafabde passed fullCI33983598401; its local77725 was intentionally stopped143 for propagation, not a pass. No production activation or lost-refusal-status claim.
+
 ## Current terminal-job, Unicode and cookie repairs — 2026-09-05
 
 Runtime `63ac710159c67302d9ad9f077be3091158c59d78` on main b96b4369 fixes PR119 comments3941534806/3941534814. A terminal blocked intent yields to later same-profile corrections only without operator hold, ambiguous/missing reason or unresolved operation evidence; claim and supersession reuse the exact same receipt predicate. Live leases, due retries, waiting work, stale fences and tenant/profile isolation remain enforced. Raw profile strings/keys are inspected before parsing; canonical values and derived text are checked after trim/NFC normalization but before hashing, including promotion and collectible image URLs without URL reserialization. Existing canonical fixture hashes remain unchanged.

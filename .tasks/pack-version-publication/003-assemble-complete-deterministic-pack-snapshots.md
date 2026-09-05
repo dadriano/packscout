@@ -8,6 +8,14 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
 
+## Current DSN and PGP review repair — 2026-09-05
+
+Independent cross-boundary580-probe review found no new actionable defect. All DSN/standard-armor expectations pass;13 P04 nested-caption differences are unchanged on the exact pre-repair baseline. Four raw P03 fullwidth-armor acceptances reflect the existing NFC stage, with actual final-assembly rejection independently confirmed. The580 count includes both guards, not580 P03 unit tests.
+
+Runtime `29c2e26d089a3d6e76fc9b58df16000b4a49cbde` repairs114 comments3941602608/3941602611 on mainb96b4369. Explicit Server/Data Source plus Database/Initial Catalog pairs establish connection context; standalone endpoint fields require connection-shaped values. Ordinary labels and public source URL attribution remain public, including bounded component encoding. Standard PGP private-key armor rejects while public armor and Bearer prose remain valid. Original/final derived payload scans reject cross-field DSN/armor synthesis. Existing parser/depth/node/byte limits are unchanged.
+
+Complete five-file matrix130/130 passes0skip, including8,000-member full/lifecycle/reuse and actual privatePG handoff (`/tmp/packscout-p03-dsn-pgp-complete-focused-20260905.log`). Owning pure127/127, services lint/types and ratchet0 pass. Source guard SHA-256419cd2f1407fff3134e9d1ab28cde72dfd56e13a9aa519f7d1e76c8f874caaba. Independent final cross-review is finishing. New full local gate is running in `/tmp/packscout-p03-dsn-pgp-framework-20260905.log`; fresh publication/CI/review remain before acceptance. Previous7ab81375 cookie source passed full local and CI33983263719, but does not certify this repair. No activation.
+
 ## Current cookie-authentication review repair — 2026-09-05
 
 PR114 P1comment3941536315/threadPRRT_kwDOTplTZc6flkf3 is repaired in runtime `8f2a4d841fc7033b8bf24db87654f0bfec15f116` on main b96b4369. Explicit Cookie/Set-Cookie structured fields are protected; unquoted header labels require a cookie name/value pair, even one-character credentials. Cookie-related prose, empty labels, ordinary product paths and Bearer-only text stay public. Existing bounded fragment traversal now checks the same prose assignments. No new parser, dependency, budget or token heuristic.
