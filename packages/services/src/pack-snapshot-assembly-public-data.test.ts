@@ -38,12 +38,34 @@ test("known database and message-broker URI schemes are private topology without
   }
 });
 
-test("known private URI schemes also reject single-slash and opaque connection targets", () => {
-  for (const uri of ["sqlite:/private/catalog.db", "sqlite+aiosqlite:/private/catalog.db", "sqlite:private/catalog.db"]) {
+test("known private URI schemes also reject single-slash and opaque connection targets", async () => {
+  for (const uri of ["sqlite:/private/catalog.db", "sqlite+aiosqlite:/private/catalog.db", "sqlite:private/catalog.db",
+    "SQLite::memory:", "sqlite:catalog.db", "mysql:db.internal:3306", "amqps:mq.internal",
+    "mysql:alice:private-marker@db.internal", "nats:host=mq.internal",
+    "sqlite:%2Fprivate%2Fcatalog", "sqlite:%3Amemory%3A"]) {
     refuses({ title: `Details ${uri}` });
     refuses({ url: "https://example.com/?data=" + encodeURIComponent(uri) });
+    const { input } = await assemblyFixture(); input.inputs.title = uri;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
   }
   assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "A MySQL and SQLite integration guide" }));
+});
+
+test("known connection-scheme words remain valid prose titles without endpoint or credential syntax", async (context) => {
+  for (const title of ["Bolt: Premium Edition", "Pulsar: First Edition", "MySQL: The Guide",
+    "Bolt:Premium Edition", "Pulsar:First Edition", "MySQL:The Guide", "SQLite:Reference", "Pulsar:FirstEdition."]) {
+    await context.test(title, async () => {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    });
+  }
+});
+
+test("repeated scheme tokens stop at connection syntax while repeated prose labels remain valid", () => {
+  for (const count of [10, 1_000, 10_000]) refuses({ title: "mysql:".repeat(count) });
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Bolt:Premium ".repeat(2_000) }));
 });
 
 test("OAuth authorization codes are private only in authentication route or parameter context", async () => {

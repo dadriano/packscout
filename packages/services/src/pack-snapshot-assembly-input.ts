@@ -9,6 +9,15 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{20,})/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
+function hasPrivateUriTarget(value: string, start: number): boolean {
+  // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
+  // differs from "Bolt: Premium Edition" and "Bolt:Premium Edition" prose.
+  // Constant-width lookahead stops at the first marker instead of scanning a suffix.
+  for (let index = start; index < value.length && !/\s/u.test(value[index]!); index += 1) {
+    if (/^[/\\@?#=:]|^%[0-9a-f]{2}|^[a-z0-9]\.[a-z0-9]/iu.test(value.slice(index, index + 3))) return true;
+  }
+  return false;
+}
 const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
 type OAuthContext = { authentication: boolean; code: boolean };
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
@@ -32,9 +41,9 @@ function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: strin
   while ((match = schemes.exec(recognized)) !== null) {
     const colon = schemes.lastIndex;
     if (recognized[colon] !== ":") continue;
-    // Private connection schemes also have single-slash or opaque forms; an
-    // authority delimiter or userinfo is not needed to expose their topology.
-    requireAssembly(!privateUriScheme.test(match[0]) || colon + 1 === recognized.length);
+    // Known scheme names alone are also product/book labels. Require connection
+    // structure, including single-slash paths and opaque endpoint forms.
+    requireAssembly(!privateUriScheme.test(match[0]) || !hasPrivateUriTarget(recognized, colon + 1));
     let authorityStart = colon + 1;
     while (recognized[authorityStart] === "/" || recognized[authorityStart] === "\\") authorityStart += 1;
     if (!/^(?:https?|ftp|wss?)$/iu.test(match[0]) && authorityStart - colon - 1 < 2) continue;
