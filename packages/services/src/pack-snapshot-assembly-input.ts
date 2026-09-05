@@ -7,7 +7,8 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
-const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bauthorization["']?\s*:\s*\S)/iu;
+const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
+const credentialColonKeys = new Set(["apikey", "password", "secret", "accesstoken", "refreshtoken", "authorization"]);
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -77,19 +78,25 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
-  function inspectUrlKey(text: string, depth: number, context: OAuthContext): void {
+  function inspectUrlKey(text: string, depth: number, context: OAuthContext, credentialOnly = false): void {
+    const credentialName = credentialColonKeys.has(text.trim().normalize("NFC").toLowerCase().replace(/[^a-z0-9]/gu, ""));
+    // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
+    // candidate names still decode under the same charged depth/byte budget.
+    if (credentialOnly && !credentialName && !text.includes("%")) return;
     const normalized = chargeUrlText(text, depth);
-    keys.add(normalized);
+    if (!credentialOnly || credentialName) keys.add(normalized);
     const key = normalized.toLowerCase().replace(/[^a-z0-9]/gu, "");
-    context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
-    requireAssembly(!context.code || !context.authentication);
+    if (!credentialOnly) {
+      context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
+      requireAssembly(!context.code || !context.authentication);
+    }
     const decoded = decodeLayer(normalized);
-    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1, context);
+    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1, context, credentialOnly);
   }
   function inspectProseAssignments(text: string, depth: number): void {
     // Quoted names are explicit fields, including punctuation and whitespace.
     // Consume each complete quoted span and charge its full name without truncation.
-    for (const match of text.matchAll(/"([^"]*)"\s*=|'([^']*)'\s*=/gu)) {
+    for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {
       inspectUrlKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
     }
     // Consume full runs even without '='; bounded suffixes recognize spaced or
@@ -98,7 +105,13 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       let end = match.index + match[0].length;
       if (text[end] === '"' || text[end] === "'") end += 1;
       while (end < text.length && /\s/u.test(text[end]!)) end += 1;
-      if (text[end] !== "=") continue;
+      const colon = text[end] === ":";
+      if (text[end] !== "=" && !colon) continue;
+      // A bare label can be public on its own; joined search text is scanned
+      // again after aliases supply an actual value (e.g. "Authorization:").
+      let valueStart = end + 1;
+      while (colon && valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
+      if (colon && valueStart === text.length) continue;
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -111,7 +124,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        inspectUrlKey(key, depth + 1, { authentication: false, code: false });
+        inspectUrlKey(key, depth + 1, { authentication: false, code: false }, colon);
       }
     }
   }

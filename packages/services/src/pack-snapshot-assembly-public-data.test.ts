@@ -58,6 +58,42 @@ test("protected credential assignments in public prose use normalized field name
   }
 });
 
+test("explicit credential-name colon assignments reject without classifying ordinary labels", async () => {
+  for (const assignment of ["api_key: sk_live_private_marker", "password: hunter2", "api.key: a", "api  key: a",
+    "API-KEY:\ta", "%61pi_key: a", "%2561pi_key: a", "secret: a", "access_token: a", "refresh.token: a",
+    "authorization: Bearer a", "client_api_key: a", '"api/key": "a"', '"password": "a"',
+    '"secret/alias": "a"', "'api💫key': 'a'", '"api\nkey": "a"']) {
+    const title = `Documentation ${assignment}`;
+    refuses({ title });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: title })) });
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
+test("ordinary colon labels and quoted promotion fields remain public", async () => {
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Authorization:" }));
+  for (const title of ["Actor: Keanu Reeves", "Host: Public Speaker", "Bolt: Premium Edition", "Pulsar:First Edition",
+    "Secret edition code: SUMMER", "Bearer abc123", 'Documentation "campaign/name": "SUMMER"',
+    "Documentation 'campaign💫name': 'SUMMER'"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Actor: Keanu Reeves; Host: Public Speaker; Bolt:Premium ".repeat(1_000) }));
+});
+
+test("an empty authorization label is rejected only after a separate public alias supplies its value", async () => {
+  const { input } = await assemblyFixture();
+  input.inputs.title = "Authorization:";
+  input.inputs.aliases = ["Bearer abc123"];
+  const candidate = await requestFor(input.inputs);
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(candidate));
+  await assert.rejects(assembler.assemble(candidate), PackSnapshotAssemblyError);
+});
+
 test("ordinary prose labels and public promotion assignments remain publishable", async () => {
   for (const title of ["Actor: Keanu Reeves", "Host: Public Speaker", "A signature collection",
     "Promotion code=SUMMER", "Secret edition code=SUMMER", "Actor collection code=SUMMER",
