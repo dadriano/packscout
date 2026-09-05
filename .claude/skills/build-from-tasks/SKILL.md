@@ -440,3 +440,16 @@ After a PR is opened and reported, do not treat the build as finished — watch 
    - PR merged or closed: stop the watch and report the final state.
 4. If the watch times out with no signal, report that no review activity was observed yet and how to resume the watch.
 5. The watcher only reads PR state and reports. Fixes land through the normal build flow in the feature worktree, gated by the same task verification anchors as the original work.
+
+
+## Output shape for the human reader
+
+Task files, commits, and PR bodies are for builders and reviewers — they stay complete. What you say to the user takes this shape:
+
+- **Progress updates restate state**: "Task 003 done (4 of 9). Now: 004 in its worktree." The reader does not hold the plan between messages; the update carries it.
+- **Errors are cause → fix**: the failing check, the cause, the fix or single next diagnostic. Matter-of-fact, no narration of attempts unless asked.
+- **The handoff**: first line names what shipped and where (branch, PR, verification result). Then at most 3 flags ranked by risk. Last line is one action the reader can take in under two minutes — usually opening the PR.
+- **Estimates in concrete units** ("two tasks left, roughly an afternoon"), never "almost done".
+- Simplification applies only to prose the user reads — never to task status, specs, code, commits, or PR bodies.
+- Before the session's first user-facing summary, load the `eli5` skill (Skill tool, audience: "a busy technical reader who skims"); if unavailable, apply purpose-first, plain-word calibration directly.
+- If `/i-have-adhd` is active it outranks these; never invoke it yourself (user-invocable only).
