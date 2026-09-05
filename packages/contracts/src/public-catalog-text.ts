@@ -3,7 +3,7 @@ import { normalizeProtectedPublicationFieldKey } from "./protected-publication-f
 
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl", "databaseurl",
   "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance", "userid", "userdata",
-  "rawsourceevidence", "sig", "xamzsignature", "signature"]);
+  "rawsourceevidence", "sig", "xamzsignature", "signature", "pwd"]);
 // Bearer is ordinary public prose unless a protected field or authorization
 // assignment establishes credential context; token spelling/length cannot do so.
 const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
@@ -114,11 +114,26 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (depth > 6 || ++nodes > 1_000 || text.length > 32_768 || (bytes += encoder.encode(text).length) > 65_536) reject();
     assertPublicCatalogLexicalText(text);
   };
-  const inspectKey = (text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathSegment = false): boolean => {
+  const inspectKey = (text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathTarget?: string): boolean => {
     const normalized = text.normalize("NFKC");
     const key = normalizeProtectedPublicationFieldKey(normalized);
     // A product path is not an HTTP header field; retain its traversal charge.
-    if (pathSegment && (key === "cookie" || key === "setcookie")) { charge(text, depth); return false; }
+    if (pathTarget !== undefined && (key === "cookie" || key === "setcookie")) { charge(text, depth); return false; }
+    if (pathTarget !== undefined && (key === "account" || key === "host")) {
+      let target = pathTarget, targetDepth = depth;
+      while (target.includes("%")) {
+        charge(target, targetDepth++);
+        const decoded = decodeLayer(target.trim().normalize("NFKC"));
+        if (decoded === target) break;
+        target = decoded.trim();
+      }
+      // Encoded separators expose another path segment, not a value suffix.
+      target = /[^/\\]+/u.exec(target)?.[0] ?? "";
+      const identifier = /^[0-9]+$|^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$|^[^\s/@]+@[^\s/@]+$/iu.test(target) ||
+        (/^[a-z0-9]+(?:[-_:][a-z0-9]+)+$/iu.test(target) && /(?:^|[-_:])[0-9]+(?:$|[-_:])/u.test(target));
+      const privateTarget = key === "account" ? identifier : hasPrivateUriTarget(target, 0) || isPrivateUrlHostname(target);
+      if (!privateTarget) { charge(text, depth); return false; }
+    }
     let protectedName = privateKeys.has(key);
     if (colonTarget !== undefined && !protectedName) {
       try { assertPublicPackCatalogBytes({ [normalized]: null }); } catch { protectedName = true; }
@@ -138,14 +153,14 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       assertPublicPackCatalogBytes({ [normalized]: null });
     }
     const decoded = decodeLayer(normalized);
-    return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
+    return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathTarget) : publicLabel;
   };
   const inspectConnectionAssignments = (text: string, depth: number): void => {
-    let through = -1, endpoint = false, catalog = false;
+    let through = -1, endpoint = false, catalog = false, dsn = false, user = false;
     // Context belongs only to adjacent semicolon fields, not unrelated prose.
     const fields = /(?:^|;)[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^=;\r\n]+))[ \t]*=[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^;\r\n]*))[ \t]*/gmu;
     for (const match of text.matchAll(fields)) {
-      if (match.index !== through) { endpoint = false; catalog = false; }
+      if (match.index !== through) { endpoint = false; catalog = false; dsn = false; user = false; }
       through = match.index + match[0].length;
       const quoted = match[1] !== undefined || match[2] !== undefined;
       let name = match[1] ?? match[2] ?? match[3]!, keyDepth = depth + 1;
@@ -165,7 +180,8 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       }
       const server = names.includes("server"), source = names.includes("datasource");
       const database = names.includes("database") || names.includes("initialcatalog");
-      if (!server && !source && !database) continue;
+      const namedSource = names.includes("dsn"), userId = names.includes("uid");
+      if (!server && !source && !database && !namedSource && !userId) continue;
       charge(name, keyDepth);
       const rawTarget = (match[4] ?? match[5] ?? match[6]!).trim();
       let target = rawTarget, targetDepth = depth + 1;
@@ -188,19 +204,39 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         endpoint ||= target !== "";
       }
       catalog ||= database && target !== "";
-      if (endpoint && catalog) reject();
+      dsn ||= namedSource && target !== ""; user ||= userId && target !== "";
+      // UID alone can identify a public card. An adjacent connection target
+      // establishes account context without globally protecting every UID.
+      if ((endpoint && catalog) || (dsn && (endpoint || catalog)) || (user && (dsn || endpoint || catalog))) reject();
     }
   };
-  const inspectProseAssignments = (text: string, depth: number): void => {
+  const inspectProseAssignments = (rawText: string, depth: number): void => {
+    const text = rawText.normalize("NFKC");
+    if (text !== rawText) charge(rawText, depth);
     inspectConnectionAssignments(text, depth);
     // Quotes establish the whole assigned name, including punctuation that the
     // protected-field normalizer removes. Each scan stops at its next delimiter.
-    for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {
-      inspectKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
+    for (const match of text.matchAll(/"([^"]*)"\s*([:=]|%[a-z0-9%_.-]*)|'([^']*)'\s*([:=]|%[a-z0-9%_.-]*)/giu)) {
+      let separator = match[2] ?? match[4]!, separatorDepth = depth + 1;
+      // Decode only the following lexical component, not a suffix or whole URL.
+      while (!/^[:=]/u.test(separator) && separator.includes("%")) {
+        charge(separator, separatorDepth++);
+        const decoded = decodeLayer(separator.trim().normalize("NFKC"));
+        if (decoded === separator) break;
+        separator = decoded.trim();
+      }
+      if (/^[:=]/u.test(separator)) inspectKey(match[1] ?? match[3]!, separatorDepth, { authentication: false, code: false });
     }
     // Consume full runs even without '='; bounded suffixes recognize spaced or
     // quoted names without treating ordinary colon labels as structured fields.
     for (const match of text.matchAll(/[a-z0-9%_.-]+(?:[ \t]+[a-z0-9%_.-]+)*/giu)) {
+      // Decode a lexical run, never an entire URL's structural delimiters.
+      // Recursion retains the existing shared depth/node/byte budget.
+      if (match[0].includes("%")) {
+        charge(match[0], depth + 1);
+        const decoded = decodeLayer(match[0].trim().normalize("NFKC"));
+        if (decoded !== match[0]) inspectProseAssignments(decoded, depth + 1);
+      }
       let end = match.index + match[0].length;
       if (text[end] === '"' || text[end] === "'") end += 1;
       while (end < text.length && /\s/u.test(text[end]!)) end += 1;
@@ -250,7 +286,9 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     for (const match of normalized.matchAll(/[^/]+/gu)) {
       let next = match.index + match[0].length;
       while (normalized[next] === "/") next += 1;
-      if (next < normalized.length) inspectKey(match[0], depth + 1, context, undefined, false, true);
+      let end = next;
+      while (end < normalized.length && normalized[end] !== "/") end += 1;
+      if (next < normalized.length) inspectKey(match[0], depth + 1, context, undefined, false, normalized.slice(next, end));
     }
     // Decode only the pathname component, preserving the URL's authority/query
     // boundaries while exposing encoded path-name/value separators.
@@ -358,7 +396,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   const inspectFragment = (text: string, depth: number, context: OAuthContext): void => {
     charge(text, depth);
-    inspectProseAssignments(text, depth);
+    inspectProseAssignments(text.normalize("NFKC"), depth);
     // Padding contains no named field or data beyond separators. Do not turn
     // each '=' into another form layer; all non-padding payloads still traverse.
     if (/^=+$/u.test(text)) return;

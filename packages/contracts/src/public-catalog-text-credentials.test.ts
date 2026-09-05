@@ -2,6 +2,64 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertPublicCatalogText, assertPublicCatalogUrl } from "./public-catalog-text.ts";
 
+test("encoded prose assignments retain explicit credential context without rewriting URLs", () => {
+  for (const text of ["Documentation api_key%3Dsk_live_private_marker", "password%3Ahunter2",
+    "Documentation api%5Fkey%253Dsk_live_private_marker", "password%253Ahunter2",
+    "%22api%2Fkey%22%3Dprivate-marker", "Documentation %22account%22%3Ainternal-123",
+    "access%20token%3Dprivate-marker", "Host%3Adb.internal:5432", '"api_key"%3Dprivate-marker',
+    "'password'%3Aprivate-marker", '"P-W-D"%3Da', '"api_key"%253Dprivate-marker']) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+  }
+  for (const text of ["Caption%3DFish%26Actor", "Caption%253DA%252BB", "Host%3A%20Public%20Speaker",
+    "Bearer%20a", "Bearer%20of%20the%20Heavens", "Card%20edition", "100% available",
+    "Visit https://example.com/?caption=Fish%26Actor"]) assert.doesNotThrow(() => assertPublicCatalogText(text));
+});
+
+test("public account and host routes remain usable without exposing identifiers or topology", () => {
+  for (const path of ["/account/rewards", "/host/events", "/%61ccount/%72ewards", "/%2561ccount/%2572ewards",
+    "/%68ost/%65vents", "/%2568ost/%2565vents", "/host/%2Fevents", "/account/preferences",
+    "/account/rewards/redeem", "/host/events/summer"]) {
+    const url = "https://example.com" + path;
+    assert.doesNotThrow(() => assertPublicCatalogUrl(url));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ${url}`));
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?next=" + encodeURIComponent(url)));
+  }
+  for (const path of ["/account/12345", "/account/123e4567-e89b-12d3-a456-426614174000", "/account/member-123",
+    "/account/alice%40example.com", "/%61ccount/%2531%2532%2533", "/host/db.internal", "/host/localhost",
+    "/host/%252Fdb.internal", "/host/db.internal%3A5432", "/accountid/rewards", "/api_key/rewards",
+    "/password/rewards", "/access_token/rewards", "/callback/code/rewards", "/host/events?account=rewards"]) {
+    const url = "https://example.com" + path;
+    assert.throws(() => assertPublicCatalogUrl(url), TypeError);
+    assert.throws(() => assertPublicCatalogText(`Visit ${url}`), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?next=" + encodeURIComponent(url)), TypeError);
+  }
+});
+
+test("named ODBC credentials are private while unqualified public UID fields remain valid", () => {
+  for (const text of ["DSN=ProdCards;UID=admin;PWD=s3cr3t", "Documentation dsn=ProdCards;uid=admin;pwd=a",
+    '"DSN" = "ProdCards" ; "UID" = "admin" ; "P-W-D" = "a"',
+    "DSN=ProdCards;UID=admin", "UID=admin;DSN=ProdCards", "Server=SQLHOST;UID=admin",
+    '{"DSN":"ProdCards","UID":"admin","PWD":"a"}', 'Documentation {"p_w_d":"a"}',
+    "DSN=ProdCards;UID=admin;%50WD=a", "Documentation ＰＷＤ：a"]) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+  }
+  for (const text of ["PWD collection", "DSN Guide", "UID=public-card-123", "DSN=Public Guide",
+    '{"uid":"public-card-123"}', "Bearer a", "Cookie: Chocolate edition", "PWDStrength=high", "itemPWD=a",
+    "DSN=;UID=public-card", "DSN=Public Guide;UID=", "DSN=Public Guide; public prose;UID=public-card",
+    "DSN=Public Guide\nUID=public-card"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+  for (const text of ['{"itemPWD":"a"}', '{"caption":"itemPWD=a"}']) assert.doesNotThrow(() => assertPublicCatalogText(text));
+  assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?itemPWD=a"));
+  assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/#itemPWD=a"));
+});
+
 test("explicit key-value database connection targets remain private", () => {
   for (const text of ["Server=10.0.0.7;Database=cards", "Data Source=db.internal:1433;Initial Catalog=cards",
     "Database=cards;Server=CATALOGSERVER", "Initial Catalog=cards;Data Source=CATALOGSERVER",

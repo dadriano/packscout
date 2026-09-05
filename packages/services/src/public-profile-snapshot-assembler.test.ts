@@ -4,6 +4,40 @@ import { packCatalogCanonicalJson } from "@packscout/contracts";
 import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
 
+test("profile promotion routes stay public while encoded credentials remain private", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const url of ["https://example.com/account/rewards", "https://example.com/host/events",
+    "https://example.com/%2561ccount/%2572ewards"]) {
+    const result = await assemblePublicProfileSnapshot({ ...fixture.provider.profile,
+      promotions: [{ promotionId: "offer", label: "Offer", copy: "Offer", url }] });
+    assert.ok("promotions" in result.profile);
+    assert.equal(result.profile.promotions[0]!.url, url);
+  }
+  for (const text of ["Documentation api_key%3Dsk_live_private_marker", "password%3Ahunter2",
+    '"api_key"%3Dprivate-marker', "'password'%3Aprivate-marker", '"P-W-D"%3Da']) {
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, displayName: text }), TypeError);
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile, aliases: [text] }), TypeError);
+  }
+  for (const url of ["https://example.com/?" + encodeURIComponent("ＰＷＤ") + "=a",
+    "https://example.com/#" + encodeURIComponent("Documentation ＰＷＤ：a")]) {
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile,
+      promotions: [{ promotionId: "offer", label: "Offer", copy: "Offer", url }] }), TypeError);
+  }
+  await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile,
+    displayName: "api_key", aliases: ["%3Dprivate-marker"] }), TypeError);
+});
+
+test("named ODBC credentials never seal into provider or collectible profile text", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const text of ["DSN=ProdCards;UID=admin;PWD=s3cr3t", 'Documentation {"p_w_d":"a"}',
+    "DSN=ProdCards;UID=admin", "Documentation ＰＷＤ：a"]) {
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile, displayName: text }), TypeError);
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.collectibles[0]!.profile, displayName: text }), TypeError);
+    await assert.rejects(assemblePublicProfileSnapshot({ ...fixture.provider.profile,
+      promotions: [{ promotionId: "offer", label: "Offer", copy: text, url: "https://example.com/offer" }] }), TypeError);
+  }
+});
+
 test("profile assembly normalizes decomposed public text before canonical hashing", async suite => {
   const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
   for (const existing of [fixture.provider, fixture.collectibles[0]!]) {

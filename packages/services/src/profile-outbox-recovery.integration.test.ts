@@ -1,12 +1,72 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { evaluatePublicationReplay, packCatalogCanonicalJson, packCatalogPublicationRequestSchema, packCatalogReceiptDigest, type PackCatalogPublicationRequest } from "@packscout/contracts";
+import { derivePublicProfileSnapshotId, evaluatePublicationReplay, normalizePackCatalogSearchText, packCatalogCanonicalByteCount,
+  packCatalogCanonicalJson, packCatalogPublicationRequestSchema, packCatalogReceiptDigest, profilePublicationEnvelopeSchema,
+  type PackCatalogPublicationRequest } from "@packscout/contracts";
 import { CentralProfilePublicationContext, CentralProfilePublicationOutboxRepository, ProviderProfileSnapshotRepository,
-  CollectibleProfileSnapshotRepository, SharedPackFanoutRepository, type ProfileWorkClaim } from "@packscout/database";
+  CollectibleProfileSnapshotRepository, SharedPackFanoutRepository, SharedPublicationPersistenceError, profileHash,
+  type ProfileWorkClaim } from "@packscout/database";
 import { createMigratedCentralTestDatabase } from "@packscout/database/test-support";
 import { faultCentralClient, fixtureProfiles, makeProfileEnvelope, profileRequest, seedCentralScope, successfulProfileReceipt } from "./shared-profile-publication.test-support.ts";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
+
+test("Schema-valid rehashed ODBC profile envelopes are refused without durable mutation", async suite => {
+  const harness = await createMigratedCentralTestDatabase();
+  try {
+    const providerId = randomUUID(), organizationId = await seedCentralScope(harness.client, [providerId]);
+    const context = new CentralProfilePublicationContext(harness.client, organizationId, "local");
+    const providerRepository = new ProviderProfileSnapshotRepository(context), collectibleRepository = new CollectibleProfileSnapshotRepository(context);
+    const { provider, collectible } = await fixtureProfiles(providerId);
+    await providerRepository.sealAndEnqueueActivation(provider);
+    await collectibleRepository.sealAndEnqueueActivation(collectible);
+    const readState = () => Promise.all([
+      harness.client.profile_snapshot_artifacts.findMany({ where: context.where, orderBy: { profile_kind: "asc" } }),
+      harness.client.profile_snapshot_batches.findMany({ where: context.where, orderBy: { profile_kind: "asc" } }),
+      harness.client.profile_activation_intents.findMany({ where: context.where, orderBy: { profile_kind: "asc" } }),
+      harness.client.profile_publication_heads.findMany({ where: context.where, orderBy: { profile_kind: "asc" } }),
+    ]);
+    const before = await readState();
+    for (const [original, repository] of [[provider, providerRepository], [collectible, collectibleRepository]] as const) {
+      await suite.test(original.profile.identity.profileKind, async () => {
+        const envelope = structuredClone(original);
+        envelope.profile.displayName = "DSN=ProdCards;UID=admin;PWD=s3cr3t";
+        if ("searchText" in envelope.profile) envelope.profile.searchText = normalizePackCatalogSearchText([
+          envelope.profile.displayName, ...envelope.profile.aliases,
+        ].join(" "));
+        // Construct internally consistent wire evidence without calling the
+        // assembler: the repository must independently enforce public privacy.
+        const { identity, ...fields } = envelope.profile;
+        const { contentSha256: _previousHash, publicProfileSnapshotId: _previousId, ...source } = identity;
+        void _previousHash; void _previousId;
+        const contentSha256 = await profileHash({ ...source, ...fields });
+        envelope.profile.identity = { ...source, contentSha256, publicProfileSnapshotId: derivePublicProfileSnapshotId(contentSha256) };
+        const body = { kind: "profile_batch", profile: envelope.profile };
+        envelope.batch = { ...envelope.batch, profile: envelope.profile,
+          publicProfileSnapshotId: envelope.profile.identity.publicProfileSnapshotId,
+          byteCount: packCatalogCanonicalByteCount(body), batchSha256: await profileHash(body) };
+        const { profile: _batchProfile, ...batch } = envelope.batch; void _batchProfile;
+        envelope.descriptor = { ...envelope.descriptor, identity: envelope.profile.identity, batch };
+        envelope.payloadSha256 = await profileHash(envelope.profile);
+        const { operationDigest: _previousDigest, ...previousIntent } = envelope.intent; void _previousDigest;
+        const intentId = randomUUID(), intent = { ...previousIntent, intentId, idempotencyKey: `profile:${intentId}`, profile: envelope.profile.identity };
+        envelope.intent = { ...intent, operationDigest: await profileHash(intent) };
+        assert.deepEqual(await profilePublicationEnvelopeSchema.parseAsync(envelope), envelope,
+          "the credential-bearing fixture must pass every schema and envelope hash check");
+        assert.notEqual(envelope.payloadSha256, original.payloadSha256);
+        assert.notEqual(envelope.intent.intentId, original.intent.intentId);
+        await assert.rejects(repository.sealAndEnqueueActivation(envelope), error => {
+          assert.ok(error instanceof SharedPublicationPersistenceError);
+          assert.equal(error.code, "SHARED_INPUT_INVALID");
+          assert.equal(error.message, "SHARED_INPUT_INVALID");
+          assert.doesNotMatch(JSON.stringify(error), /ProdCards|admin|s3cr3t|DSN|PWD/iu);
+          return true;
+        });
+        assert.deepEqual(await readState(), before, "existing artifacts, batches, intents and heads must remain unchanged");
+      });
+    }
+  } finally { await harness.close(); }
+});
 
 test("Terminal profile intents yield to corrections without crossing recovery barriers", async suite => {
   const harness = await createMigratedCentralTestDatabase();
