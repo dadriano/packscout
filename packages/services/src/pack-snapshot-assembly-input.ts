@@ -62,9 +62,27 @@ function hasCookiePair(text: string, start: number): boolean {
   pair.lastIndex = start;
   return pair.test(text);
 }
+function hasLiteralStackFrame(value: string): boolean {
+  const text = value.normalize("NFKC");
+  // A source location with line/column coordinates establishes a stack frame,
+  // not the words Error/at alone. Fixed-shape function tokens and delimited
+  // source spans keep the scan linear, including whitespace-collapsed search.
+  for (const frame of text.matchAll(/(?:^|\s)at[ \t]+(?:(?:async|new)[ \t]+)?(?:[^\s()]+(?:[ \t]+\[as[ \t]+[^\]\r\n[]+\])?[ \t]+\(([^()\r\n]+):[0-9]+:[0-9]+\)|([^()\s]+):[0-9]+:[0-9]+)(?=$|[\s),.;])/gu)) {
+    const source = frame[1] ?? frame[2]!;
+    if (/[\\/]|^node:|^[^:\s]+\.[^:\s]+$/u.test(source)) return true;
+  }
+  // Python frames quote a source file; Java frames name a class method and
+  // .java source line; Firefox frames separate a function and absolute source
+  // URL with @. None treats an ordinary Error label or email as a stack frame.
+  for (const frame of text.matchAll(/(?:^|\s)File[ \t]+"([^"\r\n]+)",[ \t]+line[ \t]+[0-9]+(?=$|[\s,.;])/gu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$/u.test(frame[1]!)) return true;
+  }
+  return /(?:^|\s)at[ \t]+[a-z_$][\w$./<>]*\.[\w$<>]+\([^()\r\n]+\.java:[0-9]+\)(?=$|[\s),.;])/iu.test(text) ||
+    /(?:^|\s)[^\s@()]*@(?:[a-z][a-z0-9+.-]*:\/{2,}|\/)[^\s()]+:[0-9]+:[0-9]+(?=$|[\s),.;])/iu.test(text);
+}
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
   const normalized = value.trim().normalize("NFC");
-  requireAssembly(!credentialText.test(normalized));
+  requireAssembly(!credentialText.test(normalized) && !hasLiteralStackFrame(normalized));
   // Basic has no minimum credential length. Decode only canonical base64 with
   // its required user/password separator, preserving ordinary "Basic edition" prose.
   for (const match of normalized.matchAll(/\bBasic\s+([a-z0-9+/]+={0,2})/giu)) {
@@ -126,11 +144,12 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   const decodeLayer = (text: string) => new URLSearchParams(
     `value=${text.replace(/&/gu, "%26").split("+").join("%2B")}`,
   ).get("value")!;
-  function chargeUrlText(text: string, depth: number): string {
+  function chargeUrlText(text: string, depth: number, stackRecognitionOnly = false): string {
     requireAssembly(++urlNodes <= limits.maximumNodes && depth <= limits.maximumDepth);
     urlBytes += encoder.encode(text).byteLength;
     requireAssembly(urlBytes <= limits.maximumInputBytes);
-    rejectCredentialText(text);
+    if (stackRecognitionOnly) requireAssembly(!hasLiteralStackFrame(text));
+    else rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
   function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathTarget?: string): boolean {
@@ -233,6 +252,16 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     // Match schema-equivalent field spelling without rewriting public bytes.
     const text = rawText.normalize("NFKC");
     if (text !== rawText) chargeUrlText(rawText, depth);
+    // Percent decoding here is recognition-only: retain frame punctuation that
+    // splits lexical assignment runs, without manufacturing URL/form structure.
+    // Every layer shares the same depth, node and byte counters as URL traversal.
+    let recognitionText = text, recognitionDepth = depth;
+    while (recognitionText.includes("%")) {
+      const decoded = decodeLayer(recognitionText);
+      if (decoded === recognitionText) break;
+      chargeUrlText(decoded, ++recognitionDepth, true);
+      recognitionText = decoded;
+    }
     inspectConnectionAssignments(text, depth);
     // Quoted names are explicit fields, including punctuation and whitespace.
     // Consume each complete quoted span and charge its full name without truncation.

@@ -7,6 +7,87 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("literal source-location stack frames never enter public pack text", async () => {
+  for (const title of ["Error: boom\n    at handler (/srv/app.js:10:5)", "TypeError: failed\r\n\tat async handler (/srv/app.ts:20:7)",
+    "Error: boom\n at Object.handler [as callback] (/srv/app.js:10:5)", "Error: boom\n at new Handler (C:\\app\\file.js:10:5)",
+    "at /srv/app.js:10:5", "at async /srv/app.js:10:5", "at async file:///srv/app.js:10:5",
+    "at handler (app.js:10:5)", "at handler (node:internal/modules/run_main:10:5)",
+    "Error: boom at handler (https://example.com/app.js:10:5)"]) {
+    refuses({ title }); refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("ordinary Error and at prose remain public without a structured source frame", async () => {
+  for (const title of ["Error: rare misprint", "Meet at the store", "Artist at handler (stage 10:5)",
+    "at booth (section:10:5)", "Visit https://example.com/app.js", "File app.js:10:5", "Bearer a"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    for (const suffix of ["?caption=", "#"]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/" + suffix + encodeURIComponent(title) }));
+    }
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("final normalized search cannot synthesize a source-location stack frame", async () => {
+  const { input } = await assemblyFixture(); input.inputs.title = "Error: boom at handler";
+  input.inputs.aliases = ["(/srv/app.js:10:5)"];
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+  await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+});
+
+test("other standard runtime frames require explicit source-location syntax", async () => {
+  for (const title of ['Traceback (most recent call last):\n  File "/srv/app.py", line 10, in handler',
+    'File "app.py", line 10, in handler', 'File "C:\\app\\file.py", line 10, in handler',
+    "java.lang.RuntimeException: boom\n at app.Handler.run(Handler.java:10)",
+    "at java.base/java.lang.Thread.run(Thread.java:840)",
+    "handler@https://example.com/app.js:10:5", "@file:///srv/app.js:10:5"]) {
+    refuses({ title }); refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+  for (const title of ['File "Collector Guide", line 10', "File guide, line 10", "at app.Handler.run(Collector Guide:10)",
+    "handler at Collector Guide:10:5", "Contact alice@example.com:10:5", "at $10:20:30"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    for (const suffix of ["?caption=", "#"]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/" + suffix + encodeURIComponent(title) }));
+    }
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("component-encoded source frames retain the same private meaning", async () => {
+  for (const frame of ["Error: boom\n    at handler (/srv/app.js:10:5)",
+    'File "/srv/app.py", line 10, in handler', "at app.Handler.run(Handler.java:10)",
+    "handler@https://example.com/app.js:10:5", "ａｔ handler (/srv/app.js:10:5)",
+    'Ｆｉｌｅ "/srv/app.py", line 10, in handler']) {
+    const title = encodeURIComponent(frame);
+    refuses({ title });
+    refuses({ url: "https://example.com/?caption=" + title });
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
 test("literal quoted names retain following encoded assignment separators", async () => {
   for (const title of ['"api_key"%3Dprivate-marker', "'password'%3Aprivate-marker", '"P-W-D"%3Da',
     'Documentation "api/key"%253Dprivate-marker', '"password"%25%33%41private-marker',
