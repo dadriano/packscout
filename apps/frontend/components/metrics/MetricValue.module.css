@@ -56,6 +56,28 @@
   line-height: 1.25;
 }
 
+.valueTrigger {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: help;
+  font: inherit;
+  padding: 0;
+  text-align: inherit;
+}
+
+.valueTrigger:hover,
+.valueTrigger[aria-expanded="true"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+.valueTrigger:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+  border-radius: 0.15rem;
+}
+
 .stateLabel::before {
   width: 0.38rem;
   height: 0.38rem;

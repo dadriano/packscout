@@ -104,13 +104,12 @@ function RepackCard({
       </button>
 
       <div className={styles.metrics}>
-        <MetricValue compact metric={grossEv.grossEvDollars} showReason={false} />
-        <MetricValue compact metric={grossEv.grossEvPercent} showReason={false} />
-        <MetricValue compact metric={grossEv.evDollars} showReason={false} />
-        <MetricValue compact metric={grossEv.evPercent} showReason={false} />
-        <MetricValue compact metric={buyback} showReason={false} />
+        <MetricValue compact glossaryDetails={[grossEv.sourceNote, grossEv.observedLabel].filter((detail): detail is string => Boolean(detail))} glossaryDetailsHeading="Source" metric={grossEv.grossEvDollars} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.grossEvPercent} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evDollars} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evPercent} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={buyback} showReason={false} showSemanticState={false} />
       </div>
-      {grossEv.sourceNote ? <p className={styles.sourceNote} title={grossEv.sourceNote}>{grossEv.sourceLabel}</p> : null}
 
       <dl className={styles.details}>
         <div>

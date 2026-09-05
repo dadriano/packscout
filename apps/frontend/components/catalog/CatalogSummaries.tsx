@@ -49,7 +49,7 @@ export function CatalogSummaries({
           });
           return (
             <li key={row.key}>
-              <Link aria-label={row.accessibleLabel} className={styles.row} href={href}>
+              <Link aria-label={row.accessibleLabel} className={styles.row} href={href} title={`${row.medianEvPercent.accessibleLabel} ${row.sourceLabel}.`}>
                 <span className={styles.label}>
                   {title === "By vendor" ? (
                     <VendorIdentity name={row.label} vendorKey={row.key} />
@@ -72,8 +72,6 @@ export function CatalogSummaries({
                   data-tone={row.medianEvPercent.tone ?? "plain"}
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
-                  <small>{row.medianEvPercent.semanticLabel}</small>
-                  <small>{row.sourceLabel}</small>
                 </span>
               </Link>
             </li>

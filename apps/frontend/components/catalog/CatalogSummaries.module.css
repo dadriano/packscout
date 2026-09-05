@@ -108,14 +108,6 @@
   font-weight: 670;
 }
 
-.median small {
-  color: var(--color-text-muted);
-  font-size: 0.6rem;
-  font-weight: 650;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
 .median[data-tone="positive"] {
   color: var(--color-positive);
 }

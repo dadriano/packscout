@@ -261,8 +261,15 @@ export function RepackInspector({
   const chaseUnavailableReason =
     chase.reasonCopy ?? METRIC_TRUST_COPY.unavailableExplanation;
   const headingId = `repack-inspector-${placement}-${repack.publicRepackId}`;
-  const vendorObservationDetails =
-    vendorEv.observedLabel === null ? [] : [vendorEv.observedLabel];
+  const vendorObservationDetails = [
+    vendorEv.sourceNote,
+    vendorEv.observedLabel,
+    vendorEv.reasonCopy,
+  ].filter((detail): detail is string => Boolean(detail));
+  const providerEvidence = providerHealth.state === "healthy" ? [] : [
+    providerHealth.statusCopy,
+    providerHealth.observedLabel,
+  ].filter((detail): detail is string => Boolean(detail));
 
   useEffect(() => {
     if (placement !== "sheet") return;
@@ -342,7 +349,7 @@ export function RepackInspector({
               {availability.label}
             </span>
             <p
-              className={styles.availabilityDescription}
+              className="sr-only"
               id={`${headingId}-availability-description`}
             >
               {availability.description}
@@ -358,9 +365,7 @@ export function RepackInspector({
           </h2>
           <p className={styles.vendor}>
             <VendorLogo vendorKey={repack.vendorKey} />
-            <span>
-              Offered by <strong>{repack.vendorDisplayName}</strong>
-            </span>
+            <strong>{repack.vendorDisplayName}</strong>
           </p>
           <p className={styles.price}>
             <span className={styles.priceValue}>
@@ -382,26 +387,12 @@ export function RepackInspector({
         <div className={styles.sectionBlock}>
           <PackScoutEvMetrics
             compact
+            confidenceDetails={providerEvidence}
             grossEvPresentation={grossEv}
             presentation={packScoutEv}
             showProvenance={false}
             showRepackPrice={false}
           />
-          {providerHealth.state !== "healthy" ? (
-            <div
-              aria-label={providerHealth.accessibleLabel}
-              className={styles.providerHealth}
-              data-state={providerHealth.state}
-            >
-              <strong>{providerHealth.statusLabel}</strong>
-              <span>{providerHealth.statusCopy}</span>
-              {providerHealth.observedAt && providerHealth.observedLabel ? (
-                <time dateTime={providerHealth.observedAt}>
-                  {providerHealth.observedLabel}
-                </time>
-              ) : null}
-            </div>
-          ) : null}
           <div className={styles.vendorEstimate}>
             <div className={styles.sectionHeading}>
               <h3>
@@ -412,27 +403,25 @@ export function RepackInspector({
                   field="vendorReportedEv"
                 />
               </h3>
-              <span>{vendorEv.sourceNote}</span>
             </div>
             <div className={styles.vendorEstimateMetrics}>
               <MetricValue
                 compact
+                glossaryDetails={vendorObservationDetails}
+                glossaryDetailsHeading="Source"
                 metric={vendorEv.reported}
                 showReason={false}
                 showSemanticState={false}
               />
               <MetricValue
                 compact
+                glossaryDetails={vendorObservationDetails}
+                glossaryDetailsHeading="Source"
                 metric={vendorEv.usdComparison}
                 showReason={false}
                 showSemanticState={false}
               />
             </div>
-            {vendorEv.reasonCopy ? (
-              <p className={styles.vendorEstimateReason}>
-                {vendorEv.reasonCopy}
-              </p>
-            ) : null}
           </div>
           <div className={styles.buybackMetric}>
             <MetricValue

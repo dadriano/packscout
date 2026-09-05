@@ -27,6 +27,10 @@
     color 120ms ease;
 }
 
+.root[data-custom-trigger="true"] {
+  margin-inline-start: 0;
+}
+
 .trigger:hover,
 .trigger[aria-expanded="true"] {
   border-color: var(--color-action);

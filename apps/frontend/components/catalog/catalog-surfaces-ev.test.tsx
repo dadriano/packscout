@@ -115,7 +115,7 @@ test("all four catalog surfaces show source-derived EV with platform attribution
       assert.ok(markup.includes("$93.79"), vendorKey);
       assert.ok(markup.includes("93.79%"), vendorKey);
     }
-    assert.ok(opportunity.includes("Platform EV × buyback"), vendorKey);
+    assert.equal(opportunity.includes("Platform EV × buyback"), false, vendorKey);
     assert.ok(opportunity.includes("EV confidence: Unavailable"), vendorKey);
     assert.ok(renderInspector(detail).includes('aria-label="EV from platform data"'));
   }
@@ -218,7 +218,8 @@ test("unavailable estimates render the reason on every surface, never zero or ve
     );
     // Vendor EV stays present but separately labeled — never as PackScout EV.
     assert.ok(markup.includes("$90.00"));
-    assert.ok(markup.includes("Reported by vendor — separate from PackScout Gross EV"));
+    assert.equal(markup.includes("Reported by vendor — separate from PackScout Gross EV"), false);
+    assert.match(markup, /aria-expanded="false"/);
   }
   // Not documented buyback shows the bounded summary, not a number.
   assert.ok(table.includes("Not documented"));
@@ -287,8 +288,9 @@ test("last-known EV stays visible and sortable after the former 60-minute bounda
     );
     assert.equal(markup.includes("Source evidence last observed"), false);
   }
-  assert.ok(inspector.includes("Source data over 60 minutes old; last known values retained"));
-  assert.ok(inspector.includes("Source evidence last observed"));
+  assert.equal(inspector.includes("Source data over 60 minutes old; last known values retained"), false);
+  assert.equal(inspector.includes("Source evidence last observed"), false);
+  assert.match(inspector, /View confidence evidence/);
   assert.ok(renderAllRepacksTable([detail]).includes("$85.00"));
   assert.ok(renderInspector(detail).includes("$85.00"));
 });
@@ -330,7 +332,8 @@ test("provider delay is informational and last-known EV remains rankable", () =>
     assert.ok(markup.includes("-$15.00"));
   }
   const inspector = renderInspector(detail);
-  assert.ok(inspector.includes("Provider feed delayed; displaying the latest available data."));
+  assert.equal(inspector.includes("Provider feed delayed; displaying the latest available data."), false);
+  assert.match(inspector, /View confidence evidence/);
 
   const opportunities = listSurfaces[0]!;
   assert.ok(opportunities.includes("Last-known estimate"));
@@ -405,6 +408,7 @@ test("all four catalog surfaces retain aged values with delayed feeds, failed up
       false,
     );
   }
-  assert.ok(inspector.includes("Fresh calculation unavailable"));
-  assert.ok(inspector.includes("calculation-time Pack Price of $100.00"));
+  assert.equal(inspector.includes("Fresh calculation unavailable"), false);
+  assert.match(inspector, /View confidence evidence/);
+  assert.equal(inspector.includes("calculation-time Pack Price of $100.00"), false);
 });

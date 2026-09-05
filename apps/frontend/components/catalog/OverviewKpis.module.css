@@ -173,33 +173,6 @@
   -webkit-line-clamp: 2;
 }
 
-.stateLabel {
-  position: absolute;
-  top: 0.42rem;
-  right: 0.52rem;
-  color: var(--color-text-muted);
-  font-size: 0.5rem;
-  font-weight: 780;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.card[data-tone="positive"] .stateLabel {
-  color: var(--color-positive);
-}
-
-.card[data-tone="caution"] .stateLabel {
-  color: var(--color-caution);
-}
-
-.card[data-tone="warning"] .stateLabel {
-  color: var(--color-warning-strong);
-}
-
-.card[data-tone="negative"] .stateLabel {
-  color: var(--color-negative);
-}
-
 @media (max-width: 1180px) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
