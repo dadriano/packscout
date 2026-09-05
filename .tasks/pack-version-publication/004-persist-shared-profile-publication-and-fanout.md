@@ -8,7 +8,77 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current account/direct-JSON propagation — 2026-09-05 11:12UTC
+## Current review repair — 2026-09-05 21:38UTC
+
+Runtime `beb3c7d4d6c2077fa538057fe5572635b19b50c7` protects explicit opaque private-key fields and Oracle/JDBC connection syntax, including Oracle driver underscores and decoded lexical evidence. Public-key text, Oracle/JDBC guide captions and Bearer prose remain accepted; URL parsing and traversal budgets are unchanged. Shared metadata fix0548991d remains included.
+
+Root complete125/125 tests pass0skip, including private PostgreSQL fan-out/recovery and production Admin bundle (`/tmp/packscout-p04-private-key-oracle-complete-focused-20260905.log`). Pure89, retained316, contracts/services static/ratchet0 and independent108/108 probes pass (216 across both guards). Guard SHA-256 `812db2772b7588f2075dbd19dd19293d126debfcf25de94319b92fa33898442a`. Fresh full gate started21:43UTC after P03 passed heavy services/volume (`/tmp/packscout-p04-private-key-oracle-framework-20260905.log`); keep004 in progress pending that gate, publication and metadata3941816873 reply. Restack after114 with exact backup:23 source-only and9 task-only commits currently. No production action.
+
+## Previous frozen verification — historical
+
+Final runtime `070f7d410709794e580003f66630fb3698ea962d` includes metadata0548991d, exact session-credential fields, explicit standard source-frame protection and the equivalent linear source classifier. Root complete121/121 tests pass0skip, including real PostgreSQL fan-out/recovery and production Admin bundle (`/tmp/packscout-p04-linear-source-frames-complete-focused-20260905.log`). Pure85/85, retained316/316, affected lint/types and ratchet0 pass. Independent134 functional plus14 equivalence checks pass; helpers are identical and1,024/2,048/4,096-pair medians0.195/0.291/0.328ms confirm removal of the overlapping suffix retry. Guard SHA-256 `b5477bf490b0320ee579515d14020c65cd4d42de7f6ccf884225fbd97561b1ec`.
+
+Fresh full `npm run verify:framework` PASSED exit0 at21:11UTC with both production builds (`/tmp/packscout-p04-linear-source-frames-framework-20260905.log`). All task criteria are accepted;004 is done. The full runner retains28 unrelated opt-in skips, none in the121 owning tests. Publish119, address metadata review3941816873, then require fresh exact-head CI/review and restack after114. No production action;006 retains ownership of the real lost-refusal status seam.
+
+## Previous session-parameter and .NET checkpoint — historical
+
+Fresh full `npm run verify:framework` PASSED exit0 on `7615575d` with both builds (`/tmp/packscout-p04-virtual-casefold-framework-20260905.log`). PR114's newly confirmed standalone session_id credential and .NET source-frame gaps require the same narrow profile-boundary repair before publication. Keep004 in progress and privacy unchecked; the real761 full pass does not certify forthcoming source changes. Existing exact metadata fix0548991d remains accepted. No production action.
+
+## Previous final-source verification — historical
+
+Final runtime `7615575dea0ec6293592effdb03c591ffb00fdf8` on main `b96b43691b48170d64bdd541e4a42cb15f096ecf` includes metadata fix `0548991d` and matching virtual-source/casefold frame protection. Root's complete six-file matrix passes117/117, zero skips, with real PostgreSQL and production Admin bundle proof (`/tmp/packscout-p04-virtual-casefold-complete-focused-20260905.log`). Pure81/81, retained316/316 probes, contracts/services lint/types and ratchet0 pass. Independent bounded review of the final patch finds no actionable defect. Guard SHA-256 `a2d05ee09934bb07708dc28dd033ee1b24e7f9ae505e3b52d393530e7a59325b`.
+
+Fresh full `npm run verify:framework` is running in `/tmp/packscout-p04-virtual-casefold-framework-20260905.log`; task004 remains in progress until it passes. Publication, metadata review reply, exact-head CI and restack after114 remain. No production activation or lost-refusal-status convergence is claimed;006 owns that integration seam.
+
+## Previous shared-metadata and literal-stack checkpoints — historical
+
+Full local `npm run verify:framework` PASSED at20:01UTC on `b95041bf` / main `b96b4369`, including both builds; log `/tmp/packscout-p04-literal-stack-metadata-framework-20260905.log`. The117 owning tests have zero skips;28 unrelated optional full-run skips remain. Before publication, PR114's new virtual-source frame finding `3941890116` requires the matching narrow profile-guard correction. Keep004 in progress and its privacy criterion open until fresh verification. Do not represent the real b950 full pass as certifying that forthcoming change.
+
+Final runtime `b95041bfe9cbea3ad61381bb9df6b9043fb421df` includes metadata fix `0548991d` and explicit literal-stack protection. Complete six-file matrix117/117 passes with zero skips, including real PG fan-out/recovery and production Admin bundle/SPA/Prisma-engine proof (`/tmp/packscout-p04-literal-stack-metadata-complete-focused-20260905.log`). All final source edits preceded that run. Pure81/81, retained316/316 probes, affected lint/types and ratchet0 pass. Independent61-probe review found no actionable change; three nested-caption refusals match baseline. Guard hash `72f6c990a4c0fc8b77cdbd203d81adb08a5576a8b516b34ea1338c21d6e541fe`. Final-runtime full gate, publication and review remain; task stays in progress until complete verification.
+
+PR119 review `3941816873` / thread `PRRT_kwDOTplTZc6fmR_q` is reproduced and fixed in `0548991d`: validate source key, source identity and every schema-bounded dependency identity with the existing lexical public-text guard before hashing, locking or persistence. The genuine red repository test previously accepted the credential-bearing URI. The full fan-out integration file now passes9/9 with zero skips, proving20 hostile metadata cases leave all seven publication-state tables unchanged, while public identifiers survive exact replay and delivery to two providers. Database/services lint/types and ratchet0 pass. Logs `/tmp/packscout-p04-shared-metadata-red-20260905.log` and `/tmp/packscout-p04-shared-metadata-focused-20260905.log`.
+
+PR114's literal-stack finding also applies to shared profile text; the existing guard and direct/profile tests are being repaired independently. Keep raw, nested, URL and standalone encoded cases under existing traversal limits and preserve public prose. A new complete matrix/full gate and current-head review remain before004 acceptance or119 readiness. Published head `5cbb7b13` / runtime `4e6b3386` is the previous review baseline; its ODBC comment is replied in `3941779746` and resolved. No production activation or lost-refusal-status convergence is claimed;006 owns the latter integration seam.
+
+## Previous ODBC and encoded-prose repair — 2026-09-05
+
+Runtime `4e6b33861f98f533007ed5f5dbf4bb2162ab0e69` repairs119 comment3941707060 and mirrors114's encoded-prose/public-route corrections. Exact normalized PWD fields reject, not arbitrary suffixes such as itemPWD; UID alone stays public, with named DSN/UID connection context confined to contiguous semicolon fields. Mixed quoted names/encoded separators share bounded lexical traversal. Account/host public routes remain valid without identifiers/topology, and credential paths/query/JSON remain strict. Decoded fullwidth private fields are recognized without rewriting payload or URL bytes.
+
+Root final six-file114/114 tests pass0skip, including pure79, real privatePG fan-out/recovery and production Admin bundle/SPA/two engines (`/tmp/packscout-p04-mixed-quotes-odbc-complete-focused-20260905.log`). Affected contracts/services lint/types and ratchet0 pass. The new repository regression rehashes hostile provider/collectible envelopes, proves schema acceptance, then verifies sanitized refusal and unchanged artifacts/batches/intents/heads; standalone26 privatePG tests pass. Independent316/316 adjusted probes per guard find no remaining defect; five P04 adjustments match existing baseline/strict fragment/raw-budget behavior. Guard341c9f48d812ba93679567b3b61b8a857652be61cc045e67b4e4c884469e60a1; repository testd3fff55c. Fresh publication/current-runtime full certification/review reply remain. Previous e428 fullCI passed, but local22482 was intentionally stopped143 for these repairs and is not a pass. No activation.
+
+## Current DSN and PGP propagation — 2026-09-05
+
+Independent580-probe cross-boundary review found no new actionable defect or helper divergence. Its13 P04 nested-label refusals match exact pre-DSN fbafabde in13/13 baseline comparisons; direct benign labels remain public. Four P03 raw-normalization differences are independently confirmed to reject at actual final assembly. The580 count includes both guards, not580 profile unit tests.
+
+Runtime `aa6a7c3cb2586e64697c9be1f5f068646fd8fb4b` propagates114's contextual DSN/private-PGP protection into the independently owned profile boundary on mainb96b4369. Adjacent endpoint/catalog assignments reject without expanding generic protected-field names; encoded public source attribution and public key armor remain valid. Existing NFKC inspection, budgets and Bearer/Cookie prose policies stay unchanged.
+
+Root complete six-file matrix106/106 passes0skip, including privatePG fan-out/recovery and production Admin bundle/SPA/two engines (`/tmp/packscout-p04-dsn-pgp-complete-focused-20260905.log`). Pure guard62/62, contracts lint/types and ratchet0 pass. Guard SHA-256722179ec5269de345ab0887344e5d0d2a1634868a6f22b0f17a8844bc2058c5c. Independent final cross-review is finishing; fresh publication/full certification remain. Prior119 terminal-job/NFC threads have fixing-SHA replies3941609327/3941609374 and are resolved. Previousfbafabde passed fullCI33983598401; its local77725 was intentionally stopped143 for propagation, not a pass. No production activation or lost-refusal-status claim.
+
+## Current terminal-job, Unicode and cookie repairs — 2026-09-05
+
+Runtime `63ac710159c67302d9ad9f077be3091158c59d78` on main b96b4369 fixes PR119 comments3941534806/3941534814. A terminal blocked intent yields to later same-profile corrections only without operator hold, ambiguous/missing reason or unresolved operation evidence; claim and supersession reuse the exact same receipt predicate. Live leases, due retries, waiting work, stale fences and tenant/profile isolation remain enforced. Raw profile strings/keys are inspected before parsing; canonical values and derived text are checked after trim/NFC normalization but before hashing, including promotion and collectible image URLs without URL reserialization. Existing canonical fixture hashes remain unchanged.
+
+The matching cookie repair protects explicit Cookie/Set-Cookie fields and header pairs, not ordinary prose or product paths. Root final six-file matrix103/103 passes0skip, including private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two engines (`/tmp/packscout-p04-cookie-recovery-nfc-final-focused-20260905.log`). Owning71 pure and31 real-PG tests pass0skip; affected database/contracts/services static checks and ratchet0 pass. Independent147 cookie+1,538 prior probes pass;34 NFC URL/hash controls pass, and independent outbox review found no unsafe skip. New real-status tests deliberately retain an ambiguity barrier for current P05 already_applied status; direct original refusal can release correction. The pre-existing lost-refusal status seam is assigned to006, not claimed fixed here. P04's existing nested colon-label fail-closed behavior is unchanged, as proved against e3810ca7. Fresh publication/current-runtime full certification/review replies remain before acceptance. No source edit is pending.
+
+## Current raw-path and relative-URL propagation — 2026-09-05
+
+Final runtime `5607d3503644d687ddd104acf730d62fa3234b15` is restacked on main b96b4369 after PR122. All 14 source patches match backup `codex/p04-before-main122-20260905` (e6faf247), apart from preserving the new main export beside the profile export in the contracts barrel; guard, service and database bytes are unchanged. Before restack, root 86/86 complete focused tests passed with zero skips, including private PostgreSQL and production Admin bundle; contracts/services lint/types and ratchet0 passed. Independent 1,538/1,538 probes pass at unchanged source SHA-256 f63318b34a534ad6d147cba24d0ea313f8aa9e8c74e8348ad09ff5d890e6d792. This adds explicit-scheme/no-relative-base semantics and preserves raw JSON query/fragment closing delimiters along with the earlier fixes. Full local `npm run verify:framework` PASSED at77e5199a/mainf852, including both production builds; 28 unrelated opt-in skips remain, while the owning matrix has none. Log: `/tmp/packscout-p04-relative-release-framework-20260905.log`. New-parent focused/static checks are running in `/tmp/packscout-p04-main122-focused-static-20260905.log`; current-parent exact-head CI and clear review remain required. Earlier 84-test notes below are intermediate evidence.
+
+The matching three-file profile repair covers raw zero/one-slash paths, scheme-relative userinfo, control-delimited prose and original query/fragment evidence before URL normalization. Original authority inspection precedes quote-delimited discovery; public split names, path emails and control-normalized IPv6 links remain valid. Existing protected-field policy, OAuth contexts, limits and ordinary Bearer positives are unchanged.
+
+Root final six-file matrix: 84/84 pass, zero skips, including real private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-relative-final-complete-focused-20260905.log`). Pure 63/63, contracts/services lint/types and ratchet0 pass. Independent final cross-review is running; source is uncommitted and fresh full certification remains before task004 acceptance and119 readiness. Published 0d9a182b full CI33979362791 passed at17:16:13UTC, but does not certify these newer repairs. No writer or public route is activated.
+
+## Earlier prose-prefixed JSON propagation — 2026-09-05
+
+Root final verification:81/81 complete six-file tests passed with zero skips, including real private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-host-path-main120-final-focused-20260905.log`). Contracts/services lint/types and ratchet0 passed at7ad8b78a. No source changed afterward. Fresh current-head full CI remains the certification gate before004 is accepted and119 marked ready.
+
+Final matching host/path/numeric repair is committed as `7ad8b78a83e28e2cf7f7c262d678f29f0e61093c` on main `f852a166cca88008eb2eb419a6a555c7ff794597`. Literal private-host classification, original/decoded path pairs, slash/backslash and OAuth context now match P03. Public IPv6 authority brackets and natural numeric/unfinished captions remain valid; recognized malformed JSON remains refused. Agent60 pure tests/static and independent138 probes pass. Root's final six-file PostgreSQL/bundle matrix and static checks are completing; exact-head full CI will certify this phase in parallel with P03's local full gate. Earlier root80/80 matrix/static passedfbee54cb; its full local run was deliberately interrupted (session40118, exit143) for the confirmed encoded-backslash repair and is NOT a passing gate. No test or limit was weakened. Earlier dd951aed local full pass is historical. The protected writer/route stays disabled.
+
+The owning public-profile boundary carries the matching repair at `dd951aed43fad761affca7cd76090e9263206887` on merged121 parent `0ea6145470a276807a0e9590d759d9fad85e9226`. Existing bounded token inspection covers structured data after prose in direct/profile/nested/URL/fragment values, retaining independent top-level and shared nested OAuth context. Public natural labels and Bearer prose remain valid; no new parser, dependency, field or weakened limit.
+
+Root68/68 focused tests pass0skip, including actual private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-prose-json-main121-final-focused-20260905.log`). Contracts/services lint/types and ratchet0 pass. All9 preceding source patches replay identically; backup `codex/p04-before-main121-20260905` retains07711d3f. Full local verifier is running (`/tmp/packscout-p04-prose-json-main121-framework-20260905.log`); fresh CI/independent review remain before004 acceptance and PR119 readiness. User has authorized merge after current checks/review are clear, following114.
+
+## Earlier account/direct-JSON propagation — 2026-09-05 11:12UTC
 
 Equivalent owning-boundary repair is committed `0bff32245664af6f257c88d365e680dd14cdd2d4` on mainf6785251. Complete protected colon fields and bounded direct escaped/duplicate/nested/adjacent JSON use existing rules/counters; quoted and URL fields remain strict, while ordinary Bearer prose and public Host/Actor labels remain valid. Independent cross-review caught benign label values inside JSON being parsed as URI schemes; direct and actual-profile red regressions now pass after applying the same explicit label policy to optional parsed values. Required URLs remain HTTP(S), and attached queries/fragments still traverse.
 
@@ -130,18 +200,18 @@ P05 supplies the authenticated public profile storage and atomic heads. P06 cons
 
 ### Fan-out durability and isolation
 
-- [ ] A shared change records the complete provider set and every provider shard before its source checkpoint advances.
-- [ ] A shard claim returns the exact provider-scoped delivery, and acknowledgment accepts only the identity and durable-result digest produced after P02 provider-local expansion.
-- [ ] One unavailable provider retains retryable work while every healthy provider continues without waiting for it.
-- [ ] Interrupted, repeated, and fenced-out delivery converges without missing or duplicate logical pack work.
-- [ ] No provider can read, claim, acknowledge, or mutate another provider's shard, and the central service never reads provider-local membership.
+- [x] A shared change records the complete provider set and every provider shard before its source checkpoint advances.
+- [x] A shard claim returns the exact provider-scoped delivery, and acknowledgment accepts only the identity and durable-result digest produced after P02 provider-local expansion.
+- [x] One unavailable provider retains retryable work while every healthy provider continues without waiting for it.
+- [x] Interrupted, repeated, and fenced-out delivery converges without missing or duplicate logical pack work.
+- [x] No provider can read, claim, acknowledge, or mutate another provider's shard, and the central service never reads provider-local membership.
 
 ### Profiles and recovery
 
-- [ ] Provider and collectible profile snapshots are complete, immutable, deterministic, and reusable by content digest while activation intents remain distinct.
-- [ ] Initial profile work is available before the first referencing pack activation, and later profile updates do not change sealed pack bytes.
-- [ ] Lost responses and repeated outbox delivery reconcile the original operation and converge to one logical profile activation.
-- [ ] Central progress never waits for provider acknowledgment after all required shards and profile intents are durable.
+- [x] Provider and collectible profile snapshots are complete, immutable, deterministic, and reusable by content digest while activation intents remain distinct.
+- [x] Initial profile work is available before the first referencing pack activation, and later profile updates do not change sealed pack bytes.
+- [x] Lost responses and repeated outbox delivery reconcile the original operation and converge to one logical profile activation.
+- [x] Central progress never waits for provider acknowledgment after all required shards and profile intents are durable.
 - [ ] Records, logs, errors, and receipts expose no credentials, raw source payloads, database locations, or cross-organization data.
 
 ## Verification
@@ -157,5 +227,6 @@ Named scenario: **Offline-provider fan-out and initial-profile recovery** — pr
 - Initial profile artifacts and intents cover every profile required by the actual healthy P02 build requests. P05's public store enforces initial active-profile prerequisites; task006 owns end-to-end first-head activation. P04 does not claim that merely sealing artifacts activates those public heads.
 - `profile-outbox-recovery.integration.test.ts` proves deterministic reuse with distinct intents, immutable database evidence, independent claims, authorization/environment/browser refusals, durable-before-send operations, lost-response reconciliation, expired-owner fencing, forged receipts, transaction interruption, exact status after ambiguity/expiry, late lease expiry, and per-profile attempt exhaustion.
 - `public-profile-snapshot-assembler.test.ts` and `public-catalog-text.test.ts` prove bounded capture before executable objects, nested URL protection, and benign encoded-value preservation. The browser-neutral text policy is the future shared boundary for pack/profile integration, not a legacy adapter.
-- Focused evidence: 37 tests pass with zero skips in `/tmp/packscout-p04-structural-url-focused-20260904.log`. Contracts/database/services lint and types pass in `/tmp/packscout-p04-structural-url-static-20260904.log`.
+- Current focused evidence:117 tests pass with zero skips on `b95041bf`; real shared-metadata and rehashed profile-envelope refusals leave durable state unchanged. Logs and independent review are recorded above. Earlier37-test evidence is historical.
+- Deferred status seam: P04 retains the ambiguity barrier when P05 status reports `already_applied` without the original refused outcome. Task006 owns returning the genuine stored receipt and the real signed-transport lost-refusal drill; P04 does not fabricate that evidence or claim that case converges already.
 - Full framework verification, final acceptance record, and publication remain pending. No schedule, service authorization, public head, or route was activated.
