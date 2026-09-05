@@ -4,7 +4,9 @@ import { normalizeProtectedPublicationFieldKey } from "./protected-publication-f
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl", "databaseurl",
   "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance", "userid", "userdata",
   "rawsourceevidence", "sig", "xamzsignature", "signature"]);
-const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bbearer\s+[a-z0-9+/_=.~-]{20,}|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)\s*[:=]\s*\S+)/iu;
+// Bearer is ordinary public prose unless a protected field or authorization
+// assignment establishes credential context; token spelling/length cannot do so.
+const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -80,6 +82,35 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     const decoded = decodeLayer(normalized);
     if (decoded !== normalized) inspectKey(decoded, depth + 1, context);
   };
+  const inspectProseAssignments = (text: string, depth: number): void => {
+    // Quotes establish the whole assigned name, including punctuation that the
+    // protected-field normalizer removes. Each scan stops at its next delimiter.
+    for (const match of text.matchAll(/"([^"]*)"\s*=|'([^']*)'\s*=/gu)) {
+      inspectKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
+    }
+    // Consume full runs even without '='; bounded suffixes recognize spaced or
+    // quoted names without treating ordinary colon labels as structured fields.
+    for (const match of text.matchAll(/[a-z0-9%_.-]+(?:[ \t]+[a-z0-9%_.-]+)*/giu)) {
+      let end = match.index + match[0].length;
+      if (text[end] === '"' || text[end] === "'") end += 1;
+      while (end < text.length && /\s/u.test(text[end]!)) end += 1;
+      if (text[end] !== "=") continue;
+      const words = match[0].split(/\s+/u);
+      let key = "";
+      for (let index = words.length - 1; index >= 0; index -= 1) {
+        // Preceding prose is not part of an assigned key. Quoted names, unlike
+        // "Secret edition code=SUMMER", explicitly establish the whole name.
+        if (index < words.length - 1 && !/["']/u.test(text[match.index - 1] ?? "")) {
+          try { assertPublicPackCatalogBytes({ [words[index]!]: null }); } catch { break; }
+        }
+        key = words[index]! + (key === "" ? "" : ` ${key}`);
+        if (key.length > 256) break;
+        // URL/form parsing owns contextual OAuth codes; lexical assignment
+        // discovery must not join separate URLs into one authentication context.
+        inspectKey(key, depth + 1, { authentication: false, code: false });
+      }
+    }
+  };
   const authenticationRoute = (path: string, depth: number): boolean => {
     if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path)) return true;
     const decoded = decodeLayer(path);
@@ -120,6 +151,9 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   const inspectFragment = (text: string, depth: number, context: OAuthContext): void => {
     charge(text, depth);
+    // Padding contains no named field or data beyond separators. Do not turn
+    // each '=' into another form layer; all non-padding payloads still traverse.
+    if (/^=+$/u.test(text)) return;
     if (isStructuredText(text)) { inspectStructuredText(text, depth, context); return; }
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), assignment = candidate.indexOf("=");
@@ -138,6 +172,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   const visit = (text: string, depth: number, required = false, context: OAuthContext = { authentication: false, code: false }): void => {
     charge(text, depth);
+    if (!required) inspectProseAssignments(text.normalize("NFKC"), depth);
     if (!required && isStructuredText(text)) { inspectStructuredText(text, depth, context); return; }
     const candidate = urlRecognition(text);
     // Nested prose can contain another URL. Share this traversal's budget rather
@@ -181,7 +216,10 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     }
   };
   if (required) visit(value, 0, true);
-  else inspectEmbedded(value, 0);
+  else {
+    inspectProseAssignments(value.trim().normalize("NFKC"), 0);
+    inspectEmbedded(value, 0);
+  }
 }
 
 export function assertPublicCatalogText(value: string): void {

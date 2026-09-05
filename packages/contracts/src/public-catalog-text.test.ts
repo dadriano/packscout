@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { assertPublicCatalogText, assertPublicCatalogUrl } from "./public-catalog-text.ts";
 
 test("public catalog text rejects normalized and inline credential fragments", () => {
-  for (const value of ["prefix Bearer 12345678901234567890 suffix", "ｂｅａｒｅｒ 12345678901234567890", "api_key=example",
+  for (const value of ["prefix Authorization: Bearer 12345678901234567890 suffix", "ａｕｔｈｏｒｉｚａｔｉｏｎ： ｂｅａｒｅｒ 12345678901234567890", "api_key=example",
     "postgresql://internal", "redis://internal", "-----BEGIN RSA PRIVATE KEY-----", "password:example"]) {
     assert.throws(() => assertPublicCatalogText(value), TypeError);
   }
@@ -40,7 +40,7 @@ test("ordinary public text cannot embed HTTP userinfo through normalization or s
   assert.doesNotThrow(() => assertPublicCatalogText("Visit https://example.com support@example.com"));
 });
 test("public URL policy scans decoded query and fragment keys and values", () => {
-  for (const suffix of ["?api%5fkey=example", "#sig=example", "#route?access_token=example", "?q=Bearer+12345678901234567890",
+  for (const suffix of ["?api%5fkey=example", "#sig=example", "#route?access_token=example", "?q=Authorization%3A+Bearer+12345678901234567890",
     "#q=postgresql%3A%2F%2Finternal", "?ＸＡｍｚＳｉｇｎａｔｕｒｅ=example"]) {
     assert.throws(() => assertPublicCatalogUrl(`https://example.com/${suffix}`), TypeError);
   }

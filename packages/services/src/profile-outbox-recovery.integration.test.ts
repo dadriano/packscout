@@ -110,7 +110,7 @@ test("Profile artifacts and exact operation journals survive faults and ownershi
       assert.equal(invoked, false);
       assert.throws(() => snapshots.sealAndEnqueueActivation({ ...provider, excess: "x".repeat(1_500_001) } as never), { code: "SHARED_LIMIT_EXCEEDED" });
       const derived = structuredClone(fixture.collectibles[0]!.profile);
-      derived.displayName = "Bearer"; derived.aliases = ["12345678901234567890"];
+      derived.displayName = "Authorization:"; derived.aliases = ["Bearer abc123"];
       await assert.rejects(assemblePublicProfileSnapshot(derived), TypeError);
       const unsafe = structuredClone(provider); unsafe.profile.displayName = "postgresql://private";
       await assert.rejects(snapshots.sealAndEnqueueActivation(unsafe), { code: "SHARED_INPUT_INVALID" });

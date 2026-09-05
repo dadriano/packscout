@@ -2,6 +2,47 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertPublicCatalogText, assertPublicCatalogUrl } from "./public-catalog-text.ts";
 
+test("explicit authorization rejects short credentials across prose and nested values", () => {
+  for (const text of ["Authorization: Bearer abc123", "authorization=bearer a", "Details Authorization: BEARER\tZg==",
+    'Documentation "authorization"="Bearer a+/._~-="', 'Documentation "Authorization": "Bearer a"',
+    "Documentation %61uthorization=Bearer a"]) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: text }))), TypeError);
+  }
+});
+
+test("Bearer words and token-shaped public text do not establish authorization context", () => {
+  for (const text of ["Bearer of the Heavens", "Card bearer collection", "bearer scout pack", "Bearer abc123",
+    "bearer a", "Details BEARER\tZg==", "===", "Bearer a+/._~-=", "Bearer 12345678901234567890", "ｂｅａｒｅｒ 12345678901234567890"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)));
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: text }))));
+  }
+});
+
+test("protected credential assignments in prose use the existing normalized field policy", () => {
+  for (const assignment of ["api_key=sk_live_private_marker", "api.key=private-marker", "api__key=private-marker",
+    "api  key=private-marker", '"api_key"="private-marker"', "authorization_code=reusable-code",
+    "code_verifier=reusable-verifier", "X-Amz-Signature=private-marker", "sig=private-marker",
+    "credentials=private-marker", "%61pi_key=private-marker", '"secret alias"="private-marker"',
+    '"api/key"="a"', '"authorization/code"="a"', '"secret/alias"="a"', "'api/key'='a'", '"api·key"="a"']) {
+    const text = `Documentation ${assignment}`;
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: text }))), TypeError);
+  }
+  for (const text of ["Actor: Keanu Reeves", "Host: Public Speaker", "A signature collection", "Promotion code=SUMMER",
+    'Documentation "campaign/name"="Summer"', "Documentation caption=Fish%26Actor", "Email contact=support@example.com", "Basic edition"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+    if (!text.includes(":")) assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)));
+  }
+  // In ordinary prose these are preceding words, not a quoted/structured key.
+  for (const text of ["Secret edition code=SUMMER", "Actor collection code=SUMMER"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
 test("public prose rejects credentials in generic URI authorities", () => {
   for (const scheme of ["amqps", "mssql", "ftp", "custom+driver"]) {
     assert.throws(() => assertPublicCatalogText(`Visit ${scheme}://alice:private-marker@internal.example/path`), TypeError);
@@ -29,7 +70,7 @@ test("embedded public URLs inspect encoded query and fragment credentials", () =
 });
 
 test("nested form credential keys and OAuth authorization codes remain protected", () => {
-  for (const nested of ["sig=private-marker", "sig =private-marker#label", "sig=private-marker?x=y", "%73ig=private-marker", "authorization_code=private-marker",
+  for (const nested of ["=sig=private-marker", "sig=private-marker", "sig =private-marker#label", "sig=private-marker?x=y", "%73ig=private-marker", "authorization_code=private-marker",
     "authorization-code=private-marker", "next=" + encodeURIComponent("sig=private-marker")]) {
     for (const prefix of ["?data=", "#data="]) {
       const target = `https://example.com/${prefix}${encodeURIComponent(nested)}`;
