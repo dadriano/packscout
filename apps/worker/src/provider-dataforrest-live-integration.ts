@@ -5,10 +5,12 @@ import {
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -109,6 +111,12 @@ export class ProviderDataforrestLiveIntegrationRegistry {
 
 export const providerDataforrestLiveIntegrationRegistry =
   new ProviderDataforrestLiveIntegrationRegistry([
+    createProviderDataforrestLiveIntegration(
+      "courtyard", dataforrestCourtyardDistributedV4SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "collector_crypt", dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
+    ),
     createProviderDataforrestLiveIntegration(
       "clutchpacks",
       dataforrestClutchpacksDistributedSourceAdapterManifest,

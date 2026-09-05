@@ -421,6 +421,42 @@ test("a rich Neon pack projects to a complete public repack detail", () => {
   assert.equal(detail.description, null);
 });
 
+test("reviewed promotion-time PackScout EV replaces the unavailable placeholder", () => {
+  const packScoutEv = {
+    status: "current",
+    methodVersion: VERSIONS.methodVersion,
+    confidencePolicyVersion: VERSIONS.confidencePolicyVersion,
+    metrics: {
+      grossEvMoney: { minorUnits: 200_000, currency: "USD" },
+      grossReturnBasisPoints: 8_000,
+      evDollars: { minorUnits: -50_000, currency: "USD" },
+      evPercentBasisPoints: -2_000,
+    },
+    confidence: {
+      policyVersion: VERSIONS.confidencePolicyVersion,
+      scoreBasisPoints: 8_000,
+      band: "high",
+      limitationCodes: ["platform_published_odds"],
+    },
+    calculatedAt: READ_AT,
+    dataAsOf: { state: "known", observedAt: "2026-09-03T19:55:00.000Z" },
+    sourceAge: { milliseconds: 300_000, state: "fresh_within_15_minutes" },
+    expiresAt: "2026-09-03T20:55:00.000Z",
+  };
+  const projected = projectProviderPacks({
+    platform: PLATFORM,
+    packs: [neonPack()],
+    chainByProviderCategoryId: new Map(),
+    collectibleTypes: ["card"],
+    readAt: READ_AT,
+    versions: VERSIONS,
+    identity,
+    includePriceless: false,
+    packScoutEvByPackKey: new Map([["pack:black-football-pack", packScoutEv]]),
+  });
+  assert.deepEqual(projected.repacks[0].evEstimates.packScout, packScoutEv);
+});
+
 test("purchase links appear only for available packs with an https listing", () => {
   const withLink = repackDetailFromPack({
     pack: neonPack({ listing_url: "https://Phygitals.example/packs/black" }),

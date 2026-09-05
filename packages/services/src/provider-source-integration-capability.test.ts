@@ -8,11 +8,13 @@ import {
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedSourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestEventsV1LegacySourceAdapterManifest,
   dataforrestLaunchDistributedSourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
@@ -128,7 +130,9 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     // these providers, so these - not the catalog-scoped ones - are the tuples
     // an activated production source needs admitted.
     `courtyard:${dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion}`,
+    `courtyard:${dataforrestCourtyardDistributedV4SourceAdapterManifest.adapterVersion}`,
     `collector_crypt:${dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion}`,
+    `collector_crypt:${dataforrestCollectorCryptDistributedV4SourceAdapterManifest.adapterVersion}`,
     `phygitals:${dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion}`,
     // Distributed-v4 binds the Phygitals rarity distribution as an EV input.
     `phygitals:${dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion}`,
@@ -138,7 +142,9 @@ test("launch registry installs exact live and catalog tuples and refuses crossed
     ["collector_crypt", dataforrestCollectorCryptCatalogV3SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsCatalogV2SourceAdapterManifest.adapterVersion],
     ["courtyard", dataforrestCourtyardDistributedV3SourceAdapterManifest.adapterVersion],
+    ["courtyard", dataforrestCourtyardDistributedV4SourceAdapterManifest.adapterVersion],
     ["collector_crypt", dataforrestCollectorCryptDistributedV3SourceAdapterManifest.adapterVersion],
+    ["collector_crypt", dataforrestCollectorCryptDistributedV4SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion],
     ["phygitals", dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion],
   ] as const) {

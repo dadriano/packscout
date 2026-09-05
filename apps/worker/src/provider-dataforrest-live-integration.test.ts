@@ -8,11 +8,13 @@ import {
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_PAGE_TARGET_RECORDS,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION,
   DATAFORREST_COURTYARD_CATALOG_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION,
+  DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION,
   DATAFORREST_COURTYARD_DISTRIBUTED_V2_MAXIMUM_RESPONSE_BYTES,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION,
   DATAFORREST_PHYGITALS_CATALOG_ADAPTER_V2_VERSION,
@@ -55,6 +57,22 @@ const dualProfiles = Object.freeze([
     maximumResponseBytes: 8_388_608,
   },
 ]);
+
+test("worker installs new odds-only profiles on exact provider tuples without changing transport bounds", () => {
+  for (const [provider, previous, current] of [
+    ["courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION, DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION],
+    ["collector_crypt", DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION, DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION],
+  ] as const) {
+    const previousIntegration = providerDataforrestLiveIntegrationRegistry.resolve(provider, previous);
+    const integration = providerDataforrestLiveIntegrationRegistry.resolve(provider, current);
+    assert.ok(previousIntegration); assert.ok(integration);
+    assert.deepEqual({ ...integration.manifest, adapterVersion: previous }, previousIntegration.manifest);
+    assert.deepEqual(integration.mapper, previousIntegration.mapper);
+    for (const crossed of ["clutchpacks", "courtyard", "collector_crypt", "phygitals"]) {
+      if (crossed !== provider) assert.equal(providerDataforrestLiveIntegrationRegistry.resolve(crossed, current), null);
+    }
+  }
+});
 
 test("the worker resolves every baseline and catalog profile by exact tuple", () => {
   for (const profile of dualProfiles) {
@@ -214,6 +232,8 @@ test("installed live integrations expose the exact closed profile set", () => {
       ({ providerKey, manifest }) => [providerKey, manifest.adapterVersion],
     ),
     [
+      ["courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION],
+      ["collector_crypt", DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION],
       ["clutchpacks", DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION],
       ["courtyard", DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION],
       ["courtyard", DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION],

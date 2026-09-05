@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import type { ReactNode } from "react";
 import type {
   PublicRepackChase,
@@ -29,6 +28,7 @@ import {
 } from "@/lib/all-repacks-table";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
+import { CatalogImage } from "./CatalogImage.client";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
@@ -45,17 +45,12 @@ type AllRepacksTableProps = Readonly<{
 }>;
 
 function RepackImage({ repack }: { readonly repack: PublicRepackViewSummaryV3 }) {
-  return repack.primaryImage ? (
-    <Image
-      alt={repack.primaryImage.alt}
-      className={styles.packImage}
-      height={46}
-      src={repack.primaryImage.url}
-      unoptimized
-      width={36}
+  return (
+    <CatalogImage
+      fallbackAlt={repack.name}
+      image={repack.primaryImage}
+      variant="thumbnail"
     />
-  ) : (
-    <span aria-hidden="true" className={styles.imagePlaceholder}>R</span>
   );
 }
 

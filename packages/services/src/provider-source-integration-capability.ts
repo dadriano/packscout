@@ -5,10 +5,12 @@ import {
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
@@ -138,6 +140,12 @@ ProviderSourceIntegrationCapabilityRegistry {
 export function createLaunchSourceIntegrationCapabilities():
 ProviderSourceIntegrationCapabilityRegistry {
   return new ProviderSourceIntegrationCapabilityRegistry([
+    providerSourceIntegrationCapability(
+      "courtyard", dataforrestCourtyardDistributedV4SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt", dataforrestCollectorCryptDistributedV4SourceAdapterManifest.adapterVersion,
+    ),
     providerSourceIntegrationCapability(
       "clutchpacks",
       CLUTCHPACKS_CAPTURE_ADAPTER_KEY,

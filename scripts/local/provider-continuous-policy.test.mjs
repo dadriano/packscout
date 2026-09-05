@@ -13,7 +13,7 @@ const { withContinuousResidency, claimContinuousResidency, continuousResidencyPo
 const { assertLocalBackfillDestination, localBackfillProviderPorts } = await tsImport("./provider-backfill-supervisor-authority.mts", import.meta.url);
 const { dataforrestContinuation } = await tsImport("@packscout/contracts", import.meta.url);
 const { parseContinuousArguments } = await tsImport("./run-provider-continuous-poller.mts", import.meta.url);
-const { ProviderBackfillSupervisorError } = await tsImport("./provider-backfill-supervisor-policy.mts", import.meta.url);
+const { ProviderBackfillSupervisorError } = policy;
 const { ContinuousReadUnavailableError } = policy;
 const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
@@ -260,8 +260,22 @@ test("exclusive resident collision prevents launch and health exposes safe proce
     await assert.rejects(withContinuousResidency(pins, () => ({ state: "waiting" }), async () => { launched = true; }, owner.port), /ALREADY_OWNED/);
     assert.equal(launched, false);
     const health = await new Promise((resolve, reject) => {
-      const socket = net.connect({ host: "127.0.0.1", port: owner.port }); let data = "";
-      socket.on("data", chunk => { data += chunk; }); socket.once("end", () => resolve(JSON.parse(data))); socket.once("error", reject);
+      const socket = net.connect({ host: "127.0.0.1", port: owner.port }); let data = ""; let settled = false;
+      socket.on("data", chunk => {
+        data += chunk;
+        const newline = data.indexOf("\n");
+        if (settled || newline === -1) return;
+        settled = true;
+        socket.destroy();
+        try { resolve(JSON.parse(data.slice(0, newline))); } catch (error) { reject(error); }
+      });
+      socket.setTimeout(1000, () => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        reject(new Error("CONTINUOUS_HEALTH_TIMEOUT"));
+      });
+      socket.once("error", error => { if (!settled) { settled = true; reject(error); } });
     });
     assert.equal(health.pid, process.pid); assert.equal(health.operationId, pins.operationId); assert.equal(health.state, "waiting");
   } finally { await owner.close(); }

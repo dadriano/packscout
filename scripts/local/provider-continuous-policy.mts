@@ -9,6 +9,7 @@ import { continuousCadenceSchema, defaultContinuousCadence, effectiveContinuousI
 import { continuousPostHeadPolicySchema, defaultContinuousPostHeadPolicy, validatedContinuousPostHeadPolicy,
   type ContinuousPostHeadPolicy } from "./provider-continuous-post-head-policy.mts";
 export { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
+export { ProviderBackfillSupervisorError };
 export { continuousSourceMinimumSeconds } from "./provider-continuous-cadence.mts";
 
 // All integrations admitted by the existing closed DataForrest live registry use

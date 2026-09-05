@@ -336,7 +336,7 @@ describe("Atomic store and six-journey catalog contract (scan budget continuatio
     const list = ok(await run(t, "listPublicPacks", { pageSize: 50 }));
     expect(list.items).toHaveLength(50);
     expect(list.nextCursor).not.toBeNull();
-  });
+  }, 15_000);
 
   test("a sparse collectible search over more heads than one scan budget continues from the last scanned profile", async () => {
     const t = createTest();

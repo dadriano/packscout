@@ -10,8 +10,9 @@
  * read fresh from their Neon provider databases (located and decrypted through
  * the central control database), and every other vendor is carried forward
  * byte-for-byte from the deployment's currently active release (via a Convex
- * snapshot export). PackScout EV is published as an explicit unavailable
- * estimate: nothing in a provider database is a PackScout calculation.
+ * snapshot export). Reviewed provider evidence retained on an exact pack row
+ * is calculated through the shared PackScout EV rulebook at promotion time;
+ * missing or unsupported evidence remains explicitly unavailable.
  *
  * Without `--publish` this is a write-free dry run that validates every entity
  * against the public contracts and writes plan.json + summary.json. With
@@ -45,6 +46,8 @@ import {
   DATA_RELEASE_V3_SEARCH_ALGORITHM_VERSION,
   DataReleaseV3PublisherError,
   DataReleaseV3ReleasePublisher,
+  composePackScoutPublicEvV3,
+  createPackScoutBuybackEvPromotionEligibilityV1,
   EMPTY_DATA_RELEASE_V3_CHAIN_HASH,
   MAX_DATA_RELEASE_V3_BATCH_RECORDS,
   MAX_DATA_RELEASE_V3_CATEGORIES,
@@ -53,6 +56,10 @@ import {
   MAX_DATA_RELEASE_V3_REPACKS,
   MAX_ROWS_PER_DATA_RELEASE_V3_SHARD,
   SignedConvexDataReleaseV3PublicationClient,
+  normalizeProviderPromotionEvEvidenceV1,
+  type DistributedProviderCollectibleInstanceRow,
+  type DistributedProviderCollectibleRow,
+  type DistributedProviderPackContentRow,
   type DataReleaseV3PublicationPort,
   type DataReleaseV3PublishPlan,
 } from "@packscout/services";
@@ -71,6 +78,8 @@ import {
   publicRepackDetailV3Schema,
   providerPackListingUrl,
   sha256CanonicalJson,
+  type PublicCollectible,
+  type PublicRepackDetailV3,
 } from "@packscout/contracts";
 import {
   PROMOTE_PROVIDER_USAGE,
@@ -80,13 +89,21 @@ import {
   withProviderPackListingUrls,
   boundedText,
   carryForwardActiveRelease,
+  canonicalTimestamp,
+  basisPointsFromRate,
   parsePromoteProviderArguments,
   parsedHttpsUrl,
   projectProviderPacks,
+  publicAvailabilityFromPack,
   publicCollectibleTypes,
+  publicPriceFromPack,
   resolvePublicCategories,
   summarizePlan,
 } from "./promote-provider-data-release-v3-plan.mjs";
+import {
+  projectProviderPromotionContents,
+  type ProviderPromotionContentSnapshot,
+} from "./promote-provider-data-release-v3-contents.mts";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -115,6 +132,21 @@ function required(environment: Environment, name: string): string {
     refuse("ENVIRONMENT_MISSING", name);
   }
   return value;
+}
+
+function configuredPublicImageOrigins(environment: Environment): readonly string[] {
+  const raw = environment.PACKSCOUT_PUBLIC_IMAGE_ORIGINS?.trim();
+  if (raw === undefined || raw.length === 0) return [];
+  const origins = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  if (
+    origins.some((value) => {
+      const parsed = parsedHttpsUrl(value);
+      return parsed === null || parsed.origin !== value.replace(/\/$/u, "");
+    })
+  ) {
+    refuse("PUBLIC_IMAGE_ORIGINS_INVALID");
+  }
+  return [...new Set(origins.map((value) => value.replace(/\/$/u, "")))].sort();
 }
 
 /**
@@ -297,9 +329,33 @@ async function locateProviderDatabases(
 
 interface ProviderSnapshot {
   readonly platform: ResolvedPlatform;
-  readonly packs: readonly Record<string, unknown>[];
+  readonly snapshotAt: string;
+  readonly packs: readonly ProviderPackRow[];
   readonly categories: readonly Record<string, unknown>[];
   readonly collectibleTypes: readonly string[];
+  readonly collectibles: readonly DistributedProviderCollectibleRow[];
+  readonly instances: readonly DistributedProviderCollectibleInstanceRow[];
+  readonly memberships: readonly DistributedProviderPackContentRow[];
+  readonly latestContentSnapshots: readonly ProviderPromotionContentSnapshot[];
+}
+
+interface ProviderPackRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly row_version: string;
+  readonly pack_key: string;
+  readonly attributes: Readonly<Record<string, unknown>> | null;
+  readonly availability: unknown;
+  readonly price_amount: unknown;
+  readonly price_currency: unknown;
+  readonly price_usd_amount: unknown;
+  readonly buyback_rate: unknown;
+  readonly source_updated_at: unknown;
+}
+
+function databaseDate(value: unknown, label: string): Date {
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (!Number.isFinite(date.getTime())) refuse("PROVIDER_SNAPSHOT_INVALID", label);
+  return date;
 }
 
 async function readProviderSnapshot(
@@ -321,11 +377,17 @@ async function readProviderSnapshot(
     databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} connect`, error);
   }
   try {
-    await client.query("set default_transaction_read_only = on").catch((error: unknown) =>
+    await client.query("begin transaction isolation level repeatable read read only").catch((error: unknown) =>
       databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} read-only session`, error),
     );
+    const snapshotClock = await client.query(
+      "select transaction_timestamp() as snapshot_at",
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} snapshot clock`, error),
+    );
     const packs = await client.query(
-      `select id, pack_key, display_name, description, pack_format, availability,
+      `select id, row_version::text, pack_key, attributes,
+              display_name, description, pack_format, availability,
               content_evidence, lifecycle, category_id,
               price_amount::text, price_currency, price_usd_amount::text,
               buyback_rate::text, vendor_ev_amount::text, vendor_ev_currency,
@@ -350,15 +412,222 @@ async function readProviderSnapshot(
     ).catch((error: unknown) =>
       databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectible types`, error),
     );
+    const packIds = packs.rows.map((row) => String(row.id));
+    const latestContentSnapshots = await client.query(
+      `select distinct on (pack_id) pack_id, completeness, effective_at
+         from pack_content_snapshots
+        where pack_id = any($1::uuid[])
+        order by pack_id, effective_at desc`,
+      [packIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} membership snapshots`, error),
+    );
+    const memberships = await client.query(
+      `select id, row_version::text, pack_id, collectible_id,
+              collectible_instance_id, total_quantity::text,
+              available_quantity::text, content_role, probability::text,
+              stated_value_amount::text, stated_value_currency, evidence_kinds,
+              match_confidence_basis_points, match_confidence_band,
+              observed_at, display_order
+         from pack_contents
+        where lifecycle = 'active' and pack_id = any($1::uuid[])
+        order by id`,
+      [packIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} pack contents`, error),
+    );
+    const collectibleIds = [
+      ...new Set(memberships.rows.map((row) => String(row.collectible_id))),
+    ];
+    const instanceIds = memberships.rows.flatMap((row) =>
+      row.collectible_instance_id === null
+        ? []
+        : [String(row.collectible_instance_id)],
+    );
+    const collectibles = await client.query(
+      `select id, row_version::text, collectible_key, collectible_type,
+              display_name, year, brand, set_or_series, card_number,
+              reference_number, subject, grade, grader, primary_image_url,
+              primary_image_alt, valuation_amount::text, valuation_currency,
+              valuation_usd_amount::text, valuation_unavailable_reason,
+              valuation_type, valuation_observed_at, data_as_of
+         from collectibles
+        where lifecycle = 'active' and id = any($1::uuid[])
+        order by id`,
+      [collectibleIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectibles`, error),
+    );
+    const aliases = await client.query(
+      `select collectible_id, display_name
+         from collectible_name_aliases
+        where lifecycle = 'active' and collectible_id = any($1::uuid[])
+        order by collectible_id, id`,
+      [collectibleIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectible aliases`, error),
+    );
+    const instances = await client.query(
+      `select id, row_version::text, collectible_id, instance_key,
+              certifier, certification_number
+         from collectible_instances
+        where lifecycle = 'active' and id = any($1::uuid[])
+        order by id`,
+      [instanceIds],
+    ).catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} collectible instances`, error),
+    );
+    const aliasesByCollectible = new Map<string, string[]>();
+    for (const row of aliases.rows) {
+      const collectibleId = String(row.collectible_id);
+      aliasesByCollectible.set(collectibleId, [
+        ...(aliasesByCollectible.get(collectibleId) ?? []),
+        String(row.display_name),
+      ]);
+    }
+    const snapshotAt = new Date(snapshotClock.rows[0]?.snapshot_at).toISOString();
+    await client.query("commit").catch((error: unknown) =>
+      databaseFailure("PROVIDER_DATABASE_UNAVAILABLE", `${platformKey} snapshot commit`, error),
+    );
     return {
       platform: access.platform,
-      packs: withProviderPackListingUrls(platformKey, packs.rows, providerPackListingUrl),
+      snapshotAt,
+      packs: withProviderPackListingUrls(
+        platformKey,
+        packs.rows,
+        providerPackListingUrl,
+      ) as ProviderPackRow[],
       categories: categories.rows,
       collectibleTypes: types.rows.map((row) => String(row.collectible_type)),
+      latestContentSnapshots: latestContentSnapshots.rows.map((row) => ({
+        packId: String(row.pack_id), completeness: row.completeness,
+        effectiveAt: databaseDate(row.effective_at, `${platformKey} membership snapshot time`),
+      })),
+      collectibles: collectibles.rows.map((row) => ({
+        id: String(row.id),
+        rowVersion: BigInt(row.row_version),
+        collectibleKey: String(row.collectible_key),
+        collectibleType: row.collectible_type,
+        displayName: String(row.display_name),
+        aliases: aliasesByCollectible.get(String(row.id)) ?? [],
+        year: row.year === null ? null : Number(row.year),
+        brand: row.brand,
+        setOrSeries: row.set_or_series,
+        cardNumber: row.card_number,
+        referenceNumber: row.reference_number,
+        subject: row.subject,
+        grade: row.grade,
+        grader: row.grader,
+        primaryImageUrl: row.primary_image_url,
+        primaryImageAlt: row.primary_image_alt,
+        valuationAmount: row.valuation_amount,
+        valuationCurrency: row.valuation_currency,
+        valuationUsdAmount: row.valuation_usd_amount,
+        valuationUnavailableReason: row.valuation_unavailable_reason,
+        valuationType: row.valuation_type,
+        valuationObservedAt: row.valuation_observed_at === null
+          ? null
+          : databaseDate(row.valuation_observed_at, `${platformKey} valuation time`),
+        dataAsOf: databaseDate(row.data_as_of, `${platformKey} collectible time`),
+      })),
+      instances: instances.rows.map((row) => ({
+        id: String(row.id),
+        rowVersion: BigInt(row.row_version),
+        collectibleId: String(row.collectible_id),
+        instanceKey: String(row.instance_key),
+        certifier: row.certifier,
+        certificationNumber: row.certification_number,
+      })),
+      memberships: memberships.rows.map((row) => ({
+        id: String(row.id),
+        rowVersion: BigInt(row.row_version),
+        packId: String(row.pack_id),
+        collectibleId: String(row.collectible_id),
+        collectibleInstanceId: row.collectible_instance_id,
+        totalQuantity: row.total_quantity === null ? null : BigInt(row.total_quantity),
+        availableQuantity: row.available_quantity === null
+          ? null
+          : BigInt(row.available_quantity),
+        contentRole: row.content_role,
+        probability: row.probability,
+        statedValueAmount: row.stated_value_amount,
+        statedValueCurrency: row.stated_value_currency,
+        evidenceKinds: row.evidence_kinds,
+        matchConfidenceBasisPoints: Number(row.match_confidence_basis_points),
+        matchConfidenceBand: String(row.match_confidence_band),
+        observedAt: databaseDate(row.observed_at, `${platformKey} membership time`),
+        displayOrder: Number(row.display_order),
+      })),
     };
   } finally {
     await client.end();
   }
+}
+
+async function promotionPackScoutEvByPackKey(
+  snapshot: ProviderSnapshot,
+  readAt: string,
+) {
+  const products: {
+    pack: ProviderPackRow;
+    evidence: Awaited<ReturnType<typeof normalizeProviderPromotionEvEvidenceV1>>;
+  }[] = [];
+  for (const pack of snapshot.packs) {
+    if (publicAvailabilityFromPack(pack) !== "available") continue;
+    const price = publicPriceFromPack(pack).usdComparison;
+    const sourceUpdatedAt = canonicalTimestamp(pack.source_updated_at);
+    if (
+      price.status !== "available" ||
+      price.value === null ||
+      sourceUpdatedAt === null
+    ) continue;
+    const evidence = await normalizeProviderPromotionEvEvidenceV1({
+      organizationId: snapshot.platform.organizationId,
+      providerId: snapshot.platform.providerId,
+      packId: pack.id,
+      packKey: pack.pack_key,
+      rowVersion: pack.row_version,
+      priceUsdMinor: price.value.minorUnits,
+      buybackRateBasisPoints: basisPointsFromRate(pack.buyback_rate),
+      sourceUpdatedAt,
+      snapshotAt: snapshot.snapshotAt,
+      readAt,
+      evidence: pack.attributes?.evInputEvidence,
+    });
+    if (evidence !== null) products.push({ pack, evidence });
+  }
+  if (products.length === 0) return new Map<string, unknown>();
+  const eligibility = createPackScoutBuybackEvPromotionEligibilityV1({
+    organizationId: snapshot.platform.organizationId,
+    readAt,
+    products: products.map(({ pack, evidence }) => ({
+      platformKey: snapshot.platform.platformKey,
+      productKey: pack.pack_key,
+      evidence,
+    })),
+  });
+  const result = new Map<string, unknown>();
+  for (const { pack } of products) {
+    const eligible = await eligibility.getPublicationEligibleRevision({
+      organizationId: snapshot.platform.organizationId,
+      platformKey: snapshot.platform.platformKey,
+      productKey: pack.pack_key,
+      readAt,
+    });
+    result.set(
+      pack.pack_key,
+      composePackScoutPublicEvV3(
+        {
+          productKey: pack.pack_key,
+          availability: "available",
+          soldOutAt: null,
+        },
+        eligible,
+        readAt,
+      ),
+    );
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +796,7 @@ async function main(): Promise<void> {
     return;
   }
   const environment = await loadEnvironment(options.envFile);
+  const publicImageOrigins = configuredPublicImageOrigins(environment);
   const stamp = new Date().toISOString().replace(/[-:.]/gu, "").replace("T", "-").slice(0, 15);
   const outDir = path.resolve(
     options.outDir ??
@@ -571,7 +841,8 @@ async function main(): Promise<void> {
     const snapshot = await readProviderSnapshot(access);
     console.log(
       `${access.platform.platformKey}: ${snapshot.packs.length} active packs, ` +
-        `${snapshot.categories.length} categories, collectible types ${JSON.stringify(
+        `${snapshot.categories.length} categories, ${snapshot.memberships.length} canonical pack contents, ` +
+        `collectible types ${JSON.stringify(
           snapshot.collectibleTypes,
         )}.`,
     );
@@ -582,6 +853,14 @@ async function main(): Promise<void> {
   // carried or freshly read record can post-date dataAsOf (Convex refuses
   // such a release at finalize; the assembler proves it before staging).
   const readAt = new Date().toISOString();
+  const packScoutEvByPlatform = new Map<string, Map<string, unknown>>();
+  for (const snapshot of snapshots) {
+    const estimates = await promotionPackScoutEvByPackKey(snapshot, readAt);
+    packScoutEvByPlatform.set(snapshot.platform.platformKey, estimates);
+    console.log(
+      `${snapshot.platform.platformKey}: ${estimates.size} packs carry reviewed promotion-time PackScout EV evidence.`,
+    );
+  }
 
   // 3. Project provider rows into public entities on the carried taxonomy.
   const versions = {
@@ -597,7 +876,14 @@ async function main(): Promise<void> {
     carriedCategories: carried?.categories ?? [],
     identity,
   });
-  const repacks = [...(carried?.repacks ?? [])];
+  const repacks: PublicRepackDetailV3[] = [...(carried?.repacks ?? [])];
+  const collectiblesById = new Map<string, PublicCollectible>(
+    (carried?.collectibles ?? []).map((collectible: PublicCollectible) => [
+      collectible.publicCollectibleId,
+      collectible,
+    ]),
+  );
+  const chases = [...(carried?.chases ?? [])];
   const skipped: unknown[] = [];
   for (const snapshot of snapshots) {
     const projected = projectProviderPacks({
@@ -609,8 +895,49 @@ async function main(): Promise<void> {
       versions,
       identity,
       includePriceless: options.includePriceless,
+      packScoutEvByPackKey:
+        packScoutEvByPlatform.get(snapshot.platform.platformKey) ?? new Map(),
     });
-    repacks.push(...projected.repacks);
+    let providerRepacks: readonly PublicRepackDetailV3[] =
+      projected.repacks.map((detail: unknown) =>
+        publicRepackDetailV3Schema.parse(detail),
+      );
+    if (snapshot.memberships.length > 0 || snapshot.latestContentSnapshots.length > 0) {
+      const detailById = new Map(
+        projected.repacks.map((detail) => [detail.publicRepackId, detail]),
+      );
+      const contentPacks = snapshot.packs.flatMap((pack) => {
+        const detail = detailById.get(
+          identity(
+            `repack:${snapshot.platform.platformKey}:${pack.pack_key}`,
+          ),
+        );
+        if (detail === undefined) return [];
+        return [{
+          id: pack.id,
+          rowVersion: BigInt(pack.row_version),
+          packKey: pack.pack_key,
+          detail: publicRepackDetailV3Schema.parse(detail),
+        }];
+      });
+      const content = projectProviderPromotionContents({
+        providerId: snapshot.platform.providerId,
+        platformKey: snapshot.platform.platformKey,
+        snapshotAt: new Date(snapshot.snapshotAt),
+        publicAssetOrigins: publicImageOrigins,
+        packs: contentPacks,
+        latestSnapshots: snapshot.latestContentSnapshots,
+        collectibles: snapshot.collectibles,
+        instances: snapshot.instances,
+        memberships: snapshot.memberships,
+      });
+      providerRepacks = content.repacks;
+      for (const collectible of content.collectibles) {
+        collectiblesById.set(collectible.publicCollectibleId, collectible);
+      }
+      chases.push(...content.repackChases);
+    }
+    repacks.push(...providerRepacks);
     skipped.push(
       ...projected.skipped.map((entry: { packKey: string; reason: string }) => ({
         platformKey: snapshot.platform.platformKey,
@@ -625,9 +952,9 @@ async function main(): Promise<void> {
     {
       readAt,
       categories: resolved.categories,
-      collectibles: carried?.collectibles ?? [],
+      collectibles: [...collectiblesById.values()],
       repacks,
-      chases: carried?.chases ?? [],
+      chases,
     },
     {
       sha256CanonicalJson,
