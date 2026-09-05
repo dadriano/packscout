@@ -67,15 +67,15 @@ function hasLiteralStackFrame(value: string): boolean {
   // A source location with line/column coordinates establishes a stack frame,
   // not the words Error/at alone. Fixed-shape function tokens and delimited
   // source spans keep the scan linear, including whitespace-collapsed search.
-  for (const frame of text.matchAll(/(?:^|\s)at[ \t]+(?:(?:async|new)[ \t]+)?(?:[^\s()]+(?:[ \t]+\[as[ \t]+[^\]\r\n[]+\])?[ \t]+\(([^()\r\n]+):[0-9]+:[0-9]+\)|([^()\s]+):[0-9]+:[0-9]+)(?=$|[\s),.;])/gu)) {
+  for (const frame of text.matchAll(/(?:^|\s)at[ \t]+(?:(?:async|new)[ \t]+)?(?:[^\s()]+(?:[ \t]+\[as[ \t]+[^\]\r\n[]+\])?[ \t]+\(([^()\r\n]+):[0-9]+:[0-9]+\)|([^()\s]+):[0-9]+:[0-9]+)(?=$|[\s),.;])/giu)) {
     const source = frame[1] ?? frame[2]!;
-    if (/[\\/]|^node:|^[^:\s]+\.[^:\s]+$/u.test(source)) return true;
+    if (/[\\/]|^node:|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(source)) return true;
   }
   // Python frames quote a source file; Java frames name a class method and
   // .java source line; Firefox frames separate a function and absolute source
   // URL with @. None treats an ordinary Error label or email as a stack frame.
-  for (const frame of text.matchAll(/(?:^|\s)File[ \t]+"([^"\r\n]+)",[ \t]+line[ \t]+[0-9]+(?=$|[\s,.;])/gu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$/u.test(frame[1]!)) return true;
+  for (const frame of text.matchAll(/(?:^|\s)File[ \t]+"([^"\r\n]+)",[ \t]+line[ \t]+[0-9]+(?=$|[\s,.;])/giu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
   }
   return /(?:^|\s)at[ \t]+[a-z_$][\w$./<>]*\.[\w$<>]+\([^()\r\n]+\.java:[0-9]+\)(?=$|[\s),.;])/iu.test(text) ||
     /(?:^|\s)[^\s@()]*@(?:[a-z][a-z0-9+.-]*:\/{2,}|\/)[^\s()]+:[0-9]+:[0-9]+(?=$|[\s),.;])/iu.test(text);

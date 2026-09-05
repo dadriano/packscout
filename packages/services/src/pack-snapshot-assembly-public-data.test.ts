@@ -12,6 +12,7 @@ test("literal source-location stack frames never enter public pack text", async 
     "Error: boom\n at Object.handler [as callback] (/srv/app.js:10:5)", "Error: boom\n at new Handler (C:\\app\\file.js:10:5)",
     "at /srv/app.js:10:5", "at async /srv/app.js:10:5", "at async file:///srv/app.js:10:5",
     "at handler (app.js:10:5)", "at handler (node:internal/modules/run_main:10:5)",
+    "at handler (<anonymous>:1:5)", "at <anonymous>:1:5", "AT ASYNC handler (/srv/app.js:10:5)",
     "Error: boom at handler (https://example.com/app.js:10:5)"]) {
     refuses({ title }); refuses({ aliases: [title] });
     refuses({ title: JSON.stringify({ caption: title }) });
@@ -28,7 +29,8 @@ test("literal source-location stack frames never enter public pack text", async 
 
 test("ordinary Error and at prose remain public without a structured source frame", async () => {
   for (const title of ["Error: rare misprint", "Meet at the store", "Artist at handler (stage 10:5)",
-    "at booth (section:10:5)", "Visit https://example.com/app.js", "File app.js:10:5", "Bearer a"]) {
+    "at booth (section:10:5)", "Visit https://example.com/app.js", "File app.js:10:5", "Bearer a",
+    "<anonymous> collection", "at handler (<anonymous> edition)", 'File "<stdin>" guide']) {
     assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
     assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
     for (const suffix of ["?caption=", "#"]) {
@@ -40,15 +42,20 @@ test("ordinary Error and at prose remain public without a structured source fram
 });
 
 test("final normalized search cannot synthesize a source-location stack frame", async () => {
-  const { input } = await assemblyFixture(); input.inputs.title = "Error: boom at handler";
-  input.inputs.aliases = ["(/srv/app.js:10:5)"];
-  assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
-  await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  for (const [title, alias] of [["Error: boom at handler", "(/srv/app.js:10:5)"],
+    ["File", '"/srv/app.py", line 10, in handler']] as const) {
+    const { input } = await assemblyFixture(); input.inputs.title = title; input.inputs.aliases = [alias];
+    assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
 });
 
 test("other standard runtime frames require explicit source-location syntax", async () => {
   for (const title of ['Traceback (most recent call last):\n  File "/srv/app.py", line 10, in handler',
     'File "app.py", line 10, in handler', 'File "C:\\app\\file.py", line 10, in handler',
+    'File "<stdin>", line 1, in <module>', 'File "<string>", line 1, in <module>',
+    'File "<frozen importlib._bootstrap>", line 1, in handler',
+    'file "/srv/app.py", line 10, in handler', 'FILE "<stdin>", LINE 1, in <module>',
     "java.lang.RuntimeException: boom\n at app.Handler.run(Handler.java:10)",
     "at java.base/java.lang.Thread.run(Thread.java:840)",
     "handler@https://example.com/app.js:10:5", "@file:///srv/app.js:10:5"]) {
@@ -79,7 +86,9 @@ test("component-encoded source frames retain the same private meaning", async ()
   for (const frame of ["Error: boom\n    at handler (/srv/app.js:10:5)",
     'File "/srv/app.py", line 10, in handler', "at app.Handler.run(Handler.java:10)",
     "handler@https://example.com/app.js:10:5", "ａｔ handler (/srv/app.js:10:5)",
-    'Ｆｉｌｅ "/srv/app.py", line 10, in handler']) {
+    'Ｆｉｌｅ "/srv/app.py", line 10, in handler', 'File "<stdin>", line 1, in <module>',
+    'File "<string>", line 1, in <module>', "at handler (<anonymous>:1:5)",
+    'Ｆｉｌｅ "＜ｓｔｄｉｎ＞", line 1, in <module>', "ａｔ handler (＜ａｎｏｎｙｍｏｕｓ＞:1:5)"]) {
     const title = encodeURIComponent(frame);
     refuses({ title });
     refuses({ url: "https://example.com/?caption=" + title });
