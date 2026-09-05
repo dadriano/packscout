@@ -8,6 +8,12 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
 
+## Current encoded-prose and public-route repair — 2026-09-05
+
+Runtime `5bba8e4f561e76b306f44170031c4d13f50665dc` repairs114 comments3941702580/3941702584 and mirrors119's named ODBC protection. Decode only charged lexical runs and a quoted field's following separator component, never an entire URL or a repeated full suffix. Account/host route words require syntactic identifier/endpoint values; ordinary rewards/events routes work while actual credential and accountid paths and query/JSON fields remain strict. Exact normalized PWD is protected without the unrelated itemPWD suffix false positive. DSN/UID context stays in contiguous assignment groups; UID alone is public. NFKC recognition protects actual decoded fullwidth action-URL fields without changing stored public bytes. Existing bounds stay.
+
+Genuine direct/actual-assembly reds precede all new repairs. Final five-file138/138 and pure135/135 tests pass0skip, with8,000-member lifecycle/reuse and actual privatePG handoff; services lint/types and ratchet0 pass. Log `/tmp/packscout-p03-mixed-quotes-odbc-complete-focused-20260905.log`. Independent316/316 adjusted probes,19 actual assemblies and depth17 rejection pass at guard a2ab7ae8653e3ff81773fadeab8614fcb017ba90e5b86f0bb175d1bd5b7ad21b. Six matrix adjustments reflect existing baseline/fragment/raw-limit semantics; no finding was waived. Fresh full local gate runs in `/tmp/packscout-p03-mixed-quotes-odbc-framework-20260905.log`. Publication/fixing-SHA replies/current-head fullCI/review remain. Previous29c2/c17 full local andCI passes do not certify this source. No activation.
+
 ## Current DSN and PGP review repair — 2026-09-05
 
 Independent cross-boundary580-probe review found no new actionable defect. All DSN/standard-armor expectations pass;13 P04 nested-caption differences are unchanged on the exact pre-repair baseline. Four raw P03 fullwidth-armor acceptances reflect the existing NFC stage, with actual final-assembly rejection independently confirmed. The580 count includes both guards, not580 P03 unit tests.
