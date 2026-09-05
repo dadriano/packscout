@@ -2,9 +2,9 @@
 
 ## Start Here
 
-Authoritative continuation, September5 at19:53UTC: the user authorized foundation merges once current checks/review clear, then all remaining work, plus Admin/monitoring screenshots and an operating guide. PR121 and120 are merged; main remains `b96b43691b48170d64bdd541e4a42cb15f096ecf` including unrelated PR122. Preserve its chosen/reordered All Repacks columns and account preferences in011/007. Counts:6/13 accepted,5/12 phases merged;003 is done,004/011 in progress. Remaining authorized merges:114 then119.
+Authoritative continuation, September5 at20:22UTC: the user authorized foundation merges once current checks/review clear, then all remaining work, plus Admin/monitoring screenshots and an operating guide. PR121 and120 are merged; main remains `b96b43691b48170d64bdd541e4a42cb15f096ecf` including unrelated PR122. Preserve its chosen/reordered All Repacks columns and account preferences in011/007. Counts6/13 accepted,5/12 phases merged;003 is done,004/011 in progress. Remaining authorized merges:114 then119.
 
-Latest runtime repairs are committed: P03 `587fb942` and P04 `b95041bf` reject literal source frames, including charged encoded/fullwidth recognition; P04 `0548991d` also rejects private shared-change metadata before fan-out. Complete143/143 and117/117 focused tests pass with zero skips; affected static gates, ratchet and independent review pass. P03 full local verifier passed with both builds; P04 full local verifier is running. Existing contextual privacy and public-prose behavior remain unchanged. Publish current heads and resolve findings, then require exact-head CI/review before authorized merges. No activation occurred.
+P03 runtime `cad03604` passes143/143 complete focused tests and the fresh full local framework gate with both builds; virtual-source review3941890116 and actual cross-field casefold regressions are fixed. Publication/reply and exact-head CI/review remain. P04 runtime `7615575d`, including metadata fix0548991d, passes117/117 complete focused tests,81 pure,316 retained probes and independent review; its fresh full gate is running. Both owning matrices have zero skips. These corrections do not broaden API, phase or frontend scope. No activation occurred.
 
 Capacity clarification requested18:33UTC, not yet answered: retain the existing1,000-pack/512-category catalog limit or support the proposed8,000-pack catalog with a more involved lossless query layout. Both preserve all frontend datapoints and8,000 full content members per pack. No capacity reduction or new architecture is approved pending the answer; foundation repairs continue independently.
 
@@ -20,7 +20,7 @@ The user requested `build-from-tasks all` and full coverage of every current fro
 
 P04 and P07A remain independent main siblings. P05B/task013 now owns the measured8-file/2,225-line neutral EV calculation/public-value extraction from011. It depends only on merged main and preserves formulas/current consumers. The two incomplete native economics files remain backed up for011. P05A resumes after003/004/005/013 merge: the read-only resume audit confirms004's not-yet-main profile assembler is also an actual dependency. Every frontend datapoint and complete-pack readiness remain required.
 
-**Progress:**6/13 tasks acceptance-complete (001/002/003/005/012/013);5/12 phases merged.003 is verified and being published;004 awaits its final full gate.011 waits for merged003/004/005/013 and the recorded capacity choice.006–010 remain todo. After011,006 publisher/recovery and007 frontend cutover can run in parallel;009 follows006 and008 follows006/007.010 is coordinated launch certification. Existing006/007 briefs define disjoint work. No live activation occurred.
+**Progress:**6/13 tasks acceptance-complete (001/002/003/005/012/013);5/12 phases merged.003 awaits fresh exact-head CI/review;004's full gate is running.011 waits for merged003/004/005/013 and the recorded capacity choice.006–010 remain todo. After011,006 publisher/recovery and007 frontend cutover can run in parallel;009 follows006 and008 follows006/007.010 is coordinated launch certification. Existing006/007 briefs define disjoint work. No live activation occurred.
 
 ## Context
 
@@ -119,7 +119,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 **Activation phase:** P10 launches the exact V1 release certified by P08 and protected by P09.
 
-**Merge order:** P01; P02, P04, and P05 independently; P03 follows P02; P05B and P07A follow merged P05 independently; P05A follows merged P03/P04/P05/P05B; P06 waits for P02–P05 and P05A; P07 waits for P05A/P07A; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09. Fresh merge approval remains required.
+**Merge order:** P01; P02, P04, and P05 independently; P03 follows P02; P05B and P07A follow merged P05 independently; P05A follows merged P03/P04/P05/P05B; P06 waits for P02–P05 and P05A; P07 waits for P05A/P07A; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09. The user authorized remaining prerequisite merges114 then119 once current checks/review clear; production activation still requires the exact launch plan and evidence.
 
 **Additional application path:** none. `pack_catalog_v1` is the only application contract and the frontend calls it directly.
 
@@ -133,8 +133,8 @@ Provider databases remain isolated and authoritative for provider-owned history.
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
 | P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | merged |
-| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 | 143 focused, full local, static and independent review pass | published |
-| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; PR119 | 117 focused, static and independent review pass; full local running | building |
+| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 | Final143/full pass; exact-head CI/review pending | published |
+| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; PR119 | Final117 focused pass; fresh full gate running | building |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
 | P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | merged PR121 | Exact parity/full gate; merge0ea61454 | merged |
 | P05A | Preserve every current frontend data point in native V1 | 011 | P03, P04, P05, P05B | root after prerequisites merge | Source-to-snapshot-to-frontend data parity | building |
@@ -179,10 +179,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** A pure assembler produces or rejects one complete snapshot deterministically; it does not publish.
 - **Review budget:** one task; 1–2 days; target at most 18 authored files and 2,000 authored lines.
 - **Rollback:** Revert the unused assembler and fixtures.
-- **Measured boundary:** At published head `3cbf55cd`, 18 authored files / 2,755 changed lines against main `b96b4369`: 11 runtime/test files / 2,565 lines and 7 delivery records / 190 lines. The soft target is exceeded by cohesive assembly, privacy and evidence tests, not only metadata. The phase remains below the 40-file / 5,000-line hard stop; remeasure after the literal-stack repair. No generated churn.
+- **Measured boundary:** Final virtual/casefold runtime and delivery records:18 authored files /2,997 changed lines against main `b96b4369`:11 runtime/test files /2,684 lines and7 delivery records /313 lines. The soft target is exceeded by cohesive assembly, privacy and evidence tests, not only metadata. The phase remains below the40-file/5,000-line hard stop. No generated churn.
 - **Branch:** `codex/pack-version-publication-p03-assembler`.
 - **Current parent:** main `b96b43691b48170d64bdd541e4a42cb15f096ecf`. Earlier parents and backups remain preserved.
-- **Current implementation:** Runtime `587fb942ecf091ee85e04ed55b7ac773b7c73a63` repairs literal-stack comment `3941788718`. Earlier encoded assignments, ODBC and contextual account/host paths remain covered.
+- **Current implementation:** Runtime `cad036046acc333f2d22fbd680f26b8cb6e3ec64` repairs virtual-source comment `3941890116` and final-search casefold synthesis. Earlier literal frames, encoded assignments, ODBC and contextual account/host paths remain covered.
 - **Current verification:**143 complete focused tests, zero skips, affected static checks, ratchet and full local verifier pass with both builds. Task003 is done; fresh current-head CI and review still gate merge. Previous CI `33986805170` certifies older `3cbf55cd` only.
 - **PR:** https://github.com/dadriano/packscout/pull/114 — open, non-draft, not merged. The user authorized merging once exact-head checks pass and review findings are clear; no renewed approval is needed for this prerequisite.
 
@@ -193,9 +193,9 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Rollback:** Stop disabled workers and retain unclaimed durable evidence.
 - **Boundary review:** At published head `5cbb7b13`, 30 authored files / 3,421 changed lines: 23 runtime/test/migration files / 3,231 lines and 7 delivery records / 190 lines. Transaction, immutability, profile assembly, privacy and crash/isolation tests form one dormant persistence boundary. The soft target overage is not metadata-only; splitting those proofs from their state would leave the boundary uncertified. Remeasure after the literal-stack repair; retain the 40-file / 5,000-line hard stop. No generated churn.
 - **Branch:** `codex/pack-version-publication-p04-profiles`.
-- **Current direct parent:** main `b96b43691b48170d64bdd541e4a42cb15f096ecf`; published runtime `4e6b3386` / head `5cbb7b13`. Restack after the authorized PR114 merge, preserving both service exports and current main.
-- **Current verification:** 114 complete focused tests, zero skips, affected lint/types and ratchet pass. Independent 316 guard probes pass. Correctly rehashed provider and collectible hostile envelopes are rejected without durable mutation. CI `33986807092` and manual review `5554229565` concern that published head only.
-- **Current repair:** Propagate the literal-stack content invariant found in PR114 to shared public text and actual profile assembly. Prior full passes remain historical; a fresh final-runtime full gate is required. No dependency, formula or runtime activation change.
+- **Current direct parent:** main `b96b43691b48170d64bdd541e4a42cb15f096ecf`; local final runtime `7615575d`, remote head still `5cbb7b13`. Restack after the authorized PR114 merge, preserving both service exports and current main.
+- **Current verification:**117 complete focused tests, zero skips, affected lint/types and ratchet pass;81 pure and316 retained guard probes pass. Metadata privacy rejects20 hostile cases with no change to seven publication tables. Independent final review is clear. Fresh full gate is running; old CI `33986807092` certifies5cbb only.
+- **Current repair:** Shared metadata validation and explicit literal/virtual source-frame protection, including final derived casefolded text. No dependency, formula or runtime activation change.
 - **PR:** https://github.com/dadriano/packscout/pull/119 — draft, pending repaired-runtime full CI; phase remains building.
 
 #### P05 — Public store and V1 reads
@@ -329,9 +329,9 @@ Total estimated builder/operator effort is 14–21 working days if serialized. P
 ## Build Order and PR Topology
 
 1. Keep merged P01/PR88, P02/PR95, and P05/PR108 accepted; do not rebuild them.
-2. Certify P03/PR114 on mainf6785251 and maintain the single read-only review watch; do not combine its repairs with another phase.
-3. Publish independent P04/task004, P07A/task012 and P05B/task013 after each exact-parent gate. Original P05A branch44e2f193 and complete ten-file stash961f2069 remain preserved.
-4. Resume P05A/task011 from merged003/005/013 prerequisites, restoring only its incomplete economics/data work. P06 requires P02–P05 plus011; atomic P07 requires005/011/012. Every frontend datapoint remains in scope.
+2. Merge P03/PR114 after exact-head CI/review clear on current mainb96b4369; preserve independent phase scope.
+3. Publish and merge P04/task004 after its fresh gate, review and post114 restack. P07A/task012 and P05B/task013 are already merged. Original P05A branch44e2f193 and complete ten-file stash961f2069 remain preserved.
+4. Resume P05A/task011 from merged003/004/005/013 prerequisites and the capacity choice, restoring only its incomplete economics/data work. P06 requires P02–P05 plus011; atomic P07 requires005/011/012. Every frontend datapoint remains in scope.
 5. Build P08 after P06/P07 and P09 after P06. P10 operates only on the exact certified merged release.
 
 | Phase | Direct prerequisite | Current relationship |

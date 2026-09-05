@@ -1,6 +1,14 @@
 # Pack publication — current handoff
 
-## Current continuation — 2026-09-05 19:38UTC
+## Current continuation — 2026-09-05 20:22UTC
+
+P03 final runtime `cad036046acc333f2d22fbd680f26b8cb6e3ec64` passes143 complete tests0skip, static/ratchet and fresh full framework gate exit0 with both builds (`/tmp/packscout-p03-virtual-casefold-framework-20260905.log`). Task003 is done;6/13 accepted,5/12 phases merged. Virtual-source finding3941890116 and actual lowercased cross-field Python synthesis are fixed. Root is preparing final records/publication/reply; fresh exact-head CI and review still gate the authorized114 merge.
+
+P04 final runtime `7615575dea0ec6293592effdb03c591ffb00fdf8` includes metadata0548991d and matching virtual/casefold protection. Root117/117 complete focused tests0skip,81 pure,316 retained probes, affected static/ratchet and independent bounded review pass. Fresh full session81401 runs `/tmp/packscout-p04-virtual-casefold-framework-20260905.log`. Source agents are frozen/idle. Root owns records, publishing and Git; single read-only watcher ends20:26UTC unless renewed. Current main remainsb96. No new production action. The capacity question and requested current-admin guide/screenshots below remain as recorded.
+
+## Earlier continuation checkpoints — historical
+
+20:02UTC latest review delta: P03 runtime587fb942/full pass is published at `f4b1c0be392cd538db16f69f3f3e9c367eb42ab6`; original stack reply3941877121 is resolved, fresh CI33988556508 runs. New review3941890116/threadPRRT_kwDOTplTZc6fmeH2 on that exact head demonstrates Python `<stdin>`/`<string>` frames bypass the source predicate.003 is reopened;003/004 privacy criteria are unchecked. Both source agents are implementing the same narrow virtual-source recognition, not changing phase/API/URL parser. P04 full32674 PASSED b95041bf at20:01UTC; metadata0548991d is verified but remains unpushed. All full local sessions are closed; fresh complete/static/full gates are required for the new guard changes. Counts5/13 accepted,5/12 merged. Watcher runs through20:26UTC. No merge/activation occurred.
 
 19:53UTC superseding gate result: P03 full local `npm run verify:framework` PASSED at runtime `587fb942` on main `b96b4369`, including1,498 services tests and both production builds. Task003 is done; counts6/13 accepted,5/12 phases merged.143 owning tests have zero skips;28 unrelated full-run opt-in skips remain. Log `/tmp/packscout-p03-literal-stack-framework-20260905.log`. P04 source `b95041bf` / metadata `0548991d` passes117 complete focused tests0skip,81 pure,316 retained probes and61 independent probes; its final-source full gate is running in `/tmp/packscout-p04-literal-stack-metadata-framework-20260905.log` after P03's heavy services/volume tests completed. All source agents and the previous watcher are finished/idle. Root owns final records, publication, fixing-SHA replies and authorized merges. No activation.
 

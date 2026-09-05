@@ -8,7 +8,15 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Active shared-metadata and literal-stack repairs — 2026-09-05
+## Current final-source verification — 2026-09-05 20:22UTC
+
+Final runtime `7615575dea0ec6293592effdb03c591ffb00fdf8` on main `b96b43691b48170d64bdd541e4a42cb15f096ecf` includes metadata fix `0548991d` and matching virtual-source/casefold frame protection. Root's complete six-file matrix passes117/117, zero skips, with real PostgreSQL and production Admin bundle proof (`/tmp/packscout-p04-virtual-casefold-complete-focused-20260905.log`). Pure81/81, retained316/316 probes, contracts/services lint/types and ratchet0 pass. Independent bounded review of the final patch finds no actionable defect. Guard SHA-256 `a2d05ee09934bb07708dc28dd033ee1b24e7f9ae505e3b52d393530e7a59325b`.
+
+Fresh full `npm run verify:framework` is running in `/tmp/packscout-p04-virtual-casefold-framework-20260905.log`; task004 remains in progress until it passes. Publication, metadata review reply, exact-head CI and restack after114 remain. No production activation or lost-refusal-status convergence is claimed;006 owns that integration seam.
+
+## Previous shared-metadata and literal-stack checkpoints — historical
+
+Full local `npm run verify:framework` PASSED at20:01UTC on `b95041bf` / main `b96b4369`, including both builds; log `/tmp/packscout-p04-literal-stack-metadata-framework-20260905.log`. The117 owning tests have zero skips;28 unrelated optional full-run skips remain. Before publication, PR114's new virtual-source frame finding `3941890116` requires the matching narrow profile-guard correction. Keep004 in progress and its privacy criterion open until fresh verification. Do not represent the real b950 full pass as certifying that forthcoming change.
 
 Final runtime `b95041bfe9cbea3ad61381bb9df6b9043fb421df` includes metadata fix `0548991d` and explicit literal-stack protection. Complete six-file matrix117/117 passes with zero skips, including real PG fan-out/recovery and production Admin bundle/SPA/Prisma-engine proof (`/tmp/packscout-p04-literal-stack-metadata-complete-focused-20260905.log`). All final source edits preceded that run. Pure81/81, retained316/316 probes, affected lint/types and ratchet0 pass. Independent61-probe review found no actionable change; three nested-caption refusals match baseline. Guard hash `72f6c990a4c0fc8b77cdbd203d81adb08a5576a8b516b34ea1338c21d6e541fe`. Final-runtime full gate, publication and review remain; task stays in progress until complete verification.
 
@@ -188,7 +196,7 @@ P05 supplies the authenticated public profile storage and atomic heads. P06 cons
 - [x] Initial profile work is available before the first referencing pack activation, and later profile updates do not change sealed pack bytes.
 - [x] Lost responses and repeated outbox delivery reconcile the original operation and converge to one logical profile activation.
 - [x] Central progress never waits for provider acknowledgment after all required shards and profile intents are durable.
-- [x] Records, logs, errors, and receipts expose no credentials, raw source payloads, database locations, or cross-organization data.
+- [ ] Records, logs, errors, and receipts expose no credentials, raw source payloads, database locations, or cross-organization data.
 
 ## Verification
 

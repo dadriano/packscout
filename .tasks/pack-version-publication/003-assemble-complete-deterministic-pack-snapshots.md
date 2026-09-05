@@ -8,7 +8,15 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** done
 
-## Active literal-stack repair — 2026-09-05
+## Current verified virtual-source repair — 2026-09-05 20:22UTC
+
+Runtime `cad036046acc333f2d22fbd680f26b8cb6e3ec64` on main `b96b43691b48170d64bdd541e4a42cb15f096ecf` fixes review `3941890116`. Explicit Python/V8 frame syntax now recognizes angle-bracket virtual sources. Case-insensitive frame matching also protects lowercased final search assembled from separately valid title/alias fields; the actual assembler regression was red before repair. Public book labels, bare virtual-source labels and Error/at/Bearer prose remain accepted. No parser, API, budget or formula change.
+
+Complete focused tests pass143/143, zero skips, including8,000-member lifecycle/reuse and real private PostgreSQL (`/tmp/packscout-p03-casefold-stack-complete-focused-20260905.log`). Services lint/types and ratchet0 pass. Full `npm run verify:framework` PASSED exit0 with both production builds (`/tmp/packscout-p03-virtual-casefold-framework-20260905.log`);28 unrelated opt-in full-run skips remain disclosed. Guard SHA-256 `bc9980d4bcf86aa2b74a72bf2a56e2c9e268b35538c657a5cb43e217705b3291`. All task criteria are accepted; fresh exact-head CI and clear review still gate the authorized PR114 merge. No activation.
+
+## Previous literal-stack checkpoints — historical
+
+20:02UTC superseding review: current-head finding `3941890116` / `PRRT_kwDOTplTZc6fmeH2` shows Python virtual filenames such as `<stdin>` and `<string>` are not recognized by the source predicate. Task003 is reopened for that concrete privacy criterion. The same guard/test files are being corrected for structurally angle-bracket virtual sources, including equivalent V8 `<anonymous>` coordinates; no word-only ban or broader runtime redesign. The preceding full pass remains valid for587fb942 only, not the new repair.
 
 Full `npm run verify:framework` PASSED September5 at19:53UTC on runtime `587fb942ecf091ee85e04ed55b7ac773b7c73a63`, parent `b96b43691b48170d64bdd541e4a42cb15f096ecf`, including1,498 service tests and both production builds. Log `/tmp/packscout-p03-literal-stack-framework-20260905.log`;28 unrelated opt-in skips remain in the full runner, none in the143 owning tests. The final delivery-record documentation check passes320 files. All acceptance criteria and phase-scoped specs are verified; task003 is done. PR114 remains unmerged pending fresh exact-head CI and clear review. No production activation.
 
