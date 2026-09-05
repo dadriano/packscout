@@ -8,6 +8,12 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
+## Current ODBC and encoded-prose repair — 2026-09-05
+
+Runtime `4e6b33861f98f533007ed5f5dbf4bb2162ab0e69` repairs119 comment3941707060 and mirrors114's encoded-prose/public-route corrections. Exact normalized PWD fields reject, not arbitrary suffixes such as itemPWD; UID alone stays public, with named DSN/UID connection context confined to contiguous semicolon fields. Mixed quoted names/encoded separators share bounded lexical traversal. Account/host public routes remain valid without identifiers/topology, and credential paths/query/JSON remain strict. Decoded fullwidth private fields are recognized without rewriting payload or URL bytes.
+
+Root final six-file114/114 tests pass0skip, including pure79, real privatePG fan-out/recovery and production Admin bundle/SPA/two engines (`/tmp/packscout-p04-mixed-quotes-odbc-complete-focused-20260905.log`). Affected contracts/services lint/types and ratchet0 pass. The new repository regression rehashes hostile provider/collectible envelopes, proves schema acceptance, then verifies sanitized refusal and unchanged artifacts/batches/intents/heads; standalone26 privatePG tests pass. Independent316/316 adjusted probes per guard find no remaining defect; five P04 adjustments match existing baseline/strict fragment/raw-budget behavior. Guard341c9f48d812ba93679567b3b61b8a857652be61cc045e67b4e4c884469e60a1; repository testd3fff55c. Fresh publication/current-runtime full certification/review reply remain. Previous e428 fullCI passed, but local22482 was intentionally stopped143 for these repairs and is not a pass. No activation.
+
 ## Current DSN and PGP propagation — 2026-09-05
 
 Independent580-probe cross-boundary review found no new actionable defect or helper divergence. Its13 P04 nested-label refusals match exact pre-DSN fbafabde in13/13 baseline comparisons; direct benign labels remain public. Four P03 raw-normalization differences are independently confirmed to reject at actual final assembly. The580 count includes both guards, not580 profile unit tests.
