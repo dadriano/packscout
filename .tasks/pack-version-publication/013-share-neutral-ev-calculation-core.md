@@ -7,6 +7,12 @@
 **Estimated scope:** medium, behavior-preserving extraction
 **Status:** done
 
+## Merged — 2026-09-05
+
+With the user's conditional merge approval, PR121 squash-merged at15:00:24UTC as `0ea6145470a276807a0e9590d759d9fad85e9226`. Root verified its tree is identical to certified14c64485/runtime77c01707, current CI33945214745 passed, bot thumbs-up and no open findings. New main includes the neutral core;011 still waits for003/004. No writer, route or production data activation occurred.
+
+Latest verification: full framework CI33945214745 PASSED at published head14c64485 on mainf6785251, completed2026-09-05 05:06:21UTC. Runtime77c01707 is unchanged from the locally certified core. PR121 remains open/non-draft with no known finding; no new implementation is required before prerequisite merge approval.
+
 ## Objective and measured boundary
 
 Move the existing pure buyback EV calculator, confidence evaluator and public value primitives behind the browser-neutral domain boundary so native V1 readiness can replay the exact same calculation. Preserve current formulas, policy identifiers, errors and existing consumers. This is shared domain logic, not a release-response adapter or a second contract.
@@ -60,4 +66,4 @@ No deploy applies to this pure domain refactor.011 owns immutable full-data pari
 
 - Guidance: tech-001 native V1/clean-slate domain boundary plus011's approved unchanged-formula/full-data extension. No companion spec is edited.
 - Delivery split only: shared domain behavior is not legacy response translation, dual reads/writes, another public catalog schema or provider-specific generic logic.
-- Runtime77c01707 onf6785251 passes root364 focused regressions, affected static checks and the full framework gate at5d710c32. Preserving existing public consumer export names and errors imports the same domain values without a conversion layer, alternate read/write path or legacy DTO dependency. Only publication remains; no application activation applies to this phase.
+- Runtime77c01707 onf6785251 passes root364 focused regressions, affected static checks and the full framework gate at5d710c32. Preserving existing public consumer export names and errors imports the same domain values without a conversion layer, alternate read/write path or legacy DTO dependency. Published in PR121; no application activation applies to this phase.
