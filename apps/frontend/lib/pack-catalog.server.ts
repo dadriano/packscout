@@ -62,7 +62,15 @@ export function createPackCatalogReader(options: Readonly<{
     if (url === null) return packCatalogError("CATALOG_UNAVAILABLE") as PackCatalogResult<K>;
     try {
       const result = await transport(references[operation], catalogReadArguments({ request: parsed.data }, environment), { url });
-      return parsePackCatalogResult(operation, result);
+      const response = parsePackCatalogResult(operation, result);
+      // A coherent entity response must also belong to this parsed request, including after a cursor reset.
+      if (response.ok && (
+        (operation === "getPublicPack" && "publicRepackId" in parsed.data && "snapshot" in response.data &&
+          response.data.snapshot.publicRepackId !== parsed.data.publicRepackId) ||
+        (operation === "findPacksByDesiredCollectible" && "publicCollectibleId" in parsed.data && "publicCollectibleId" in response.data &&
+          response.data.publicCollectibleId !== parsed.data.publicCollectibleId)
+      )) return packCatalogError("CATALOG_UNAVAILABLE") as PackCatalogResult<K>;
+      return response;
     } catch {
       return packCatalogError("CATALOG_UNAVAILABLE") as PackCatalogResult<K>;
     }

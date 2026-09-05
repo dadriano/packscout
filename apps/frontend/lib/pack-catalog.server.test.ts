@@ -13,9 +13,9 @@ const environment = {
 };
 const fixturePromise = createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
 
-async function queryFixtures() {
+async function queryFixtures(packName: "packA" | "packB" = "packA") {
   const fixture = await fixturePromise;
-  const pack = fixture.packs.packA.snapshot;
+  const pack = fixture.packs[packName].snapshot;
   const payload = pack.payload;
   const page = fixture.query.firstPage;
   return {
@@ -76,6 +76,44 @@ test("invalid public input fails before any credentialed request", async () => {
     assert.deepEqual(await reader.read("listPublicPacks", input), packCatalogError("INVALID_QUERY"));
   }
   assert.equal(calls, 0);
+});
+
+test("a schema-valid pack or desired-collectible result cannot satisfy a different requested identity", async (context) => {
+  const fixtures = await queryFixtures("packB");
+  const results = {
+    getPublicPack: { ok: true, data: fixtures.getPublicPack },
+    findPacksByDesiredCollectible: { ok: true, data: { ...fixtures.findPacksByDesiredCollectible, publicCollectibleId: packCatalogFixtureIds.collectibleB } },
+  };
+  for (const operation of ["getPublicPack", "findPacksByDesiredCollectible"] as const) {
+    await context.test(operation, async () => {
+      assert.equal(packCatalogV1QueryContracts[operation].output.safeParse(results[operation]).success, true);
+      let calls = 0;
+      const reader = createPackCatalogReader({ environment, transport: async () => { calls += 1; return results[operation]; } });
+      assert.deepEqual(await reader.read(operation, inputs(operation)), packCatalogError("CATALOG_UNAVAILABLE"), operation);
+      assert.equal(calls, 1);
+    });
+  }
+});
+
+test("cursor recovery rejects a valid response for the wrong pack or desired collectible without another retry", async (context) => {
+  const fixture = await fixturePromise;
+  const fixtures = await queryFixtures("packB");
+  for (const operation of ["getPublicPack", "findPacksByDesiredCollectible"] as const) {
+    await context.test(operation, async () => {
+      const cursorKey = operation === "getPublicPack" ? "contentsCursor" : "cursor";
+      const query = packCatalogV1QueryContracts[operation].input.parse({ ...inputs(operation), [cursorKey]: fixture.query.cursor });
+      const response = operation === "getPublicPack" ? { ok: true, data: fixtures.getPublicPack }
+        : { ok: true, data: { ...fixtures.findPacksByDesiredCollectible, publicCollectibleId: packCatalogFixtureIds.collectibleB } };
+      assert.equal(packCatalogV1QueryContracts[operation].output.safeParse(response).success, true);
+      const requests: unknown[] = [];
+      const reader = createPackCatalogReader({ environment, transport: async (_reference, args) => {
+        requests.push(args.request);
+        return requests.length === 1 ? packCatalogError("CURSOR_EXPIRED") : response;
+      } });
+      assert.deepEqual(await reader.readPage(operation, query), { result: packCatalogError("CATALOG_UNAVAILABLE"), paginationReset: true }, operation);
+      assert.deepEqual(requests, [query, { ...query, [cursorKey]: null }]);
+    });
+  }
 });
 
 test("invalid or absent origin never invokes transport", async () => {
