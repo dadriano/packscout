@@ -9,6 +9,36 @@ test("public catalog text rejects normalized and inline credential fragments", (
   }
   assert.doesNotThrow(() => assertPublicCatalogText("Card bearer collection"));
 });
+test("ordinary public text cannot embed HTTP userinfo through normalization or slash forms", () => {
+  for (const target of ["https://alice:correcthorsebattery@example.com", "HTTP://alice@example.com",
+    "ｈｔｔｐｓ：／／alice:correcthorsebattery＠example.com", "ht\nt\rps://alice:correcthorsebattery@example.com",
+    "ht\ttps:\\\\alice:correcthorsebattery@example.com", "https:/alice:correcthorsebattery@example.com",
+    "https:\t/\n/alice:correcthorsebattery@example.com",
+    "https://alice:pri\tvate-marker@example.com", "https://ali\nce:private-marker@example.com",
+    "https:alice:correcthorsebattery@example.com", "https:////alice:correcthorsebattery@example.com",
+    'https://alice:pa"ss@example.com', "https://alice:pa'ss@example.com", "https://alice:pa<ss>word@example.com"]) {
+    assert.throws(() => assertPublicCatalogText(`Visit ${target} for details.`), TypeError);
+  }
+  for (const target of ["https://example.com", "HTTP://example.com/path/alice@example.com",
+    "https://example.com/?contact=alice@example.com", "https://example.com/#alice@example.com",
+    "ht\ttps:\\\\example.com/path/alice@example.com", "https:example.com/path/alice@example.com"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ${target} then email alice@example.com for details.`));
+  }
+  assert.throws(() => assertPublicCatalogText("x".repeat(65_537)), TypeError);
+  assert.throws(() => assertPublicCatalogText("\ufdfa".repeat(4_000)), TypeError);
+  assert.doesNotThrow(() => assertPublicCatalogText('Visit "https://example.com" then email alice@example.com.'));
+  for (const separator of ["\n", "\t", "\r\n"]) {
+    const ambiguous = `https://example.com${separator}support@example.com`;
+    // Identical WHATWG parser meaning to userinfo: privacy cannot distinguish the intended prose.
+    assert.equal(new URL(ambiguous).href, new URL("https://example.comsupport@example.com").href);
+    assert.throws(() => assertPublicCatalogText(`Visit ${ambiguous}`), TypeError);
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit https://example.com${separator} Contact support@example.com`));
+    assert.throws(() => assertPublicCatalogText(`Visit https://alice:correct${separator}horsebattery@example.com`), TypeError);
+    assert.throws(() => assertPublicCatalogText(`Visit https://ali${separator}ce:private-marker@example.com`), TypeError);
+    assert.throws(() => assertPublicCatalogUrl(`https://alice:correct${separator}horsebattery@example.com`), TypeError);
+  }
+  assert.doesNotThrow(() => assertPublicCatalogText("Visit https://example.com support@example.com"));
+});
 test("public URL policy scans decoded query and fragment keys and values", () => {
   for (const suffix of ["?api%5fkey=example", "#sig=example", "#route?access_token=example", "?q=Bearer+12345678901234567890",
     "#q=postgresql%3A%2F%2Finternal", "?ＸＡｍｚＳｉｇｎａｔｕｒｅ=example"]) {
@@ -64,4 +94,21 @@ test("relative targets and extra component encoding layers cannot conceal protec
     }
   }
   assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/#caption=Fish%26Actor&label=Fish%2BActor"));
+});
+test("malformed nested authorities cannot bypass protected query or fragment inspection", () => {
+  for (const target of ["https://api.example:invalid/cb?%61ccess_token=private-marker",
+    "https://api.example:65536/cb#sig=private-marker"]) {
+    for (const encoded of [encodeURIComponent(target), encodeURIComponent(encodeURIComponent(target))]) {
+      for (const prefix of ["?next=", "#next=", "#"]) {
+        assert.throws(() => assertPublicCatalogUrl(`https://example.com/${prefix}${encoded}`), TypeError);
+      }
+    }
+  }
+  for (const target of ["https://api.example:443/cb?campaign=pack", "https://api.example:8443/cb#caption=Fish%26Actor"]) {
+    for (const encoded of [encodeURIComponent(target), encodeURIComponent(encodeURIComponent(target))]) {
+      for (const prefix of ["?next=", "#next=", "#"]) {
+        assert.doesNotThrow(() => assertPublicCatalogUrl(`https://example.com/${prefix}${encoded}`));
+      }
+    }
+  }
 });

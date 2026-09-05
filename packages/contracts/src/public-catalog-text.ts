@@ -9,7 +9,16 @@ const reject = () => { throw new TypeError("PUBLIC_CATALOG_PROTECTED_TEXT"); };
 
 /** Public strings must be safe after display/search normalization as well as before it. */
 export function assertPublicCatalogText(value: string): void {
-  if (credentialText.test(value.trim().normalize("NFKC"))) reject();
+  // Bound normalization and the linear embedded-authority scan independently of callers.
+  if (value.length > 65_536) reject();
+  const normalized = value.trim().normalize("NFKC");
+  if (normalized.length > 65_536 || credentialText.test(normalized)) reject();
+  // WHATWG removes TAB/LF/CR everywhere, including within userinfo. Ambiguous
+  // control-joined URL/email text therefore fails closed; ordinary spaces remain.
+  const recognized = normalized.replace(/[\t\n\r]/gu, "");
+  for (const match of recognized.matchAll(/\bhttps?:[/\\]*([^/\\?#\s]*)/giu)) {
+    if (match[1]!.includes("@")) reject();
+  }
 }
 
 /** Recognize what WHATWG will parse without rewriting the URL's parameter structure. */
