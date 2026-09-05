@@ -8,8 +8,16 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature", "pwd",
   "sessionid", "sessiontoken", "jsessionid", "phpsessid", "aspnetsessionid"]);
+const isPrivateFieldKey = (normalizedKey: string) => privateKeys.has(normalizedKey) || normalizedKey.includes("privatekey");
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
-const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
+const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|oracle|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
+function hasJdbcTarget(value: string, start: number): boolean {
+  // JDBC establishes connection context with subprotocol:subname, not its
+  // bare name or a driver-guide label. Sticky matching reads only this prefix.
+  const protocol = /[a-z][a-z0-9+.-]*:/iyu;
+  protocol.lastIndex = start;
+  return protocol.test(value) && protocol.lastIndex < value.length && !/\s/u.test(value[protocol.lastIndex]!);
+}
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
   // differs from "Bolt: Premium Edition" and "Bolt:Premium Edition" prose.
@@ -106,6 +114,7 @@ function hasLiteralStackFrame(value: string): boolean {
 }
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
   const normalized = value.trim().normalize("NFC");
+  requireAssembly(normalized.length <= limits.maximumInputBytes);
   requireAssembly(!credentialText.test(normalized) && !hasLiteralStackFrame(normalized));
   // Basic has no minimum credential length. Decode only canonical base64 with
   // its required user/password separator, preserving ordinary "Basic edition" prose.
@@ -128,6 +137,7 @@ function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: strin
     // Known scheme names alone are also product/book labels. Require connection
     // structure, including single-slash paths and opaque endpoint forms.
     requireAssembly(!privateUriScheme.test(match[0]) || !hasPrivateUriTarget(recognized, colon + 1));
+    requireAssembly(match[0].toLowerCase() !== "jdbc" || !hasJdbcTarget(recognized, colon + 1));
     let authorityStart = colon + 1;
     while (recognized[authorityStart] === "/" || recognized[authorityStart] === "\\") authorityStart += 1;
     if (!/^(?:https?|ftp|wss?)$/iu.test(match[0]) && authorityStart - colon - 1 < 2) continue;
@@ -168,12 +178,11 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   const decodeLayer = (text: string) => new URLSearchParams(
     `value=${text.replace(/&/gu, "%26").split("+").join("%2B")}`,
   ).get("value")!;
-  function chargeUrlText(text: string, depth: number, stackRecognitionOnly = false): string {
+  function chargeUrlText(text: string, depth: number): string {
     requireAssembly(++urlNodes <= limits.maximumNodes && depth <= limits.maximumDepth);
     urlBytes += encoder.encode(text).byteLength;
     requireAssembly(urlBytes <= limits.maximumInputBytes);
-    if (stackRecognitionOnly) requireAssembly(!hasLiteralStackFrame(text));
-    else rejectCredentialText(text);
+    rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
   function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathTarget?: string): boolean {
@@ -194,7 +203,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       const privateTarget = key === "account" ? identifier : hasPrivateUriTarget(target, 0) || isPrivateUrlHostname(target);
       if (!privateTarget) { chargeUrlText(text, depth); return false; }
     }
-    let protectedName = privateKeys.has(key);
+    let protectedName = isPrivateFieldKey(key);
     if (colonTarget !== undefined && !protectedName) {
       try { assertPublicPackCatalogBytes({ [text]: null }); } catch { protectedName = true; }
     }
@@ -276,14 +285,16 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     // Match schema-equivalent field spelling without rewriting public bytes.
     const text = rawText.normalize("NFKC");
     if (text !== rawText) chargeUrlText(rawText, depth);
-    // Percent decoding here is recognition-only: retain frame punctuation that
-    // splits lexical assignment runs, without manufacturing URL/form structure.
+    // Percent decoding here is lexical recognition only: retain connection and
+    // frame punctuation without manufacturing or reparsing URL/form structure.
     // Every layer shares the same depth, node and byte counters as URL traversal.
     let recognitionText = text, recognitionDepth = depth;
     while (recognitionText.includes("%")) {
       const decoded = decodeLayer(recognitionText);
       if (decoded === recognitionText) break;
-      chargeUrlText(decoded, ++recognitionDepth, true);
+      chargeUrlText(decoded, ++recognitionDepth);
+      const recognized = decoded.normalize("NFKC");
+      if (recognized !== decoded) rejectCredentialText(recognized);
       recognitionText = decoded;
     }
     inspectConnectionAssignments(text, depth);
@@ -601,7 +612,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     requireAssembly(bytes <= limits.maximumInputBytes);
   }
   visit(value, 0);
-  for (const key of keys) requireAssembly(!privateKeys.has(key.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/gu, "")));
+  for (const key of keys) requireAssembly(!isPrivateFieldKey(key.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/gu, "")));
   // Scan raw field/query names before schema parsing; normalize public text later.
   try { assertPublicPackCatalogBytes(Object.fromEntries([...keys].map(key => [key, null]))); }
   catch { requireAssembly(false); }

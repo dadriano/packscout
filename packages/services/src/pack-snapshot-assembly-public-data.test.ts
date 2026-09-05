@@ -7,6 +7,63 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("explicit private-key fields protect opaque material without guessing its spelling", async () => {
+  for (const key of ["private_key", "sshPrivateKey", "tls-private-key", "signingPrivateKey", "private_key_pem",
+    "Ｐｒｉｖａｔｅ＿Ｋｅｙ", "privateKeyGuide"]) {
+    const text = `${key}=opaque-private-material`;
+    const url = "https://example.com/?" + encodeURIComponent(key) + "=opaque-private-material";
+    for (const title of [text, JSON.stringify({ [key]: "opaque-private-material" }), encodeURIComponent(text)]) {
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      refuses({ title });
+    }
+    refuses({ [key]: "opaque-private-material" }); refuses({ url });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(JSON.stringify({ [key]: "opaque-private-material" })) });
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  for (const title of ["Private key", "Private key guide", "Bearer a", "public_key=public-material", "sshPublicKey=public-material"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ public_key: "public-material", sshPublicKey: "public-material" }));
+  const { input } = await assemblyFixture(); input.inputs.title = "private_key"; input.inputs.aliases = ["=opaque-private-material"];
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+  await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+});
+
+test("Oracle and explicit JDBC connection syntax stay private while driver labels stay public", async () => {
+  for (const text of ["oracle://db.internal/service", "oracle+oracledb://db.internal/service", "oracle+cx_oracle://db.internal/service", "oracle:/db.internal/service",
+    "jdbc:oracle:thin:@db.internal:1521/service", "jdbc:oracle:oci:@service", "jdbc:h2:mem:cards", "jdbc:derby:cards"]) {
+    for (const title of [text, "Documentation " + text, JSON.stringify({ caption: text }), encodeURIComponent(text)]) {
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      refuses({ title });
+    }
+    for (const suffix of ["?next=", "#"]) {
+      const url = "https://example.com/" + suffix + encodeURIComponent(text);
+      refuses({ url });
+      const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+  for (const text of ["ｏｒａｃｌｅ://db.internal/service", "ｊｄｂｃ:ｏｒａｃｌｅ:thin:@db.internal:1521/service"]) {
+    const { input } = await assemblyFixture(); input.inputs.title = encodeURIComponent(text);
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  for (const title of ["Oracle: Collector Edition", "Oracle:Collector Edition", "JDBC: Driver Guide", "JDBC:Driver Guide", "Bearer a"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: encodeURIComponent(title) }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    for (const suffix of ["?caption=", "#"]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/" + suffix + encodeURIComponent(title) }));
+    }
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
 test("standalone normalized session credential fields stay private", async () => {
   for (const key of ["session_id", "session-token", "JSESSIONID", "PHPSESSID", "ASP.NET_SessionId", "Ｓｅｓｓｉｏｎ＿ＩＤ"]) {
     const title = `Documentation "${key}"="private-marker"`;
