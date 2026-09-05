@@ -118,6 +118,53 @@ test("URL parsing exposes protected query keys across normalized schemes and nes
   }
 });
 
+test("nested URL-valued parameters and fragments cannot hide protected credentials", async () => {
+  const fields = [(input: ProviderPackBuildInputs, url: string) => { input.imageUrl = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.actions[0]!.url = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.contents[0]!.imageUrl = url; }];
+  const wrap = (nested: string, fragment = false) => `https://example.com/redirect${fragment ? "#" : "?"}next=${encodeURIComponent(nested)}`;
+  for (const setUrl of fields) {
+    const { input } = await assemblyFixture();
+    setUrl(input.inputs, wrap(wrap("https://example.com/card?size=large", true)));
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    setUrl(input.inputs, "https://example.com/image?caption=Fish%26Actor");
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    for (const fragment of ["https://example.com/card?caption=Fish%26Actor",
+      encodeURIComponent("https://example.com/card?caption=Fish%26Actor"), "caption=Fish%26Actor"]) {
+      setUrl(input.inputs, `https://example.com/#${fragment}`);
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+    for (const ordinary of ["width=100%", "x=%FF"]) {
+      setUrl(input.inputs, `https://example.com/?%2573ig=private-marker&${ordinary}`);
+      await reject(await requestFor(input.inputs));
+    }
+    for (const relative of ["..", ".", "route"]) {
+      setUrl(input.inputs, `https://example.com/#${relative}%2Fcb%3F%252573ig%3Dprivate-marker%26width%3D100%25`);
+      await reject(await requestFor(input.inputs));
+    }
+    for (const nested of ["https://api.example/cb?access_token=private-marker",
+      "https://api.example/cb#%73ig=private-marker", "//api.example/cb?access_token=private-marker",
+      "/cb?access_token=private-marker", "https://user:private-marker@api.example/cb",
+      "\\\\user:private-marker@api.example/cb", "ht\ntps://user:private-marker@api.example/cb",
+      "ht\ttps://user:private-marker@api.example/cb", "\u0000https://user:private-marker@api.example/cb"]) {
+      for (const fragment of [false, true]) {
+        setUrl(input.inputs, wrap(wrap(nested, fragment), !fragment));
+        await reject(await requestFor(input.inputs));
+      }
+      setUrl(input.inputs, `https://example.com/#${encodeURIComponent(nested)}`);
+      await reject(await requestFor(input.inputs));
+    }
+    setUrl(input.inputs, `https://example.com/#${encodeURIComponent("https://api.example/cb?access_token=private-marker")}`);
+    await reject(await requestFor(input.inputs));
+    let deeplyEncoded = "https://example.com/card";
+    for (let depth = 0; depth <= packSnapshotAssemblyLimits.maximumDepth; depth += 1) deeplyEncoded = encodeURIComponent(deeplyEncoded);
+    const boundedUrl = `https://example.com/?next=${deeplyEncoded}`;
+    assert.ok(boundedUrl.length < 2_048); // Encoding traversal has its own depth budget, not merely the URL field bound.
+    setUrl(input.inputs, boundedUrl);
+    await reject(await requestFor(input.inputs));
+  }
+});
+
 test("credential-bearing public text is scanned after schema-equivalent normalization", async () => {
   const { input: benign } = await assemblyFixture();
   benign.inputs.title = "Padded title";

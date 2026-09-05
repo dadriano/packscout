@@ -15,9 +15,67 @@ function rejectCredentialText(value: string): void {
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
  * execute during capture. Unknown schema fields are rejected, never stripped. */
 export function assertPackAssemblyPublicData(value: unknown): void {
-  let nodes = 0, bytes = 0;
+  let nodes = 0, bytes = 0, urlNodes = 0, urlBytes = 0;
   const ancestors = new Set<object>(), keys = new Set<string>();
   const encoder = new TextEncoder();
+  const decodeLayer = (text: string) => new URLSearchParams(
+    `value=${text.replace(/&/gu, "%26").split("+").join("%2B")}`,
+  ).get("value")!;
+  function chargeUrlText(text: string, depth: number): string {
+    requireAssembly(++urlNodes <= limits.maximumNodes && depth <= limits.maximumDepth);
+    urlBytes += encoder.encode(text).byteLength;
+    requireAssembly(urlBytes <= limits.maximumInputBytes);
+    rejectCredentialText(text);
+    return text.trim().normalize("NFC");
+  }
+  function inspectUrlKey(text: string, depth: number): void {
+    const normalized = chargeUrlText(text, depth);
+    keys.add(normalized);
+    const decoded = decodeLayer(normalized);
+    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1);
+  }
+  function urlRecognition(normalized: string): string {
+    // Match WHATWG scheme/authority recognition, without changing query-value structure.
+    const withoutControls = normalized.replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "");
+    let start = 0, end = withoutControls.length;
+    while (start < end && withoutControls.charCodeAt(start) <= 32) start += 1;
+    while (end > start && withoutControls.charCodeAt(end - 1) <= 32) end -= 1;
+    return withoutControls.slice(start, end).replaceAll("\\", "/");
+  }
+  function inspectFragment(text: string, depth: number): void {
+    const normalized = chargeUrlText(text, depth);
+    const isTarget = (value: string) => {
+      const candidate = urlRecognition(value), query = candidate.indexOf("?"), equals = candidate.indexOf("=");
+      return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.\.?[/]/iu.test(candidate) ||
+        (query >= 0 && (equals < 0 || query < equals));
+    };
+    if (isTarget(normalized)) { inspectUrlText(normalized, depth + 1); return; }
+    const decoded = decodeLayer(normalized);
+    if (decoded !== normalized && (isTarget(decoded) || !normalized.includes("="))) {
+      inspectFragment(decoded, depth + 1); return;
+    }
+    for (const [key, nested] of new URLSearchParams(normalized)) {
+      inspectUrlKey(key, depth + 1); inspectUrlText(nested, depth + 1);
+    }
+  }
+  function inspectUrlText(text: string, depth = 0, required = false): void {
+    const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
+    if (!required && !candidate.startsWith("/") && !/^[a-z][a-z0-9+.-]*:|[?#]/iu.test(candidate)) {
+      const decoded = decodeLayer(normalized);
+      if (decoded !== normalized) inspectUrlText(decoded, depth + 1);
+      return;
+    }
+    let url: URL;
+    try { url = required ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
+    catch { requireAssembly(!required); return; }
+    requireAssembly(url.username === "" && url.password === "");
+    // Preserve URL structure: decode individual names/values, never the whole URL.
+    for (const [key, nested] of url.searchParams) {
+      inspectUrlKey(key, depth + 1); inspectUrlText(nested, depth + 1);
+    }
+    const fragment = url.hash.slice(1);
+    if (fragment !== "") inspectFragment(fragment, depth + 1);
+  }
   function visit(item: unknown, depth: number, field = "") {
     requireAssembly(++nodes <= limits.maximumNodes && depth <= limits.maximumDepth);
     if (typeof item === "string") {
@@ -25,12 +83,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       bytes += encoder.encode(item).byteLength;
       rejectCredentialText(item);
       if (field === "url" || field === "imageUrl") {
-        const url = new URL(item);
-        for (const parameters of [url.searchParams, new URLSearchParams(url.hash.slice(1))]) {
-          for (const [key, nested] of parameters) {
-            rejectCredentialText(key); rejectCredentialText(nested); keys.add(key);
-          }
-        }
+        inspectUrlText(item, 0, true);
       }
     } else if (item === null || item === undefined || typeof item === "boolean") bytes += 5;
     else if (typeof item === "number") { requireAssembly(Number.isSafeInteger(item) && !Object.is(item, -0)); bytes += 20; }
