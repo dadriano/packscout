@@ -8,11 +8,17 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current frozen review repair — 2026-09-05 20:52UTC
+## Current review repair — 2026-09-05 21:38UTC
+
+Runtime `beb3c7d4d6c2077fa538057fe5572635b19b50c7` protects explicit opaque private-key fields and Oracle/JDBC connection syntax, including Oracle driver underscores and decoded lexical evidence. Public-key text, Oracle/JDBC guide captions and Bearer prose remain accepted; URL parsing and traversal budgets are unchanged. Shared metadata fix0548991d remains included.
+
+Root complete125/125 tests pass0skip, including private PostgreSQL fan-out/recovery and production Admin bundle (`/tmp/packscout-p04-private-key-oracle-complete-focused-20260905.log`). Pure89, retained316, contracts/services static/ratchet0 and independent108/108 probes pass (216 across both guards). Guard SHA-256 `812db2772b7588f2075dbd19dd19293d126debfcf25de94319b92fa33898442a`. Fresh full gate started21:43UTC after P03 passed heavy services/volume (`/tmp/packscout-p04-private-key-oracle-framework-20260905.log`); keep004 in progress pending that gate, publication and metadata3941816873 reply. Restack after114 with exact backup:23 source-only and9 task-only commits currently. No production action.
+
+## Previous frozen verification — historical
 
 Final runtime `070f7d410709794e580003f66630fb3698ea962d` includes metadata0548991d, exact session-credential fields, explicit standard source-frame protection and the equivalent linear source classifier. Root complete121/121 tests pass0skip, including real PostgreSQL fan-out/recovery and production Admin bundle (`/tmp/packscout-p04-linear-source-frames-complete-focused-20260905.log`). Pure85/85, retained316/316, affected lint/types and ratchet0 pass. Independent134 functional plus14 equivalence checks pass; helpers are identical and1,024/2,048/4,096-pair medians0.195/0.291/0.328ms confirm removal of the overlapping suffix retry. Guard SHA-256 `b5477bf490b0320ee579515d14020c65cd4d42de7f6ccf884225fbd97561b1ec`.
 
-A fresh final-source full gate is running in `/tmp/packscout-p04-linear-source-frames-framework-20260905.log`, started after P03's heavy services/volume lane. Keep004 in progress and119 draft until certified, then handle metadata review3941816873, fresh CI/review and restack after114. No production action;006 retains ownership of the real lost-refusal status seam.
+Fresh full `npm run verify:framework` PASSED exit0 at21:11UTC with both production builds (`/tmp/packscout-p04-linear-source-frames-framework-20260905.log`). All task criteria are accepted;004 is done. The full runner retains28 unrelated opt-in skips, none in the121 owning tests. Publish119, address metadata review3941816873, then require fresh exact-head CI/review and restack after114. No production action;006 retains ownership of the real lost-refusal status seam.
 
 ## Previous session-parameter and .NET checkpoint — historical
 

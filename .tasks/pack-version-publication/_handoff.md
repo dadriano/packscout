@@ -1,6 +1,14 @@
 # Pack publication — current handoff
 
-## Current continuation — 2026-09-05 20:52UTC
+## Current continuation — 2026-09-05 21:47UTC
+
+Final repairs are frozen7f063180/beb3c7d4 onmainb96. Root150/125 complete tests0skip, affected static/ratchet, P04 retained316 and independent216 probes pass. P03 full23628 PASSED exit0 at21:46UTC with both builds (`/tmp/packscout-p03-private-key-oracle-framework-20260905.log`);003 is done,6/13 accepted,5/12 merged. P04 full68682 started21:43UTC after P03 heavy services/volume (`/tmp/packscout-p04-private-key-oracle-framework-20260905.log`) and is running. Root is publishing114 and replying to3942069495 (`PRRT_kwDOTplTZc6fm7xz`) /3942069499 (`PRRT_kwDOTplTZc6fm7x0`). Fresh exact-head CI/review still gates merge.119 remote5cbb7b13 remains draft pending full/publication and0548991d metadata reply3941816873. P04 rebase inventory32commits=23source-only+9task-only, no mixed; helper updated23 and syntax-checked, not executed. No production action.
+
+### Previous verification checkpoint — superseded by new review
+
+Both final full local gates PASSED with both builds: P03196f897c andP04070f7d41 on mainb96. Complete148/121 focused tests0skip, independent134+14, affected static/ratchet and P04 retained316 all pass.003/004 done;7/13 accepted,5/12 merged.114 is publishedbd9db7930ede146e10dacc8c10780352743a2fe8; session/.NET replies3942058741/3942058785 resolve both threads, CI33992083066 and new-head review run.119 verified publication/metadata reply is being prepared; restack after114 using preserved22source-only commits and exactbackup. No full local process remains active. No production action.
+
+011 clarification at21:42UTC supersedes the earlier1,000-versus8,000 question: retain8,000packs; ask only whether complete category filters keep existing512category capacity or need larger delivery. No answer yet. Corrected thin pack/provider selector uses actualpps_/ppfs_ ID lengths:6,792,060 bytes for8,000+8,000 rows, two ranges/16,000 docs before auth. Referenced-provider marker/index avoids8,000 point reads without a global provider cap. This is a feasible derived-index candidate, not implemented or live-metered. Root must still prove compact immutable filter hydration,64MiB action heap/latency, final16MiB return, exact desired-membership lookup and races against later-blocked displaced snapshots. One calculation clock is not a database snapshot; all hydration stays pinned to one coherent selected population. Task011 has the complete receipt and remaining category decision. No reduced pack capacity, new endpoint, facet change or source implementation is approved by this investigation.
 
 21:03UTC authoritative result: P03full21903 PASSED runtime196f897c/mainb96 with both production builds.003 is done;6/13 accepted,5/12 phases merged.148 owning tests have no skips;28 unrelated full-run opt-in skips remain disclosed. Root is preparing one final publication/reply checkpoint; fresh current-head CI and review still gate114 merge. P04full81058 remains running at unchanged070f7d41. Source-frame reviewer is clear/idle. No activation.
 

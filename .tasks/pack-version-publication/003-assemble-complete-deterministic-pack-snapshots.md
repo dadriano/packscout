@@ -8,7 +8,13 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** done
 
-## Current frozen review repair — 2026-09-05 20:52UTC
+## Current review repair — 2026-09-05 21:38UTC
+
+Runtime `7f063180fb8c9f6bacdb04577f7e8cab8e5867af` fixes PR114 review5123049426: opaque explicit private-key fields (3942069495) and Oracle/JDBC connections (3942069499), including encoded and recognition-normalized forms. Explicit normalized field fragments protect private_key_pem and prefixed names without banning bare prose. Original URL parsing, traversal counters and linear source classification remain intact. Public keys, Oracle/JDBC guide labels and Bearer text stay public.
+
+Root complete150/150 tests pass0skip, including8,000-member lifecycle/reuse and real private PostgreSQL (`/tmp/packscout-p03-private-key-oracle-complete-focused-20260905.log`). Pure147, services static/ratchet0 and independent108/108 probes pass (216 across both guards); bounded prefix measurements show no quadratic growth. Guard SHA-256 `320fa3078d8aba1cf9b865c7bcaad3b1ce38885de47ef52e5ad5fd9ac28897d7`. Full local `npm run verify:framework` PASSED exit0 at21:46UTC on7f063180/mainb96 with both builds (`/tmp/packscout-p03-private-key-oracle-framework-20260905.log`).003 is done;28 unrelated full-run opt-in skips remain, none in its150 owning tests. Publish/reply and require fresh exact-head CI/review before merge. No activation.
+
+## Previous frozen verification — historical
 
 Final runtime `196f897c230f789de17c4948101600f9c9bcd954` includes `ba363c9a`'s exact session-credential fields and explicit .NET/Ruby/Go/PHP source-frame coverage, plus an equivalent linear source-name classifier. V8/Python/Java/Firefox, virtual sources, original/derived/casefolded/nested/encoded text, public labels and all existing counters remain covered. Bare session/SID/Bearer text is public; the previously public session_id=a control intentionally becomes a protected explicit credential assignment with a retained regression.
 
