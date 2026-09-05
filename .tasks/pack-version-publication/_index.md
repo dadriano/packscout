@@ -2,7 +2,11 @@
 
 ## Start Here
 
-Authoritative continuation2026-09-05: the user authorized all four foundation merges after green current checks/clear review, then remaining work, and requested verified Admin/monitoring screenshots plus a management guide. PR121 merged0ea61454 and independent green PR120 mergedf852a166cca88008eb2eb419a6a555c7ff794597 (current main); the technical reorder was explained while publication fixes verified. Task012 is DONE:654 frontend tests0skip, full local and CI33974274282 passed33cdfe96/runtime3d134eb0, reviews resolved. P03/P04 are finishing natural nested caption refinements to the prose-JSON repair, then restacking/certifying onf852a166. Counts5/13 accepted,5/12 phases merged;003/004/011 in_progress. Remaining authorized foundation merges114→119. P08 owns the V1 guide/screenshot set, P10 adds exact-launch evidence; no public activation occurred. Checkpoints below are historical unless explicitly refreshed.
+Authoritative continuation, September 5: the user authorized the foundation merges once current checks and review clear, then all remaining work, plus Admin/monitoring screenshots and a management guide. PR121 and PR120 are merged; current main advanced through unrelated PR122 to b96b43691b48170d64bdd541e4a42cb15f096ecf. Its chosen/reordered All Repacks columns and account preferences must survive011/007. Counts: 5/13 accepted, 5/12 phases merged; 003/004/011 in progress. Remaining authorized foundation merges: 114 then 119.
+
+Final raw-path/scheme-relative URL repairs are committed: P03 runtime cbedce27 passes 124/124 complete focused tests; P04 runtime 77e5199a, published as e6faf247, passes 86/86. Both have zero skips, passing affected static checks and independent 1,538/1,538 boundary probes. Original query/fragment controls, split-card names, public IPv6 and JSON closing delimiters are covered without new heuristics or weakened limits. P04 full local certification is running; new exact-head CI and clear review remain required. Prior 114/9e5c9a8e and 119/0d9a182b full CI successes certify only older runtimes. No activation occurred.
+
+The user-requested current-admin visual tour and management-guide index now exist at `output/pack-publication-current-admin-20260905/README.md`, with three fresh synthetic-source screenshots from main-equivalent 33cdfe96. They are explicitly not production or V1 publication evidence. P08 still owns the actual V1 guide and monitoring screenshot set; P10 adds exact-launch certification. Lower checkpoints are historical unless explicitly refreshed.
 
 ### Previous verification checkpoint
 
@@ -14,7 +18,7 @@ The user requested `build-from-tasks all` and full coverage of every current fro
 
 P04 and P07A remain independent main siblings. P05B/task013 now owns the measured8-file/2,225-line neutral EV calculation/public-value extraction from011. It depends only on merged main and preserves formulas/current consumers. The two incomplete native economics files remain backed up for011. P05A resumes after003/004/005/013 merge: the read-only resume audit confirms004's not-yet-main profile assembler is also an actual dependency. Every frontend datapoint and complete-pack readiness remain required.
 
-**Progress:** 5/13 tasks acceptance-complete (001/002/005/012/013); 3/12 implementation phases merged.003/004 are verifying review fixes;011 waits merged003/004/005/013.006–010 remain todo. After011,006 publication/recovery and007 frontend cutover may run in parallel;009 follows006 and008 follows006/007.010 is the coordinated operational launch. Existing006/007 task files contain disjoint implementation/acceptance briefs. No new phase, merge or live activation occurred in this build.
+**Progress:** 5/13 tasks acceptance-complete (001/002/005/012/013); 5/12 implementation phases merged. 003/004 are verifying review fixes; 011 waits for merged 003/004/005/013. 006–010 remain todo. After 011, publication/recovery 006 and frontend cutover 007 may run in parallel; 009 follows 006 and 008 follows 006/007. Task 010 is the coordinated operational launch. Existing 006/007 files contain disjoint implementation briefs. PR121/120 merged during this continuation; no live activation occurred.
 
 ## Context
 

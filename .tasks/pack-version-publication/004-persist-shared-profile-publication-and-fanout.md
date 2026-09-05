@@ -8,7 +8,15 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current prose-prefixed JSON propagation — 2026-09-05
+## Current raw-path and relative-URL propagation — 2026-09-05
+
+Final runtime `77e5199a4f36597090d5e0ed1be4fef7de403af6` is committed on main f852a166. Root 86/86 complete focused tests pass with zero skips, including private PostgreSQL and production Admin bundle; contracts/services lint/types and ratchet0 pass. Independent 1,538/1,538 probes pass at unchanged source SHA-256 f63318b34a534ad6d147cba24d0ea313f8aa9e8c74e8348ad09ff5d890e6d792. This adds explicit-scheme/no-relative-base semantics and preserves raw JSON query/fragment closing delimiters along with the earlier fixes. Latest logs are `/tmp/packscout-p04-url-json-ending-complete-focused-20260905.log` and `/tmp/packscout-p04-url-json-ending-ratchet-20260905.log`. Full local framework verification is starting in `/tmp/packscout-p04-relative-release-framework-20260905.log`; fresh publication/CI remain. No source change after this freeze; earlier 84-test notes below are intermediate evidence.
+
+The matching three-file profile repair covers raw zero/one-slash paths, scheme-relative userinfo, control-delimited prose and original query/fragment evidence before URL normalization. Original authority inspection precedes quote-delimited discovery; public split names, path emails and control-normalized IPv6 links remain valid. Existing protected-field policy, OAuth contexts, limits and ordinary Bearer positives are unchanged.
+
+Root final six-file matrix: 84/84 pass, zero skips, including real private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-relative-final-complete-focused-20260905.log`). Pure 63/63, contracts/services lint/types and ratchet0 pass. Independent final cross-review is running; source is uncommitted and fresh full certification remains before task004 acceptance and119 readiness. Published 0d9a182b full CI33979362791 passed at17:16:13UTC, but does not certify these newer repairs. No writer or public route is activated.
+
+## Earlier prose-prefixed JSON propagation — 2026-09-05
 
 Root final verification:81/81 complete six-file tests passed with zero skips, including real private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-host-path-main120-final-focused-20260905.log`). Contracts/services lint/types and ratchet0 passed at7ad8b78a. No source changed afterward. Fresh current-head full CI remains the certification gate before004 is accepted and119 marked ready.
 
