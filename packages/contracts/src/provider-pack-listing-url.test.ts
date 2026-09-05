@@ -26,3 +26,18 @@ test("pack routes reject paths, queries, encoding and malformed identities", () 
   }
   assert.equal(providerPackListingUrl("phygitals", "pokemon_1000"), null);
 });
+
+test("legacy numeric Phygitals identities link through their verified slugs or not at all", () => {
+  assert.equal(providerPackListingUrl("phygitals", "13"),
+    "https://www.phygitals.com/repacks/rookie-pack");
+  assert.equal(providerPackListingUrl("phygitals", "41"),
+    "https://www.phygitals.com/repacks/one-piece-mythic-pack");
+  // A numeric id without a recorded slug would only ever be a 404.
+  assert.equal(providerPackListingUrl("phygitals", "999"), null);
+  assert.equal(providerPackListingUrl("phygitals", "013"), null);
+  // Slug identities are unaffected, and no other provider has legacy ids.
+  assert.equal(providerPackListingUrl("phygitals", "1-mythic-ewhv3o"),
+    "https://www.phygitals.com/repacks/1-mythic-ewhv3o");
+  assert.equal(providerPackListingUrl("collector_crypt", "1000"),
+    "https://gacha.collectorcrypt.com/gacha/1000");
+});
