@@ -583,3 +583,113 @@ test("runner completes on step 50,000 and never admits a 50,001st page step", as
     PROVIDER_MANUAL_IMPORT_MAXIMUM_ROUTED_PAGE_STEPS,
   );
 });
+
+function headReconciliationExecutor(input: {
+  advanceClock(): void;
+  headSteps: number;
+}) {
+  let step = 0;
+  return {
+    terminalizeProgress() {
+      throw new Error("A completed continuation must not be terminalized.");
+    },
+    async executeNextPage() {
+      step += 1;
+      input.advanceClock();
+      if (step === 1) return { kind: "progress" as const, runId, pageCount: 1 };
+      if (step <= 1 + input.headSteps) {
+        return {
+          kind: "progress" as const,
+          runId,
+          pageCount: 1,
+          reconciliationPending: true as const,
+        };
+      }
+      return {
+        kind: "completed" as const,
+        runId,
+        pageCount: 1,
+        counters: {
+          pages: 1,
+          catalog: 1,
+          pulls: 0,
+          marketEvents: 0,
+          accepted: 1,
+          duplicate: 0,
+          quarantined: 0,
+          materialChanges: 1,
+        },
+      };
+    },
+  };
+}
+
+test("every head reconciliation step is observed with a running elapsed clock", async () => {
+  const client = {} as ProviderPrismaClient;
+  let clock = initialNow.getTime();
+  const observed: unknown[] = [];
+  // One executor for the whole run: the runtime creates a fresh executor per step.
+  const executor = headReconciliationExecutor({
+    advanceClock: () => { clock += 11_000; },
+    headSteps: 2,
+  });
+
+  const result = await runProviderManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:courtyard",
+    dependencies: {
+      async bootstrapProvider() {
+        return bootstrapFixture();
+      },
+      async runWithCachedProviderDatabase(_route, operation) {
+        return { state: "reachable" as const, value: await operation(client) };
+      },
+      createExecutor() {
+        return executor;
+      },
+      now: () => new Date(clock),
+      observeHeadReconciliationProgress(progress) {
+        observed.push(progress);
+      },
+    },
+  });
+
+  assert.equal(result.kind, "completed");
+  assert.deepEqual(observed, [
+    { runId, pageCount: 1, headReconciliationSteps: 1, elapsedMilliseconds: 11_000 },
+    { runId, pageCount: 1, headReconciliationSteps: 2, elapsedMilliseconds: 22_000 },
+  ]);
+});
+
+test("a failing head reconciliation observer never changes the run outcome", async () => {
+  const client = {} as ProviderPrismaClient;
+  let observations = 0;
+  const executor = headReconciliationExecutor({
+    advanceClock: () => {},
+    headSteps: 3,
+  });
+
+  const result = await runProviderManualImportOnce({
+    environment: environment(),
+    fallbackWorkerId: "preview:courtyard",
+    dependencies: {
+      async bootstrapProvider() {
+        return bootstrapFixture();
+      },
+      async runWithCachedProviderDatabase(_route, operation) {
+        return { state: "reachable" as const, value: await operation(client) };
+      },
+      createExecutor() {
+        return executor;
+      },
+      now: () => initialNow,
+      observeHeadReconciliationProgress() {
+        observations += 1;
+        throw new Error("observer unavailable");
+      },
+    },
+  });
+
+  assert.equal(result.kind, "completed");
+  assert.equal(observations, 3);
+});

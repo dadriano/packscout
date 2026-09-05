@@ -273,6 +273,14 @@ async function run(): Promise<ProviderManualImportProcessResult> {
               failureCode,
             }));
           },
+          observeHeadReconciliationProgress(progress) {
+            console.log(JSON.stringify({
+              level: "info",
+              event: "provider_manual_import_head_reconciliation_progress",
+              providerKey: lane.providerKey,
+              ...progress,
+            }));
+          },
         },
       });
     };
