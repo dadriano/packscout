@@ -8,6 +8,12 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
 
+## Current cookie-authentication review repair — 2026-09-05
+
+PR114 P1comment3941536315/threadPRRT_kwDOTplTZc6flkf3 is repaired in runtime `8f2a4d841fc7033b8bf24db87654f0bfec15f116` on main b96b4369. Explicit Cookie/Set-Cookie structured fields are protected; unquoted header labels require a cookie name/value pair, even one-character credentials. Cookie-related prose, empty labels, ordinary product paths and Bearer-only text stay public. Existing bounded fragment traversal now checks the same prose assignments. No new parser, dependency, budget or token heuristic.
+
+Complete five-file matrix passes 126/126, zero skips (`/tmp/packscout-p03-cookie-complete-focused-20260905.log`); owning pure123 and services lint/types/ratchet0 pass. Independent147 cookie probes plus1,538 previous boundary probes pass at guard SHA-256 b2ceb2dd3f60f8a21d2dfc7db97dc10f9ec5b90e842cf751a3ac79e3cfbb7af3, with six real-assembler normalization/composition controls passing. Initial cookie regressions failed before repair. Full local session43601 is running in `/tmp/packscout-p03-cookie-framework-20260905.log`; publication/current-head CI and the fixing-SHA reply remain. Previous main122 full session34014 was intentionally stopped143 for this new finding, not counted as a pass. No public activation.
+
 ## Current raw-path and relative-URL repair — 2026-09-05
 
 New PR114 findings 3941339525/3941339526 on 9e5c9a8e cover zero/one-slash HTTP raw-path evidence and scheme-relative userinfo in prose. Both are reproduced and repaired in the same two guard/test files. Original-text URL discovery preserves control-delimited boundaries; complete raw authority inspection rejects userinfo through quotes before prose tokenization; differing original query/fragment components traverse under the same counters as their parsed values. Public split-card names, path emails, independent OAuth links and quoted public IPv6 controls remain valid. No new parser, dependency, schema, bound or Bearer-only heuristic.

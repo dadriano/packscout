@@ -8,6 +8,10 @@
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including crash, network, fencing, retry, rollback, authorization, and isolation verification
 **Status:** todo
 
+## Signed-status integration follow-up — 2026-09-05
+
+P04 independent review found a pre-existing P05 recovery seam: `convex/packCatalogOperationStore.ts:describeOperation` delegates exact live status to `evaluatePublicationReplay`, returning already_applied/null reason even when the stored original operation was refused. P04's queue repair deliberately retains the ambiguity barrier without an original definitive refusal; do not test lost-refusal recovery with a synthetic status result the actual store cannot emit. During006 integration, preserve the stored operation outcome/reason in exact authorized signed status (or prove the existing exact transport recovery obtains the original receipt), and test the real P05→P04 path for lost refusal, successful activation, expiry, mismatched bytes, organization/entity scope and no unsafe supersession. This is the existing status operation, not a new public API, adapter or permissive fallback.
+
 ## Handoff — 2026-09-04
 
 Not started.002/005 are merged;003/004 are implemented in PR114/119 with repaired-head certification pending.011 full-data parity remains incomplete and waits merged003/005/013 (neutral core PR121). These are actual prerequisites;005 alone does not unblock006. The user authorizes remaining builds with delegation, not production activation. P02's crash/partial-expiry fixes are already merged in PR95 and remain owned by002. This phase owns authenticated remote status reconciliation, transaction-local capture composition, worker registration and the full external-write crash matrix. Reconcile persisted operations even without an ambiguity marker; use `retireReconciled` only with authenticated non-activation evidence, never a missing receipt or expired replay. Workers and credentials stay disabled until separate launch authorization.
