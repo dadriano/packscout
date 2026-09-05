@@ -1,5 +1,13 @@
 # Pack publication — current handoff
 
+## Latest main118 and delegation
+
+Task013/P05B runtime77c01707 is committed onf6785251:9 source files/2,329changed lines. Root independently reran364/364 regressions, zero skips, and verified calculator/confidence bodies byte-identical apart from imports; affected static gates pass. Full local framework gate is the next operation, using only the owned private PostgreSQL URL and existing moved dependencies. P04 agent has moved to PR120 request-ID binding repair3939406332 in the loader/two focused files; root owns all metadata/Git. No core PR or full data-parity completion yet.
+
+Latest roots: P03runtime57805ed8 fixes all three follow-up findings;74 full focused assembler/capacity/private-PG tests and static gates pass after29identical restack patches. P04runtime140747b8 propagates the same finite credential policy;25 focused/static checks and20 independent probes pass, current-parent45-test persistence-inclusive verification is running after12identical restack patches. Backups p03/p04-before-main118 retain61091595/2064bc27. P07A published head98937a11/runtime9459611d has42 fresh focused checks and fullCI33943710237 running. P03 now acts as the single read-only watcher while p04_profiles finishes task013 core parity. Exact full gates, review replies and metadata-ready transitions remain pending; do not mistake older checkpoints for current readiness.
+
+Main advanced tof6785251 via docs-only PR118. P03's JSON fix is published/replied/resolved, but three new P1s3939374805/4808/4811 reopen Basic credentials, contextual OAuth code and bare private connection schemes; p03_review owns bounded guard/tests. P04 will receive analogous owning-boundary fixes before restack. P07A restacked with all8patches identical and zero frontend tree changes to runtime9459611d/checkpointa19a2628; its earlier full gate and explicit bot thumbs-up are historical and012 is in_progress only for exact-new-parent recertification. P05B/task013 is independently building onf6785251; p04_profiles owns neutral core/parity tests, root owns review monitoring while both code agents work. Current counts3/13 tasks and3/12 implementation phases merged; no accepted product outcome was removed. Older records below retain backup/evidence history, not current readiness.
+
 ## Request, progress and authority
 
 The active request is to proceed with `build-from-tasks all` and delegate in parallel, preserving every current frontend datapoint by extending the sole native V1 contract. Heat remains deferred.4/12 tasks are acceptance-complete;001/002/005 are merged and012 is published ready for review.003/004 repairs are being integrated;011 is partial;006–010 are not implemented.

@@ -17,9 +17,15 @@ Partial011 measured10 source files/2,337 changed lines before capture/readiness/
 
 Branch/worktree: `codex/pack-version-publication-p05b-ev-core` / `.worktrees/pack-version-publication-p05b-ev-core`. Root safely reuses the idle workflow-owned P05A directory/dependencies through a Git worktree move after stashing all ten source files and task records. Record that immutable stash before delegation. Original P05A branch/parent44e2f193 and immutable ten-file stashcd88d5c6 remain recoverable.
 
-Direct base: main `ef3c73e8bb61ade6907dc2abd67751523ae026bd`. Both semantic prerequisites are merged. No unmerged P03/P04/P07A code belongs in this independent phase.
+Current direct base: main `f678525141a55f4d7acbd82487a1871a94632096` (PR118, workflow skill records only). The metadata-only checkpoint was replayed from ef3c73e8 to `d168640d` before restoring source; backup `codex/p05b-before-main118-20260905` retains24e8d00f. Both semantic prerequisites are merged. No unmerged P03/P04/P07A code belongs in this independent phase.
 
 Preservation completed: immutable stash `961f20694651e80c2e665f555bbce1e347dcc143` contains all ten partial source files plus records. The idle P05A worktree was clean after stashing and moved with `git worktree move` to P05B, retaining its relative workspace dependency links. The new branch starts exactly at mainef3c73e8; original P05A branch44e2f193 and both prior stashes remain unchanged. Only eight neutral files are restored; the two incomplete native economics files remain in the stash for011.
+
+## Current verified implementation
+
+Runtime `77c01707c6c8da9d886ebc316e1dc1fac8fda758` on direct mainf6785251. Source scope is9 authored files/+1,248/-1,081 (2,329 changed lines); the extra file is the dedicated public-entry/value regression. Root independently reran the complete44-file matrix:364/364 pass, zero skips (`/tmp/packscout-p05b-root-focused-20260905.log`). Contracts/services lint/types, boundaries and zero-finding ratchet pass. Root verified both648/238-line calculation bodies are byte-identical apart from the local import. The audit verifies16 moved public-value declarations and25 retained release declarations unchanged; neutral closure is nine local modules plus Zod, with no release DTO/server/database/provider/ambient-clock dependency.
+
+Red missing-export test: `/tmp/packscout-p05b-neutral-core-red-20260905.log`; final agent focused/static/audit logs: `/tmp/packscout-p05b-neutral-core-{focused-final,static,audit}-20260905.log`. New tests cover public schema/function identity, canonical four-metric values, honest unavailable/vendor data, strict protected fields and stable errors. Incomplete native economics files remain absent and preserved in stash961f2069. Exact committed-head full framework gate remains pending; no PR, deployment or full011 completion is claimed.
 
 ## Requirements
 
@@ -32,11 +38,11 @@ Preservation completed: immutable stash `961f20694651e80c2e665f555bbce1e347dcc14
 
 ## Acceptance Criteria
 
-- [ ] Public domain/service entries identify the exact same calculator/confidence functions; deterministic fixtures pass.
-- [ ] Existing calculator, confidence, public EV, provider-derived values and protected-data regressions pass unchanged.
-- [ ] Formula/policy/error behavior matches the direct base; no release DTO or server-only dependency enters the neutral core.
+- [x] Public domain/service entries identify the exact same calculator/confidence functions; deterministic fixtures pass.
+- [x] Existing calculator, confidence, public EV, provider-derived values and protected-data regressions pass unchanged.
+- [x] Formula/policy/error behavior matches the direct base; no release DTO or server-only dependency enters the neutral core.
 - [ ] Affected lint/types, framework guardrails and full `npm run verify:framework` pass on the exact parent/runtime.
-- [ ] Only the measured neutral boundary is committed/reviewable; incomplete011 work stays recoverable and later ownership is recorded.
+- [x] Only the measured neutral boundary is committed/reviewable; incomplete011 work stays recoverable and later ownership is recorded.
 
 ## Verification
 
@@ -48,4 +54,4 @@ No deploy applies to this pure domain refactor.011 owns immutable full-data pari
 
 - Guidance: tech-001 native V1/clean-slate domain boundary plus011's approved unchanged-formula/full-data extension. No companion spec is edited.
 - Delivery split only: shared domain behavior is not legacy response translation, dual reads/writes, another public catalog schema or provider-specific generic logic.
-- Final verification SHA and PR evidence: pending.
+- Runtime77c01707 onf6785251 passes root364 focused regressions and affected static checks; full gate/publication remain pending. Preserving existing public consumer export names and errors imports the same domain values without a conversion layer, alternate read/write path or legacy DTO dependency.
