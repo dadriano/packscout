@@ -1,8 +1,6 @@
 ---
 name: tasks-to-ux-specs
 description: Create shared, ADHD-friendly UX-oriented ux-*.md companion specs from a design-to-tasks feature task folder, optionally with clickable HTML mockups or Figma handoff mockup specs. Use when task files already exist and the agent should define user flows, layout behavior, interaction states, accessibility requirements, content guidance, visual direction, UX acceptance guidance, or mockup artifacts mapped back to related task IDs. Trigger with /tasks-to-ux-specs.
-disable-model-invocation: true
-argument-hint: "[.tasks/<feature>/ | path/to/task.md] [--mockup=html|figma|both]"
 ---
 
 # Tasks to UX Specs
@@ -13,7 +11,7 @@ The output is design guidance for builders. It does not replace task files, `_in
 
 ## ADHD-Friendly Specs
 
-Before writing or updating any spec, read [i-have-adhd](../i-have-adhd/SKILL.md) completely and apply it for the rest of the session.
+If the user has explicitly activated [i-have-adhd](../i-have-adhd/SKILL.md), read and follow it. Do not activate that persistent mode as a side effect of this workflow. Otherwise, keep user-facing prose purpose-first and easy to scan without changing the session's output mode.
 
 UX specs are PRDs for builders. Shape every `ux-*.md` so a builder can act on it immediately:
 

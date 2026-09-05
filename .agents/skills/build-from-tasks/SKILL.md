@@ -103,9 +103,9 @@ Companion spec rules:
 
 If a companion spec references Convex implementation details or Convex-driven UX behavior and the repository contains `convex/_generated/ai/guidelines.md`, read that guideline file before changing Convex code.
 
-## Execution Checklist (TodoWrite)
+## Execution Checklist
 
-Mirror active build progress in the TodoWrite checklist. The `.tasks` files remain the canonical source of truth. The checklist is a live execution view for the user, not a replacement tracker.
+Mirror active build progress using the current harness's available plan/checklist tool. If it has no such tool, maintain a concise checklist in progress messages. The `.tasks` files remain the canonical source of truth. The checklist is a live execution view for the user, not a replacement tracker.
 
 Checklist rules:
 
@@ -277,33 +277,18 @@ Run a phase-local or stack-wide integration pass:
 
 ### `deploy`
 
-Deploy the current build locally for end-to-end verification on isolated ports:
+Start the affected services from the current worktree using the repository's actual local-development commands:
 
-```bash
-./scripts/deploy-local.sh
-```
+1. Inspect root and workspace `package.json` scripts, `.env.example` files, and `docs/database-provisioning.md` before selecting a command. Confirm the required local configuration and database target; do not assume a start command creates an isolated database.
+2. In Packscout, use `npm run dev:frontend`, `npm run dev:admin`, or `npm run dev:all` for the relevant surface. Inspect the existing utilities under `scripts/local` and documented provisioning commands if database setup is needed; provision only the intended local target within the user's authorization.
+3. Check for port collisions and use the supported `PACKSCOUT_FRONTEND_PORT`, `PACKSCOUT_ADMIN_PORT`, and `PACKSCOUT_ADMIN_HMR_PORT` settings when needed. Record the chosen ports, process/session handles, and URLs; ports are not assigned automatically from branch names.
+4. Wait for readiness, then drive the affected flows with the repository's runtime verification workflow and observe outcomes directly. Report any missing configuration or unavailable local runtime as a verification gap.
 
-This script creates an isolated database, assigns deterministic ports from the branch name, starts the local services, and reports the URLs when ready.
-
-Override the base port when needed:
-
-```bash
-DEPLOY_BASE_PORT=4500 ./scripts/deploy-local.sh
-```
-
-Use deploy from the current phase worktree after phase integration as the default final runtime verification before publishing a phase with a runnable surface. At the top of the stack, deploy the cumulative feature state for end-to-end verification. Only skip it when the user explicitly opts out, the phase is deliberately dormant with an explicit later E2E owner, or the repository has no local deploy path.
-
-Once the deploy is up, drive the affected flows against it with the repository's runtime verification workflow when available, and observe the outcomes directly. Fall back to manual testing only when no runtime verification path exists.
+Use this local runtime check from the current phase worktree after phase integration before publishing a phase with a runnable surface. At the top of the stack, verify the cumulative feature state. Only skip it when the user explicitly opts out, the phase is deliberately dormant with an explicit later E2E owner, or the repository has no local runtime path.
 
 ### `teardown`
 
-Decommission a local deploy:
-
-```bash
-./scripts/deploy-local.sh teardown
-```
-
-This stops services, drops the deploy database, and cleans up temporary deploy files.
+Stop only the service processes started for this verification run, using their recorded process/session handles. Use documented local cleanup commands only for resources owned by that run. Do not drop or reset databases without explicit authorization; starting the development services does not imply a disposable database was created.
 
 ## Parallel Delegation
 

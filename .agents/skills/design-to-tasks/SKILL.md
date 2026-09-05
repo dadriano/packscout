@@ -27,9 +27,9 @@ This skill creates product/task breakdowns, not companion specs or mockups. Comp
 
 ## ADHD-Friendly Planning and PRDs
 
-Before asking planning questions or writing PRD artifacts, read [i-have-adhd](../i-have-adhd/SKILL.md) completely and apply it for the rest of the design-to-tasks session.
+If the user has explicitly activated [i-have-adhd](../i-have-adhd/SKILL.md), read and follow it. Do not activate that persistent mode as a side effect of this workflow. Otherwise, keep user-facing prose purpose-first and easy to scan without changing the session's output mode.
 
-Apply its rules to both the conversation and the generated `_index.md` and numbered task files:
+Use the following planning conventions in the conversation and the generated `_index.md` and numbered task files:
 
 - Lead each question batch with the single decision the user needs to make next. Ask no more than three related questions.
 - Start every PRD with a `Start Here` section that gives one bounded, implementation-agnostic next action.

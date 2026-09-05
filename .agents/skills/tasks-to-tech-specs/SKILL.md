@@ -1,8 +1,6 @@
 ---
 name: tasks-to-tech-specs
 description: Create shared, ADHD-friendly implementation-oriented tech-*.md companion specs from a design-to-tasks feature task folder. Use when task files already exist and the agent should ground technical plans in the repository, define code/database/API/interface changes, map specs back to related task IDs, or prepare implementation guidance for build-from-tasks. Trigger with /tasks-to-tech-specs.
-disable-model-invocation: true
-argument-hint: [.tasks/<feature>/ | path/to/task.md]
 ---
 
 # Tasks to Tech Specs
@@ -13,7 +11,7 @@ The output is implementation guidance for builders. It does not replace task fil
 
 ## ADHD-Friendly Specs
 
-Before writing or updating any spec, read [i-have-adhd](../i-have-adhd/SKILL.md) completely and apply it for the rest of the session.
+If the user has explicitly activated [i-have-adhd](../i-have-adhd/SKILL.md), read and follow it. Do not activate that persistent mode as a side effect of this workflow. Otherwise, keep user-facing prose purpose-first and easy to scan without changing the session's output mode.
 
 Tech specs are PRDs for builders. Shape every `tech-*.md` so a builder can act on it immediately:
 

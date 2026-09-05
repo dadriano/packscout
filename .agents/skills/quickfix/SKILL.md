@@ -1,8 +1,6 @@
 ---
 name: quickfix
 description: Diagnose and fix simple bugs or small tasks with a quick plan-then-execute workflow. Use for issues that don't warrant full task decomposition — generates an ADHD-friendly mini-PRD, gets confirmation, then implements the fix. Runs in an isolated worktree and opens a PR. Trigger with /quickfix or when the user wants a fast bugfix without .tasks/ decomposition.
-disable-model-invocation: true
-argument-hint: <description of the bug or task>
 ---
 
 # Quickfix
@@ -13,7 +11,7 @@ Diagnose and fix a bug or small task in a single pass. This is the lightweight a
 
 ## ADHD-Friendly Plans and Reports
 
-Before writing the Phase 2 plan, read [i-have-adhd](../i-have-adhd/SKILL.md) completely and apply it for the rest of the quickfix session.
+If the user has explicitly activated [i-have-adhd](../i-have-adhd/SKILL.md), read and follow it. Do not activate that persistent mode as a side effect of this workflow. Otherwise, keep user-facing prose purpose-first and easy to scan without changing the session's output mode.
 
 The Quickfix Plan is a mini-PRD and the Quickfix Complete report is its receipt. Shape both, and the conversation between them, so the reader can act immediately:
 
