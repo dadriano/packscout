@@ -7,9 +7,18 @@ const privateKeys = new Set(["account", "accountid", "authorization", "connectio
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{20,})/iu;
+const embeddedHttpAuthorities = /\bhttps?:[\\/]*([^\\/\s?#]*)/giu;
 
 function rejectCredentialText(value: string): void {
-  requireAssembly(!credentialText.test(value.trim().normalize("NFC")));
+  const normalized = value.trim().normalize("NFC");
+  requireAssembly(!credentialText.test(normalized));
+  // HTTP authority ends at path/query/fragment or whitespace, not at a quote
+  // that WHATWG would percent-encode inside a username or password.
+  // WHATWG removes these controls even inside userinfo. Ambiguous control-joined
+  // URL/email text therefore fails closed; ordinary prose spaces stay boundaries.
+  const recognized = normalized.replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "");
+  // Consume each complete authority once, including benign ones, to stay linear.
+  for (const match of recognized.matchAll(embeddedHttpAuthorities)) requireAssembly(!match[1]!.includes("@"));
 }
 
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
@@ -67,7 +76,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     }
     let url: URL;
     try { url = required ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
-    catch { requireAssembly(!required); return; }
+    catch { requireAssembly(false); return; }
     requireAssembly(url.username === "" && url.password === "");
     // Preserve URL structure: decode individual names/values, never the whole URL.
     for (const [key, nested] of url.searchParams) {

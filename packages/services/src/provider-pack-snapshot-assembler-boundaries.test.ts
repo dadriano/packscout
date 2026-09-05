@@ -165,6 +165,54 @@ test("nested URL-valued parameters and fragments cannot hide protected credentia
   }
 });
 
+test("malformed nested URL targets fail closed before protected components can escape", async () => {
+  const setters = [(input: ProviderPackBuildInputs, url: string) => { input.imageUrl = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.actions[0]!.url = url; },
+    (input: ProviderPackBuildInputs, url: string) => { input.contents[0]!.imageUrl = url; }];
+  for (const set of setters) {
+    const { input } = await assemblyFixture();
+    set(input.inputs, `https://example.com/?next=${encodeURIComponent("https://api.example:443/cb?campaign=public")}`);
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    for (const nested of ["https://api.example:bad/cb?access_token=private-marker",
+      "https://[invalid]/cb#%73ig=private-marker", "https://%FF/cb?access_token=private-marker"]) {
+      for (const prefix of ["?next=", "#next=", "#"]) {
+        set(input.inputs, `https://example.com/${prefix}${encodeURIComponent(nested)}`);
+        await reject(await requestFor(input.inputs));
+      }
+    }
+  }
+});
+
+test("HTTP userinfo inside ordinary public text is rejected without rejecting benign links or email", async () => {
+  const setters = [(input: ProviderPackBuildInputs, text: string) => { input.title = text; },
+    (input: ProviderPackBuildInputs, text: string) => { input.aliases = [text]; },
+    (input: ProviderPackBuildInputs, text: string) => { input.contents[0]!.displayName = text; }];
+  for (const set of setters) {
+    const { input } = await assemblyFixture();
+    for (const text of ["Visit https://example.com and email support@example.com",
+      "Visit https://example.com\nEmail support@example.com", "Visit https://example.com\tEmail support@example.com",
+      "Visit https://example.com/path@public", "Visit https://example.com/?label=public@example.com"]) {
+      set(input.inputs, text);
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+    for (const url of ["https://alice:correcthorsebattery@example.com", "HTTP://alice@example.com",
+      "https://:private-marker@example.com", "https://alice:private-marker@[invalid]",
+      "ht\ttps://alice:private-marker@example.com", "https:\\\\alice:private-marker@example.com",
+      "https:alice:private-marker@example.com", "https:\t//alice:private-marker@example.com",
+      "https://\nalice:private-marker@example.com", 'https://alice:pri"vate@example.com',
+      "https://alice:pri<vate@example.com", "https://alice:pri\tvate-marker@example.com",
+      "https://ali\nce:private-marker@example.com", "https://alice:pri\rvate-marker@example.com"]) {
+      set(input.inputs, `Visit ${url}`);
+      await reject(await requestFor(input.inputs));
+    }
+    // This ambiguous sequence has the same WHATWG authority as split userinfo.
+    for (const separator of ["\n", "\t", "\r\n"]) {
+      set(input.inputs, `Visit https://example.com${separator}support@example.com`);
+      await reject(await requestFor(input.inputs));
+    }
+  }
+});
+
 test("credential-bearing public text is scanned after schema-equivalent normalization", async () => {
   const { input: benign } = await assemblyFixture();
   benign.inputs.title = "Padded title";
