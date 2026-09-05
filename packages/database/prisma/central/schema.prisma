@@ -206,6 +206,9 @@ model organizations {
   global_activity_events   global_activity_events[]
   provider_health          provider_health[]
   admin_alerts             admin_alerts[]
+  shared_changes           shared_catalog_changes[]
+  shared_checkpoints       shared_change_checkpoints[]
+  profile_heads            profile_publication_heads[]
 }
 
 model operators {
@@ -443,6 +446,7 @@ model providers {
   release_invalidations         provider_release_invalidations[]
   invalidation_checkpoint       provider_invalidation_checkpoints?
   manifest_operations           manifest_activation_operations[]
+  shared_deliveries             shared_change_deliveries[]
 
   @@unique([provider_key], map: "providers_provider_key_unique")
   @@unique([id, organization_id], map: "providers_id_organization_unique")
@@ -1046,4 +1050,173 @@ model artifact_retention_executions {
   started_at      DateTime        @db.Timestamptz(6)
   finished_at     DateTime?       @db.Timestamptz(6)
   created_at      DateTime        @default(now()) @db.Timestamptz(6)
+}
+
+// Dormant pack_catalog_v1 central publication; scoped SQL constraints live in the migration.
+model shared_change_checkpoints {
+  organization_id  String                  @db.Uuid
+  source_key       String                  @db.VarChar(200)
+  through_sequence BigInt                  @default(0)
+  change_id        String?                 @db.Uuid
+  receipt_sha256   String?                 @db.Char(64)
+  organization     organizations           @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "shared_checkpoint_org_fk")
+  change           shared_catalog_changes? @relation(fields: [organization_id, change_id], references: [organization_id, id], onDelete: Restrict, onUpdate: NoAction, map: "shared_checkpoint_change_fk")
+
+  @@id([organization_id, source_key])
+}
+
+model shared_catalog_changes {
+  organization_id    String                      @db.Uuid
+  id                 String                      @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source_key         String                      @db.VarChar(200)
+  source_sequence    BigInt
+  source_identity    String                      @db.VarChar(200)
+  request_sha256     String                      @db.Char(64)
+  payload_sha256     String                      @db.Char(64)
+  dependencies_json  Json
+  audience_json      Json
+  audience_sha256    String                      @db.Char(64)
+  profile_intent_ids Json
+  receipt_sha256     String                      @db.Char(64)
+  created_at         DateTime                    @default(now()) @db.Timestamptz(6)
+  organization       organizations               @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "shared_change_org_fk")
+  checkpoints        shared_change_checkpoints[]
+  deliveries         shared_change_deliveries[]
+
+  @@id([organization_id, id])
+  @@unique([organization_id, source_identity])
+  @@unique([organization_id, source_key, source_sequence])
+}
+
+model shared_change_deliveries {
+  organization_id          String                 @db.Uuid
+  provider_id              String                 @db.Uuid
+  id                       String                 @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  change_id                String                 @db.Uuid
+  provider_change_sequence BigInt                 @unique @default(autoincrement())
+  shard_index              Int
+  delivery_json            Json
+  state                    String                 @default("ready") @db.VarChar(32)
+  reason_code              String?                @db.VarChar(64)
+  attempts                 Int                    @default(0)
+  available_at             DateTime               @default(now()) @db.Timestamptz(6)
+  lease_owner              String?                @db.Uuid
+  lease_fence              BigInt                 @default(0)
+  lease_expires_at         DateTime?              @db.Timestamptz(6)
+  acknowledgment_sha256    String?                @db.Char(64)
+  completed_at             DateTime?              @db.Timestamptz(6)
+  provider                 providers              @relation(fields: [provider_id, organization_id], references: [id, organization_id], onDelete: Restrict, onUpdate: NoAction, map: "shared_delivery_provider_fk")
+  change                   shared_catalog_changes @relation(fields: [organization_id, change_id], references: [organization_id, id], onDelete: Restrict, onUpdate: NoAction, map: "shared_delivery_change_fk")
+
+  @@id([organization_id, provider_id, id])
+  @@unique([organization_id, change_id, provider_id])
+  @@unique([organization_id, change_id, shard_index])
+  @@index([organization_id, provider_id, provider_change_sequence])
+}
+
+model profile_snapshot_artifacts {
+  organization_id String                       @db.Uuid
+  profile_kind    String                       @db.VarChar(16)
+  entity_id       String                       @db.Uuid
+  snapshot_id     String                       @db.VarChar(69)
+  content_sha256  String                       @db.Char(64)
+  descriptor_json Json
+  created_at      DateTime                     @default(now()) @db.Timestamptz(6)
+  head            profile_publication_heads    @relation("ProfileArtifacts", fields: [organization_id, profile_kind, entity_id], references: [organization_id, profile_kind, entity_id], onDelete: Restrict, onUpdate: NoAction, map: "profile_artifact_head_fk")
+  active_heads    profile_publication_heads[]  @relation("ProfileActiveSnapshot")
+  batches         profile_snapshot_batches[]
+  intents         profile_activation_intents[]
+
+  @@id([organization_id, profile_kind, entity_id, snapshot_id])
+  @@unique([organization_id, profile_kind, entity_id, content_sha256])
+}
+
+model profile_snapshot_batches {
+  organization_id String                     @db.Uuid
+  profile_kind    String                     @db.VarChar(16)
+  entity_id       String                     @db.Uuid
+  snapshot_id     String                     @db.VarChar(69)
+  batch_index     Int
+  batch_json      Json
+  artifact        profile_snapshot_artifacts @relation(fields: [organization_id, profile_kind, entity_id, snapshot_id], references: [organization_id, profile_kind, entity_id, snapshot_id], onDelete: Restrict, onUpdate: NoAction, map: "profile_batch_artifact_fk")
+
+  @@id([organization_id, profile_kind, entity_id, snapshot_id, batch_index])
+}
+
+model profile_publication_heads {
+  organization_id    String                       @db.Uuid
+  profile_kind       String                       @db.VarChar(16)
+  entity_id          String                       @db.Uuid
+  generation         BigInt                       @default(0)
+  active_snapshot_id String?                      @db.VarChar(69)
+  lease_intent_id    String?                      @db.Uuid
+  lease_owner        String?                      @db.Uuid
+  lease_fence        BigInt                       @default(0)
+  lease_expires_at   DateTime?                    @db.Timestamptz(6)
+  organization       organizations                @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "profile_head_org_fk")
+  active_artifact    profile_snapshot_artifacts?  @relation("ProfileActiveSnapshot", fields: [organization_id, profile_kind, entity_id, active_snapshot_id], references: [organization_id, profile_kind, entity_id, snapshot_id], onDelete: Restrict, onUpdate: NoAction, map: "profile_head_active_fk")
+  leased_intent      profile_activation_intents?  @relation("ProfileLeaseIntent", fields: [organization_id, profile_kind, entity_id, lease_intent_id], references: [organization_id, profile_kind, entity_id, id], onDelete: Restrict, onUpdate: NoAction, map: "profile_head_lease_fk")
+  artifacts          profile_snapshot_artifacts[] @relation("ProfileArtifacts")
+  intents            profile_activation_intents[] @relation("ProfileIntents")
+
+  @@id([organization_id, profile_kind, entity_id])
+}
+
+model profile_activation_intents {
+  organization_id      String                           @db.Uuid
+  profile_kind         String                           @db.VarChar(16)
+  entity_id            String                           @db.Uuid
+  id                   String                           @db.Uuid
+  snapshot_id          String                           @db.VarChar(69)
+  sequence             BigInt                           @unique @default(autoincrement())
+  idempotency_key      String                           @db.VarChar(200)
+  intent_json          Json
+  authorization_sha256 String                           @db.Char(64)
+  payload_sha256       String                           @db.Char(64)
+  state                String                           @default("ready") @db.VarChar(32)
+  reason_code          String?                          @db.VarChar(64)
+  attempts             Int                              @default(0)
+  available_at         DateTime                         @default(now()) @db.Timestamptz(6)
+  created_at           DateTime                         @default(now()) @db.Timestamptz(6)
+  completed_at         DateTime?                        @db.Timestamptz(6)
+  head                 profile_publication_heads        @relation("ProfileIntents", fields: [organization_id, profile_kind, entity_id], references: [organization_id, profile_kind, entity_id], onDelete: Restrict, onUpdate: NoAction, map: "profile_intent_head_fk")
+  artifact             profile_snapshot_artifacts       @relation(fields: [organization_id, profile_kind, entity_id, snapshot_id], references: [organization_id, profile_kind, entity_id, snapshot_id], onDelete: Restrict, onUpdate: NoAction, map: "profile_intent_artifact_fk")
+  leasing_heads        profile_publication_heads[]      @relation("ProfileLeaseIntent")
+  operations           profile_publication_operations[]
+
+  @@id([organization_id, profile_kind, entity_id, id])
+  @@unique([organization_id, profile_kind, entity_id, idempotency_key])
+  @@index([organization_id, profile_kind, entity_id, sequence])
+}
+
+model profile_publication_operations {
+  organization_id String                        @db.Uuid
+  profile_kind    String                        @db.VarChar(16)
+  entity_id       String                        @db.Uuid
+  intent_id       String                        @db.Uuid
+  id              String                        @db.Uuid
+  idempotency_key String                        @db.VarChar(200)
+  request_sha256  String                        @db.Char(64)
+  request_json    Json
+  created_at      DateTime                      @default(now()) @db.Timestamptz(6)
+  intent          profile_activation_intents    @relation(fields: [organization_id, profile_kind, entity_id, intent_id], references: [organization_id, profile_kind, entity_id, id], onDelete: Restrict, onUpdate: NoAction, map: "profile_operation_intent_fk")
+  receipt         profile_publication_receipts?
+
+  @@id([organization_id, profile_kind, entity_id, intent_id, id])
+  @@unique([organization_id, id])
+  @@unique([organization_id, idempotency_key])
+}
+
+model profile_publication_receipts {
+  organization_id String                         @db.Uuid
+  profile_kind    String                         @db.VarChar(16)
+  entity_id       String                         @db.Uuid
+  intent_id       String                         @db.Uuid
+  operation_id    String                         @db.Uuid
+  receipt_json    Json
+  receipt_sha256  String                         @db.Char(64)
+  created_at      DateTime                       @default(now()) @db.Timestamptz(6)
+  operation       profile_publication_operations @relation(fields: [organization_id, profile_kind, entity_id, intent_id, operation_id], references: [organization_id, profile_kind, entity_id, intent_id, id], onDelete: Restrict, onUpdate: NoAction, map: "profile_receipt_operation_fk")
+
+  @@id([organization_id, profile_kind, entity_id, intent_id, operation_id])
 }
