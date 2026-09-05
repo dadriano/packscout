@@ -8,7 +8,13 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
 
-## Current prose-prefixed JSON repair — 2026-09-05
+## Current raw-path and relative-URL repair — 2026-09-05
+
+New PR114 findings 3941339525/3941339526 on 9e5c9a8e cover zero/one-slash HTTP raw-path evidence and scheme-relative userinfo in prose. Both are reproduced and repaired in the same two guard/test files. Original-text URL discovery preserves control-delimited boundaries; complete raw authority inspection rejects userinfo through quotes before prose tokenization; differing original query/fragment components traverse under the same counters as their parsed values. Public split-card names, path emails, independent OAuth links and quoted public IPv6 controls remain valid. No new parser, dependency, schema, bound or Bearer-only heuristic.
+
+Root complete five-file matrix: 121/121 pass, zero skips, including 8,000-member full/lifecycle/reuse and private PostgreSQL handoff (`/tmp/packscout-p03-relative-complete-focused-20260905.log`). Agent pure 118/118 and services lint/types/ratchet0 pass. Independent final cross-review is running; source is uncommitted and fresh full certification/publication/review replies remain. Published 9e5c9a8e full CI33979360663 passed at17:17:32UTC, but does not certify these newer repairs. Its local full failure and successful isolated rerun remain accurately recorded in the handoff.
+
+## Earlier prose-prefixed JSON repair — 2026-09-05
 
 Latest three-finding repair: `d53d0be14a1f8276518bc74627f5d4b29d1b79b3` on main `f852a166cca88008eb2eb419a6a555c7ff794597` rejects literal private URL hosts and protected raw/decoded pathname pairs, including dot-segment-erased evidence and encoded separators. Numeric bracket prose stays public without relaxing recognized JSON syntax. Decoded JSON/form prose reuses the same embedded-URL traversal and existing budgets; no DNS, dependency, API, schema or Bearer-only policy change. Root114/114 complete focused tests pass0skip, including8,000-member capacity/lifecycle/reuse and private PostgreSQL handoff (`/tmp/packscout-p03-host-path-main120-focused-20260905.log`); services lint/types and ratchet0 pass. Agent111 pure tests and independent138 probes pass with no remaining finding in this scope. Full local gate is running in `/tmp/packscout-p03-host-path-main120-framework-20260905.log`; fresh publication/CI and replies to3941202241/3941202247/3941202250 remain. Previous aa62d3d8 local full and1f954697 CI33976721907 passed, but do not certify this new repair.
 
