@@ -183,6 +183,40 @@ test("JSON within prose preserves ordinary braces brackets and quoted natural te
   }
 });
 
+test("natural leading labels remain public inside JSON and URL captions", async (context) => {
+  for (const label of ["[1/1] card", "{Limited Edition} card", '"Limited Edition" pack', '"Limited Edition', '"C:\\Cards\\Set"']) {
+    await context.test(label, async () => {
+      for (const text of [label, JSON.stringify({ caption: label }), "Documentation " + JSON.stringify({ caption: label }),
+        JSON.stringify(label)]) {
+        for (const field of ["displayName", "title", "aliases"] as const) {
+          const { input } = await assemblyFixture();
+          if (field === "displayName") input.inputs.contents[0]!.displayName = text;
+          else if (field === "title") input.inputs.title = text; else input.inputs.aliases = [text];
+          assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+        }
+        assert.doesNotThrow(() => assertPackAssemblyPublicData({ displayName: text }));
+        for (const suffix of ["?caption=", "#caption=", "#"]) {
+          const url = "https://example.com/" + suffix + encodeURIComponent(text);
+          assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+          const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+          assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+        }
+      }
+    });
+  }
+});
+
+test("natural label dispatch does not weaken recognized JSON or escaped standalone strings", () => {
+  for (const payload of ['{"caption":"safe",}', '[{"caption":"safe"}', '{"caption":"\\u00GG"}',
+    '{"caption":"safe"} extra', '["safe"] extra',
+    JSON.stringify('{"\\u0070assword":"private"}'), '"\\u0070assword: private"',
+    JSON.stringify('{"\\u0070assword":"private"}') + " edition"]) {
+    for (const suffix of ["?caption=", "#caption=", "#"]) {
+      refuses({ url: "https://example.com/" + suffix + encodeURIComponent(payload) });
+    }
+  }
+});
+
 test("JSON after prose shares the existing depth node and byte limits", () => {
   for (const json of ['{"caption":"public",}', '[{"caption":"public"}', '{"caption":"\\u00GG"}']) {
     refuses({ displayName: "Documentation " + json });

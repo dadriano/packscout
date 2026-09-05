@@ -155,7 +155,6 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     const decoded = decodeLayer(path);
     return decoded !== path && authenticationRoute(chargeUrlText(decoded, depth + 1), depth + 1);
   }
-  const isStructuredText = (text: string) => /^[{["]/u.test(text);
   function stringTokenEnd(text: string, start: number): number {
     let index = start + 1;
     while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
@@ -176,6 +175,15 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     if (text[next] === "{" || text[next] === "[") return true;
     arrayScalarPrefix.lastIndex = next;
     return arrayScalarPrefix.test(text);
+  }
+  function inspectLeadingStructuredText(text: string, depth: number, context: OAuthContext): boolean {
+    // Natural labels such as [1/1], {Limited Edition}, or a quoted name followed
+    // by prose do not establish a whole JSON document, including inside captions.
+    if ((text[0] === "{" || text[0] === "[") && isProseContainer(text, 0)) {
+      inspectStructuredText(text, depth, context); return true;
+    }
+    return text[0] === '"' && stringTokenEnd(text, 0) === text.length &&
+      inspectStructuredText(text, depth, context, 0, true) > 0;
   }
   function inspectStructuredText(text: string, depth: number, context: OAuthContext, prefixStart?: number, proseString = false): number {
     // Inspect every token before parsing the document: JSON.parse alone would
@@ -241,7 +249,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
-    if (isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
+    if (inspectLeadingStructuredText(normalized, depth, context)) return;
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), equals = candidate.indexOf("=");
       return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.\.?[/]/iu.test(candidate) ||
@@ -263,7 +271,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   function inspectUrlText(text: string, depth = 0, required = false, context: OAuthContext = { authentication: false, code: false }): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
     if (!required) inspectProseAssignments(normalized, depth);
-    if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
+    if (!required && inspectLeadingStructuredText(normalized, depth, context)) return;
     if (!required) inspectProseStructuredText(normalized, depth, context, true);
     // Dispatch a form by its leading assignment, even when its value contains
     // a literal question mark or fragment marker. URL paths retain precedence.
