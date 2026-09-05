@@ -1,16 +1,23 @@
 import type {
   PublicRepackSort,
   PublicRepackSummaryV3,
+  TableColumnLayoutTableKey,
 } from "@packscout/contracts";
 import type { GlossaryFieldKey } from "./metric-vocabulary";
 import { presentPackAvailability } from "./pack-availability-presentation";
+import type { TableColumnLayout } from "./table-column-layout";
 
 export type CatalogSortDirection = "asc" | "desc";
+
+export const ALL_REPACKS_TABLE_KEY =
+  "all_repacks" satisfies TableColumnLayoutTableKey;
 
 export type AllRepacksHeader = Readonly<{
   key: GlossaryFieldKey;
   label: string;
   sort?: PublicRepackSort;
+  /** The identity column can be reordered but never hidden. */
+  required?: true;
 }>;
 
 /**
@@ -23,7 +30,7 @@ export type AllRepacksHeader = Readonly<{
 export const ALL_REPACKS_HEADERS: readonly AllRepacksHeader[] = Object.freeze([
   { key: "vendor", label: "Vendor" },
   { key: "category", label: "Category" },
-  { key: "repack", label: "Repack", sort: "repack" },
+  { key: "repack", label: "Repack", sort: "repack", required: true },
   { key: "repackPrice", label: "Pack Price", sort: "repack_price" },
   { key: "grossEv", label: "Gross EV $", sort: "packscout_gross_ev" },
   { key: "grossEvPercent", label: "Gross EV %" },
@@ -37,6 +44,20 @@ export const ALL_REPACKS_HEADERS: readonly AllRepacksHeader[] = Object.freeze([
   { key: "promoCode", label: "Promo Code" },
   { key: "repackLink", label: "Repack Link" },
 ]);
+
+const headersByKey = new Map<GlossaryFieldKey, AllRepacksHeader>(
+  ALL_REPACKS_HEADERS.map((header) => [header.key, header]),
+);
+
+/** The headers to render, in the viewer's order, skipping hidden columns. */
+export function visibleAllRepacksHeaders(
+  layout: TableColumnLayout<GlossaryFieldKey>,
+): readonly AllRepacksHeader[] {
+  return layout.flatMap((entry) => {
+    const header = headersByKey.get(entry.key);
+    return entry.visible && header !== undefined ? [header] : [];
+  });
+}
 
 export function nextCatalogSortDirection(
   currentSort: PublicRepackSort,

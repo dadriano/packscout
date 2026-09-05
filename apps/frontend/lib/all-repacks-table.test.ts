@@ -3,9 +3,11 @@ import { test } from "node:test";
 import type { PublicRepackSummaryV3 } from "@packscout/contracts";
 import {
   ALL_REPACKS_HEADERS,
+  ALL_REPACKS_TABLE_KEY,
   catalogHeaderAriaSort,
   nextCatalogSortDirection,
   publicRowActions,
+  visibleAllRepacksHeaders,
 } from "./all-repacks-table";
 
 test("the table shows the four PackScout metrics together with both EV sources", () => {
@@ -115,5 +117,22 @@ test("only available rows expose the outbound repack link, and promos are never 
       actionAvailability: { promo: false, repackLink: false },
     } as PublicRepackSummaryV3),
     { promo: false, repackLink: false },
+  );
+});
+
+test("only the Repack column is required, and visible headers follow the viewer's layout", () => {
+  assert.deepEqual(
+    ALL_REPACKS_HEADERS.filter(({ required }) => required).map(({ key }) => key),
+    ["repack"],
+  );
+  assert.equal(ALL_REPACKS_TABLE_KEY, "all_repacks");
+  assert.deepEqual(
+    visibleAllRepacksHeaders([
+      { key: "evDollars", visible: true },
+      { key: "vendor", visible: false },
+      { key: "repack", visible: true },
+      { key: "heat", visible: true },
+    ]).map(({ key }) => key),
+    ["evDollars", "repack"],
   );
 });

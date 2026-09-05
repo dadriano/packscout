@@ -105,6 +105,7 @@ import type * as publicRepacksV3 from "../publicRepacksV3.js";
 import type * as repackHeatReadModel from "../repackHeatReadModel.js";
 import type * as repackHeatTestCatalog from "../repackHeatTestCatalog.js";
 import type * as savedItems from "../savedItems.js";
+import type * as tableColumnLayouts from "../tableColumnLayouts.js";
 
 import type {
   ApiFromModules,
@@ -210,6 +211,7 @@ declare const fullApi: ApiFromModules<{
   repackHeatReadModel: typeof repackHeatReadModel;
   repackHeatTestCatalog: typeof repackHeatTestCatalog;
   savedItems: typeof savedItems;
+  tableColumnLayouts: typeof tableColumnLayouts;
 }>;
 
 /**
