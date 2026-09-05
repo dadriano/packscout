@@ -90,6 +90,31 @@ test("direct JSON retains the existing structural bounds and malformed-document 
     "[".repeat(7) + "null" + "]".repeat(7)]) assert.throws(() => assertPublicCatalogText(text), TypeError);
 });
 
+test("natural leading captions remain public at nested value boundaries", async (context) => {
+  for (const caption of ["[1/1] card", "{Limited Edition} card", '"Limited Edition" pack']) {
+    for (const text of [caption, `  ${caption}  `]) {
+      await context.test(JSON.stringify(text), () => {
+        assert.doesNotThrow(() => assertPublicCatalogText(text));
+        assert.doesNotThrow(() => assertPublicCatalogText(JSON.stringify({ caption: text })));
+        assert.doesNotThrow(() => assertPublicCatalogText("Details " + JSON.stringify({ caption: text })));
+        assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)));
+        assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)));
+      });
+    }
+  }
+});
+
+test("nested leading structured text retains strict documents and escaped string inspection", () => {
+  for (const text of ['{"caption":"public",}', '[{"caption":"public"}',
+    '{"caption":"public"} trailing prose', '"\\u0070assword: a"']) {
+    for (const payload of [text, `  ${text}  `]) {
+      assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: payload })), TypeError);
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(payload)), TypeError);
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(payload)), TypeError);
+    }
+  }
+});
+
 test("prose-prefixed structured text inspects protected keys at every bounded value boundary", () => {
   for (const text of ['Documentation {"\\u0070assword":"private-marker"}',
     'Public edition [{"\\u0061ccount":"internal-123"}]',

@@ -145,7 +145,6 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     charge(decoded, depth + 1);
     return authenticationRoute(decoded, depth + 1);
   };
-  const isStructuredText = (text: string) => /^[{["]/u.test(text.trimStart());
   const stringTokenEnd = (text: string, start: number): number => {
     let index = start + 1;
     while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
@@ -166,6 +165,16 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (text[next] === "{" || text[next] === "[") return true;
     arrayScalarPrefix.lastIndex = next;
     return arrayScalarPrefix.test(text);
+  };
+  const inspectLeadingStructuredText = (text: string, depth: number, context: OAuthContext): boolean => {
+    const candidate = text.trim();
+    // Natural labels such as [1/1], {Limited Edition}, or a quoted name followed
+    // by prose do not establish a whole JSON document, including inside captions.
+    if ((candidate[0] === "{" || candidate[0] === "[") && isProseContainer(candidate, 0)) {
+      inspectStructuredText(candidate, depth, context); return true;
+    }
+    return candidate[0] === '"' && stringTokenEnd(candidate, 0) === candidate.length &&
+      inspectStructuredText(candidate, depth, context, 0, true) > 0;
   };
   const inspectStructuredText = (text: string, depth: number, context: OAuthContext, prefixStart?: number, proseString = false): number => {
     // Inspect tokens before parsing the document so overwritten duplicate keys
@@ -227,7 +236,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     // Padding contains no named field or data beyond separators. Do not turn
     // each '=' into another form layer; all non-padding payloads still traverse.
     if (/^=+$/u.test(text)) return;
-    if (isStructuredText(text)) { inspectStructuredText(text, depth, context); return; }
+    if (inspectLeadingStructuredText(text, depth, context)) return;
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), assignment = candidate.indexOf("=");
       return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.{1,2}\//iu.test(candidate) ||
@@ -247,7 +256,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   const visit = (text: string, depth: number, required = false, context: OAuthContext = { authentication: false, code: false }): void => {
     charge(text, depth);
     if (!required) inspectProseAssignments(text.normalize("NFKC"), depth);
-    if (!required && isStructuredText(text)) { inspectStructuredText(text, depth, context); return; }
+    if (!required && inspectLeadingStructuredText(text, depth, context)) return;
     if (!required) inspectProseStructuredText(text, depth, context, true);
     const candidate = urlRecognition(text);
     // Nested prose can contain another URL. Share this traversal's budget rather
