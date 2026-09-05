@@ -47,6 +47,8 @@ function SavedItemButton({
     saved: controller.saved,
     loading: controller.loading,
     pending: controller.pending,
+    pendingSaved: controller.pendingSaved,
+    failed: controller.failed,
     message: controller.message,
   });
 
@@ -61,7 +63,7 @@ function SavedItemButton({
   return (
     <div className={styles.root} data-kind={kind}>
       <button
-        aria-describedby={statusId}
+        aria-describedby={presentation.statusCopy ? statusId : undefined}
         aria-pressed={presentation.pressed}
         className={styles.button}
         disabled={presentation.disabled}
@@ -73,7 +75,7 @@ function SavedItemButton({
       </button>
       <p
         aria-live="polite"
-        className={styles.status}
+        className={presentation.statusCopy ? styles.status : "sr-only"}
         data-tone={presentation.tone}
         id={statusId}
         role="status"

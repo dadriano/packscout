@@ -62,7 +62,11 @@ const targets = {
     roots: ["__tests__", "scripts"],
     testFile: /\.test\.mjs$/,
     loader: false,
-    isolatedFiles: ["scripts/start-admin-embedded.test.mjs"],
+    isolatedFiles: [
+      "scripts/local/provider-continuous-policy.test.mjs",
+      "scripts/local/provider-resident-policy.test.mjs",
+      "scripts/start-admin-embedded.test.mjs",
+    ],
   },
 };
 

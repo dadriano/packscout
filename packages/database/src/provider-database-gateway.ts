@@ -60,7 +60,29 @@ export interface BoundedProviderDatabaseGatewayOptions {
   readonly operationTimeoutMs?: number;
   readonly closeTimeoutMs?: number;
   readonly now?: () => Date;
+  /**
+   * Observes operations this gateway had to report as unreachable. Every gateway
+   * failure collapses to a failure code by design, so this is the only place the
+   * underlying rejection reason survives for an operator to read. The sink must
+   * never influence an outcome: anything it throws is swallowed.
+   */
+  readonly diagnostics?: (event: ProviderDatabaseGatewayDiagnostic) => void;
 }
+
+export type ProviderDatabaseGatewayDiagnostic =
+  | {
+      readonly kind: "operation_rejected";
+      readonly providerId: string;
+      /** Error name and message only, whitespace-collapsed and truncated. */
+      readonly reason: string;
+      /** The rejection's own `code` property when it is a string (Prisma, Node). */
+      readonly code: string | null;
+    }
+  | {
+      readonly kind: "operation_timed_out";
+      readonly providerId: string;
+      readonly budgetMs: number;
+    };
 
 export type ProviderDatabaseOperationResult<T> =
   | {
@@ -88,8 +110,24 @@ interface PendingProviderAcquisition {
 
 type TimedSettlement<T> =
   | { readonly state: "fulfilled"; readonly value: T }
-  | { readonly state: "rejected" }
+  | { readonly state: "rejected"; readonly reason: unknown }
   | { readonly state: "timed_out" };
+
+const maximumDiagnosticReasonLength = 500;
+
+function describeRejection(reason: unknown): { reason: string; code: string | null } {
+  const text = reason instanceof Error
+    ? `${reason.name}: ${reason.message}`
+    : typeof reason === "string" ? reason : "non_error_rejection";
+  let code: string | null = null;
+  if (typeof reason === "object" && reason !== null) {
+    const property = Object.getOwnPropertyDescriptor(reason, "code");
+    if (property !== undefined && "value" in property && typeof property.value === "string") {
+      code = property.value;
+    }
+  }
+  return { reason: text.replace(/\s+/gu, " ").trim().slice(0, maximumDiagnosticReasonLength), code };
+}
 
 function settleBefore<T>(promise: Promise<T>, deadline: number): Promise<TimedSettlement<T>> {
   const remainingMs = deadline - Date.now();
@@ -111,11 +149,11 @@ function settleBefore<T>(promise: Promise<T>, deadline: number): Promise<TimedSe
         clearTimeout(timer);
         resolve({ state: "fulfilled", value });
       },
-      () => {
+      (reason: unknown) => {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        resolve({ state: "rejected" });
+        resolve({ state: "rejected", reason });
       },
     );
   });
@@ -477,9 +515,30 @@ export class BoundedProviderDatabaseGateway {
     );
     const settledOperation = await settleBefore(operationPromise, deadline);
     if (settledOperation.state === "timed_out") {
+      // The operation is abandoned the moment we return unavailable, so its
+      // reference must be dropped HERE rather than deferred to a promise that may
+      // never settle. A query hung on a dropped connection never settles, so the
+      // old `void operationPromise.then(release, release)` left references above
+      // zero forever: acquire() then short-circuited every later call on this
+      // provider to database_unreachable, and beginClose() refused to reclaim a
+      // referenced entry, so the slot stayed poisoned for the life of the process.
+      // That is exactly how all three import residents wedged - only a restart
+      // cleared it. Closing the lifecycle now also tears down the connection the
+      // hung query is stuck on, which is the right thing to do with an abandoned
+      // operation and bounds how long it can hold a connection.
       acquired.state = "retiring";
       acquired.retireFailureCode = "database_unreachable";
-      void operationPromise.then(release, release);
+      // Drop the poisoned entry from the cache so the NEXT acquire builds a fresh
+      // lifecycle instead of short-circuiting on this one, then release, which
+      // closes it once no caller still holds it.
+      this.#cache.delete(route.target.providerId);
+      release();
+      void operationPromise.catch(() => undefined);
+      this.#report({
+        kind: "operation_timed_out",
+        providerId: route.target.providerId,
+        budgetMs: this.#operationTimeoutMs,
+      });
       return unavailable(route.target.providerId, this.#now(), "database_unreachable");
     }
     release();
@@ -491,7 +550,24 @@ export class BoundedProviderDatabaseGateway {
         observedAt: this.#now().toISOString(),
       };
     }
+    // The failure code stays "database unreachable" for every caller; only the
+    // diagnostics sink learns what actually rejected. Without this, residents
+    // wedged for hours on a pooled connection stuck in read-only mode and nobody
+    // could tell it apart from a network outage.
+    this.#report({
+      kind: "operation_rejected",
+      providerId: route.target.providerId,
+      ...describeRejection(settledOperation.reason),
+    });
     return unavailable(route.target.providerId, this.#now(), "database_unreachable");
+  }
+
+  #report(event: ProviderDatabaseGatewayDiagnostic): void {
+    try {
+      this.options.diagnostics?.(event);
+    } catch {
+      // A diagnostics sink can never change an outcome.
+    }
   }
 
   async close(): Promise<void> {

@@ -7,6 +7,7 @@ import type {
 import {
   buildV3CurrentEv,
   buildV3LastKnownEv,
+  buildV3UnavailableEv,
   buildV3ViewSummary,
 } from "@/lib/packscout-ev-fixtures.test-support";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
@@ -18,7 +19,7 @@ import {
   resolveOverviewSelection,
 } from "./overview-presentation";
 
-test("presents the three nonpositive-policy overview KPIs", () => {
+test("presents the three overview KPIs using displayed EV", () => {
   const kpis: DashboardKpis = {
     totalRepacks: 1_248,
     medianPackScoutEvPercent: { status: "available", basisPoints: -180 },
@@ -26,7 +27,7 @@ test("presents the three nonpositive-policy overview KPIs", () => {
     highConfidenceRepacks: 500,
   };
 
-  const presentation = presentDashboardKpis(kpis);
+  const presentation = presentDashboardKpis(kpis, "packscout");
 
   assert.deepEqual(
     presentation.map(({ id }) => id),
@@ -38,14 +39,45 @@ test("presents the three nonpositive-policy overview KPIs", () => {
   );
   assert.equal(
     presentation[1]?.helper,
-    "Known current + last-known EV · 500 high confidence",
+    "PackScout EV · 500 high confidence",
   );
   assert.equal(
     presentation[1]?.accessibleLabel,
-    "Median EV %: -1.80%. Negative. Includes known current and last-known estimates. 500 high-confidence repacks.",
+    "Median EV %: -1.80%. Negative. PackScout EV. 500 high-confidence repacks.",
   );
   assert.equal(presentation[1]?.tone, "positive");
   assert.equal(presentation[2]?.reasonCopy, "Collectible value unavailable.");
+});
+
+test("positive source-derived medians remain visible in headline and group summaries", () => {
+  const metric = { status: "available" as const, basisPoints: 800 };
+  const kpis = presentDashboardKpis({ totalRepacks: 1, medianPackScoutEvPercent: metric,
+    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 }, "provider_reported");
+  const summaries = presentCatalogSummaries([{ key: "phygitals", label: "Phygitals",
+    repackCount: 1, medianPackScoutEvPercent: metric }], [{ key: "phygitals", source: "provider_reported" }]);
+  assert.equal(kpis[1]?.value, "+8.00%");
+  assert.equal(kpis[1]?.tone, "positive");
+  assert.equal(kpis[1]?.state, "plain");
+  assert.equal(summaries[0]?.medianEvPercent.displayValue, "+8.00%");
+  assert.equal(summaries[0]?.medianEvPercent.tone, "positive");
+  assert.match(summaries[0]!.accessibleLabel, /Median EV %: \+8\.00%.*Platform EV × buyback/);
+  assert.equal(summaries[0]?.sourceLabel, "Platform EV × buyback");
+  assert.match(kpis[1]!.helper, /^Platform EV × buyback/);
+});
+
+test("negative and mixed medians retain explicit sources, and independent positives stay unavailable", () => {
+  const metric = { status: "available" as const, basisPoints: -1500 };
+  for (const [source, label] of [["provider_reported", "Platform EV × buyback"], ["mixed", "Mixed sources"], ["packscout", "PackScout EV"]] as const) {
+    const result = presentCatalogSummaries([{ key: "sample", label: "Sample", repackCount: 1,
+      medianPackScoutEvPercent: metric }], [{ key: "sample", source }]);
+    assert.equal(result[0]?.medianEvPercent.displayValue, "-15.00%");
+    assert.equal(result[0]?.sourceLabel, label);
+    assert.ok(result[0]?.accessibleLabel.includes(label));
+  }
+  const result = presentDashboardKpis({ totalRepacks: 1,
+    medianPackScoutEvPercent: { status: "available", basisPoints: 800 },
+    highestChaseValueUsdMinor: null, highConfidenceRepacks: 0 }, "packscout");
+  assert.equal(result[1]?.value, "Unavailable");
 });
 
 test("overview opportunity rows retain server-presented last-known EV", () => {
@@ -60,10 +92,48 @@ test("overview opportunity rows retain server-presented last-known EV", () => {
   assert.equal(row.packScoutEv.confidence.displayValue, "Medium · 50%");
   assert.equal(row.packScoutEv.tone, "negative");
   assert.equal(row.packScoutEv.confidence.tone, "caution");
+  assert.equal(row.displayedEv.source, "packscout");
+  assert.equal(row.displayedEv.evDollars, row.packScoutEv.evDollars);
   assert.match(
     row.packScoutEv.freshness.dataAsOfLabel,
     /^Source evidence last observed /,
   );
+});
+
+test("opportunities present source-derived EV without inventing independent confidence", () => {
+  for (const [vendorKey, vendorDisplayName] of [
+    ["phygitals", "Phygitals"],
+    ["collector_crypt", "Collector Crypt"],
+    ["courtyard", "Courtyard"],
+  ]) {
+    const repack = buildV3ViewSummary({
+      vendorKey,
+      vendorDisplayName,
+      buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
+      evEstimates: {
+        packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+        vendorReported: {
+          status: "available",
+          sourceMoney: { minorUnits: 10_421, currency: "USD" },
+          usdComparison: {
+            status: "available",
+            value: { minorUnits: 10_421, currency: "USD" },
+          },
+          observedAt: "2026-08-19T10:00:00.000Z",
+        },
+      },
+    });
+    const row = presentOpportunityRow(repack, 2);
+
+    assert.equal(row.rank, 2);
+    assert.equal(row.displayedEv.source, "vendor_reported");
+    assert.equal(row.displayedEv.evDollars.displayValue, "-$6.21");
+    assert.equal(row.displayedEv.evPercent.displayValue, "-6.21%");
+    assert.equal(row.displayedEv.sourceLabel, "Platform EV × buyback");
+    assert.equal(row.displayedEv.sourceNote, `Calculated from ${vendorDisplayName}-reported EV × buyback.`);
+    assert.equal(row.packScoutEv.evDollars.availability, "unavailable");
+    assert.equal(row.packScoutEv.confidence.availability, "unavailable");
+  }
 });
 
 test("presents server-ranked opportunities without re-sorting or recomputing", () => {
@@ -79,6 +149,10 @@ test("presents server-ranked opportunities without re-sorting or recomputing", (
   assert.equal(row.packScoutEv.grossEvDollars.displayValue, "$85.00");
   assert.equal(row.packScoutEv.confidence.displayValue, "High · 100%");
   assert.equal(row.packScoutEv.confidence.tone, "positive");
+  assert.equal(row.displayedEv.source, "packscout");
+  assert.equal(row.displayedEv.evDollars, row.packScoutEv.evDollars);
+  assert.equal(row.displayedEv.evPercent, row.packScoutEv.evPercent);
+  assert.equal(row.displayedEv.sourceNote, null);
   assert.equal(row.buyback.displayValue, "85%");
   assert.equal(row.topChaseValue.displayValue, "$850.00");
   assert.equal(row.simulated, false);
@@ -132,7 +206,7 @@ test("scales repack groups and retains unavailable reasons", () => {
     },
   ];
 
-  const presentation = presentCatalogSummaries(summaries);
+  const presentation = presentCatalogSummaries(summaries, [{ key: "collector_crypt", source: "packscout" }, { key: "courtyard", source: null }]);
 
   assert.deepEqual(presentation.map(({ barRatio }) => barRatio), [1, 0.5]);
   assert.equal(presentation[0]?.medianEvPercent.displayValue, "-2.30%");
@@ -147,7 +221,7 @@ test("overview medians propagate selective EV tones", () => {
     medianPackScoutEvPercent: { status: "available", basisPoints: -1_000 },
     highestChaseValueUsdMinor: null,
     highConfidenceRepacks: 0,
-  });
+  }, "packscout");
   const summaries = presentCatalogSummaries([
     {
       key: "collector_crypt",
@@ -155,7 +229,7 @@ test("overview medians propagate selective EV tones", () => {
       repackCount: 1,
       medianPackScoutEvPercent: { status: "available", basisPoints: -500 },
     },
-  ]);
+  ], [{ key: "collector_crypt", source: "packscout" }]);
 
   assert.equal(kpis[1]?.state, "negative");
   assert.equal(kpis[1]?.tone, "warning");

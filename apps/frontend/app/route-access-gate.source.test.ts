@@ -19,12 +19,16 @@ const rootSource = source("./page.tsx");
 const packsSource = source("./packs/page.tsx");
 const learnSource = source("./learn/page.tsx");
 const learnArticleSource = source("./learn/[slug]/page.tsx");
+const watchlistSource = source("./watchlist/page.tsx");
 const accessSource = source("./access/page.tsx");
 const layoutSource = source("./layout.tsx");
 const robotsSource = source("./robots.ts");
 const searchRouteSource = source("./api/collectibles/search/route.ts");
 const chaseRepacksRouteSource = source(
   "./api/collectibles/[publicCollectibleId]/repacks/route.ts",
+);
+const packDetailRouteSource = source(
+  "./api/repacks/[publicRepackId]/route.ts",
 );
 const rootLoadingSource = source("./loading.tsx");
 const healthRouteSource = source("./api/health/route.ts");
@@ -43,6 +47,11 @@ test("every gated page resolves access before any catalog read", () => {
     [
       "learn article",
       learnArticleSource,
+      "readPublicCatalogRecordUpdateStatus(",
+    ],
+    [
+      "watchlist",
+      watchlistSource,
       "readPublicCatalogRecordUpdateStatus(",
     ],
   ] as const) {
@@ -103,6 +112,19 @@ test("gated surfaces carry the decision-driven robots metadata", () => {
   }
 });
 
+test("Watchlist stays a personal destination: signed-out visitors render, crawlers never index it", () => {
+  const body = defaultExportBody(watchlistSource);
+  assert.match(body, /resolveWatchlistRoute\(access\)/);
+  assert.equal(watchlistSource.includes("resolveGatedRoute"), false);
+  assert.match(watchlistSource, /robots: PERSONAL_SURFACE_ROBOTS/);
+  assert.equal(watchlistSource.includes("gatedSurfaceRobots"), false);
+  assert.match(body, /<ShellSurfaceReporter mode=\{surface\} \/>/);
+  assert.match(
+    body,
+    /completeSignInHandoff=\{access\.outcome === "signed_out"\}/,
+  );
+});
+
 test("the robots surface serves the fail-closed policy dynamically", () => {
   assert.match(robotsSource, /robotsPolicyForGateStatus\(await readGateStatusForRequest\(\)\)/);
   assert.match(robotsSource, /export const dynamic = "force-dynamic";/);
@@ -116,6 +138,10 @@ test("catalog search is guarded before its handler and the health probe stays op
   assert.match(
     chaseRepacksRouteSource,
     /createAccessGuardedHandler\(\s*resolveVisitorAccessForRequest,\s*createDesiredCollectibleRepacksHandler\(readRepacksByDesiredCollectible\),?\s*\)/,
+  );
+  assert.match(
+    packDetailRouteSource,
+    /createAccessGuardedHandler\(\s*resolveVisitorAccessForRequest,\s*createPublicRepackDetailHandler\(readPublicShellStatus,\s*readPublicRepack\),?\s*\)/,
   );
   assert.equal(healthRouteSource.includes("resolveVisitorAccess"), false);
   assert.equal(healthRouteSource.includes("cookies"), false);
@@ -259,10 +285,12 @@ test("every caller of a credentialed catalog read resolves access first", () => 
     "packs/page.tsx",
     "learn/page.tsx",
     "learn/[slug]/page.tsx",
+    "watchlist/page.tsx",
     "not-found.tsx",
     "learn/[slug]/not-found.tsx",
     "api/collectibles/search/route.ts",
     "api/collectibles/[publicCollectibleId]/repacks/route.ts",
+    "api/repacks/[publicRepackId]/route.ts",
   ]) {
     assert.ok(callers.includes(expected), `${expected} was enumerated`);
   }

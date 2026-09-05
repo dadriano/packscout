@@ -18,7 +18,14 @@ export interface ProviderResolvedFactReferences {
 }
 
 export const PROVIDER_FACT_REFERENCE_TARGET_BATCH = 250;
-const FACT_REFERENCE_RECONCILIATION_LIMIT = 500;
+// Rows resolved per relationship per batch. Each batch is its own bounded
+// transaction, so this bounds one UPDATE, not the scan. Measured on the largest
+// provider database (Collector Crypt, 2026-09-04): a 5,000-row batch costs 11 s
+// median and 25 s mean, dominated by random heap page reads from the Neon
+// pageserver rather than the ~4 s of fixed round trips first assumed, so the
+// 7.2M-row backlog took ~1,440 batches and about 13 hours of head
+// reconciliation, during which the run commits no source pages.
+export const FACT_REFERENCE_RECONCILIATION_LIMIT = 5_000;
 type QueryClient = Pick<ProviderQueryClient, "$queryRaw">;
 type Target = Readonly<{ id: string; key: string }>;
 type Position = ProviderFactReferenceScanCursor["packs"];

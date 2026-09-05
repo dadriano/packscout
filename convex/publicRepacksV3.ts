@@ -11,6 +11,7 @@ import {
   publicReadError,
   publicRepackListPageV3Schema,
   publicRepackDetailV3Schema,
+  publicRepackChaseSchema,
   publicShellStatusV3Schema,
   publicRepackViewDetailV3Schema,
   unavailableRepackHeat,
@@ -19,6 +20,7 @@ import {
   publicRepackViewSummaryV3FromDetail,
   searchPublicCollectiblesInputSchema,
   type DashboardKpis,
+  type DisplayedEvMedianSource,
   type DataReleaseV3Identity,
   type ListPublicRepacksInput,
   type PublicCollectible,
@@ -31,7 +33,7 @@ import {
 } from "@packscout/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   action,
   internalQuery,
@@ -53,6 +55,7 @@ import {
 } from "./dataReleaseV3Search";
 import { evFactsFromDetail, type DataReleaseV3EvFacts } from "./dataReleaseV3EvFacts";
 import { loadDataReleaseV3DisplayedRepacks } from "./dataReleaseV3DisplayedRepacks";
+import { medianDisplayedEvPercent, type DisplayedEvMedianContext } from "./dataReleaseV3DisplayedEvMedian";
 import { usesLegacyEvSnapshot } from "./dataReleaseV3EvMigrationState";
 import { loadRetainedEvPointer } from "./dataReleaseV3RetainedEv";
 import {
@@ -87,7 +90,7 @@ import {
  * heat state rather than borrowing a v2-aligned signal.
  */
 
-const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
+export const MAX_DESIRED_CHASES_PER_COLLECTIBLE = 512;
 
 type Success<T> = { readonly ok: true; readonly data: T };
 type PublicResult<T> = Success<T> | PublicReadError;
@@ -139,7 +142,7 @@ export type ActiveDataReleaseV3 = Readonly<{
   }>[];
 }>;
 
-async function loadActiveDataReleaseV3(
+export async function loadActiveDataReleaseV3(
   ctx: QueryCtx,
   currentTime?: number,
 ): Promise<ActiveDataReleaseV3 | null> {
@@ -497,31 +500,6 @@ function compareRows(
   return compareText(left.publicRepackId, right.publicRepackId);
 }
 
-function medianPackScoutEvPercent(
-  rows: readonly DataReleaseV3SearchRow[],
-): DashboardKpis["medianPackScoutEvPercent"] {
-  const values = rows
-    .flatMap((row) =>
-      row.packScoutEvPercentBasisPoints === null
-        ? []
-        : [row.packScoutEvPercentBasisPoints],
-    )
-    .sort((left, right) => left - right);
-  if (values.length === 0) {
-    return {
-      status: "unavailable",
-      basisPoints: null,
-      reason: "ESTIMATE_UNAVAILABLE",
-    };
-  }
-  const middle = Math.floor(values.length / 2);
-  const basisPoints =
-    values.length % 2 === 1
-      ? values[middle]!
-      : Math.round((values[middle - 1]! + values[middle]!) / 2);
-  return { status: "available", basisPoints };
-}
-
 function purchasableRepackRows(
   rows: readonly DataReleaseV3SearchRow[],
 ): DataReleaseV3SearchRow[] {
@@ -535,14 +513,16 @@ function purchasableRepackRows(
  * counts the catalog the filters matched, and all four states stay
  * discoverable there.
  */
-function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
+function dashboardKpis(rows: readonly DataReleaseV3SearchRow[], context: DisplayedEvMedianContext):
+  Readonly<{ kpis: DashboardKpis; source: DisplayedEvMedianSource | null }> {
   const purchasableRows = purchasableRepackRows(rows);
   const chaseValues = purchasableRows.flatMap((row) =>
     row.topChaseValueMinor === null ? [] : [row.topChaseValueMinor],
   );
-  return {
+  const median = medianDisplayedEvPercent(purchasableRows, context);
+  return { source: median.source, kpis: {
     totalRepacks: rows.length,
-    medianPackScoutEvPercent: medianPackScoutEvPercent(purchasableRows),
+    medianPackScoutEvPercent: median.metric,
     highestChaseValueUsdMinor:
       chaseValues.length === 0 ? null : Math.max(...chaseValues),
     highConfidenceRepacks: purchasableRows.filter(
@@ -550,12 +530,13 @@ function dashboardKpis(rows: readonly DataReleaseV3SearchRow[]): DashboardKpis {
         row.packScoutConfidenceBasisPoints !== null &&
         row.packScoutConfidenceBasisPoints >= 8_000,
     ).length,
-  };
+  } };
 }
 
 function repackSummaries(
   rows: readonly DataReleaseV3SearchRow[],
   group: "vendor" | "category",
+  context: DisplayedEvMedianContext,
 ) {
   const groups = new Map<
     string,
@@ -579,20 +560,24 @@ function repackSummaries(
       }
     });
   }
-  return [...groups]
-    .map(([key, value]) => ({
-      key,
-      label: value.label,
-      repackCount: value.rows.length,
-      medianPackScoutEvPercent: medianPackScoutEvPercent(
-        purchasableRepackRows(value.rows),
-      ),
-    }))
+  const summaries = [...groups]
+    .map(([key, value]) => {
+      const median = medianDisplayedEvPercent(purchasableRepackRows(value.rows), context);
+      return {
+        key,
+        label: value.label,
+        repackCount: value.rows.length,
+        medianPackScoutEvPercent: median.metric,
+        source: median.source,
+      };
+    })
     .sort(
       (left, right) =>
         right.repackCount - left.repackCount || left.key.localeCompare(right.key),
     )
     .slice(0, 5);
+  return { groups: summaries.map(({ source: _source, ...group }) => group),
+    sources: summaries.map(({ key, source }) => ({ key, source })) };
 }
 
 function contextualFacets(
@@ -717,9 +702,11 @@ function collectibleDisplay(detail: PublicCollectible) {
   };
 }
 
-async function loadDesiredChases(
+export async function loadDesiredChases(
   ctx: QueryCtx,
-  release: ActiveDataReleaseV3,
+  release: Readonly<{
+    releaseDocument: Readonly<{ _id: Id<"dataReleaseV3Releases"> }>;
+  }>,
   publicCollectibleId: string,
 ): Promise<ReadonlyMap<string, PublicRepackChase> | null> {
   const chases = await ctx.db
@@ -733,8 +720,18 @@ async function loadDesiredChases(
   if (chases.length > MAX_DESIRED_CHASES_PER_COLLECTIBLE) return null;
   const byRepack = new Map<string, PublicRepackChase>();
   for (const chase of chases) {
-    if (byRepack.has(chase.publicRepackId)) return null;
-    byRepack.set(chase.publicRepackId, chase.detail as PublicRepackChase);
+    if (
+      chase.publicRepackId !== chase.detail.publicRepackId ||
+      chase.publicCollectibleId !== chase.detail.publicCollectibleId ||
+      chase.publicCollectibleId !== publicCollectibleId
+    ) {
+      return null;
+    }
+    const parsed = publicRepackChaseSchema.safeParse(chase.detail);
+    if (!parsed.success || byRepack.has(parsed.data.publicRepackId)) {
+      return null;
+    }
+    byRepack.set(parsed.data.publicRepackId, parsed.data);
   }
   return byRepack;
 }
@@ -881,22 +878,23 @@ export const getDashboardBundleV3AtTime = internalQuery({
     const matchingRows = allRows.filter((row) =>
       rowMatchesFilters(row, request.filters),
     );
-    // Opportunities are actionable buys: only available repacks with a
-    // last-known PackScout estimate rank, by signed EV dollars
-    // descending. Sold-out, unavailable, and unknown packs stay visible in the
-    // catalog and never rank here.
+    // Use the same displayed EV source for eligibility and sorting as All
+    // Repacks, without making non-purchasable or frozen history actionable.
     const opportunityRows = [...matchingRows]
       .filter(
         (row) =>
           packIsPurchasable(row.availability) &&
-          row.packScoutEvDollarsMinor !== null,
+          displayedEvMetricFromDataReleaseV3SearchRow(
+            row, "packScoutEvDollarsMinor", active.evByPublicId.get(row.publicRepackId),
+            active.legacyEvSnapshot,
+          ) !== null,
       )
       .sort((left, right) =>
         compareRows(left, right, {
           search: "",
           sort: "packscout_ev_dollars",
           direction: "desc",
-        }),
+        }, active.evByPublicId, active.legacyEvSnapshot),
       )
       .slice(0, 6);
     const details = await hydrateRepackViews(ctx, active, opportunityRows, health);
@@ -917,11 +915,14 @@ export const getDashboardBundleV3AtTime = internalQuery({
       selectedRepack,
     });
     if (!bundle.success) return publicReadError("RELEASE_UNAVAILABLE");
-    return success({
+    const kpis = dashboardKpis(matchingRows, active);
+    const vendors = repackSummaries(matchingRows, "vendor", active);
+    const categories = repackSummaries(matchingRows, "category", active);
+    return { ...success({
       ...bundle.data,
-      kpis: dashboardKpis(matchingRows),
-      vendorSummaries: repackSummaries(matchingRows, "vendor"),
-      categorySummaries: repackSummaries(matchingRows, "category"),
+      kpis: kpis.kpis,
+      vendorSummaries: vendors.groups,
+      categorySummaries: categories.groups,
       facets: contextualFacets(
         allRows,
         allRows,
@@ -930,7 +931,7 @@ export const getDashboardBundleV3AtTime = internalQuery({
         active.categoryByPublicId,
       ),
       activeFilters: request.filters,
-    });
+    }), evMedianSources: { overall: kpis.source, vendors: vendors.sources, categories: categories.sources } };
   },
 });
 

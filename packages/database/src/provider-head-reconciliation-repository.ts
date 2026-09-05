@@ -32,8 +32,16 @@ async function retainPosition(tx: ProviderTransactionClient, state: Progress, sc
 /** One bounded head batch per transaction, with its continuation committed alongside fact promotions. */
 export class PrismaProviderHeadReconciliationRepository {
   constructor(private readonly database: ProviderPrismaClient) {}
-  async step(input: { runId: string; workerId: string; workerFence: bigint }): Promise<"progress" | "complete" | "lease_lost" | "run_not_ready"> {
+  async step(input: { runId: string; workerId: string; workerFence: bigint;
+    /** The execution mode's transaction budget; a head batch is bounded work, but it
+     * runs over the same remote round trips and lock waits as a page commit. */
+    timeoutMilliseconds?: number;
+  }): Promise<"progress" | "complete" | "lease_lost" | "run_not_ready"> {
     if (!uuid.test(input.runId)) return invalid();
+    const timeout = input.timeoutMilliseconds ?? 30_000;
+    if (!Number.isSafeInteger(timeout) || timeout < 1_000 || timeout > 480_000) {
+      throw new RangeError("The provider head reconciliation transaction budget is invalid.");
+    }
     return this.database.$transaction(async tx => {
       const lease = await lockProviderWorkerLease(tx, "import");
       if (!providerWorkerLeaseIsLive(lease, { owner: input.workerId, fence: input.workerFence })) return "lease_lost";
@@ -90,6 +98,6 @@ export class PrismaProviderHeadReconciliationRepository {
       await appendProviderLocalAudit(tx, { correlationId: randomUUID(), action: PROVIDER_HEAD_RECONCILIATION_ACTION,
         targetType: "provider_run", targetId: input.runId, outcome: "success", details: { ...state }, occurredAt: new Date() });
       return state.phase === "complete" ? "complete" : "progress";
-    }, { maxWait: 5_000, timeout: 30_000, isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }, { maxWait: 5_000, timeout, isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 }

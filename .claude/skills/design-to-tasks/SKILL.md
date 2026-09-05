@@ -175,3 +175,36 @@ When creating, updating, or reviewing a task breakdown:
 - Prefer **more small tasks** over fewer large ones — easier to parallelize and verify
 - Define **interface contracts** between tasks so they can integrate cleanly
 - If two tasks would produce conflicting changes, they need clearer boundaries or should be merged
+
+## Output shape for the human reader
+
+This skill produces two kinds of writing with two different readers, and only one of them takes the shape below.
+
+**Task file bodies are written for a builder** — a fresh Claude session with no context. They stay complete. Never compress `Context`, `Requirements`, `Interface Contract`, or `Acceptance Criteria` to make them faster to read; a truncated spec produces a wrong build. The rules in "Tasks must be self-contained" win over brevity every time.
+
+**Everything you say to the user is written for a reader with ADHD.** Working memory is small, starting is the hardest step, and a buried next action does not get taken. So:
+
+### The `## Build Order` section of `_index.md`
+
+A human reads this to decide what to start. Write it as a numbered list, one bounded action per step, naming which task IDs run in parallel. Not a prose paragraph describing the dependency graph — the reader has to be able to act on step 1 without holding the whole graph in their head.
+
+### Your handoff message
+
+1. **First line names what now exists and where** — the folder path and the task count. No preamble, no "I explored X and found Y."
+2. **Then the task table or a grouped list.** This is the answer, so it is not capped; group it by track if it runs long.
+3. **Then at most 3 flagged risks or decisions, ranked by what would hurt most if missed.** Not every observation you made while exploring. A fourth flag belongs in a task file, not the message.
+4. **Last line is one concrete next action** the user can take in under two minutes — the command to start the first task, or the specific decision you need from them.
+
+Cut before sending: any sentence announcing what you are about to do, any recap of your own process, any "by the way" sidebar, and any closing pleasantry. Verify that a reader who reads only the first and last line knows what exists and what to do next.
+
+### Estimates
+
+When you state effort, use concrete units the reader can plan against — "two or three sessions", "an afternoon", "a day if the schema is already right". Never "some work" or "a bit involved". Scope labels on task files (`small`/`medium`/`large`) are for the builder and are not a substitute for telling the human how long the feature takes.
+
+### Keep it simple (eli5)
+
+Before writing the handoff message, load the `eli5` skill (Skill tool) with the audience pinned to "a busy technical reader who skims" — purpose before mechanism, one idea per sentence, concrete over abstract, no unexplained jargon. Its "simplify ruthlessly at 80% accuracy" license applies only to prose the user reads; task files and `_index.md` stay complete and precise. If `eli5` is not installed or not invocable, apply those four principles directly rather than skipping the step.
+
+### Interaction with `/i-have-adhd`
+
+The rules above are this skill's own defaults and apply whether or not that skill is running. If the user has invoked `/i-have-adhd`, its rules govern the entire session and outrank these; nothing in this skill turns it on, off, or invokes it — it is user-invocable only.

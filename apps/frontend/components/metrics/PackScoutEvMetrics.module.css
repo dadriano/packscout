@@ -78,9 +78,32 @@
   font-size: 0.72rem;
 }
 
-.confidenceLabel {
+.confidenceTrigger {
   display: inline-flex;
   align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: help;
+  font: inherit;
+  padding: 0.2rem 0;
+}
+
+.confidenceTrigger:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+  border-radius: 0.15rem;
+}
+
+.hintMark {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  font: italic 700 0.65rem ui-serif, Georgia, serif;
 }
 
 .confidence strong {
@@ -103,58 +126,6 @@
 
 .confidence[data-tone="unavailable"] strong {
   color: var(--color-status-neutral);
-}
-
-.note,
-.reason {
-  margin: 0;
-  border-inline-start: 2px solid var(--color-status-neutral);
-  color: var(--color-text-muted);
-  font-size: 0.76rem;
-  line-height: 1.45;
-  padding-inline-start: 0.65rem;
-}
-
-.freshness {
-  display: grid;
-  gap: 0.45rem;
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
-  line-height: 1.45;
-}
-
-.sourceAge {
-  margin: 0;
-}
-
-.sourceAge[data-delayed="true"] {
-  color: var(--color-text);
-  font-weight: 620;
-}
-
-.freshnessList {
-  display: grid;
-  margin: 0;
-  gap: 0.2rem;
-}
-
-.freshnessRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-
-.freshnessRow dt,
-.freshnessRow dd {
-  margin: 0;
-}
-
-.freshnessRow dd {
-  color: var(--color-text);
-  font-variant-numeric: tabular-nums;
-  text-align: end;
-  white-space: nowrap;
 }
 
 .provenance {

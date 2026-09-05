@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./test-fixtures/dataforrest-events-v1": "./src/__fixtures__/dataforest-events-v1.fixture.ts"
+    "./test-fixtures/dataforrest-events-v1": "./src/__fixtures__/dataforest-events-v1.fixture.ts",
+    "./test-fixtures/pack-catalog-v1": "./src/pack-catalog-fixtures.ts"
   },
   "scripts": {
     "lint": "eslint src",

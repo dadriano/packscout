@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import net from "node:net";
-import test from "node:test";
-import { tsImport } from "tsx/esm/api";
+import test, { after } from "node:test";
+import { register } from "tsx/esm/api";
+const loader = register({ namespace: import.meta.url });
+const tsImport = loader.import;
+after(() => loader.unregister());
 const policy = await tsImport("./provider-continuous-policy.mts", import.meta.url);
 const cadencePolicy = await tsImport("./provider-continuous-cadence.mts", import.meta.url);
 const postHeadPolicy = await tsImport("./provider-continuous-post-head-policy.mts", import.meta.url);
@@ -10,6 +13,7 @@ const { withContinuousResidency, claimContinuousResidency, continuousResidencyPo
 const { assertLocalBackfillDestination, localBackfillProviderPorts } = await tsImport("./provider-backfill-supervisor-authority.mts", import.meta.url);
 const { dataforrestContinuation } = await tsImport("@packscout/contracts", import.meta.url);
 const { parseContinuousArguments } = await tsImport("./run-provider-continuous-poller.mts", import.meta.url);
+const { ProviderBackfillSupervisorError } = policy;
 const { ContinuousReadUnavailableError } = policy;
 const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
@@ -256,8 +260,22 @@ test("exclusive resident collision prevents launch and health exposes safe proce
     await assert.rejects(withContinuousResidency(pins, () => ({ state: "waiting" }), async () => { launched = true; }, owner.port), /ALREADY_OWNED/);
     assert.equal(launched, false);
     const health = await new Promise((resolve, reject) => {
-      const socket = net.connect({ host: "127.0.0.1", port: owner.port }); let data = "";
-      socket.on("data", chunk => { data += chunk; }); socket.once("end", () => resolve(JSON.parse(data))); socket.once("error", reject);
+      const socket = net.connect({ host: "127.0.0.1", port: owner.port }); let data = ""; let settled = false;
+      socket.on("data", chunk => {
+        data += chunk;
+        const newline = data.indexOf("\n");
+        if (settled || newline === -1) return;
+        settled = true;
+        socket.destroy();
+        try { resolve(JSON.parse(data.slice(0, newline))); } catch (error) { reject(error); }
+      });
+      socket.setTimeout(1000, () => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        reject(new Error("CONTINUOUS_HEALTH_TIMEOUT"));
+      });
+      socket.once("error", error => { if (!settled) { settled = true; reject(error); } });
     });
     assert.equal(health.pid, process.pid); assert.equal(health.operationId, pins.operationId); assert.equal(health.state, "waiting");
   } finally { await owner.close(); }
@@ -281,4 +299,40 @@ test("all four isolated destinations are exact, legacy/cross-provider routes and
   assert.throws(() => parseContinuousArguments(["--run", "--await-initial-run",
     ...keys.flatMap((key, index) => [`--${key}`, values[index]])]));
   assert.throws(() => parseContinuousArguments([...args, "--reset-cursor"]));
+});
+test("provider-database refusal during a cycle waits with backoff and re-executes the same queued cycle", async () => {
+  const unavailable = () => new ProviderBackfillSupervisorError(policy.providerUnavailableRefusalCode);
+  assert.equal(policy.isProviderUnavailableRefusal(unavailable()), true, "test errors must share the supervisor's module identity");
+  const v = fixture(); let executions = 0; const waits = []; const events = []; const stop = new AbortController();
+  await policy.superviseContinuousProvider({ pins, read: async () => v,
+    persist: async view => { v.cycle = policy.makeContinuousCycle(view, pins); v.cycleQueued = false; },
+    queue: async cycle => { v.cycleQueued = true; v.snapshot.run = { ...v.snapshot.run, id: cycle.runId,
+      state: "queued", reachedHead: false, requestedHash: cycle.checkpointHash }; v.snapshot.activeRunIds = [cycle.runId]; },
+    execute: async () => { if (++executions <= 2) throw unavailable();
+      v.snapshot.run.state = "succeeded"; v.snapshot.run.reachedHead = true; v.snapshot.run.finishedAt = new Date(v.snapshot.now);
+      v.snapshot.activeRunIds = []; stop.abort(); return "head"; },
+    wait: async ms => { waits.push(ms); v.snapshot.now = new Date(v.snapshot.now.getTime() + ms); },
+    emit: event => { events.push(event); if (events.length > 10) stop.abort(); },
+  }, stop.signal);
+  assert.equal(executions, 3, JSON.stringify(events)); assert.deepEqual(waits, [15000, 30000]);
+  assert.deepEqual(events.map(event => event.state), ["due", "queue", "execute", "provider_unavailable", "execute",
+    "provider_unavailable", "execute", "stopped"], "the queued cycle is re-executed, never re-persisted or re-queued");
+  assert.deepEqual(events.filter(event => event.state === "provider_unavailable").map(event => event.retry), [1, 2]);
+
+  // The bound still holds: a refusal that never clears latches under the same code.
+  const w = fixture(); w.cycle = policy.makeContinuousCycle(w, pins); w.cycleQueued = true;
+  w.snapshot.run = { ...w.snapshot.run, id: w.cycle.runId, state: "queued", reachedHead: false, requestedHash: w.cycle.checkpointHash };
+  w.snapshot.activeRunIds = [w.cycle.runId];
+  const halt = new AbortController(); let launches = 0; const states = [];
+  await policy.superviseContinuousProvider({ pins, read: async () => w, persist: async () => assert.fail(), queue: async () => assert.fail(),
+    execute: async () => { launches++; throw unavailable(); },
+    wait: async () => { if (states.filter(event => event.state === "blocked").length === 2) halt.abort(); },
+    emit: event => { states.push(event); if (states.length > 60) halt.abort(); },
+  }, halt.signal);
+  assert.equal(launches, policy.providerUnavailableRetryLimit + 1);
+  assert.equal(states.filter(event => event.state === "provider_unavailable").length, policy.providerUnavailableRetryLimit);
+  assert.equal(states.find(event => event.state === "blocked").code, policy.providerUnavailableRefusalCode);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 24].map(policy.providerUnavailableWaitMilliseconds),
+    [15000, 30000, 60000, 120000, 240000, 300000, 300000, 300000]);
+  for (const count of [0, -1, 1.5, NaN, Infinity]) assert.throws(() => policy.providerUnavailableWaitMilliseconds(count), /RETRY_COUNT_INVALID/);
 });

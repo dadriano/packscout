@@ -10,6 +10,8 @@ export interface ContinuousHealth {
   runId?: string;
   nextDueAt?: string;
   code?: string;
+  /** Consecutive bounded retries of a provider-database refusal, when in that state. */
+  retry?: number;
   cadence?: ContinuousCadence;
   effectiveIntervalSeconds?: number;
   postHeadPolicy?: ContinuousPostHeadPolicy;

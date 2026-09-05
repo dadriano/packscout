@@ -370,6 +370,39 @@ deciding people, revoking access, what an unadmitted party can still observe,
 and opening the product to the public with one switch — are documented in
 [docs/closed-beta-operations.md](docs/closed-beta-operations.md).
 
+### Local catalog access bypass
+
+For a UI polish session without signing in, add this server-only flag to the
+ignored `apps/frontend/.env.development.local` file:
+
+```dotenv
+PACKSCOUT_LOCAL_ACCESS_BYPASS=1
+```
+
+Start the development server with an explicit loopback listener:
+
+```bash
+PACKSCOUT_FRONTEND_HOST=127.0.0.1 PACKSCOUT_FRONTEND_PORT=5199 npm run dev:frontend
+```
+
+The bypass requires `NODE_ENV=development` (set by `next dev`), an explicit
+loopback `PACKSCOUT_FRONTEND_HOST`, and a loopback request host. Production
+builds, public hosts, wildcard listeners, and any flag value other than `1`
+keep the normal access gate. Remove the flag or set it to `0` to test login
+and beta admission again. Do not prefix it with `NEXT_PUBLIC_`.
+
+This opens the dashboard, packs, guides, and catalog GET/HEAD routes. It does
+not create a user session, grant account capabilities, or change the Convex
+beta switch. Watchlist saves and other account actions still need sign-in.
+Closed-beta catalog data still requires the existing server-only
+`PACKSCOUT_CATALOG_READ_TOKEN` for the configured deployment.
+
+Acceptance coverage: `apps/frontend/lib/local-access-bypass.server.test.ts`
+automates the enabled preview, disabled/production/non-loopback refusals,
+per-request rechecking, noindex metadata, and write-handler refusal. Browser
+smoke checks cover dashboard and packs rendering while signed out, plus the
+Watchlist sign-in prompt.
+
 ### Transactional email
 
 Operational alerts, beta access decisions, the welcome message, and the

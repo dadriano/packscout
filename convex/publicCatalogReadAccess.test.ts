@@ -216,6 +216,57 @@ const OPEN_PUBLIC_QUERIES: Readonly<Record<string, string>> = Object.freeze({
     "the authenticated saved-items capability; admission enforcement on it " +
     "belongs to closed-beta-access/004 and it returns only the caller's own " +
     "references",
+  "savedItems.getOwnerWatchlist":
+    "the authenticated owner Watchlist action; Convex mints the evaluation " +
+    "clock, it is save-gated (same standing policy as saving), and it returns " +
+    "only the caller's own saved collections",
+  "packCatalogSavedItems.getSavedItemIds":
+    "the pack_catalog_v1 twin of the saved-items read (pack-version-publication/005); " +
+    "it passes the same admission gate, returns only the caller's own stable " +
+    "identities, and stays dormant until P07 switches the frontend",
+});
+
+/**
+ * The pack_catalog_v1 reads (pack-version-publication/005). They run the same
+ * two-caller gate as the V3 reads but refuse with the V1 contract's own
+ * non-leaking result, so they are enumerated and exercised as their own group.
+ */
+const GATED_V1_CATALOG_QUERIES = [
+  "packCatalogV1.getPublicShellStatus",
+  "packCatalogV1.getDashboardBundle",
+  "packCatalogV1.listPublicPacks",
+  "packCatalogV1.getPublicPack",
+  "packCatalogV1.searchPublicCollectibles",
+  "packCatalogV1.findPacksByDesiredCollectible",
+] as const;
+type GatedV1CatalogQuery = (typeof GATED_V1_CATALOG_QUERIES)[number];
+const V1_ACCESS_REFUSAL = {
+  ok: false,
+  code: "CATALOG_UNAVAILABLE",
+  error: "The catalog is unavailable.",
+  retryable: true,
+};
+const V1_QUERY_INVOCATIONS: Readonly<
+  Record<GatedV1CatalogQuery, (reader: CatalogReader, extra: ExtraCatalogArgs) => Promise<unknown>>
+> = Object.freeze({
+  "packCatalogV1.getPublicShellStatus": (reader, extra) =>
+    reader.action(api.packCatalogV1.getPublicShellStatus, { ...extra }),
+  "packCatalogV1.getDashboardBundle": (reader, extra) =>
+    reader.action(api.packCatalogV1.getDashboardBundle, { ...extra }),
+  "packCatalogV1.listPublicPacks": (reader, extra) =>
+    reader.action(api.packCatalogV1.listPublicPacks, { ...extra }),
+  "packCatalogV1.getPublicPack": (reader, extra) =>
+    reader.action(api.packCatalogV1.getPublicPack, {
+      request: { publicRepackId: "30000000-0000-4000-8000-000000000001" },
+      ...extra,
+    }),
+  "packCatalogV1.searchPublicCollectibles": (reader, extra) =>
+    reader.action(api.packCatalogV1.searchPublicCollectibles, { request: { query: "charizard" }, ...extra }),
+  "packCatalogV1.findPacksByDesiredCollectible": (reader, extra) =>
+    reader.action(api.packCatalogV1.findPacksByDesiredCollectible, {
+      request: { publicCollectibleId: "40000000-0000-4000-8000-000000000001" },
+      ...extra,
+    }),
 });
 
 /**
@@ -259,9 +310,11 @@ function discoverPublicQueryExports(): ReadonlySet<string> {
       );
     }
     const moduleName = path.replace(/^\.\//u, "").replace(/\.ts$/u, "");
-    const registrationPattern = path.endsWith("/publicRepacksV3.ts")
-      ? /^export const (\w+) = (?:query|action)\(\{/gmu
-      : /^export const (\w+) = query\(\{/gmu;
+    const registrationPattern =
+      path.endsWith("/publicRepacksV3.ts") || path.endsWith("/savedItems.ts") ||
+        path.endsWith("/packCatalogV1.ts")
+        ? /^export const (\w+) = (?:query|action)\(\{/gmu
+        : /^export const (\w+) = query\(\{/gmu;
     for (const match of source.matchAll(registrationPattern)) {
       discovered.add(`${moduleName}.${match[1]!}`);
     }
@@ -376,12 +429,16 @@ describe("catalog read-model enumeration", () => {
     const discovered = discoverPublicQueryExports();
     const classified = new Set<string>([
       ...GATED_CATALOG_QUERIES,
+      ...GATED_V1_CATALOG_QUERIES,
       ...Object.keys(OPEN_PUBLIC_QUERIES),
     ]);
     expect(
       classified.size,
       "a query must be either gated or open-by-design, never both",
-    ).toBe(GATED_CATALOG_QUERIES.length + Object.keys(OPEN_PUBLIC_QUERIES).length);
+    ).toBe(
+      GATED_CATALOG_QUERIES.length + GATED_V1_CATALOG_QUERIES.length +
+        Object.keys(OPEN_PUBLIC_QUERIES).length,
+    );
     expect([...discovered].sort()).toEqual([...classified].sort());
     for (const reason of Object.values(OPEN_PUBLIC_QUERIES)) {
       expect(reason.length).toBeGreaterThan(20);
@@ -430,6 +487,36 @@ describe("catalog read-model enumeration", () => {
     const admitted = await establishReader(t, "approved");
     for (const name of GATED_CATALOG_QUERIES) {
       expectServed(name, await CATALOG_QUERY_INVOCATIONS[name](admitted, seeded, {}));
+    }
+  });
+
+  test("while the beta is on, no pack_catalog_v1 read is reachable without one of the two admitted callers", async () => {
+    stubLocalRuntime();
+    vi.stubEnv("PACKSCOUT_PUBLIC_CURSOR_HMAC_KEY", "pack-catalog-v1-cursor-signing-key-0001");
+    const t = createTest();
+    const servedByV1 = (name: string, result: unknown) => {
+      expect(result, `${name} should answer an admitted caller with its own contract result`).not.toEqual(V1_ACCESS_REFUSAL);
+      expect((result as { code?: unknown }).code, name).not.toBe("CATALOG_UNAVAILABLE");
+    };
+    const refusedByV1 = (name: string, result: unknown) => {
+      expect(result, `${name} should refuse with the V1 non-leaking unavailable result`).toEqual(V1_ACCESS_REFUSAL);
+    };
+    for (const name of GATED_V1_CATALOG_QUERIES) {
+      servedByV1(name, await V1_QUERY_INVOCATIONS[name](t, {}));
+    }
+    closeBeta();
+    configureCredential(CATALOG_READ_TOKEN);
+    const awaiting = await establishReader(t, "awaiting_review");
+    for (const name of GATED_V1_CATALOG_QUERIES) {
+      const invoke = V1_QUERY_INVOCATIONS[name];
+      refusedByV1(name, await invoke(t, {}));
+      refusedByV1(name, await invoke(t, { catalogReadToken: WRONG_TOKEN_SAME_LENGTH }));
+      refusedByV1(name, await invoke(awaiting, {}));
+      servedByV1(name, await invoke(t, { catalogReadToken: CATALOG_READ_TOKEN }));
+    }
+    const admitted = await establishReader(t, "approved");
+    for (const name of GATED_V1_CATALOG_QUERIES) {
+      servedByV1(name, await V1_QUERY_INVOCATIONS[name](admitted, {}));
     }
   });
 });

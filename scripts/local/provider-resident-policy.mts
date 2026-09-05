@@ -3,7 +3,10 @@ import { classifyBackfillCheckpoint, refuseBackfill,
 import { backfillHasOwnedExpiredHeadLease, type BackfillView } from "./provider-backfill-supervisor.mts";
 import { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
 export { ContinuousReadUnavailableError } from "./provider-continuous-read.mts";
-import { continuousObservationMilliseconds } from "./provider-continuous-policy.mts";
+export { ProviderBackfillSupervisorError };
+import { continuousObservationMilliseconds, isProviderUnavailableRefusal, ProviderBackfillSupervisorError,
+  providerUnavailableRetryLimit,
+  providerUnavailableWaitMilliseconds } from "./provider-continuous-policy.mts";
 import { residentContinuousPins, type ResidentBootstrapView, type ResidentHandoff } from "./provider-resident-handoff.mts";
 import type { ContinuousHealth } from "./provider-continuous-residency.mts";
 import { residentFailureCode } from "./provider-resident-errors.mts";
@@ -16,9 +19,11 @@ export interface ResidentBootstrapPort {
   emit(event: ContinuousHealth): void;
 }
 /** A backfill reaches head once, then its immutable handoff anchors all future
- * cycles. Errors from writes/execution latch; only typed read outages retry. */
+ * cycles. Errors from writes/execution latch; only typed read outages and the
+ * bounded provider-database refusal retry. */
 export async function superviseResidentBootstrap(port: ResidentBootstrapPort, signal: AbortSignal): Promise<BackfillPins | null> {
   let blocked: string | null = null;
+  let unavailable = 0;
   while (!signal.aborted) {
     let reading = true;
     try {
@@ -59,9 +64,13 @@ export async function superviseResidentBootstrap(port: ResidentBootstrapPort, si
         const after = await port.read();
         if (after.backfill?.snapshot.state !== "paused") break;
       }
+      unavailable = 0;
     } catch (error) {
       if (reading && error instanceof ContinuousReadUnavailableError) {
         port.emit({ state: blocked === null ? "read_unavailable" : "blocked", code: blocked ?? error.code });
+      } else if (blocked === null && isProviderUnavailableRefusal(error) && ++unavailable <= providerUnavailableRetryLimit) {
+        port.emit({ state: "provider_unavailable", code: error.code, retry: unavailable });
+        await port.wait(providerUnavailableWaitMilliseconds(unavailable)); continue;
       } else {
         blocked ??= residentFailureCode(error);
         port.emit({ state: "blocked", code: blocked });

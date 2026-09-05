@@ -1,0 +1,303 @@
+import type { PublicImage } from "@packscout/contracts";
+import { formatCollectibleDescriptor } from "./collectible-identity";
+import { presentPackAvailability } from "./pack-availability-presentation";
+import {
+  formatWatchlistRepackEvSummary,
+  type WatchlistRepackEv,
+} from "./packscout-ev-presentation";
+
+export const WATCHLIST_PATH = "/watchlist" as const;
+export const WATCHLIST_CHASE_TAB = "chase-cards" as const;
+
+export type WatchlistTab = "repacks" | "chase-cards";
+
+export type WatchlistAuthStatus =
+  | "unavailable"
+  | "loading"
+  | "signed_out"
+  | "signed_in"
+  | "error";
+
+export type WatchlistRepackRow = Readonly<{
+  publicRepackId: string;
+  savedAt: string;
+  catalogStatus: "resolved" | "unavailable";
+  openable: boolean;
+  repack: Readonly<{
+    name: string;
+    vendorDisplayName: string;
+    availability: "available" | "unavailable" | "unknown" | "sold_out";
+    displayedEv: WatchlistRepackEv | null;
+    primaryImage: PublicImage | null;
+  }> | null;
+}>;
+
+export type WatchlistCollectibleRow = Readonly<{
+  publicCollectibleId: string;
+  savedAt: string;
+  catalogStatus: "resolved" | "unavailable";
+  openable: boolean;
+  collectible: Readonly<{
+    name: string;
+    collectibleType:
+      | "card"
+      | "watch"
+      | "coin"
+      | "sealed_product"
+      | "memorabilia"
+      | "other";
+    year: number | null;
+    brand: string | null;
+    setOrSeries: string | null;
+    cardNumber: string | null;
+    referenceNumber: string | null;
+    grade: string | null;
+    grader: string | null;
+    primaryImage: PublicImage | null;
+  }> | null;
+}>;
+
+export type OwnerWatchlist = Readonly<{
+  savedRepacks: readonly WatchlistRepackRow[];
+  savedCollectibles: readonly WatchlistCollectibleRow[];
+  savedRepackCount: number;
+  savedCollectibleCount: number;
+}>;
+
+export type WatchlistFrame =
+  | Readonly<{ kind: "sign_in" }>
+  | Readonly<{ kind: "checking" }>
+  | Readonly<{ kind: "unavailable"; copy: string }>
+  | Readonly<{ kind: "error" }>
+  | Readonly<{ kind: "loading" }>
+  | Readonly<{ kind: "ready"; watchlist: OwnerWatchlist }>;
+
+export function parseWatchlistTab(
+  value: string | readonly string[] | null | undefined,
+): WatchlistTab {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === WATCHLIST_CHASE_TAB ? "chase-cards" : "repacks";
+}
+
+export function watchlistHref(tab: WatchlistTab = "repacks"): string {
+  return tab === "chase-cards"
+    ? `${WATCHLIST_PATH}?tab=${WATCHLIST_CHASE_TAB}`
+    : WATCHLIST_PATH;
+}
+
+export function watchlistNavVisible(input: Readonly<{
+  authStatus: WatchlistAuthStatus;
+  accountSavingAvailable: boolean;
+}>): boolean {
+  return input.authStatus === "signed_in" && input.accountSavingAvailable;
+}
+
+export function watchlistCanLoadOwnerRead(input: Readonly<{
+  authStatus: WatchlistAuthStatus;
+  accountNotice: string | null;
+  accountSavingAvailable: boolean;
+  accountSavingFailed: boolean;
+}>): boolean {
+  return (
+    input.authStatus === "signed_in" &&
+    input.accountNotice === null &&
+    (input.accountSavingAvailable || input.accountSavingFailed)
+  );
+}
+
+export function watchlistTabAccessibleName(
+  tab: WatchlistTab,
+  count: number,
+): string {
+  const label = tab === "repacks" ? "Repacks" : "Chase cards";
+  return `${label}, ${count}`;
+}
+
+export function presentWatchlistUnavailableCopy(
+  authStatus: WatchlistAuthStatus,
+  accountNotice: string | null,
+): string {
+  if (accountNotice !== null) return accountNotice;
+  if (authStatus === "unavailable") {
+    return "Account saving is not configured for this environment.";
+  }
+  if (authStatus === "error") {
+    return "Your session could not be verified. Sign out and try again.";
+  }
+  return "Watchlist cannot load right now.";
+}
+
+export function presentWatchlistFrame(input: Readonly<{
+  authStatus: WatchlistAuthStatus;
+  accountSavingAvailable: boolean;
+  accountNotice: string | null;
+  loading: boolean;
+  failed: boolean;
+  watchlist: OwnerWatchlist | null;
+}>): WatchlistFrame {
+  if (input.authStatus === "signed_out") return { kind: "sign_in" };
+  if (input.authStatus === "loading") return { kind: "checking" };
+  if (input.authStatus === "unavailable" || input.authStatus === "error") {
+    return {
+      kind: "unavailable",
+      copy: presentWatchlistUnavailableCopy(
+        input.authStatus,
+        input.accountNotice,
+      ),
+    };
+  }
+  if (!input.accountSavingAvailable) {
+    if (input.accountNotice !== null) {
+      return {
+        kind: "unavailable",
+        copy: presentWatchlistUnavailableCopy(
+          input.authStatus,
+          input.accountNotice,
+        ),
+      };
+    }
+    return { kind: "checking" };
+  }
+  if (input.failed) return { kind: "error" };
+  if (input.loading || input.watchlist === null) return { kind: "loading" };
+  return { kind: "ready", watchlist: input.watchlist };
+}
+
+export const WATCHLIST_SIGN_IN_COPY =
+  "Sign in to see the repacks and chase cards you saved." as const;
+
+export const WATCHLIST_LOAD_ERROR_COPY =
+  "We couldn't load your Watchlist. Try again." as const;
+
+export const WATCHLIST_EMPTY_REPACKS_COPY =
+  "You have not saved a repack yet. Save one from Dashboard or All Repacks." as const;
+
+export const WATCHLIST_EMPTY_CHASE_CARDS_COPY =
+  "You have not saved a chase card yet. Save one from All Repacks desired-chase search." as const;
+
+export const WATCHLIST_UNAVAILABLE_LABEL = "No longer in the catalog" as const;
+
+export const WATCHLIST_REMOVING_COPY = "Removing this save." as const;
+
+export const WATCHLIST_STALE_INSPECT_COPY =
+  "This save is no longer in the catalog." as const;
+
+export const WATCHLIST_PACK_INSPECT_LOADING_COPY =
+  "Loading pack details…" as const;
+
+export const WATCHLIST_PACK_INSPECT_FAILED_COPY =
+  "Pack details are temporarily unavailable." as const;
+
+export const WATCHLIST_PACK_INSPECT_MISSING_COPY =
+  "This pack is no longer available." as const;
+
+export function presentWatchlistRepackRow(row: WatchlistRepackRow): Readonly<{
+  title: string;
+  detail: string | null;
+  stale: boolean;
+  image: PublicImage | null;
+  canInspect: boolean;
+}> {
+  if (row.catalogStatus === "unavailable" || row.repack === null) {
+    return {
+      title: row.publicRepackId,
+      detail: WATCHLIST_UNAVAILABLE_LABEL,
+      stale: true,
+      image: null,
+      canInspect: false,
+    };
+  }
+  const availability = presentPackAvailability(row.repack.availability).label;
+  const ev =
+    row.repack.displayedEv === null
+      ? null
+      : formatWatchlistRepackEvSummary(row.repack.displayedEv);
+  return {
+    title: row.repack.name,
+    detail: [row.repack.vendorDisplayName, availability, ev]
+      .filter((value): value is string => value !== null && value !== "")
+      .join(" · "),
+    stale: false,
+    image: row.repack.primaryImage ?? null,
+    canInspect: row.openable,
+  };
+}
+
+export function presentWatchlistCollectibleRow(
+  row: WatchlistCollectibleRow,
+): Readonly<{
+  title: string;
+  detail: string | null;
+  stale: boolean;
+  image: PublicImage | null;
+  canInspect: boolean;
+}> {
+  if (row.catalogStatus === "unavailable" || row.collectible === null) {
+    return {
+      title: row.publicCollectibleId,
+      detail: WATCHLIST_UNAVAILABLE_LABEL,
+      stale: true,
+      image: null,
+      canInspect: false,
+    };
+  }
+  const descriptor = formatCollectibleDescriptor(row.collectible);
+  return {
+    title: row.collectible.name,
+    detail: descriptor.length > 0 ? descriptor : null,
+    stale: false,
+    image: row.collectible.primaryImage ?? null,
+    canInspect: row.openable,
+  };
+}
+
+export function presentWatchlistInspectLabel(
+  title: string,
+  canInspect: boolean,
+): string {
+  return canInspect
+    ? `View details for ${title}`
+    : `${title}. ${WATCHLIST_STALE_INSPECT_COPY}`;
+}
+
+export function presentWatchlistRemoveLabel(title: string): string {
+  return `Remove ${title} from Watchlist`;
+}
+
+export function presentWatchlistRemoveControl(input: Readonly<{
+  pending: boolean;
+  loading: boolean;
+  failed: boolean;
+  saved: boolean;
+  message?: Readonly<{ copy: string; tone: "success" | "error" }>;
+}>): Readonly<{
+  disabled: boolean;
+  label: string;
+  statusCopy: string;
+  tone: "neutral" | "success" | "error";
+}> {
+  if (input.pending) {
+    return {
+      disabled: true,
+      label: "Removing…",
+      statusCopy: WATCHLIST_REMOVING_COPY,
+      tone: "neutral",
+    };
+  }
+  if (input.loading || input.failed || !input.saved) {
+    return {
+      disabled: true,
+      label: "Remove",
+      statusCopy: input.failed
+        ? "Your saved items could not be loaded right now."
+        : input.message?.copy ?? "",
+      tone: input.failed ? "error" : (input.message?.tone ?? "neutral"),
+    };
+  }
+  return {
+    disabled: false,
+    label: "Remove",
+    statusCopy: input.message?.copy ?? "",
+    tone: input.message?.tone ?? "neutral",
+  };
+}

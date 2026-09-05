@@ -8,6 +8,9 @@ import path from "node:path";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 process.env.NODE_ENV = "test";
+// Recovery requires an explicit temp-directory pin; Linux runners need not set
+// TMPDIR. Supply the fixture environment without relaxing the live policy.
+process.env.TMPDIR ||= os.tmpdir();
 const { publishClutchpacksProductionPostHead: publish, clutchpacksProductionPostHeadSchema } =
   await tsImport("./clutchpacks-production-post-head.mts", import.meta.url);
 const recoveryModule = await tsImport("./clutchpacks-production-post-head-recovery.mts", import.meta.url);
@@ -404,6 +407,17 @@ test("the recovery execution directory is an atomic one-use token", async t => {
   const f = await recoveryFixture(t); await f.execute(); const childCount = f.children.length;
   await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_EXISTS"));
   assert.equal(f.children.length, childCount);
+});
+
+test("recovery still refuses a missing explicit temporary directory before launch", async t => {
+  const f = await recoveryFixture(t), priorTmpdir = process.env.TMPDIR;
+  assert.ok(priorTmpdir);
+  delete process.env.TMPDIR;
+  try {
+    await assert.rejects(f.execute(), safelyRecoveryBlocked("POST_HEAD_RECOVERY_EXECUTION_FAILED"));
+    assert.equal(f.children.length, 2);
+    await assert.rejects(stat(f.executionInput.executionDirectory));
+  } finally { process.env.TMPDIR = priorTmpdir; }
 });
 
 test("executor policy refuses a coherent alternate executor checkout", async t => {

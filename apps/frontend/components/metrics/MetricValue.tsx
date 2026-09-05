@@ -15,6 +15,7 @@ type MetricValueProps = Readonly<{
   showLabel?: boolean;
   showReason?: boolean;
   showSemanticState?: boolean;
+  valueHint?: boolean;
 }>;
 
 export function MetricValue({
@@ -28,6 +29,7 @@ export function MetricValue({
   showLabel = true,
   showReason = true,
   showSemanticState = true,
+  valueHint = false,
 }: MetricValueProps) {
   const hasSignedState =
     metric.semanticState !== undefined &&
@@ -57,10 +59,26 @@ export function MetricValue({
       ) : null}
 
       <div className={styles.valueRow}>
-        <span aria-hidden="true" className={styles.value}>
-          {metric.displayValue}
-        </span>
-        <span className="sr-only">{metric.accessibleLabel}</span>
+        {valueHint ? (
+          <GlossaryHint
+            align={glossaryAlign}
+            content={glossaryContent}
+            details={[
+              ...(metric.availability === "unavailable" ? [metric.reasonCopy] : []),
+              ...(glossaryDetails ?? []),
+            ]}
+            detailsHeading={glossaryDetailsHeading ?? "Source"}
+            field={metric.glossaryKey}
+            trigger={<span aria-hidden="true" className={styles.value}>{metric.displayValue}</span>}
+            triggerAriaLabel={metric.accessibleLabel}
+            triggerClassName={styles.valueTrigger}
+          />
+        ) : (
+          <>
+            <span aria-hidden="true" className={styles.value}>{metric.displayValue}</span>
+            <span className="sr-only">{metric.accessibleLabel}</span>
+          </>
+        )}
         {showSemanticState && hasSignedState ? (
           <span aria-hidden="true" className={styles.stateLabel}>
             {metric.semanticLabel}

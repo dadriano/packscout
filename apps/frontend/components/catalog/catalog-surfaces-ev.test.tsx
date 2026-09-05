@@ -89,7 +89,7 @@ function renderInspector(detail = buildV3ViewDetail()): string {
 
 const EXPECTED_METRIC_VALUES = ["$85.00", "85.00%", "-$15.00", "-15.00%"] as const;
 
-test("table, mobile cards, and detail show source-derived Gross EV with platform attribution", () => {
+test("all four catalog surfaces show source-derived EV with platform attribution", () => {
   for (const [vendorKey, vendorDisplayName] of [
     ["phygitals", "Phygitals"], ["collector_crypt", "Collector Crypt"], ["courtyard", "Courtyard"],
   ]) {
@@ -102,15 +102,21 @@ test("table, mobile cards, and detail show source-derived Gross EV with platform
           observedAt: "2026-08-19T10:00:00.000Z" },
       },
     });
-    for (const markup of [renderAllRepacksTable([detail]), renderAllRepacksCards([detail]), renderInspector(detail)]) {
-      assert.ok(markup.includes("$93.79"), vendorKey);
-      assert.ok(markup.includes("93.79%"), vendorKey);
+    const opportunity = renderOpportunityTable(detail);
+    const grossEvSurfaces = [renderAllRepacksTable([detail]), renderAllRepacksCards([detail]), renderInspector(detail)];
+    for (const markup of [opportunity, ...grossEvSurfaces]) {
       assert.ok(markup.includes("-$6.21"), vendorKey);
       assert.ok(markup.includes("-6.21%"), vendorKey);
       assert.ok(markup.includes(`Calculated from ${vendorDisplayName}-reported EV × buyback.`), vendorKey);
       assert.ok(markup.includes("EV confidence"), vendorKey);
       assert.equal(markup.includes("High · 100%"), false, vendorKey);
     }
+    for (const markup of grossEvSurfaces) {
+      assert.ok(markup.includes("$93.79"), vendorKey);
+      assert.ok(markup.includes("93.79%"), vendorKey);
+    }
+    assert.equal(opportunity.includes("Platform EV × buyback"), false, vendorKey);
+    assert.ok(opportunity.includes("EV confidence: Unavailable"), vendorKey);
     assert.ok(renderInspector(detail).includes('aria-label="EV from platform data"'));
   }
 });
@@ -152,6 +158,41 @@ test("the opportunity surface is labeled as ranked by EV $ from the server", () 
   assert.match(markup, /aria-pressed="true"/);
 });
 
+test("mixed-source opportunities retain server order and the selected repack", () => {
+  const platform = buildV3ViewDetail({
+    publicRepackId: "4f886b23-61a2-5041-bd26-45d5b64304f3",
+    name: "Starter Pokémon",
+    vendorKey: "collector_crypt",
+    vendorDisplayName: "Collector Crypt",
+    buyback: { kind: "uniform_rate", rateBasisPoints: 9_000 },
+    evEstimates: {
+      packScout: buildV3UnavailableEv("SOURCE_EVIDENCE_UNAVAILABLE"),
+      vendorReported: {
+        status: "available",
+        sourceMoney: { minorUnits: 10_421, currency: "USD" },
+        usdComparison: { status: "available", value: { minorUnits: 10_421, currency: "USD" } },
+        observedAt: "2026-08-19T10:00:00.000Z",
+      },
+    },
+  });
+  const independent = buildV3ViewDetail({ name: "Core Pack" });
+  const markup = renderStatic(
+    <OpportunityTable
+      onSelectOpportunity={noop}
+      opportunities={[platform, independent].map(publicRepackViewSummaryV3FromDetail)}
+      repacksHref="/packs"
+      selectedPublicRepackId={platform.publicRepackId}
+    />,
+  );
+
+  assert.ok(markup.indexOf("Starter Pokémon") < markup.indexOf("Core Pack"));
+  assert.match(markup, /aria-label="Inspect Starter Pokémon, selected" aria-pressed="true"/);
+  assert.match(markup, /aria-label="Inspect Core Pack" aria-pressed="false"/);
+  assert.ok(markup.includes("-$6.21"));
+  assert.ok(markup.includes("-$15.00"));
+  assert.equal(markup.match(/High · 100%/g)?.length, 1);
+});
+
 test("unavailable estimates render the reason on every surface, never zero or vendor EV", () => {
   const detail = buildV3ViewDetail({
     buyback: { kind: "not_documented" },
@@ -177,7 +218,8 @@ test("unavailable estimates render the reason on every surface, never zero or ve
     );
     // Vendor EV stays present but separately labeled — never as PackScout EV.
     assert.ok(markup.includes("$90.00"));
-    assert.ok(markup.includes("Reported by vendor — separate from PackScout Gross EV"));
+    assert.equal(markup.includes("Reported by vendor — separate from PackScout Gross EV"), false);
+    assert.match(markup, /aria-expanded="false"/);
   }
   // Not documented buyback shows the bounded summary, not a number.
   assert.ok(table.includes("Not documented"));
@@ -246,8 +288,9 @@ test("last-known EV stays visible and sortable after the former 60-minute bounda
     );
     assert.equal(markup.includes("Source evidence last observed"), false);
   }
-  assert.ok(inspector.includes("Source data over 60 minutes old; last known values retained"));
-  assert.ok(inspector.includes("Source evidence last observed"));
+  assert.equal(inspector.includes("Source data over 60 minutes old; last known values retained"), false);
+  assert.equal(inspector.includes("Source evidence last observed"), false);
+  assert.match(inspector, /View confidence evidence/);
   assert.ok(renderAllRepacksTable([detail]).includes("$85.00"));
   assert.ok(renderInspector(detail).includes("$85.00"));
 });
@@ -289,7 +332,8 @@ test("provider delay is informational and last-known EV remains rankable", () =>
     assert.ok(markup.includes("-$15.00"));
   }
   const inspector = renderInspector(detail);
-  assert.ok(inspector.includes("Provider feed delayed; displaying the latest available data."));
+  assert.equal(inspector.includes("Provider feed delayed; displaying the latest available data."), false);
+  assert.match(inspector, /View confidence evidence/);
 
   const opportunities = listSurfaces[0]!;
   assert.ok(opportunities.includes("Last-known estimate"));
@@ -364,6 +408,7 @@ test("all four catalog surfaces retain aged values with delayed feeds, failed up
       false,
     );
   }
-  assert.ok(inspector.includes("Fresh calculation unavailable"));
-  assert.ok(inspector.includes("calculation-time Pack Price of $100.00"));
+  assert.equal(inspector.includes("Fresh calculation unavailable"), false);
+  assert.match(inspector, /View confidence evidence/);
+  assert.equal(inspector.includes("calculation-time Pack Price of $100.00"), false);
 });

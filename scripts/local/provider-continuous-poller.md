@@ -151,6 +151,17 @@ the admission check nor the post-head callback.
   is discarded. Identity/credential/authority errors, unknown database exceptions
   and all queue/write/child failures do not gain this retry capability. Read
   unavailability never clears a previously latched permanent failure.
+- **Provider-database refusal during a cycle or the bootstrap backfill
+  (`BACKFILL_PROVIDER_DATABASE_UNAVAILABLE`):** the gateway produced no outcome,
+  so no decision was applied and nothing needs undoing. Remain
+  `provider_unavailable` (the event carries the `retry` count), wait 15 seconds
+  doubling to a 5-minute ceiling, then re-read and re-verify pins and hashes
+  before the next attempt, exactly as an operator restart would. After 24
+  consecutive retries (about 1.7 hours) latch `blocked` under that same code.
+  This never clears a previously latched failure. The underlying rejection is
+  logged by the gateway diagnostics as `provider_database_operation_rejected`
+  or `provider_database_operation_timed_out` lines, so "unavailable" can be
+  told apart from, say, a pooled connection stuck in read-only mode.
 - **Receipt before queue:** restart recognizes the exact receipt and queues once.
 - **Utility lease before queue:** wait out its normal 120-second expiry, then only
   that exact receipt-owned expired lease may be fenced through the normal lease

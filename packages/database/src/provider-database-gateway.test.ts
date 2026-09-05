@@ -4,7 +4,11 @@ import type { CentralDatabaseLifecycle } from "./central-database.ts";
 import { providerDatabaseTarget } from "./database-topology.ts";
 import type { ProviderDatabaseLifecycle } from "./provider-database.ts";
 import { ProviderDatabaseDestinationPolicy } from "./provider-database-destination-policy.ts";
-import { BoundedProviderDatabaseGateway, type BoundedProviderDatabaseGatewayOptions } from "./provider-database-gateway.ts";
+import {
+  BoundedProviderDatabaseGateway,
+  type BoundedProviderDatabaseGatewayOptions,
+  type ProviderDatabaseGatewayDiagnostic,
+} from "./provider-database-gateway.ts";
 import type { ProviderDatabaseRoute } from "./provider-database-locator.ts";
 
 const route: ProviderDatabaseRoute = {
@@ -38,6 +42,7 @@ function fixture(input: {
   allowedHost?: string;
   operationProfile?: BoundedProviderDatabaseGatewayOptions["operationProfile"];
   operationTimeoutMs?: number;
+  diagnostics?: BoundedProviderDatabaseGatewayOptions["diagnostics"];
 } = {}) {
   const opened: { databaseUrl: string; providerId: string; providerKey: string; connectionLimit: number }[] = [];
   let resolved = 0;
@@ -73,6 +78,7 @@ function fixture(input: {
     maximumCachedProviders: 1,
     connectionTimeoutMs: 1500,
     ...(input.operationProfile === undefined ? {} : { operationProfile: input.operationProfile }),
+    ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
     operationTimeoutMs: input.operationTimeoutMs ?? 1000,
   });
   return { gateway, opened, resolved: () => resolved, closed: () => closed };
@@ -160,4 +166,75 @@ test("gateway retains explicit destination-approved plaintext behavior for local
     assert.equal(url.searchParams.get("sslmode"), "disable");
     assert.equal(url.searchParams.has("sslaccept"), false);
   } finally { await state.gateway.close(); }
+});
+
+test("an operation that never settles retires its slot instead of poisoning the provider for the process lifetime", async () => {
+  const state = fixture({ operationTimeoutMs: 1000 });
+
+  // A query hung on a dropped connection never settles. The gateway abandons it
+  // at the deadline, but it must not keep holding the cached entry's reference:
+  // that made every later call short-circuit to database_unreachable and made the
+  // entry unclosable, wedging all three import residents until a process restart.
+  const hung = await state.gateway.runWithCachedProviderDatabase(
+    route, () => new Promise<never>(() => {}));
+  assert.equal(hung.state, "unreachable");
+  assert.equal(hung.state === "unreachable" ? hung.failureCode : null, "database_unreachable");
+
+  // The very next call must succeed on a FRESH lifecycle, exactly as a restarted
+  // process would. Before the fix this returned unreachable forever.
+  const after = await state.gateway.runWithCachedProviderDatabase(route, async () => "recovered");
+  assert.equal(after.state, "reachable");
+  assert.equal(after.state === "reachable" ? after.value : null, "recovered");
+  assert.equal(state.opened.length, 2, "the poisoned lifecycle must be replaced, not reused");
+
+  // And a third call keeps working, so recovery is not a one-shot.
+  const again = await state.gateway.runWithCachedProviderDatabase(route, async () => "still-working");
+  assert.equal(again.state, "reachable");
+  assert.equal(state.opened.length, 2, "a healthy cached lifecycle is still reused");
+});
+
+test("a rejected or abandoned operation reports why through diagnostics while the outcome stays database_unreachable", async () => {
+  const diagnostics: ProviderDatabaseGatewayDiagnostic[] = [];
+  const state = fixture({ operationTimeoutMs: 500, diagnostics: (event) => { diagnostics.push(event); } });
+  try {
+    // Every gateway failure collapses to a failure code by design. Production
+    // residents wedged for hours on "database unreachable" that was really a
+    // pooled connection left in read-only mode (SQLSTATE 25006); the reason has
+    // to survive somewhere an operator can read it.
+    const rejected = await state.gateway.runWithCachedProviderDatabase(route, async () => {
+      throw Object.assign(
+        new Error("Raw query failed. Code: `25006`.\n\nMessage: `ERROR: cannot execute SELECT FOR UPDATE in a read-only transaction`"),
+        { code: "P2010" },
+      );
+    });
+    assert.equal(rejected.state, "unreachable");
+    assert.equal(rejected.state === "unreachable" ? rejected.failureCode : null, "database_unreachable");
+    assert.deepEqual(diagnostics, [{
+      kind: "operation_rejected",
+      providerId: route.target.providerId,
+      code: "P2010",
+      reason: "Error: Raw query failed. Code: `25006`. Message: `ERROR: cannot execute SELECT FOR UPDATE in a read-only transaction`",
+    }]);
+
+    const hung = await state.gateway.runWithCachedProviderDatabase(route, () => new Promise<never>(() => {}));
+    assert.equal(hung.state, "unreachable");
+    assert.deepEqual(diagnostics[1], { kind: "operation_timed_out", providerId: route.target.providerId, budgetMs: 500 });
+
+    // A non-Error rejection is still described, and a fulfilled operation reports nothing.
+    const bare = await state.gateway.runWithCachedProviderDatabase(route, () => Promise.reject("connection reset"));
+    assert.equal(bare.state, "unreachable");
+    assert.deepEqual(diagnostics[2], { kind: "operation_rejected", providerId: route.target.providerId, code: null, reason: "connection reset" });
+    const fine = await state.gateway.runWithCachedProviderDatabase(route, async () => "ok");
+    assert.equal(fine.state, "reachable");
+    assert.equal(diagnostics.length, 3);
+  } finally { await state.gateway.close(); }
+
+  // A sink that throws never changes an outcome.
+  const throwing = fixture({ diagnostics: () => { throw new Error("sink failure"); } });
+  try {
+    const failed = await throwing.gateway.runWithCachedProviderDatabase(route, async () => { throw new Error("boom"); });
+    assert.equal(failed.state, "unreachable");
+    const recovered = await throwing.gateway.runWithCachedProviderDatabase(route, async () => "ok");
+    assert.equal(recovered.state, "reachable");
+  } finally { await throwing.gateway.close(); }
 });

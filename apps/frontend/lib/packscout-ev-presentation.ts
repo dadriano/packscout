@@ -3,6 +3,7 @@ import {
   vendorReportedGrossEvV3,
   type DashboardKpis,
   type DataReleaseV3Identity,
+  type DisplayedEvMedianSource,
   type PackScoutDisplayedEvSourceAgeStateV3,
   type PackScoutDisplayedEvV3,
   type PublicBuybackSummaryV3,
@@ -261,6 +262,28 @@ export function formatSignedEvPercent(basisPoints: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+/** Compact Watchlist EV line: money, signed return, and confidence band. */
+export type WatchlistRepackEv = Readonly<{
+  evDollarsMinorUnits: number;
+  grossReturnBasisPoints: number;
+  confidenceBand: "low" | "medium" | "high";
+}>;
+
+export function formatWatchlistRepackEvSummary(
+  estimatedEv: WatchlistRepackEv,
+): string {
+  return [
+    formatMoneyMinorUnits({
+      minorUnits: estimatedEv.evDollarsMinorUnits,
+      currency: "USD",
+    }),
+    formatSignedEvPercent(
+      estimatedEv.grossReturnBasisPoints - 10_000,
+    ),
+    `${estimatedEv.confidenceBand} confidence`,
+  ].join(" · ");
 }
 
 /** Unsigned Gross EV % with exact two-decimal rendering (85.00%). */
@@ -910,14 +933,16 @@ export function presentVendorReportedEvV3(
 export function presentSignedEvPercentMetric(
   metric: DashboardKpis["medianPackScoutEvPercent"],
   label = "EV %",
+  source: DisplayedEvMedianSource | null = null,
 ): MetricValuePresentation {
   if (metric.status === "unavailable") {
     return unavailableMetric(label, "evPercent", metric.reason);
   }
-  if (metric.basisPoints > 0) {
+  if (source === null || (source === "packscout" && metric.basisPoints > 0)) {
     return unavailableMetric(label, "evPercent", "CALCULATION_UNAVAILABLE");
   }
-  const state = semanticStateForSignedBasisPoints(metric.basisPoints);
+  const state = metric.basisPoints > 0 ? undefined
+    : semanticStateForSignedBasisPoints(metric.basisPoints);
   const tone = evToneForSignedBasisPoints(metric.basisPoints);
   return availableMetric(
     label,

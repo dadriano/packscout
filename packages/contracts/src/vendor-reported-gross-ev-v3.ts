@@ -1,4 +1,7 @@
-import type { PublicRepackSummaryDisplayedV3 } from "./data-release-v3-entities.ts";
+import {
+  packAvailabilityIsPurchasableV3,
+  type PublicRepackSummaryDisplayedV3,
+} from "./data-release-v3-entities.ts";
 import { PROVIDER_REPORTED_EV_BASIS_V1 } from "./provider-reported-ev-basis-v1.ts";
 
 export type VendorReportedGrossEvV3Input = Pick<PublicRepackSummaryDisplayedV3,
@@ -69,4 +72,19 @@ export function vendorReportedGrossEvV3(
     buybackRateBasisPoints: input.buyback.rateBasisPoints,
   });
   return metrics === null ? null : { ...metrics, observedAt: reported.observedAt };
+}
+
+/** Resolve rankable displayed EV without changing its source or confidence. */
+export function rankableDisplayedEvDollarsV3(
+  input: VendorReportedGrossEvV3Input & Pick<PublicRepackSummaryDisplayedV3, "availability">,
+): number | null {
+  if (!packAvailabilityIsPurchasableV3(input.availability)) return null;
+  const estimate = input.evEstimates.packScout;
+  if (estimate.status === "last_known" && estimate.historicalSoldOutAt !== null) return null;
+  if (estimate.status === "current" || estimate.status === "last_known") {
+    return estimate.metrics.evDollars.minorUnits;
+  }
+  return estimate.status === "unavailable"
+    ? vendorReportedGrossEvV3(input)?.evDollarsMoney.minorUnits ?? null
+    : null;
 }

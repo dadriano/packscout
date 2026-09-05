@@ -31,6 +31,15 @@ test("table delegates confidence evidence and removes its inline explanation", (
   assert.doesNotMatch(source, /showStatusNote/);
 });
 
+test("table thumbnails use the shared failure-aware catalog image", () => {
+  assert.match(source, /import \{ CatalogImage \}/);
+  assert.match(
+    source,
+    /<CatalogImage[\s\S]*?fallbackAlt=\{repack\.name\}[\s\S]*?image=\{repack\.primaryImage\}[\s\S]*?variant="thumbnail"/,
+  );
+  assert.doesNotMatch(source, /from "next\/image"/);
+});
+
 test("horizontal scrolling does not contain the shared fixed hint panel", () => {
   assert.doesNotMatch(styles, /\bcontain\s*:/);
   assert.doesNotMatch(styles, /container-type\s*:/);

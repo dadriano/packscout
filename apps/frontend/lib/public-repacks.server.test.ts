@@ -6,8 +6,10 @@ import {
   CATALOG_READ_TOKEN_MAXIMUM_LENGTH,
   CATALOG_READ_TOKEN_MINIMUM_LENGTH,
   catalogReadArguments,
-  publicRepackReadsConfigured,
   readCatalogReadCredential,
+} from "./catalog-read-access.server";
+import {
+  publicRepackReadsConfigured,
   readPublicCatalogRecordUpdateStatus,
   readPublicShellStatus,
 } from "./public-repacks.server";

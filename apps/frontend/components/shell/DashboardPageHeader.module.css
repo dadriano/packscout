@@ -1,0 +1,34 @@
+.hero {
+  display: grid;
+  min-height: 10rem;
+  align-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-action) 25%, var(--color-border));
+  border-radius: 0.8rem;
+  background: linear-gradient(110deg, var(--color-action-soft), var(--color-surface) 75%);
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.heroTitle {
+  margin: 0;
+  color: var(--color-text);
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.heroTitle:focus {
+  outline: 0;
+}
+
+.heroCopy {
+  max-width: 45rem;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: clamp(0.95rem, 1.5vw, 1.125rem);
+  line-height: 1.55;
+  text-wrap: pretty;
+}

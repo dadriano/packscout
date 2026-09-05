@@ -19,6 +19,7 @@ import {
   resolvePublicCategories,
   uuidFromSha256,
   vendorReportedEvFromPack,
+  withProviderPackListingUrls,
 } from "./promote-provider-data-release-v3-plan.mjs";
 
 const READ_AT = "2026-09-03T20:00:00.000Z";
@@ -420,6 +421,42 @@ test("a rich Neon pack projects to a complete public repack detail", () => {
   assert.equal(detail.description, null);
 });
 
+test("reviewed promotion-time PackScout EV replaces the unavailable placeholder", () => {
+  const packScoutEv = {
+    status: "current",
+    methodVersion: VERSIONS.methodVersion,
+    confidencePolicyVersion: VERSIONS.confidencePolicyVersion,
+    metrics: {
+      grossEvMoney: { minorUnits: 200_000, currency: "USD" },
+      grossReturnBasisPoints: 8_000,
+      evDollars: { minorUnits: -50_000, currency: "USD" },
+      evPercentBasisPoints: -2_000,
+    },
+    confidence: {
+      policyVersion: VERSIONS.confidencePolicyVersion,
+      scoreBasisPoints: 8_000,
+      band: "high",
+      limitationCodes: ["platform_published_odds"],
+    },
+    calculatedAt: READ_AT,
+    dataAsOf: { state: "known", observedAt: "2026-09-03T19:55:00.000Z" },
+    sourceAge: { milliseconds: 300_000, state: "fresh_within_15_minutes" },
+    expiresAt: "2026-09-03T20:55:00.000Z",
+  };
+  const projected = projectProviderPacks({
+    platform: PLATFORM,
+    packs: [neonPack()],
+    chainByProviderCategoryId: new Map(),
+    collectibleTypes: ["card"],
+    readAt: READ_AT,
+    versions: VERSIONS,
+    identity,
+    includePriceless: false,
+    packScoutEvByPackKey: new Map([["pack:black-football-pack", packScoutEv]]),
+  });
+  assert.deepEqual(projected.repacks[0].evEstimates.packScout, packScoutEv);
+});
+
 test("purchase links appear only for available packs with an https listing", () => {
   const withLink = repackDetailFromPack({
     pack: neonPack({ listing_url: "https://Phygitals.example/packs/black" }),
@@ -448,6 +485,29 @@ test("purchase links appear only for available packs with an https listing", () 
   });
   assert.deepEqual(insecure.actions, {});
   assert.equal(insecure.primaryImage, null);
+});
+
+test("promotion restores missing links using exact canonical pack identity without changing stored rows", () => {
+  const rows = [neonPack(), neonPack({ availability: "sold_out" }),
+    neonPack({ listing_url: "https://example.test/preserved" }),
+    neonPack({ pack_key: "card:wrong-kind" })];
+  const calls = [];
+  const enriched = withProviderPackListingUrls("phygitals", rows, (provider, id) => {
+    calls.push([provider, id]);
+    return "https://www.phygitals.com/repacks/black-football-pack";
+  });
+  assert.equal(rows[0].listing_url, null);
+  assert.deepEqual(calls, [["phygitals", "black-football-pack"], ["phygitals", "black-football-pack"]]);
+  const details = enriched.map((pack) => repackDetailFromPack({
+    pack, platform: PLATFORM, readAt: READ_AT, versions: VERSIONS, identity,
+    categoryChain: [], collectibleTypes: ["card"],
+  }));
+  assert.equal(details[0].actions.repackLink.listingUrl,
+    "https://www.phygitals.com/repacks/black-football-pack");
+  assert.deepEqual(details[1].actions, {});
+  assert.equal(details[2].actions.repackLink.listingUrl, "https://example.test/preserved");
+  assert.deepEqual(details[3].actions, {});
+  assert.equal(withProviderPackListingUrls("unknown", [rows[0]], () => null)[0].listing_url, null);
 });
 
 test("packs without a USD price are skipped unless asked for", () => {

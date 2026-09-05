@@ -5,14 +5,17 @@ import {
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   type LaunchProviderKey,
 } from "@packscout/contracts";
 import {
@@ -138,6 +141,12 @@ export function createLaunchSourceIntegrationCapabilities():
 ProviderSourceIntegrationCapabilityRegistry {
   return new ProviderSourceIntegrationCapabilityRegistry([
     providerSourceIntegrationCapability(
+      "courtyard", dataforrestCourtyardDistributedV4SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
+      "collector_crypt", dataforrestCollectorCryptDistributedV4SourceAdapterManifest.adapterVersion,
+    ),
+    providerSourceIntegrationCapability(
       "clutchpacks",
       CLUTCHPACKS_CAPTURE_ADAPTER_KEY,
     ),
@@ -204,6 +213,13 @@ ProviderSourceIntegrationCapabilityRegistry {
     providerSourceIntegrationCapability(
       "phygitals",
       dataforrestPhygitalsDistributedV3SourceAdapterManifest.adapterVersion,
+    ),
+    // Distributed-v4 binds the Phygitals rarity distribution as a
+    // probability-only EV input; admitted before activation for the same
+    // admission-gate reason as the versions above.
+    providerSourceIntegrationCapability(
+      "phygitals",
+      dataforrestPhygitalsDistributedV4SourceAdapterManifest.adapterVersion,
     ),
   ]);
 }

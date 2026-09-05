@@ -90,6 +90,7 @@ export const PACKSCOUT_BUYBACK_EV_V3_SURFACE_PREFIXES_V1 = Object.freeze([
   "packages/services/src/providers/buyback-ev-evidence.ts",
   "convex/dataReleaseV3",
   "convex/publicRepacksV3",
+  "convex/savedItems.ts",
 ] as const);
 
 /**
@@ -622,6 +623,16 @@ export const PACKSCOUT_BUYBACK_EV_CUTOVER_INVENTORY_V1: readonly PackScoutBuybac
       replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
       note:
         "Convex read model for saved items stores the pre-buyback estimate shape.",
+    }),
+    item({
+      itemKey: "public-field:convex-watchlist-saved-items",
+      kind: "public_field",
+      path: "convex/savedItems.ts",
+      elements: ["estimatedEvValidator", "displayWatchlistEstimatedEv"],
+      disposition: "replaced_by_v3",
+      replacementPath: "packages/contracts/src/data-release-v3-ev-estimates.ts",
+      note:
+        "Convex Watchlist projection reads the saved buyback-adjusted estimate shape while retaining its historical estimatedEv field name.",
     }),
     item({
       itemKey: "public-field:admin-product-user-directory",

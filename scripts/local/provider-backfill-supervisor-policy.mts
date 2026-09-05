@@ -110,20 +110,28 @@ export function classifyBackfillCheckpoint(snapshot: BackfillSnapshot): "head" |
     (run.state === "queued" ? snapshot.state === "idle" && run.requestedHash === snapshot.checkpointHash
       : snapshot.state === "running" && (run.pageCount === 0 ? run.requestedHash === snapshot.checkpointHash
         : snapshot.lastPage?.matches && snapshot.lastPage.number === run.pageCount && snapshot.lastPage.hash === snapshot.checkpointHash))) return "execute";
-  // A run that reached head and committed nothing leaves the checkpoint exactly
-  // where it started, so a transient failure at that point is as safe to retry
-  // as one before head. Without this a head-reaching commit failure matches no
-  // classification branch at all and latches the provider on an intact
-  // checkpoint: collector_crypt sat blocked for 16 hours this way.
+  // A failed run is safe to retry only when the checkpoint sits exactly where its
+  // last committed page left it: before head that page continues with "more", at
+  // head it is the head page itself. A run that reached head and committed
+  // nothing leaves the checkpoint where it started, which is equally intact.
+  // Without these shapes a head-reaching failure matches no classification
+  // branch at all and latches the provider on an intact checkpoint:
+  // collector_crypt sat blocked for 16 hours on a zero-page head failure, then
+  // again on a committed head page whose head reconciliation failed.
   const headWithoutCommit = run.reachedHead && run.pageCount === 0 &&
     run.requestedHash === snapshot.checkpointHash;
-  if (run.state !== "failed" || (run.reachedHead && !headWithoutCommit) ||
-    !run.finishedAt || snapshot.state !== "error" ||
+  // A full replay (no requested cursor) that dies at head still owes the
+  // quarantine phase only full replays run; a retry queued from the checkpoint
+  // would skip it and report success, so that shape stays with an operator.
+  const committedPagesIntact = run.pageCount > 0 && snapshot.lastPage?.matches === true &&
+    snapshot.lastPage.number === run.pageCount &&
+    snapshot.lastPage.continuation === (run.reachedHead ? "head" : "more") &&
+    snapshot.lastPage.hash === snapshot.checkpointHash && run.requestedHash !== snapshot.checkpointHash &&
+    (!run.reachedHead || run.requestedHash !== null);
+  if (run.state !== "failed" || !run.finishedAt || snapshot.state !== "error" ||
     snapshot.activeRunIds.length !== 0 || snapshot.actionableCommands.length !== 0 ||
     !run.finalMatches || run.finalHash !== snapshot.checkpointHash || !snapshot.checkpointHash ||
-    (run.pageCount > 0 && (!snapshot.lastPage?.matches || snapshot.lastPage.number !== run.pageCount ||
-      snapshot.lastPage.continuation !== "more" || snapshot.lastPage.hash !== snapshot.checkpointHash ||
-      run.requestedHash === snapshot.checkpointHash))) {
+    (run.pageCount > 0 ? !committedPagesIntact : run.reachedHead && !headWithoutCommit)) {
     refuseBackfill("BACKFILL_TERMINAL_CHECKPOINT_UNSAFE");
   }
   if (transientBackfillCodes.has(run.failureCode ?? "")) return "transient_retry";

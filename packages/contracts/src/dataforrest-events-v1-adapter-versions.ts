@@ -19,6 +19,9 @@ export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V2_VERSION =
  */
 export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V3_VERSION =
   "dataforrest-collector-crypt-distributed-adapter-v3" as const;
+/** Adds pack V2 probability-only EV evidence; every older identity is unchanged. */
+export const DATAFORREST_COLLECTOR_CRYPT_DISTRIBUTED_ADAPTER_V4_VERSION =
+  "dataforrest-collector-crypt-distributed-adapter-v4" as const;
 export const DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_VERSION =
   "dataforrest-collector-crypt-catalog-adapter-v1" as const;
 export const DATAFORREST_COLLECTOR_CRYPT_CATALOG_ADAPTER_V2_VERSION =
@@ -42,6 +45,9 @@ export const DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V2_VERSION =
  */
 export const DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V3_VERSION =
   "dataforrest-courtyard-distributed-adapter-v3" as const;
+/** Adds pack V2 probability-only EV evidence; every older identity is unchanged. */
+export const DATAFORREST_COURTYARD_DISTRIBUTED_ADAPTER_V4_VERSION =
+  "dataforrest-courtyard-distributed-adapter-v4" as const;
 export const DATAFORREST_COURTYARD_CATALOG_ADAPTER_VERSION =
   "dataforrest-courtyard-catalog-adapter-v1" as const;
 /**
@@ -64,6 +70,14 @@ export const DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V2_VERSION =
  */
 export const DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V3_VERSION =
   "dataforrest-phygitals-distributed-adapter-v3" as const;
+/**
+ * Distributed (all-stream) admission carrying the distributed-v2 card reader
+ * and the catalog-PACK reader V2, which binds the published rarity
+ * distribution as a probability-only EV input (odds plus a USD value range per
+ * tier, pool size unknown). Distributed-v3 left `evInput` absent.
+ */
+export const DATAFORREST_PHYGITALS_DISTRIBUTED_ADAPTER_V4_VERSION =
+  "dataforrest-phygitals-distributed-adapter-v4" as const;
 export const DATAFORREST_PHYGITALS_CATALOG_ADAPTER_VERSION =
   "dataforrest-phygitals-catalog-adapter-v1" as const;
 /**

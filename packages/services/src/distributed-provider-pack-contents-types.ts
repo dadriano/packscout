@@ -3,6 +3,7 @@ import type {
   PublicCollectible,
   PublicRepackChase,
   PublicRepackDetail,
+  PublicRepackDetailV3,
 } from "@packscout/contracts";
 
 export interface DistributedProviderCollectibleRow {
@@ -59,21 +60,35 @@ export interface DistributedProviderPackContentRow {
   readonly displayOrder: number;
 }
 
-export interface DistributedProviderContentPack<TDetail = PublicRepackDetail> {
+export interface DistributedProviderContentPack {
   readonly id: string;
   readonly rowVersion: bigint;
   readonly packKey: string;
-  readonly detail: TDetail;
+  readonly detail: PublicRepackDetail;
   /** Derived from the retained inventory snapshot, independently of EV evidence. */
   readonly evidenceCompleteness: "complete" | "partial" | "unknown";
 }
 
-export interface DistributedProviderPackContentsProjection<TDetail = PublicRepackDetail> {
+export interface DistributedProviderContentPackV3 extends Omit<
+  DistributedProviderContentPack,
+  "detail"
+> {
+  readonly detail: PublicRepackDetailV3;
+}
+
+export interface DistributedProviderPackContentsProjection {
   readonly collectibles: readonly PublicCollectible[];
-  readonly repacks: readonly TDetail[];
+  readonly repacks: readonly PublicRepackDetail[];
   readonly repackChases: readonly PublicRepackChase[];
   readonly collectibleMappings: readonly ApprovedPublicCollectibleMapping[];
   readonly dataAsOf: Date;
+}
+
+export interface DistributedProviderPackContentsProjectionV3 extends Omit<
+  DistributedProviderPackContentsProjection,
+  "repacks"
+> {
+  readonly repacks: readonly PublicRepackDetailV3[];
 }
 
 export class DistributedProviderPackContentsError extends Error {

@@ -5,14 +5,17 @@ import {
   dataforrestCollectorCryptDistributedSourceAdapterManifest,
   dataforrestCollectorCryptDistributedV2SourceAdapterManifest,
   dataforrestCollectorCryptDistributedV3SourceAdapterManifest,
+  dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
   dataforrestCourtyardCatalogSourceAdapterManifest,
   dataforrestCourtyardCatalogV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV2SourceAdapterManifest,
   dataforrestCourtyardDistributedV3SourceAdapterManifest,
+  dataforrestCourtyardDistributedV4SourceAdapterManifest,
   dataforrestPhygitalsCatalogSourceAdapterManifest,
   dataforrestPhygitalsCatalogV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV2SourceAdapterManifest,
   dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+  dataforrestPhygitalsDistributedV4SourceAdapterManifest,
   launchProviderKeySchema,
   sourceAdapterManifestV1Schema,
   type LaunchProviderKey,
@@ -109,6 +112,12 @@ export class ProviderDataforrestLiveIntegrationRegistry {
 export const providerDataforrestLiveIntegrationRegistry =
   new ProviderDataforrestLiveIntegrationRegistry([
     createProviderDataforrestLiveIntegration(
+      "courtyard", dataforrestCourtyardDistributedV4SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "collector_crypt", dataforrestCollectorCryptDistributedV4SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
       "clutchpacks",
       dataforrestClutchpacksDistributedSourceAdapterManifest,
     ),
@@ -163,5 +172,9 @@ export const providerDataforrestLiveIntegrationRegistry =
     createProviderDataforrestLiveIntegration(
       "phygitals",
       dataforrestPhygitalsDistributedV3SourceAdapterManifest,
+    ),
+    createProviderDataforrestLiveIntegration(
+      "phygitals",
+      dataforrestPhygitalsDistributedV4SourceAdapterManifest,
     ),
   ]);

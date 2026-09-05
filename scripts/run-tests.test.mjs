@@ -119,15 +119,28 @@ test("fails when every discovered test in a lane is quarantined", (t) => {
   assert.match(result.stderr, /every discovered test quarantined/);
 });
 
-test("runs process integration files only after the parallel tooling lane", (t) => {
+test("runs resource-sensitive process files only after the parallel tooling lane", (t) => {
   const root = createFixture(t);
   const markerPath = path.join(root, "parallel-complete");
+  mkdirSync(path.join(root, "scripts", "local"), { recursive: true });
   writeFileSync(
     path.join(root, "scripts", "parallel.test.mjs"),
     `import { writeFileSync } from "node:fs";\n` +
       `import test from "node:test";\n` +
       `test("parallel", () => writeFileSync(${JSON.stringify(markerPath)}, "done"));\n`,
   );
+  for (const filename of [
+    "provider-continuous-policy.test.mjs",
+    "provider-resident-policy.test.mjs",
+  ]) {
+    writeFileSync(
+      path.join(root, "scripts", "local", filename),
+      `import { existsSync } from "node:fs";\n` +
+        `import assert from "node:assert/strict";\n` +
+        `import test from "node:test";\n` +
+        `test("isolated", () => assert.equal(existsSync(${JSON.stringify(markerPath)}), true));\n`,
+    );
+  }
   writeFileSync(
     path.join(root, "scripts", "start-admin-embedded.test.mjs"),
     `import { existsSync } from "node:fs";\n` +
@@ -141,5 +154,13 @@ test("runs process integration files only after the parallel tooling lane", (t) 
   assert.match(
     result.stdout,
     /executing isolated scripts\/start-admin-embedded\.test\.mjs/,
+  );
+  assert.match(
+    result.stdout,
+    /executing isolated scripts\/local\/provider-continuous-policy\.test\.mjs/,
+  );
+  assert.match(
+    result.stdout,
+    /executing isolated scripts\/local\/provider-resident-policy\.test\.mjs/,
   );
 });

@@ -21,6 +21,7 @@ import {
   productionPublicationReceiptSigningValue,
   productionPublicationRequestSigningValue,
   productionReceiptHash,
+  type PackCatalogErrorCode,
   type ProviderReleaseErrorCode,
   type ProductionDataReleaseErrorCode,
   type ProductionPublicationPath,
@@ -30,7 +31,8 @@ export type PublicationServerErrorCode =
   | ProductionDataReleaseErrorCode
   | ProviderReleaseErrorCode
   | CatalogManifestErrorCode
-  | CatalogRetentionErrorCode;
+  | CatalogRetentionErrorCode
+  | PackCatalogErrorCode;
 
 export type PublicationClientFailureCode =
   | PublicationServerErrorCode

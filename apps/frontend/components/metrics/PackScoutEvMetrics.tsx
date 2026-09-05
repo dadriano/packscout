@@ -15,20 +15,32 @@ type PackScoutEvMetricsProps = Readonly<{
   showFreshness?: boolean;
   showRepackPrice?: boolean;
   showProvenance?: boolean;
+  confidenceDetails?: readonly string[];
   headingHint?: Pick<GlossaryDefinition, "label" | "definition" | "learnHref">;
 }>;
 
-/**
- * The shared four-metric PackScout block: Gross EV $, Gross EV %, EV $, and
- * EV % beside Pack Price, with confidence, status, freshness, and the
- * required source and advice lines. Every value arrives pre-formatted from
- * the presentation boundary; this component renders and never calculates.
- *
- * EV $ carries no visible "Negative" word: every public PackScout EV is at or
- * below zero, so the word never distinguishes one pack from another. The
- * sign is in the value, the tone color says how far from break-even it is,
- * and the accessible label still names the state for assistive technology.
- */
+/** Evidence stays available from the confidence value without filling the panel. */
+export function confidenceEvidenceDetails(
+  presentation: PackScoutEvV3Presentation,
+  showFreshness = true,
+): readonly string[] {
+  const { freshness } = presentation;
+  return [...new Set([
+    ...presentation.confidence.limitations,
+    presentation.reasonCopy,
+    presentation.zeroPayoutNote,
+    presentation.calculationPriceNote,
+    ...(showFreshness ? [
+      freshness.sourceAgeLabel,
+      freshness.calculatedLabel,
+      freshness.dataAsOfLabel,
+      freshness.confidenceEvaluatedLabel,
+      freshness.soldOutLabel,
+    ] : []),
+  ].filter((detail): detail is string => Boolean(detail)))];
+}
+
+/** Values and accessible signs come from the shared presentation boundary. */
 export function PackScoutEvMetrics({
   presentation,
   grossEvPresentation,
@@ -36,13 +48,24 @@ export function PackScoutEvMetrics({
   showFreshness = true,
   showRepackPrice = true,
   showProvenance = true,
+  confidenceDetails = [],
   headingHint = {
     label: METRIC_TRUST_COPY.estimateLabel,
     definition: METRIC_TRUST_COPY.longRunExplanation,
     learnHref: EXPECTED_VALUE_ARTICLE_HREF,
   },
 }: PackScoutEvMetricsProps) {
-  const { freshness } = presentation;
+  const platformDetails = [
+    grossEvPresentation?.sourceNote,
+    grossEvPresentation?.observedLabel,
+  ].filter((detail): detail is string => Boolean(detail));
+  const evidenceDetails = [...new Set([
+    ...confidenceEvidenceDetails(presentation, showFreshness),
+    ...(grossEvPresentation?.source === "vendor_reported"
+      ? ["Platform-reported EV does not establish an independent confidence score."]
+      : []),
+    ...confidenceDetails,
+  ])];
   return (
     <section
       className={styles.root}
@@ -54,14 +77,11 @@ export function PackScoutEvMetrics({
         <section aria-label="EV from platform data" className={styles.root}>
           <h3 className={styles.heading}>Expected value</h3>
           <div className={styles.metrics}>
-            <MetricValue compact={compact} metric={grossEvPresentation.grossEvDollars} />
-            <MetricValue compact={compact} metric={grossEvPresentation.grossEvPercent} />
-            <MetricValue compact={compact} metric={grossEvPresentation.evDollars} showSemanticState={false} />
-            <MetricValue compact={compact} metric={grossEvPresentation.evPercent} showSemanticState={false} />
+            <MetricValue compact={compact} glossaryDetails={platformDetails} glossaryDetailsHeading="Source" metric={grossEvPresentation.grossEvDollars} showReason={false} />
+            <MetricValue compact={compact} glossaryDetails={platformDetails} glossaryDetailsHeading="Source" metric={grossEvPresentation.grossEvPercent} showReason={false} />
+            <MetricValue compact={compact} glossaryDetails={platformDetails} glossaryDetailsHeading="Source" metric={grossEvPresentation.evDollars} showSemanticState={false} />
+            <MetricValue compact={compact} glossaryDetails={platformDetails} glossaryDetailsHeading="Source" metric={grossEvPresentation.evPercent} showSemanticState={false} />
           </div>
-          <p className={styles.note}>{grossEvPresentation.sourceNote}</p>
-          <p className={styles.note}>{grossEvPresentation.observedLabel}</p>
-          <p className={styles.note}>Platform-reported EV does not establish an independent confidence score.</p>
         </section>
       ) : null}
       <div className={styles.header}>
@@ -86,14 +106,21 @@ export function PackScoutEvMetrics({
         className={styles.confidence}
         data-tone={presentation.confidence.tone}
       >
-        <span className={styles.confidenceLabel}>
-          EV confidence
-          <GlossaryHint
-            details={presentation.confidence.limitations}
-            field="evConfidence"
-          />
-        </span>
-        <strong>{presentation.confidence.displayValue}</strong>
+        <span>EV confidence</span>
+        <GlossaryHint
+          align="end"
+          details={evidenceDetails}
+          detailsHeading="Confidence evidence"
+          field="evConfidence"
+          trigger={
+            <>
+              <strong>{presentation.confidence.displayValue}</strong>
+              <span aria-hidden="true" className={styles.hintMark}>i</span>
+            </>
+          }
+          triggerAriaLabel={`${presentation.confidence.accessibleLabel} View confidence evidence.`}
+          triggerClassName={styles.confidenceTrigger}
+        />
       </div>
 
       <div className={styles.metrics}>
@@ -134,66 +161,6 @@ export function PackScoutEvMetrics({
           />
         ) : null}
       </div>
-
-      {presentation.zeroPayoutNote ? (
-        <p className={styles.note}>{presentation.zeroPayoutNote}</p>
-      ) : null}
-      {presentation.reasonCopy ? (
-        <p className={styles.reason}>{presentation.reasonCopy}</p>
-      ) : null}
-      {presentation.calculationPriceNote ? (
-        <p className={styles.note}>{presentation.calculationPriceNote}</p>
-      ) : null}
-
-      {showFreshness ? (
-        <div className={styles.freshness}>
-          {freshness.sourceAgeLabel ? (
-            <p className={styles.sourceAge} data-delayed={freshness.delayed}>
-              {freshness.sourceAgeLabel}
-            </p>
-          ) : null}
-          <dl className={styles.freshnessList}>
-            <div className={styles.freshnessRow}>
-              <dt>Calculated</dt>
-              <dd>
-                <time dateTime={freshness.calculatedAt}>
-                  {freshness.calculatedTimeLabel}
-                </time>
-              </dd>
-            </div>
-            <div className={styles.freshnessRow}>
-              <dt>Source evidence last observed</dt>
-              <dd>
-                {freshness.dataAsOf && freshness.dataAsOfTimeLabel ? (
-                  <time dateTime={freshness.dataAsOf}>
-                    {freshness.dataAsOfTimeLabel}
-                  </time>
-                ) : (
-                  "Unknown"
-                )}
-              </dd>
-            </div>
-            <div className={styles.freshnessRow}>
-              <dt>Confidence evaluated</dt>
-              <dd>
-                <time dateTime={freshness.confidenceEvaluatedAt}>
-                  {freshness.confidenceEvaluatedTimeLabel}
-                </time>
-              </dd>
-            </div>
-            {freshness.soldOutAt && freshness.soldOutTimeLabel ? (
-              <div className={styles.freshnessRow}>
-                <dt>Sold out</dt>
-                <dd>
-                  <time dateTime={freshness.soldOutAt}>
-                    {freshness.soldOutTimeLabel}
-                  </time>
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        </div>
-      ) : null}
 
       {showProvenance ? (
         <div className={styles.provenance}>

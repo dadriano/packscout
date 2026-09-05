@@ -28,7 +28,7 @@ import {
   type ProviderManualImportStage,
 } from "./provider-manual-import-diagnostics.ts";
 
-import { finishProviderImportHead } from "./provider-manual-import-head.ts";
+import { boundedHeadTransactionMilliseconds, finishProviderImportHead } from "./provider-manual-import-head.ts";
 import { reconcileProviderPageFactReferencesOpportunistically } from "./provider-manual-import-reconciliation.ts";
 import { providerManualImportExecutionBudget, providerManualImportLeaseMilliseconds,
   type ProviderImportExecutionMode } from "./provider-manual-import-execution-budget.ts";
@@ -42,12 +42,16 @@ export type ProviderManualImportExecutionResult =
       runId: string;
       pageCount: number;
       reconciliationPending?: true;
+      /** Set only by the head path, when this invocation ran a head-reconciliation step. */
+      headReconciliationExecuted?: true;
     }>
   | Readonly<{
       kind: "completed";
       runId: string;
       pageCount: number;
       counters: ProviderRunCounters;
+      /** Set only by the head path, when the completing head-reconciliation step ran here. */
+      headReconciliationExecuted?: true;
     }>
   | Readonly<{
       kind: "blocked" | "failed";
@@ -339,8 +343,9 @@ export class ProviderManualImportExecutor {
         };
       }
 
-      const finishHead = () => finishProviderImportHead({ database: this.dependencies.database,
+      const finishHead = (deadlineAt?: number) => finishProviderImportHead({ database: this.dependencies.database,
         runId: runId!, workerId: this.#workerId, fence, leaseMilliseconds: this.#leaseMilliseconds,
+        transactionMilliseconds: boundedHeadTransactionMilliseconds(this.#budget.transactionMilliseconds, deadlineAt),
         signal, onStage: (next) => { stage = next; } });
       if (runningRun.reachedSourceHead) {
         const result = await finishHead();
@@ -430,7 +435,7 @@ export class ProviderManualImportExecutor {
         if (committed.reachedHead) {
           const result: ProviderManualImportExecutionResult = Date.now() + 35_000 > pageDeadlineAt
             ? { kind: "progress", runId, pageCount: committed.pageNumber, reconciliationPending: true }
-            : await finishHead();
+            : await finishHead(pageDeadlineAt);
           retainLeaseForNextPage = result.kind === "progress";
           return result;
         }

@@ -21,6 +21,16 @@ export type SaveControlPresentation = Readonly<{
 const noun = (kind: SavedItemKind) =>
   kind === "repack" ? "repack" : "desired collectible";
 
+const savedErrorCopy: Readonly<Record<string, string>> = {
+  AUTH_REQUIRED: "Sign in again to update your saved items.",
+  AUTH_IDENTITY_INVALID: "Your session could not be verified. Sign out and try again.",
+  INVALID_PUBLIC_REPACK_ID: "This repack cannot be saved. Refresh the catalog and try again.",
+  INVALID_PUBLIC_COLLECTIBLE_ID: "This collectible cannot be saved. Refresh the catalog and try again.",
+  SAVED_RESOURCE_UNAVAILABLE: "This item is no longer in the catalog. You can still remove an existing save.",
+  SAVED_ITEM_LIMIT_REACHED: "You have reached the limit of 250 saves for this collection. Remove an item and try again.",
+  SAVED_ITEMS_STATE_CONFLICT: "Your saved items changed. Refresh the page before trying again.",
+};
+
 export function presentSavedItemMutationMessage(input: Readonly<{
   kind: SavedItemKind;
   saved: boolean;
@@ -36,7 +46,9 @@ export function presentSavedItemMutationMessage(input: Readonly<{
     return {
       copy: input.errorCode === PRODUCT_USER_SUSPENDED_ERROR_CODE
         ? SUSPENDED_ACCOUNT_NOTICE
-        : `We couldn't update this ${label.toLowerCase()}. Try again.`,
+        : input.errorCode && Object.hasOwn(savedErrorCopy, input.errorCode)
+          ? savedErrorCopy[input.errorCode]
+          : `We couldn't update this ${label.toLowerCase()}. Try again.`,
       tone: "error",
     };
   }
@@ -57,6 +69,8 @@ export function presentSaveControl(input: Readonly<{
   saved: boolean;
   loading: boolean;
   pending: boolean;
+  pendingSaved?: boolean;
+  failed?: boolean;
   message?: Readonly<{
     copy: string;
     tone: "success" | "error";
@@ -101,7 +115,7 @@ export function presentSaveControl(input: Readonly<{
       disabled: false,
       label: "Sign in to save",
       pressed: false,
-      statusCopy: `Sign in to save this ${noun(input.kind)} across devices.`,
+      statusCopy: "",
       tone: "neutral",
     };
   }
@@ -117,13 +131,25 @@ export function presentSaveControl(input: Readonly<{
     };
   }
 
-  if (input.pending) {
+  if (input.failed) {
     return {
       action: "none",
       disabled: true,
-      label: input.saved ? "Saving…" : "Removing…",
+      label: "Save unavailable",
+      pressed: false,
+      statusCopy: "Your saved items could not be loaded right now.",
+      tone: "error",
+    };
+  }
+
+  if (input.pending) {
+    const saving = input.pendingSaved ?? !input.saved;
+    return {
+      action: "none",
+      disabled: true,
+      label: saving ? "Saving…" : "Removing…",
       pressed: input.saved,
-      statusCopy: input.saved
+      statusCopy: saving
         ? `Saving this ${noun(input.kind)}.`
         : `Removing this ${noun(input.kind)}.`,
       tone: "neutral",

@@ -13,7 +13,7 @@ import {
   buildV3Price,
   buildV3UnavailableEv,
 } from "@/lib/packscout-ev-fixtures.test-support";
-import { PackScoutEvMetrics } from "./PackScoutEvMetrics";
+import { confidenceEvidenceDetails, PackScoutEvMetrics } from "./PackScoutEvMetrics";
 
 function render(
   estimate: PackScoutEvV3PresentationInput["estimate"],
@@ -29,6 +29,18 @@ function render(
       })}
     />,
   );
+}
+
+function evidence(
+  estimate: PackScoutEvV3PresentationInput["estimate"],
+  overrides: Partial<PackScoutEvV3PresentationInput> = {},
+): string {
+  return confidenceEvidenceDetails(presentPackScoutEvV3({
+    estimate,
+    price: buildV3Price(),
+    availability: "available",
+    ...overrides,
+  })).join("\n");
 }
 
 test("renders the four metrics, price, status, source, and advice lines", () => {
@@ -76,7 +88,8 @@ test("last-known estimates keep values, observed time, and decayed confidence", 
   assert.ok(markup.includes("Last-known estimate"));
   assert.ok(markup.includes("$85.00"));
   assert.ok(markup.includes("Medium · 50%"));
-  assert.ok(markup.includes("Source evidence last observed"));
+  assert.ok(evidence(buildV3LastKnownEv()).includes("Source evidence last observed"));
+  assert.equal(markup.includes("Source evidence last observed"), false);
   assert.match(markup, /data-status="last_known"/);
 });
 
@@ -86,23 +99,27 @@ test("sold-out historical estimates keep values with sold-out wording", () => {
   });
   assert.ok(markup.includes("Sold out · historical estimate"));
   assert.ok(markup.includes("$85.00"));
-  assert.ok(markup.includes("<dt>Sold out</dt>"));
-  assert.match(markup, /datetime="2026-08-19T10:05:00.000Z"/i);
+  assert.match(evidence(buildV3SoldOutEv(8_500), { availability: "sold_out" }), /Sold out/);
+  assert.equal(markup.includes("<dt>Sold out</dt>"), false);
 });
 
-test("delayed source age renders the delayed freshness text", () => {
+test("delayed source age and timestamps are available from the confidence value", () => {
   const markup = render(buildV3DelayedEv(8_500));
   assert.ok(markup.includes("Source data delayed (15–30 minutes old)"));
-  assert.ok(markup.includes("<dt>Calculated</dt>"));
-  assert.ok(markup.includes("<dt>Source evidence last observed</dt>"));
-  assert.ok(markup.includes("<dt>Confidence evaluated</dt>"));
+  const details = evidence(buildV3DelayedEv(8_500));
+  for (const label of ["Calculated", "Source evidence last observed", "Confidence evaluated"]) {
+    assert.ok(details.includes(label), label);
+    assert.equal(markup.includes(`<dt>${label}</dt>`), false);
+  }
+  assert.match(markup, /aria-label="PackScout EV confidence: [^"]+ View confidence evidence\."/);
+  assert.match(markup, /aria-expanded="false"/);
 });
 
-test("a valid zero payout renders $0.00 with the explicit note", () => {
+test("a valid zero payout stays numeric with its explanation in confidence evidence", () => {
   const markup = render(buildV3CurrentEv(0));
   assert.ok(markup.includes("$0.00"));
   assert.ok(
-    markup.includes(
+    evidence(buildV3CurrentEv(0)).includes(
       "Valid $0.00 payout: every supported outcome pays no guaranteed buyback.",
     ),
   );
@@ -120,9 +137,13 @@ test("last known values remain rendered with zero confidence, failure reason, an
   const markup = render(buildV3LastKnownEv(8_500, { latestUnavailableReason: "BUYBACK_UNAVAILABLE" }), {
     price: buildV3Price(20_000),
   });
-  for (const text of ["Last-known estimate", "$85.00", "-$15.00", "Low · 0%",
-    "Fresh calculation unavailable", "calculation-time Pack Price of $100.00", "$200.00"]) {
+  for (const text of ["Last-known estimate", "$85.00", "-$15.00", "Low · 0%", "$200.00"]) {
     assert.ok(markup.includes(text), text);
   }
-  assert.match(markup, /datetime="2026-08-19T10:00:00.000Z"/i);
+  const details = evidence(buildV3LastKnownEv(8_500, { latestUnavailableReason: "BUYBACK_UNAVAILABLE" }), {
+    price: buildV3Price(20_000),
+  });
+  for (const text of ["Fresh calculation unavailable", "calculation-time Pack Price of $100.00", "Calculated", "Source evidence last observed"]) {
+    assert.ok(details.includes(text), text);
+  }
 });

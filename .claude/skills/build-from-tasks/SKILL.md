@@ -246,33 +246,18 @@ Run a post-build integration pass:
 
 ### `deploy`
 
-Deploy the current build locally for end-to-end verification on isolated ports:
+Start the affected services from the current worktree using the repository's actual local-development commands:
 
-```bash
-./scripts/deploy-local.sh
-```
+1. Inspect root and workspace `package.json` scripts, `.env.example` files, and `docs/database-provisioning.md` before selecting a command. Confirm the required local configuration and database target; do not assume a start command creates an isolated database.
+2. In Packscout, use `npm run dev:frontend`, `npm run dev:admin`, or `npm run dev:all` for the relevant surface. Inspect the existing utilities under `scripts/local` and documented provisioning commands if database setup is needed; provision only the intended local target within the user's authorization.
+3. Check for port collisions and use the supported `PACKSCOUT_FRONTEND_PORT`, `PACKSCOUT_ADMIN_PORT`, and `PACKSCOUT_ADMIN_HMR_PORT` settings when needed. Record the chosen ports, process/session handles, and URLs; ports are not assigned automatically from branch names.
+4. Wait for readiness, then drive the affected flows with the repository's runtime verification workflow and observe outcomes directly. Report any missing configuration or unavailable local runtime as a verification gap.
 
-This script creates an isolated database, assigns deterministic ports from the branch name, starts the local services, and reports the URLs when ready.
-
-Override the base port when needed:
-
-```bash
-DEPLOY_BASE_PORT=4500 ./scripts/deploy-local.sh
-```
-
-Use deploy after the integration pass as the default final verification step before publishing. Only skip it when the user explicitly opts out or the repository does not support a local deploy path.
-
-Once the deploy is up, drive the affected flows against it with the repository's runtime verification workflow when available, and observe the outcomes directly. Fall back to manual testing only when no runtime verification path exists.
+Use this local runtime check after integration before publishing runnable changes. Only skip it when the user explicitly opts out or the repository has no local runtime path.
 
 ### `teardown`
 
-Decommission a local deploy:
-
-```bash
-./scripts/deploy-local.sh teardown
-```
-
-This stops services, drops the deploy database, and cleans up temporary deploy files.
+Stop only the service processes started for this verification run, using their recorded process/session handles. Use documented local cleanup commands only for resources owned by that run. Do not drop or reset databases without explicit authorization; starting the development services does not imply a disposable database was created.
 
 ## Parallel Delegation
 
@@ -440,3 +425,16 @@ After a PR is opened and reported, do not treat the build as finished — watch 
    - PR merged or closed: stop the watch and report the final state.
 4. If the watch times out with no signal, report that no review activity was observed yet and how to resume the watch.
 5. The watcher only reads PR state and reports. Fixes land through the normal build flow in the feature worktree, gated by the same task verification anchors as the original work.
+
+
+## Output shape for the human reader
+
+Task files, commits, and PR bodies are for builders and reviewers — they stay complete. What you say to the user takes this shape:
+
+- **Progress updates restate state**: "Task 003 done (4 of 9). Now: 004 in its worktree." The reader does not hold the plan between messages; the update carries it.
+- **Errors are cause → fix**: the failing check, the cause, the fix or single next diagnostic. Matter-of-fact, no narration of attempts unless asked.
+- **The handoff**: first line names what shipped and where (branch, PR, verification result). Then at most 3 flags ranked by risk. Last line is one action the reader can take in under two minutes — usually opening the PR.
+- **Estimates in concrete units** ("two tasks left, roughly an afternoon"), never "almost done".
+- Simplification applies only to prose the user reads — never to task status, specs, code, commits, or PR bodies.
+- Before the session's first user-facing summary, load the `eli5` skill (Skill tool, audience: "a busy technical reader who skims"); if unavailable, apply purpose-first, plain-word calibration directly.
+- If `/i-have-adhd` is active it outranks these; never invoke it yourself (user-invocable only).

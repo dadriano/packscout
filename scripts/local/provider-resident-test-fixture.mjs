@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import { tsImport } from "tsx/esm/api";
 const { providerMixedCursorFingerprint } = await tsImport("@packscout/database", import.meta.url);
-const { DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION } = await tsImport("@packscout/contracts", import.meta.url);
-const { providerDataforrestLiveIntegrationRegistry } = await tsImport("../../apps/worker/src/provider-dataforrest-live-integration.ts", import.meta.url);
+const { dataforrestClutchpacksDistributedSourceAdapterManifest } = await tsImport("@packscout/contracts", import.meta.url);
 export const pins = { organizationId: "2a333333-3333-4333-8333-333333333331", providerId: "2a333333-3333-4333-8333-333333333332",
   providerKey: "clutchpacks", configId: "2a333333-3333-4333-8333-333333333333", initialRunId: "2a333333-3333-4333-8333-333333333334",
   operationId: "2a333333-3333-4333-8333-333333333335", operatorId: "2a333333-3333-4333-8333-333333333336" };
 export function residentFixture() {
   const now = new Date("2026-08-30T06:05:00Z");
-  const integration = providerDataforrestLiveIntegrationRegistry.resolve(
-    "clutchpacks",
-    DATAFORREST_CLUTCHPACKS_DISTRIBUTED_ADAPTER_VERSION,
-  );
+  const integration = {
+    providerKey: "clutchpacks",
+    manifest: dataforrestClutchpacksDistributedSourceAdapterManifest,
+  };
   const authority = { configNumber: 4n, integration, cachedConfiguration: { adapterKey: integration.manifest.adapterVersion,
     settings: { platform: "clutchpacks" } }, expiresAt: null, scheduleSeconds: 300, digest: "d".repeat(64) };
   const cursor = { sourceInstanceId: pins.providerId, sourceRevisionId: pins.configId, sourceTypeKey: integration.manifest.sourceTypeKey,

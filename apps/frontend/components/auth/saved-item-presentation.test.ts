@@ -22,6 +22,7 @@ test("a guest save action opens authentication without claiming a save", () => {
   assert.equal(presentation.disabled, false);
   assert.equal(presentation.pressed, false);
   assert.equal(presentation.label, "Sign in to save");
+  assert.equal(presentation.statusCopy, "");
 });
 
 test("configured saved-item controls expose loading, pending, success, and error", () => {
@@ -42,6 +43,7 @@ test("configured saved-item controls expose loading, pending, success, and error
     authStatus: "signed_in",
     saved: true,
     pending: true,
+    pendingSaved: true,
   });
   assert.equal(saving.label, "Saving…");
   assert.equal(saving.pressed, true);
@@ -60,11 +62,22 @@ test("configured saved-item controls expose loading, pending, success, and error
   const failed = presentSaveControl({
     ...base,
     authStatus: "signed_in",
+    failed: true,
+  });
+  assert.equal(failed.action, "none");
+  assert.equal(failed.disabled, true);
+  assert.equal(failed.pressed, false);
+  assert.equal(failed.label, "Save unavailable");
+  assert.equal(failed.tone, "error");
+
+  const writeFailed = presentSaveControl({
+    ...base,
+    authStatus: "signed_in",
     message: { copy: "Try again.", tone: "error" },
   });
-  assert.equal(failed.action, "toggle");
-  assert.equal(failed.statusCopy, "Try again.");
-  assert.equal(failed.tone, "error");
+  assert.equal(writeFailed.action, "toggle");
+  assert.equal(writeFailed.statusCopy, "Try again.");
+  assert.equal(writeFailed.tone, "error");
 });
 
 test("unconfigured and unverifiable sessions fail closed", () => {

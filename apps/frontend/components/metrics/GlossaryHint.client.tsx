@@ -153,6 +153,7 @@ export function GlossaryHint({
     <span
       className={styles.root}
       data-align={align}
+      data-custom-trigger={trigger ? "true" : undefined}
       data-open={state.open ? "true" : "false"}
       onBlur={handleBlur}
       onFocus={() => dispatch({ type: "focus_enter" })}

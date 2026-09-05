@@ -14,10 +14,21 @@ const providerSource = readFileSync(
   new URL("./AuthenticatedSavedItemsProvider.client.tsx", import.meta.url),
   "utf8",
 );
+const mutationSource = readFileSync(
+  new URL("./saved-item-mutations.client.ts", import.meta.url),
+  "utf8",
+);
+
 const accountControlSource = readFileSync(
   new URL("./AccountControl.client.tsx", import.meta.url),
   "utf8",
 );
+
+test("item toggles retain the authoritative refusal path when standing is already suspended", () => {
+  assert.match(providerSource, /toggle: async \(\) => \{\s*if \(signedIn && savedItemIds !== undefined\) \{\s*await mutations\.run\(kind, id, !isSaved\(kind, id\)\);/);
+  // Account-level availability and its notice still describe suspended standing.
+  assert.match(providerSource, /accountSavingAvailable: signedIn && savedItemIds !== undefined && accountNotice === null/);
+});
 
 test("the suspended refusal is recognised, and nothing else is mistaken for it", () => {
   const refusal = {
@@ -160,7 +171,7 @@ test("a blocked save reads as a suspended account, not a retryable fault", () =>
   );
 
   // Any other failure keeps the ordinary retryable message.
-  for (const errorCode of [null, undefined, "SAVED_ITEM_LIMIT_REACHED"]) {
+  for (const errorCode of [null, undefined]) {
     assert.deepEqual(
       presentSavedItemMutationMessage({
         kind: "repack",
@@ -195,12 +206,12 @@ test("the product learns standing from the authenticated self-standing read", ()
   // A blocked write is the second arrival of the same fact, and a completed
   // write clears it, so reinstatement needs no reload.
   assert.match(
-    providerSource,
-    /if \(isSuspendedAccountRefusal\(error\)\) setRefusedAsSuspended\(true\);/,
+    mutationSource,
+    /if \(isSuspendedAccountRefusal\(error\)\) publish\(\{ \.\.\.state, refusedAsSuspended: true \}\);/,
   );
-  assert.match(providerSource, /setRefusedAsSuspended\(false\);/);
+  assert.match(mutationSource, /publish\(\{ \.\.\.state, refusedAsSuspended: false \}\);/);
   // Only the stable code crosses into presentation; no backend text is shown.
-  assert.match(providerSource, /errorCode: readRefusalCode\(error\)/);
+  assert.match(mutationSource, /errorCode: readRefusalCode\(error\)/);
   assert.equal(providerSource.includes("error.message"), false);
 
   // The notice reaches the account surface, and nothing gates public content.

@@ -100,8 +100,8 @@ function requireTimestamp(value: string, productKey: string | null): number {
  *   sellout as explicit history; an incoherent freeze blocks the release.
  * - A missing revision is an explicit unknown-time unavailable state.
  */
-function composePackScoutPublicEv(
-  product: DataReleaseV3CanonicalProduct,
+export function composePackScoutPublicEvV3(
+  product: Pick<DataReleaseV3CanonicalProduct, "productKey" | "availability" | "soldOutAt">,
   eligibility: Awaited<ReturnType<DataReleaseV3EligibilityPort["getPublicationEligibleRevision"]>>,
   readAt: string,
 ): PackScoutPublicEvV3 {
@@ -330,7 +330,7 @@ export class DataReleaseV3ReleaseAssembler {
         productKey: product.productKey,
         readAt,
       });
-      const packScout = composePackScoutPublicEv(product, eligibility, readAt);
+      const packScout = composePackScoutPublicEvV3(product, eligibility, readAt);
       const parsed = publicRepackDetailV3Schema.safeParse({
         publicRepackId: product.publicRepackId,
         publicVendorId: product.publicVendorId,

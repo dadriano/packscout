@@ -1,14 +1,16 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import type { PublicRepackFilters } from "@packscout/contracts";
+import type { DisplayedEvMedianSourcesV3, PublicRepackFilters } from "@packscout/contracts";
 import { catalogHrefForSummary } from "@/lib/catalog-query-state.client";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 import { presentCatalogSummaries } from "./overview-presentation";
+import { VendorIdentity } from "./VendorIdentity";
 import styles from "./CatalogSummaries.module.css";
 
 type CatalogSummariesProps = Readonly<{
   title: "By vendor" | "By category";
   summaries: readonly RepackSummaryGroupV3[];
+  evMedianSources: DisplayedEvMedianSourcesV3["vendors"];
   activeFilters: PublicRepackFilters;
 }>;
 
@@ -17,9 +19,10 @@ type SummaryBarStyle = CSSProperties & { "--bar-ratio": number };
 export function CatalogSummaries({
   title,
   summaries,
+  evMedianSources,
   activeFilters,
 }: CatalogSummariesProps) {
-  const rows = presentCatalogSummaries(summaries);
+  const rows = presentCatalogSummaries(summaries, evMedianSources);
   const headingId =
     title === "By vendor" ? "catalog-by-vendor" : "catalog-by-category";
 
@@ -46,8 +49,12 @@ export function CatalogSummaries({
           });
           return (
             <li key={row.key}>
-              <Link aria-label={row.accessibleLabel} className={styles.row} href={href}>
-                <span className={styles.label}>{row.label}</span>
+              <Link aria-label={row.accessibleLabel} className={styles.row} href={href} title={`${row.medianEvPercent.accessibleLabel} ${row.sourceLabel}.`}>
+                <span className={styles.label}>
+                  {title === "By vendor" ? (
+                    <VendorIdentity name={row.label} vendorKey={row.key} />
+                  ) : row.label}
+                </span>
                 <span
                   aria-hidden="true"
                   className={styles.track}
@@ -65,7 +72,6 @@ export function CatalogSummaries({
                   data-tone={row.medianEvPercent.tone ?? "plain"}
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
-                  <small>{row.medianEvPercent.semanticLabel}</small>
                 </span>
               </Link>
             </li>

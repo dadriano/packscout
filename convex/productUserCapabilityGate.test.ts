@@ -140,6 +140,7 @@ function capabilityCalls(
 ): ReadonlyArray<() => Promise<unknown>> {
   return [
     () => session.query(api.savedItems.getSavedItemIds, {}),
+    () => session.action(api.savedItems.getOwnerWatchlist, {}),
     () =>
       session.mutation(api.savedItems.setSavedRepack, {
         publicRepackId,
@@ -483,13 +484,18 @@ describe("the beta switch off preserves today's behavior", () => {
       }),
       SUSPENDED_CODE,
     );
-    // The suspended account still sees what it owns while the beta is off.
+    // Identifier-only reads still show what the account owns. Watchlist is
+    // save-gated, so it refuses the same way the write does.
     await expect(
       session.query(api.savedItems.getSavedItemIds, {}),
     ).resolves.toEqual({
       savedRepackIds: [publicRepackId],
       savedCollectibleIds: [],
     });
+    await expectErrorCode(
+      session.action(api.savedItems.getOwnerWatchlist, {}),
+      SUSPENDED_CODE,
+    );
 
     await setStanding(t, USER_A.tokenIdentifier, "active");
     await expect(
@@ -510,12 +516,17 @@ describe("the beta switch off preserves today's behavior", () => {
     await insertLegacyRecord(t, USER_B.tokenIdentifier);
     const session = t.withIdentity(USER_B);
 
-    // Reads do not consult the directory while the beta is off, exactly as
-    // before this task; writes hit the same standing-read conflict they
-    // always have. Neither outcome is an admission refusal.
+    // Identifier-only reads do not consult the directory while the beta is
+    // off, exactly as before this task. Watchlist and writes hit the same
+    // standing-read conflict they share. Neither outcome is an admission
+    // refusal.
     await expect(
       session.query(api.savedItems.getSavedItemIds, {}),
     ).resolves.toEqual({ savedRepackIds: [], savedCollectibleIds: [] });
+    await expectErrorCode(
+      session.action(api.savedItems.getOwnerWatchlist, {}),
+      "PRODUCT_USER_STATE_CONFLICT",
+    );
     await expectErrorCode(
       session.mutation(api.savedItems.setSavedRepack, {
         publicRepackId,
@@ -750,7 +761,7 @@ describe("authenticated entry-point enumeration", () => {
       }
     }
 
-    // Scanner liveness: the three shipped capabilities are discovered and
+    // Scanner liveness: the shipped saved-item capabilities are discovered and
     // gated. If the registration style ever changes, this fails loudly
     // instead of the scan going quietly blind.
     expect(gatedByModule.get("savedItems.ts")?.sort()).toEqual([
@@ -758,5 +769,33 @@ describe("authenticated entry-point enumeration", () => {
       "setSavedCollectible",
       "setSavedRepack",
     ]);
+    const savedItemsSource = sources.get("savedItems.ts") ?? "";
+    const watchlistAction = publicRegistrationsOf(savedItemsSource).find(
+      ({ name }) => name === "getOwnerWatchlist",
+    );
+    expect(watchlistAction?.kind).toBe("action");
+    expect(watchlistAction?.segment.includes("Date.now()")).toBe(true);
+    expect(watchlistAction?.segment.includes("getOwnerWatchlistAtTime")).toBe(
+      true,
+    );
+    expect(
+      watchlistAction?.segment.includes("proveOwnerWatchlistRepacks"),
+    ).toBe(true);
+    expect(
+      watchlistAction?.segment.includes(
+        "validateOwnerWatchlistCollectibleChases",
+      ),
+    ).toBe(true);
+    expect(watchlistAction?.segment.includes(GATE_CALL)).toBe(false);
+    expect(watchlistAction?.segment.includes("ctx.db")).toBe(false);
+    expect(savedItemsSource).toContain(
+      "export const getOwnerWatchlistAtTime = internalQuery",
+    );
+    expect(
+      savedItemsSource
+        .split("export const getOwnerWatchlistAtTime")[1]
+        ?.split("export const getOwnerWatchlist")[0]
+        ?.includes(GATE_CALL),
+    ).toBe(true);
   });
 });

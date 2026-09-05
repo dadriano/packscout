@@ -118,3 +118,17 @@ When `tech-*.md` files already exist:
 Do not edit source task files, `_index.md`, or `ux-*.md` files unless the user explicitly asks. This skill creates and updates only `tech-*.md` companion files.
 
 Do not mark task status, check acceptance criteria, or add spec-compliance notes. Those belong to `build-from-tasks` during implementation.
+
+
+## Output shape for the human reader
+
+Spec bodies are for builders — complete and precise, never compressed for readability. The handoff message is for a human:
+
+1. First line: which spec files now exist and in which folder.
+2. One line per spec: what it covers and the task IDs it maps to.
+3. At most 3 decisions or risks that need human eyes, ranked.
+4. Last line: one concrete next action — usually the follow-on skill to run or the one decision you need.
+
+Simplification never applies to spec content.
+- Before the session's first user-facing summary, load the `eli5` skill (Skill tool, audience: "a busy technical reader who skims"); if unavailable, apply purpose-first, plain-word calibration directly.
+- If `/i-have-adhd` is active it outranks these; never invoke it yourself (user-invocable only).

@@ -130,3 +130,14 @@ Do not treat the run as finished when the PR opens — watch it for review feedb
 - **Always exit the worktree** after pushing and opening the PR.
 - **Always start the PR review watch** after opening the PR. A 👍 reaction on the initial PR comment marks the PR as good; new review comments must be surfaced and addressed before the fix is considered settled.
 - **If the scope grows**, stop and tell the user. If investigation reveals the issue is larger than a quickfix (needs multiple coordinated changes across many files, architectural changes, or new features), recommend `/design-to-tasks` instead.
+
+
+## Output shape for the human reader
+
+The confirmation gate is the surface that matters: a wall of text gets rubber-stamped, which defeats the gate. The mini-PRD shown to the user must read in under two minutes — what is broken (one sentence), what you will change and where (numbered, at most 5 items), the risk (one line), then the question: proceed?
+
+- The handoff: first line is what is fixed plus the PR link; then how it was verified; last line one under-two-minute action.
+- Errors are cause → fix, matter-of-fact.
+- Simplify the prose, never the diff or the facts of what changed.
+- Before the session's first user-facing summary, load the `eli5` skill (Skill tool, audience: "a busy technical reader who skims"); if unavailable, apply purpose-first, plain-word calibration directly.
+- If `/i-have-adhd` is active it outranks these; never invoke it yourself (user-invocable only).

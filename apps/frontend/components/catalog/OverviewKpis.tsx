@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { DashboardKpis } from "@packscout/contracts";
+import type { DashboardKpis, DisplayedEvMedianSource } from "@packscout/contracts";
 import { presentDashboardKpis } from "./overview-presentation";
 import styles from "./OverviewKpis.module.css";
 
@@ -11,6 +11,7 @@ const KPI_MARKS = Object.freeze({
 
 type OverviewKpisProps = Readonly<{
   kpis: DashboardKpis;
+  evMedianSource: DisplayedEvMedianSource | null;
   repacksHref?: string;
 }>;
 
@@ -33,17 +34,12 @@ function KpiCard({
           </span>
         ) : null}
       </div>
-      {kpi.stateLabel && kpi.state !== "unavailable" ? (
-        <span aria-hidden="true" className={styles.stateLabel}>
-          {kpi.stateLabel}
-        </span>
-      ) : null}
     </>
   );
 }
 
-export function OverviewKpis({ kpis, repacksHref }: OverviewKpisProps) {
-  const presentations = presentDashboardKpis(kpis);
+export function OverviewKpis({ kpis, evMedianSource, repacksHref }: OverviewKpisProps) {
+  const presentations = presentDashboardKpis(kpis, evMedianSource);
 
   return (
     <section aria-label="Overview metrics">

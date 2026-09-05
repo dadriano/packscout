@@ -1,14 +1,26 @@
 # Task: Publish and Recover Pack State
 
 **ID:** pack-version-publication/006
-**Depends on:** pack-version-publication/002, pack-version-publication/003, pack-version-publication/004, pack-version-publication/005
+**Depends on:** pack-version-publication/002, pack-version-publication/003, pack-version-publication/004, pack-version-publication/005, pack-version-publication/011
 **Blocks:** pack-version-publication/008, pack-version-publication/009
 **Delivery phase:** P06
 **Estimated scope:** large
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including crash, network, fencing, retry, rollback, authorization, and isolation verification
 **Status:** todo
 
+## Handoff — 2026-09-04
+
+Not started.002/005 are merged;003/004 are implemented in PR114/119 with repaired-head certification pending.011 full-data parity remains incomplete and waits merged003/005/013 (neutral core PR121). These are actual prerequisites;005 alone does not unblock006. The user authorizes remaining builds with delegation, not production activation. P02's crash/partial-expiry fixes are already merged in PR95 and remain owned by002. This phase owns authenticated remote status reconciliation, transaction-local capture composition, worker registration and the full external-write crash matrix. Reconcile persisted operations even without an ambiguity marker; use `retireReconciled` only with authenticated non-activation evidence, never a missing receipt or expired replay. Workers and credentials stay disabled until separate launch authorization.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
+
+### Parallel implementation brief after prerequisites merge
+
+Run independently of007 from the same verified011 parent. Own the pack/profile publisher and recovery services, transactional native PackInputCapture adapter, shared-delivery worker, P02/P04 repository and worker-gate wiring, `apps/worker` composition/runtime configuration, and environment-scoped seed/recovery/gate commands. Reuse `packages/services/src/convex-pack-catalog-publication-client.ts` and P05 HTTP routes rather than creating another transport. Keep schedules/credentials/commands disabled in production.
+
+Consume011's sealed complete build inputs/private evidence/hash association, `BuiltPublicPackSnapshot` and profile envelope; do not recompute economics or modify frontend consumers. Root serializes contract/database/service exports and any required Convex store/schema/generated corrections. Verify the two-provider/two-pack/profile ambiguity and epoch-recovery matrix, including lost responses without an ambiguity marker, gate/lease/hold/seed isolation, then full framework checks. Combined post-merge proof updates and rolls back one pack while another stays byte-identical in the browser.
 
 Drive two packs and one profile through crashes before assembly, after snapshot seal, before send, after an unknown response, during activation, and during protected rollback, then record the exact durable state and recovery outcome at every boundary.
 
@@ -24,7 +36,7 @@ Network outcomes can be unknown after a request is accepted, and an expired work
 
 ## Delivery Context
 
-P06 branches from the updated default branch after P02–P05 merge. Its review promise is a complete pack/profile publisher plus protected per-pack recovery commands, all disabled in production after merge. P08 and P09 may consume its status and operating evidence; enabling production schedules or credentials remains outside this task.
+P06 branches from the updated default branch after P02–P05 and P05A/task011 merge. Its review promise is a complete pack/profile publisher plus protected per-pack recovery commands, all disabled in production after merge. P08 and P09 may consume its status and operating evidence; enabling production schedules or credentials remains outside this task.
 
 ## Requirements
 

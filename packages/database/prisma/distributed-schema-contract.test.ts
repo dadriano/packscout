@@ -86,6 +86,16 @@ const PROVIDER_TABLES = [
   "provider_publication_operations",
   "provider_publication_receipts",
   "provider_publication_state",
+  "pack_publication_scopes",
+  "pack_publication_heads",
+  "pack_build_requests",
+  "pack_publication_change_receipts",
+  "pack_publication_impact_progress",
+  "pack_snapshot_artifacts",
+  "pack_snapshot_batches",
+  "pack_activation_intents",
+  "pack_publication_operations",
+  "pack_publication_receipts",
 ] as const;
 
 const CENTRAL_ENUMS = {
@@ -235,6 +245,8 @@ const CENTRAL_SOFT_REFERENCES = [
 ] as const;
 
 const PROVIDER_SOFT_REFERENCES = [
+  "pack_publication_scopes.organization_id",
+  "pack_publication_scopes.provider_id",
   "database_identity.provider_id",
   "provider_runtime.central_provider_id",
   "provider_runtime.cached_config_version_id",
@@ -269,6 +281,11 @@ const CENTRAL_ALLOWED_UNBOUND_UUIDS = [
 ] as const;
 
 const PROVIDER_ALLOWED_UNBOUND_UUIDS = [
+  // Central authority is bound once against database_identity by the scope trigger.
+  "pack_publication_scopes.organization_id",
+  "pack_publication_scopes.provider_id",
+  // Polymorphic build/activation reference: scoped deferred SQL constraint below.
+  "pack_publication_heads.lease_work_id",
   "database_identity.provider_id",
   "market_events.event_group_id",
   "promotion_changes.entity_id",
@@ -502,7 +519,7 @@ test("distributed Prisma schemas freeze exact role inventories and enum vocabula
   assert.deepEqual([...centralModels.keys()].sort(), [...CENTRAL_TABLES].sort());
   assert.deepEqual([...providerModels.keys()].sort(), [...PROVIDER_TABLES].sort());
   assert.equal(centralModels.size, 42);
-  assert.equal(providerModels.size, 32);
+  assert.equal(providerModels.size, 42);
   assert.deepEqual(enumInventory(centralSource), CENTRAL_ENUMS);
   assert.deepEqual(enumInventory(providerSource), PROVIDER_ENUMS);
 
@@ -547,6 +564,20 @@ test("cross-authority identifiers stay soft while every local UUID reference is 
     [...PROVIDER_ALLOWED_UNBOUND_UUIDS].sort(),
     "provider UUID identifiers without local Prisma relations drifted",
   );
+});
+
+test("pack publication owns only scoped local references and immutable episodes", () => {
+  const migration = migrationContents("provider", "20260903194000_pack_publication_state");
+  assert.match(migration, /provider_id = NEW.provider_id/u);
+  assert.match(migration, /CREATE CONSTRAINT TRIGGER pack_lease_reference/u);
+  assert.match(migration, /DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION guard_pack_lease_reference/u);
+  assert.match(migration, /w.organization_id = head.organization_id AND w.provider_id = head.provider_id/u);
+  assert.match(migration, /w.public_repack_id = head.public_repack_id AND w.state = 'publishing'/u);
+  assert.match(migration, /after_pack_id uuid REFERENCES packs\(id\)/u);
+  assert.match(migration, /OLD.state IN \('published','superseded','rolled_back'\)/u);
+  assert.match(migration, /pack_publication_one_shared_boundary_idx/u);
+  assert.match(migration, /octet_length\(inputs_json::text\) <= 36000000 AND octet_length\(request_json::text\) <= 18000000/u);
+  assert.match(migration, /octet_length\(snapshot_json::text\) <= 18000000/u);
 });
 
 test("provider facts preserve source identities while local relationships resolve monotonically", () => {

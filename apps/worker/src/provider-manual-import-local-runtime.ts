@@ -101,6 +101,15 @@ export interface ProviderManualImportBootstrap {
   readonly integration: ProviderDataforrestLiveIntegration;
 }
 
+export interface ProviderManualImportHeadReconciliationProgress {
+  readonly runId: string;
+  readonly pageCount: number;
+  /** Executor invocations in this process that ran a head-reconciliation step. */
+  readonly headReconciliationSteps: number;
+  /** Time since this process first observed a head-reconciliation step, by the runtime clock. */
+  readonly elapsedMilliseconds: number;
+}
+
 export interface ProviderManualImportLocalDependencies {
   bootstrapProvider(input: Readonly<{
     providerId: string;
@@ -128,6 +137,15 @@ export interface ProviderManualImportLocalDependencies {
   now?: () => Date;
   relayProviderActivity?(): Promise<void>;
   observeRelayFailure?(failureCode: "CENTRAL_ACTIVITY_UNAVAILABLE"): void;
+  /**
+   * Observes every executor invocation that ran a head-reconciliation step,
+   * so a drain that commits no source pages for hours stays visible in the
+   * process log. Runs that never reach head observe nothing; observer
+   * failures never change the run.
+   */
+  observeHeadReconciliationProgress?(
+    progress: ProviderManualImportHeadReconciliationProgress,
+  ): void;
 }
 
 /**
@@ -231,6 +249,35 @@ export async function runProviderManualImportOnce(input: Readonly<{
     return routed.value;
   };
 
+  const clockMilliseconds = (): number => {
+    const observed = now();
+    return observed instanceof Date ? observed.getTime() : Number.NaN;
+  };
+  let headReconciliationSteps = 0;
+  let headReconciliationObservedAt: number | null = null;
+  // Only results stamped by the head path count: a page that reaches head with
+  // too little window left is reported as pending without any head work, and
+  // the final head step returns "completed" rather than another progress.
+  const observeHeadReconciliation = (
+    progress: Extract<ProviderManualImportExecutionResult, { kind: "progress" | "completed" }>,
+  ): void => {
+    if (!progress.headReconciliationExecuted) return;
+    headReconciliationSteps += 1;
+    const observedAt = clockMilliseconds();
+    headReconciliationObservedAt ??= observedAt;
+    const elapsed = observedAt - headReconciliationObservedAt;
+    try {
+      input.dependencies.observeHeadReconciliationProgress?.({
+        runId: progress.runId,
+        pageCount: progress.pageCount,
+        headReconciliationSteps,
+        elapsedMilliseconds: Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0,
+      });
+    } catch {
+      // Best-effort observer failures never change committed provider work.
+    }
+  };
+
   let result: ProviderManualImportExecutionResult | null = null;
   for (
     let step = 0;
@@ -276,6 +323,9 @@ export async function runProviderManualImportOnce(input: Readonly<{
         previousProgress,
         "PROVIDER_CAPTURE_ABORTED",
       );
+    }
+    if (result.kind === "progress" || result.kind === "completed") {
+      observeHeadReconciliation(result);
     }
     if (result.kind !== "progress") break;
     // Head receipts advance independently of source-page limits and never refetch the source.

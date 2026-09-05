@@ -4,9 +4,11 @@ import Link from "next/link";
 import type { PublicRepackViewSummaryV3 } from "@packscout/contracts";
 import type { MetricValuePresentation } from "@/lib/packscout-ev-presentation";
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
+import { MetricValue } from "@/components/metrics/MetricValue";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { CatalogImage } from "./CatalogImage.client";
+import { VendorIdentity } from "./VendorIdentity";
 import { presentOpportunityRow } from "./overview-presentation";
 import styles from "./OpportunityTable.module.css";
 
@@ -22,28 +24,21 @@ type OpportunityTableProps = Readonly<{
   onSelectOpportunity: OpportunitySelectionHandler;
 }>;
 
-function MetricCell({ metric }: { metric: MetricValuePresentation }) {
+function MetricCell({ metric, details }: Readonly<{
+  metric: MetricValuePresentation;
+  details?: readonly string[];
+}>) {
   return (
-    <span
-      className={styles.metric}
-      data-state={metric.semanticState ?? "plain"}
-      data-tone={metric.tone ?? "plain"}
-    >
-      <span aria-hidden="true" className={styles.metricValue}>
-        {metric.displayValue}
-      </span>
-      <span className="sr-only">{metric.accessibleLabel}</span>
-      {metric.semanticLabel && metric.availability === "available" ? (
-        <span aria-hidden="true" className={styles.metricState}>
-          {metric.semanticLabel}
-        </span>
-      ) : null}
-      {metric.availability === "unavailable" ? (
-        <span aria-hidden="true" className={styles.unavailableReason}>
-          {metric.reasonCopy}
-        </span>
-      ) : null}
-    </span>
+    <MetricValue
+      compact
+      glossaryDetails={details}
+      metric={metric}
+      showGlossary={false}
+      showLabel={false}
+      showReason={false}
+      showSemanticState={false}
+      valueHint={Boolean(details?.length) || metric.availability === "unavailable"}
+    />
   );
 }
 
@@ -114,31 +109,20 @@ function OpportunityRow({
         </button>
       </td>
       <td>
-        <span className={styles.vendor}>
-          {row.vendorLogoUrl ? (
-            <CatalogImage
-              decorative
-              fallback="none"
-              fallbackAlt={`${row.vendorDisplayName} logo`}
-              image={{
-                url: row.vendorLogoUrl,
-                alt: `${row.vendorDisplayName} logo`,
-              }}
-              variant="vendor"
-            />
-          ) : null}
-          <span>{row.vendorDisplayName}</span>
-        </span>
+        <VendorIdentity name={row.vendorDisplayName} vendorKey={repack.vendorKey} />
       </td>
       <td>{row.category}</td>
       <td>
         <MetricCell metric={row.packPrice} />
       </td>
       <td>
-        <MetricCell metric={row.packScoutEv.evDollars} />
+        <MetricCell
+          details={[row.displayedEv.sourceNote, row.displayedEv.observedLabel].filter((detail): detail is string => Boolean(detail))}
+          metric={row.displayedEv.evDollars}
+        />
       </td>
       <td>
-        <MetricCell metric={row.packScoutEv.evPercent} />
+        <MetricCell metric={row.displayedEv.evPercent} />
       </td>
       <td>
         <CatalogConfidenceEvidence

@@ -46,6 +46,27 @@ test("closed transaction and query cancellation do not falsely assert a timeout 
     .failureCode, "PROVIDER_IMPORT_DATABASE_TRANSACTION_CONFLICT");
 });
 
+test("every expired-transaction P2028 template classifies as expiry while other P2028s stay invalid", async () => {
+  const { ProviderPrisma } = await import("@packscout/database/test-support");
+  const expired = (operation: string) => new ProviderPrisma.PrismaClientKnownRequestError("private query text", {
+    code: "P2028", clientVersion: "6.19.3",
+    meta: { error: `Transaction already closed: A ${operation} cannot be executed on an expired transaction. The timeout for this transaction was 480000 ms, however 480205 ms passed since the start of the transaction. Consider increasing the interactive transaction timeout or doing less work in the transaction.` },
+  });
+  for (const operation of ["query", "batch query", "commit", "rollback"]) {
+    const classified = classifyProviderManualImportFailure(expired(operation), "head_reconciliation");
+    assert.equal(classified.failureCode, "PROVIDER_IMPORT_DATABASE_TRANSACTION_EXPIRED");
+    assert.equal(classified.failureClass, "database");
+    assert.match(classified.failureSummary, /stage=head_reconciliation; category=transaction_expired/u);
+    assert.equal(JSON.stringify(classified).includes("private"), false);
+  }
+  const unknown = new ProviderPrisma.PrismaClientKnownRequestError("private query text", {
+    code: "P2028", clientVersion: "6.19.3",
+    meta: { error: "Transaction not found. Transaction ID is invalid, refers to an old closed transaction Prisma doesn't have information about anymore, or was obtained before disconnecting." },
+  });
+  assert.equal(classifyProviderManualImportFailure(unknown, "head_reconciliation").failureCode,
+    "PROVIDER_IMPORT_DATABASE_TRANSACTION_INVALID");
+});
+
 test("unknown exceptions remain non-source failures even during source reads", () => {
   for (const error of [new Error("private details"), { code: "unreviewed-private-code" }, null]) {
     assert.deepEqual(classifyProviderManualImportFailure(error, "source_read"), {

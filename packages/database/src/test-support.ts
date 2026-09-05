@@ -25,6 +25,9 @@ import {
 } from "./database-topology.ts";
 import { DISTRIBUTED_TRANSACTION_OPTIONS } from "./role-aware-database.ts";
 
+/** Lets tests outside this package build real provider Prisma errors for classification. */
+export { Prisma as ProviderPrisma } from "../prisma/generated/provider/index.js";
+
 const execFileAsync = promisify(execFile);
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const schemaPath = fileURLToPath(new URL("../prisma/schema.prisma", import.meta.url));
@@ -553,3 +556,4 @@ export async function withMigratedTestDatabase<T>(
     await harness.close();
   }
 }
+export { createProviderHarness } from "./provider-canonical-integration-support.ts";
