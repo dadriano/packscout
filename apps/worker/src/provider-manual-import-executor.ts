@@ -42,12 +42,16 @@ export type ProviderManualImportExecutionResult =
       runId: string;
       pageCount: number;
       reconciliationPending?: true;
+      /** Set only by the head path, when this invocation ran a head-reconciliation step. */
+      headReconciliationExecuted?: true;
     }>
   | Readonly<{
       kind: "completed";
       runId: string;
       pageCount: number;
       counters: ProviderRunCounters;
+      /** Set only by the head path, when the completing head-reconciliation step ran here. */
+      headReconciliationExecuted?: true;
     }>
   | Readonly<{
       kind: "blocked" | "failed";

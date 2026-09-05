@@ -584,9 +584,14 @@ test("runner completes on step 50,000 and never admits a 50,001st page step", as
   );
 });
 
+/**
+ * Mirrors the executor at head: the page that reaches head is reported as
+ * pending without head work, each head batch is a stamped progress, and the
+ * final batch is a stamped completion.
+ */
 function headReconciliationExecutor(input: {
   advanceClock(): void;
-  headSteps: number;
+  headBatches: number;
 }) {
   let step = 0;
   return {
@@ -596,13 +601,21 @@ function headReconciliationExecutor(input: {
     async executeNextPage() {
       step += 1;
       input.advanceClock();
-      if (step === 1) return { kind: "progress" as const, runId, pageCount: 1 };
-      if (step <= 1 + input.headSteps) {
+      if (step === 1) {
         return {
           kind: "progress" as const,
           runId,
           pageCount: 1,
           reconciliationPending: true as const,
+        };
+      }
+      if (step <= input.headBatches) {
+        return {
+          kind: "progress" as const,
+          runId,
+          pageCount: 1,
+          reconciliationPending: true as const,
+          headReconciliationExecuted: true as const,
         };
       }
       return {
@@ -619,19 +632,20 @@ function headReconciliationExecutor(input: {
           quarantined: 0,
           materialChanges: 1,
         },
+        headReconciliationExecuted: true as const,
       };
     },
   };
 }
 
-test("every head reconciliation step is observed with a running elapsed clock", async () => {
+test("only executed head reconciliation steps are observed, through the completing one", async () => {
   const client = {} as ProviderPrismaClient;
   let clock = initialNow.getTime();
   const observed: unknown[] = [];
   // One executor for the whole run: the runtime creates a fresh executor per step.
   const executor = headReconciliationExecutor({
     advanceClock: () => { clock += 11_000; },
-    headSteps: 2,
+    headBatches: 3,
   });
 
   const result = await runProviderManualImportOnce({
@@ -655,9 +669,11 @@ test("every head reconciliation step is observed with a running elapsed clock", 
   });
 
   assert.equal(result.kind, "completed");
+  // The pending-only page step is not observed; the completing step is.
   assert.deepEqual(observed, [
-    { runId, pageCount: 1, headReconciliationSteps: 1, elapsedMilliseconds: 11_000 },
-    { runId, pageCount: 1, headReconciliationSteps: 2, elapsedMilliseconds: 22_000 },
+    { runId, pageCount: 1, headReconciliationSteps: 1, elapsedMilliseconds: 0 },
+    { runId, pageCount: 1, headReconciliationSteps: 2, elapsedMilliseconds: 11_000 },
+    { runId, pageCount: 1, headReconciliationSteps: 3, elapsedMilliseconds: 22_000 },
   ]);
 });
 
@@ -666,7 +682,7 @@ test("a failing head reconciliation observer never changes the run outcome", asy
   let observations = 0;
   const executor = headReconciliationExecutor({
     advanceClock: () => {},
-    headSteps: 3,
+    headBatches: 3,
   });
 
   const result = await runProviderManualImportOnce({
