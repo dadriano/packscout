@@ -70,16 +70,10 @@ function RepackCard({
         onClick={(event) => onSelect(repack.publicRepackId, event.currentTarget)}
         type="button"
       >
-        <CatalogImage
-          fallbackAlt={repack.name}
-          image={repack.primaryImage}
-          variant="thumbnail"
-        />
-        <span className={styles.identity}>
+        <span className={styles.vendorRow}>
           <span className={styles.vendor}>
             <VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} />
           </span>
-          <span className={styles.name}>{repack.name}</span>
           <span
             className={styles.availability}
             data-state={repack.availability}
@@ -87,13 +81,25 @@ function RepackCard({
             {availability.label}
             <span className="sr-only">. {availability.description}</span>
           </span>
-          <span className={styles.category}>
-            {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
-          </span>
         </span>
-        <span className={styles.price}>
-          <span aria-hidden="true">{price.displayValue}</span>
-          <span className="sr-only">{price.accessibleLabel}</span>
+        <span className={styles.packRow}>
+          <CatalogImage
+            decorative
+            fallbackAlt={repack.name}
+            image={repack.primaryImage}
+            variant="thumbnail"
+          />
+          <span className={styles.identity}>
+            <span className={styles.name}>{repack.name}</span>
+            <span className={styles.category}>
+              {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
+            </span>
+          </span>
+          <span className={styles.price}>
+            <span aria-hidden="true" className={styles.priceLabel}>Pack price</span>
+            <span aria-hidden="true">{price.displayValue}</span>
+            <span className="sr-only">{price.accessibleLabel}</span>
+          </span>
         </span>
       </button>
 
