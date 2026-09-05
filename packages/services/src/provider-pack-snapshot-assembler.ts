@@ -86,7 +86,8 @@ export class ProviderPackSnapshotAssembler {
         const existing = await publicPackSnapshotSchema.parseAsync(existingSnapshot);
         requireAssembly(existing.identity.providerId === inputs.providerId && existing.identity.publicRepackId === inputs.publicRepackId);
         if (existing.identity.publicPackSnapshotId === artifact.snapshot.identity.publicPackSnapshotId) {
-          requireAssembly(equal(existing, artifact.snapshot));
+          // Schema transforms validate the candidate, but cannot establish exact captured-byte reuse.
+          requireAssembly(equal(existingSnapshot, artifact.snapshot));
           disposition = "reused";
         }
       }

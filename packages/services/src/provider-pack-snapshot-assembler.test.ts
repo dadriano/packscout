@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogCanonicalJson, publicPackSummaryCore } from "@packscout/contracts";
-import { ProviderPackSnapshotAssembler } from "./provider-pack-snapshot-assembler.ts";
+import { PACK_SNAPSHOT_HASH_DOMAIN, hashPackCatalogValue, packCatalogCanonicalJson, publicPackSnapshotSchema, publicPackSummaryCore } from "@packscout/contracts";
+import { PackSnapshotAssemblyError, ProviderPackSnapshotAssembler } from "./provider-pack-snapshot-assembler.ts";
 import { assemblyFixture, requestFor, refreshEvInputs } from "./provider-pack-snapshot-assembler.test-support.ts";
 
 const assembler = new ProviderPackSnapshotAssembler();
@@ -87,6 +87,48 @@ test("exact artifact reuse is separate from evidence and a changed public byte c
   assert.equal(independent.disposition, "reused");
   assert.equal(independent.canonicalBytes, golden.canonicalBytes);
   assert.notDeepEqual(independent.evidence.sharedDependencies, input.request.evidence.sharedDependencies);
+});
+
+test("reuse cannot normalize supplied snapshot bytes into an exact artifact", async context => {
+  const { input } = await assemblyFixture();
+  input.inputs.title = "Café";
+  const pinned = await requestFor(input.inputs);
+  const built = await assembler.assemble(pinned);
+  const mutations = {
+    "payload title whitespace": (snapshot: typeof built.snapshot) => { snapshot.payload.title = "  Café  "; },
+    "summary title whitespace": (snapshot: typeof built.snapshot) => { snapshot.payload.summaryProjection.title = "  Café  "; },
+    "equivalent timestamp representation": (snapshot: typeof built.snapshot) => {
+      snapshot.identity.dataAsOf = "2026-09-03T11:00:00-07:00";
+      snapshot.payload.dataAsOf = "2026-09-03T11:00:00-07:00";
+    },
+    "decomposed Unicode titles": (snapshot: typeof built.snapshot) => {
+      snapshot.payload.title = "Cafe\u0301";
+      snapshot.payload.summaryProjection.title = "Cafe\u0301";
+    },
+  };
+  for (const [name, mutate] of Object.entries(mutations)) await context.test(name, async () => {
+    const candidate = structuredClone(built.snapshot);
+    mutate(candidate);
+    const supplied = structuredClone(candidate);
+    // Schema validity does not prove that the supplied immutable bytes were canonical.
+    assert.deepEqual(await publicPackSnapshotSchema.parseAsync(candidate), built.snapshot);
+    await assert.rejects(assembler.assemble({ ...pinned, existingSnapshot: candidate }), error =>
+      error instanceof PackSnapshotAssemblyError && error.code === "PACK_SNAPSHOT_INPUT_INVALID" &&
+      error.reasonCode === "INVALID_DOMAIN_DATA");
+    assert.deepEqual(candidate, supplied);
+  });
+});
+
+test("reuse compares the synchronous candidate capture, not later caller mutations", async () => {
+  const { input, golden } = await assemblyFixture();
+  const candidate = structuredClone(golden.snapshot);
+  const pending = assembler.assemble({ ...input, existingSnapshot: candidate });
+  candidate.payload.title = "Later caller title";
+  candidate.payload.summaryProjection.title = "Later caller title";
+  const built = await pending;
+  assert.equal(built.disposition, "reused");
+  assert.deepEqual(built.snapshot, golden.snapshot);
+  assert.equal(built.canonicalBytes, golden.canonicalBytes);
 });
 
 test("all eligible valuations participate, with a stable native-ID tie break", async () => {

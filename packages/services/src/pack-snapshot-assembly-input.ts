@@ -3,22 +3,40 @@ import { assertPublicPackCatalogBytes, compareCanonicalStrings, packBuildRequest
   packSnapshotEvidenceSchema, providerPackBuildInputsSchema, publicProfileSnapshotIdSchema } from "@packscout/contracts";
 import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-snapshot-assembly-types.ts";
 
-const privateKeys = new Set(["account", "accountid", "authorization", "connectionstring", "connectionurl",
+const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{20,})/iu;
-const embeddedHttpAuthorities = /\bhttps?:[\\/]*([^\\/\s?#]*)/giu;
-
-function rejectCredentialText(value: string): void {
+function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
   const normalized = value.trim().normalize("NFC");
   requireAssembly(!credentialText.test(normalized));
-  // HTTP authority ends at path/query/fragment or whitespace, not at a quote
+  // URI authority ends at path/query/fragment or whitespace, not at a quote
   // that WHATWG would percent-encode inside a username or password.
   // WHATWG removes these controls even inside userinfo. Ambiguous control-joined
   // URL/email text therefore fails closed; ordinary prose spaces stay boundaries.
   const recognized = normalized.replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "");
-  // Consume each complete authority once, including benign ones, to stay linear.
-  for (const match of recognized.matchAll(embeddedHttpAuthorities)) requireAssembly(!match[1]!.includes("@"));
+  // Consume whole scheme-like runs even when no URI follows. Remember scanned
+  // spans so nested scheme spellings cannot rescan a long authority or suffix.
+  const schemes = /[a-z][a-z0-9+.-]*/giu;
+  let match: RegExpExecArray | null, authorityThrough = 0, parsedThrough = 0;
+  while ((match = schemes.exec(recognized)) !== null) {
+    const colon = schemes.lastIndex;
+    if (recognized[colon] !== ":") continue;
+    let authorityStart = colon + 1;
+    while (recognized[authorityStart] === "/" || recognized[authorityStart] === "\\") authorityStart += 1;
+    if (!/^(?:https?|ftp|wss?)$/iu.test(match[0]) && authorityStart - colon - 1 < 2) continue;
+    let end = Math.max(authorityStart, authorityThrough);
+    while (end < recognized.length && !/[\\/\s?#]/u.test(recognized[end]!)) {
+      requireAssembly(recognized[end] !== "@"); end += 1;
+    }
+    authorityThrough = end;
+    if (inspectEmbeddedUrl && match.index >= parsedThrough) {
+      end = colon + 1;
+      while (end < recognized.length && !/[\s<>"']/u.test(recognized[end]!)) end += 1;
+      parsedThrough = end;
+      inspectEmbeddedUrl(recognized.slice(match.index, end));
+    }
+  }
 }
 
 /** Inspect descriptors before cloning so getters, cycles and mutable handles cannot
@@ -63,12 +81,22 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     if (decoded !== normalized && (isTarget(decoded) || !normalized.includes("="))) {
       inspectFragment(decoded, depth + 1); return;
     }
-    for (const [key, nested] of new URLSearchParams(normalized)) {
+    inspectForm(normalized, depth);
+  }
+  function inspectForm(text: string, depth: number): void {
+    for (const [key, nested] of new URLSearchParams(text)) {
       inspectUrlKey(key, depth + 1); inspectUrlText(nested, depth + 1);
     }
   }
   function inspectUrlText(text: string, depth = 0, required = false): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
+    // Dispatch a form by its leading assignment, even when its value contains
+    // a literal question mark or fragment marker. URL paths retain precedence.
+    const assignment = candidate.indexOf("="), marker = candidate.search(/[?#]/u);
+    if (!required && !/^[a-z][a-z0-9+.-]*:|^(?:\/|\.\.?\/)/iu.test(candidate) &&
+      assignment >= 0 && (marker < 0 || assignment < marker)) {
+      inspectForm(normalized, depth); return;
+    }
     if (!required && !candidate.startsWith("/") && !/^[a-z][a-z0-9+.-]*:|[?#]/iu.test(candidate)) {
       const decoded = decodeLayer(normalized);
       if (decoded !== normalized) inspectUrlText(decoded, depth + 1);
@@ -90,8 +118,9 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     if (typeof item === "string") {
       requireAssembly(item.length <= limits.maximumSnapshotBytes);
       bytes += encoder.encode(item).byteLength;
-      rejectCredentialText(item);
-      if (field === "url" || field === "imageUrl") {
+      const urlField = field === "url" || field === "imageUrl";
+      rejectCredentialText(item, urlField ? undefined : target => inspectUrlText(target));
+      if (urlField) {
         inspectUrlText(item, 0, true);
       }
     } else if (item === null || item === undefined || typeof item === "boolean") bytes += 5;
@@ -120,7 +149,8 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   visit(value, 0);
   for (const key of keys) requireAssembly(!privateKeys.has(key.toLowerCase().replace(/[^a-z0-9]/gu, "")));
   // Scan raw field/query names before schema parsing; normalize public text later.
-  assertPublicPackCatalogBytes(Object.fromEntries([...keys].map(key => [key, null])));
+  try { assertPublicPackCatalogBytes(Object.fromEntries([...keys].map(key => [key, null]))); }
+  catch { requireAssembly(false); }
 }
 
 function record(value: unknown): Record<string, unknown> {
