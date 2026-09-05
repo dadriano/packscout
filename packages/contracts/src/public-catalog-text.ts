@@ -6,7 +6,7 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
   "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 // Bearer is ordinary public prose unless a protected field or authorization
 // assignment establishes credential context; token spelling/length cannot do so.
-const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
+const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -140,7 +140,59 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     const decoded = decodeLayer(normalized);
     return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
   };
+  const inspectConnectionAssignments = (text: string, depth: number): void => {
+    let through = -1, endpoint = false, catalog = false;
+    // Context belongs only to adjacent semicolon fields, not unrelated prose.
+    const fields = /(?:^|;)[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^=;\r\n]+))[ \t]*=[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^;\r\n]*))[ \t]*/gmu;
+    for (const match of text.matchAll(fields)) {
+      if (match.index !== through) { endpoint = false; catalog = false; }
+      through = match.index + match[0].length;
+      const quoted = match[1] !== undefined || match[2] !== undefined;
+      let name = match[1] ?? match[2] ?? match[3]!, keyDepth = depth + 1;
+      while (name.includes("%")) {
+        charge(name, keyDepth++);
+        name = name.trim().normalize("NFKC");
+        const decoded = decodeLayer(name);
+        if (decoded === name) break;
+        name = decoded;
+      }
+      name = name.normalize("NFKC");
+      const names = [normalizeProtectedPublicationFieldKey(name.trim())];
+      if (!quoted) {
+        const trimmed = name.trim().replace(/\s+/gu, " "), last = trimmed.lastIndexOf(" ");
+        names.push(normalizeProtectedPublicationFieldKey(trimmed.slice(last + 1)));
+        if (last >= 0) names.push(normalizeProtectedPublicationFieldKey(trimmed.slice(trimmed.lastIndexOf(" ", last - 1) + 1)));
+      }
+      const server = names.includes("server"), source = names.includes("datasource");
+      const database = names.includes("database") || names.includes("initialcatalog");
+      if (!server && !source && !database) continue;
+      charge(name, keyDepth);
+      const rawTarget = (match[4] ?? match[5] ?? match[6]!).trim();
+      let target = rawTarget, targetDepth = depth + 1;
+      if (server || source) {
+        // Decode only this assignment value until a public URL is recognizable;
+        // encoded path/query boundaries remain the existing URL visitor's job.
+        while (!/^https?:\/\//iu.test(target) && target.includes("%")) {
+          charge(target, targetDepth++);
+          target = target.trim().normalize("NFKC");
+          const decoded = decodeLayer(target);
+          if (decoded === target) break;
+          target = decoded.trim();
+        }
+        const connection = hasPrivateUriTarget(target, 0) || /,[ \t]*[0-9]{1,5}$/u.test(target) || isPrivateUrlHostname(target);
+        const publicSourceUrl = source && /^https?:\/\//iu.test(target);
+        if (connection && !publicSourceUrl) reject();
+        if (publicSourceUrl && target !== rawTarget) visit(target, targetDepth, false);
+        // Explicit endpoint/catalog fields establish context without guessing
+        // a hostname grammar for quoted, braced or named instances.
+        endpoint ||= target !== "";
+      }
+      catalog ||= database && target !== "";
+      if (endpoint && catalog) reject();
+    }
+  };
   const inspectProseAssignments = (text: string, depth: number): void => {
+    inspectConnectionAssignments(text, depth);
     // Quotes establish the whole assigned name, including punctuation that the
     // protected-field normalizer removes. Each scan stops at its next delimiter.
     for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {

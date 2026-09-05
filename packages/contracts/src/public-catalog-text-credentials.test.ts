@@ -2,6 +2,54 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertPublicCatalogText, assertPublicCatalogUrl } from "./public-catalog-text.ts";
 
+test("explicit key-value database connection targets remain private", () => {
+  for (const text of ["Server=10.0.0.7;Database=cards", "Data Source=db.internal:1433;Initial Catalog=cards",
+    "Database=cards;Server=CATALOGSERVER", "Initial Catalog=cards;Data Source=CATALOGSERVER",
+    "Documentation SERVER = 10.0.0.7 ; DATABASE = cards", 'Server="db.internal,1433";Database=cards',
+    "Server=db.internal,1433;Database=cards", "Data Source=CATALOGSERVER;Initial Catalog=cards",
+    "Server=CATALOGSERVER;Database=cards", "Server=db.internal:1433", "Data Source=db.internal:1433",
+    '"Server" = "SQLHOST" ; "Database" = "cards"', 'Server="SQLHOST" ; Database="cards"',
+    "Server={SQLHOST};Database=cards", "Server=Public Speaker;Database=Card Collection", "Server=SQLHOST,1433",
+    "Documentation\tData\tSource=SQLHOST;Initial Catalog=cards", "Data Source=localhost",
+    "Data Source=https://example.com/catalog;Initial Catalog=cards", "Database=cards;Data Source=https://example.com/catalog",
+    "Data Source=https%3A%2F%2F127.1%2Fguide", "Data Source=https%253A%252F%252Fexample.com%252Faccess_token%252Fprivate-marker",
+    "Data Source=https%3A%2F%2Fexample.com%2F%3Faccess_token%3Dprivate-marker", "Server=%20db.internal",
+    "Data Source=%20https%3A%2F%2F127.1%2Fguide"]) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+  }
+});
+
+test("ordinary database and source labels are not connection strings", () => {
+  for (const text of ["Server: Public Speaker", "Data Source: Collector Guide", "Database: Card Collection",
+    "Server", "Data Source", "Database", "Server edition", "Data Source=https://example.com/guide",
+    "Server=Collector", "Database=Card Collection", "Cookie: Chocolate edition", "Bearer abc123",
+    "Server=SQLHOST; public prose;Database=cards", "Database=cards\nServer=SQLHOST",
+    "Data Source=https%3A%2F%2Fexample.com%2Fguide", "Data Source=https%253A%252F%252Fexample.com%252Fguide",
+    "Data Source=%20https%3A%2F%2Fexample.com%2Fguide",
+    "Data Source=https%3A%2F%2Fexample.com%2F%3Fcaption%3DFish%2526Actor"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+  assert.doesNotThrow(() => assertPublicCatalogText("Data Source=https://example.com/?caption=Fish%26Actor"));
+});
+
+test("standard private-key armor rejects PGP blocks without rejecting public keys", () => {
+  for (const header of ["-----BEGIN PGP PRIVATE KEY BLOCK-----", "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----"]) {
+    const text = `Documentation ${header}\nfixture-private-key-material\n-----END PGP PRIVATE KEY BLOCK-----`;
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+  }
+  for (const text of ["-----BEGIN PGP PUBLIC KEY BLOCK-----\nfixture-public-key-material\n-----END PGP PUBLIC KEY BLOCK-----",
+    "-----BEGIN PUBLIC KEY-----", "PGP private key documentation", "Bearer of the Heavens"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
 test("explicit cookie authentication context rejects short header values", () => {
   for (const text of ["Cookie: session_id=private-marker", "Set-Cookie: auth=private-marker",
     "Documentation COOKIE: a=b", "Set Cookie: a = b; Secure; HttpOnly", "Cookie: \"a=b\"",
