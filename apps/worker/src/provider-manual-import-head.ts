@@ -34,7 +34,8 @@ export async function finishProviderImportHead(input: {
   if (step === "progress") {
     const active = await runs.active();
     if (!active || active.id !== input.runId) return { kind: "blocked", runId: input.runId, failureCode: "PROVIDER_RUN_NOT_RUNNING" };
-    return { kind: "progress", runId: input.runId, pageCount: active.counters.pages, reconciliationPending: true };
+    return { kind: "progress", runId: input.runId, pageCount: active.counters.pages, reconciliationPending: true,
+      headReconciliationExecuted: true };
   }
   if (step !== "complete") return { kind: "blocked", runId: input.runId,
     failureCode: step === "lease_lost" ? "PROVIDER_IMPORT_LEASE_LOST" : "PROVIDER_HEAD_RECONCILIATION_NOT_READY" };
@@ -44,5 +45,6 @@ export async function finishProviderImportHead(input: {
     state: "succeeded", failureCode: null, failureClass: null, failureSummary: null, correlationId: randomUUID(), finishedAt: new Date() });
   if (finished.kind !== "finished" && finished.kind !== "already_terminal") return { kind: "blocked", runId: input.runId,
     failureCode: finished.kind === "lease_lost" ? "PROVIDER_IMPORT_LEASE_LOST" : "PROVIDER_RUN_FINISH_" + finished.kind.toUpperCase() };
-  return { kind: "completed", runId: input.runId, pageCount: finished.run.counters.pages, counters: finished.run.counters };
+  return { kind: "completed", runId: input.runId, pageCount: finished.run.counters.pages, counters: finished.run.counters,
+    headReconciliationExecuted: true };
 }
