@@ -8,7 +8,15 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current ODBC and encoded-prose repair — 2026-09-05
+## Active shared-metadata and literal-stack repairs — 2026-09-05
+
+Final runtime `b95041bfe9cbea3ad61381bb9df6b9043fb421df` includes metadata fix `0548991d` and explicit literal-stack protection. Complete six-file matrix117/117 passes with zero skips, including real PG fan-out/recovery and production Admin bundle/SPA/Prisma-engine proof (`/tmp/packscout-p04-literal-stack-metadata-complete-focused-20260905.log`). All final source edits preceded that run. Pure81/81, retained316/316 probes, affected lint/types and ratchet0 pass. Independent61-probe review found no actionable change; three nested-caption refusals match baseline. Guard hash `72f6c990a4c0fc8b77cdbd203d81adb08a5576a8b516b34ea1338c21d6e541fe`. Final-runtime full gate, publication and review remain; task stays in progress until complete verification.
+
+PR119 review `3941816873` / thread `PRRT_kwDOTplTZc6fmR_q` is reproduced and fixed in `0548991d`: validate source key, source identity and every schema-bounded dependency identity with the existing lexical public-text guard before hashing, locking or persistence. The genuine red repository test previously accepted the credential-bearing URI. The full fan-out integration file now passes9/9 with zero skips, proving20 hostile metadata cases leave all seven publication-state tables unchanged, while public identifiers survive exact replay and delivery to two providers. Database/services lint/types and ratchet0 pass. Logs `/tmp/packscout-p04-shared-metadata-red-20260905.log` and `/tmp/packscout-p04-shared-metadata-focused-20260905.log`.
+
+PR114's literal-stack finding also applies to shared profile text; the existing guard and direct/profile tests are being repaired independently. Keep raw, nested, URL and standalone encoded cases under existing traversal limits and preserve public prose. A new complete matrix/full gate and current-head review remain before004 acceptance or119 readiness. Published head `5cbb7b13` / runtime `4e6b3386` is the previous review baseline; its ODBC comment is replied in `3941779746` and resolved. No production activation or lost-refusal-status convergence is claimed;006 owns the latter integration seam.
+
+## Previous ODBC and encoded-prose repair — 2026-09-05
 
 Runtime `4e6b33861f98f533007ed5f5dbf4bb2162ab0e69` repairs119 comment3941707060 and mirrors114's encoded-prose/public-route corrections. Exact normalized PWD fields reject, not arbitrary suffixes such as itemPWD; UID alone stays public, with named DSN/UID connection context confined to contiguous semicolon fields. Mixed quoted names/encoded separators share bounded lexical traversal. Account/host public routes remain valid without identifiers/topology, and credential paths/query/JSON remain strict. Decoded fullwidth private fields are recognized without rewriting payload or URL bytes.
 
@@ -168,19 +176,19 @@ P05 supplies the authenticated public profile storage and atomic heads. P06 cons
 
 ### Fan-out durability and isolation
 
-- [ ] A shared change records the complete provider set and every provider shard before its source checkpoint advances.
-- [ ] A shard claim returns the exact provider-scoped delivery, and acknowledgment accepts only the identity and durable-result digest produced after P02 provider-local expansion.
-- [ ] One unavailable provider retains retryable work while every healthy provider continues without waiting for it.
-- [ ] Interrupted, repeated, and fenced-out delivery converges without missing or duplicate logical pack work.
-- [ ] No provider can read, claim, acknowledge, or mutate another provider's shard, and the central service never reads provider-local membership.
+- [x] A shared change records the complete provider set and every provider shard before its source checkpoint advances.
+- [x] A shard claim returns the exact provider-scoped delivery, and acknowledgment accepts only the identity and durable-result digest produced after P02 provider-local expansion.
+- [x] One unavailable provider retains retryable work while every healthy provider continues without waiting for it.
+- [x] Interrupted, repeated, and fenced-out delivery converges without missing or duplicate logical pack work.
+- [x] No provider can read, claim, acknowledge, or mutate another provider's shard, and the central service never reads provider-local membership.
 
 ### Profiles and recovery
 
-- [ ] Provider and collectible profile snapshots are complete, immutable, deterministic, and reusable by content digest while activation intents remain distinct.
-- [ ] Initial profile work is available before the first referencing pack activation, and later profile updates do not change sealed pack bytes.
-- [ ] Lost responses and repeated outbox delivery reconcile the original operation and converge to one logical profile activation.
-- [ ] Central progress never waits for provider acknowledgment after all required shards and profile intents are durable.
-- [ ] Records, logs, errors, and receipts expose no credentials, raw source payloads, database locations, or cross-organization data.
+- [x] Provider and collectible profile snapshots are complete, immutable, deterministic, and reusable by content digest while activation intents remain distinct.
+- [x] Initial profile work is available before the first referencing pack activation, and later profile updates do not change sealed pack bytes.
+- [x] Lost responses and repeated outbox delivery reconcile the original operation and converge to one logical profile activation.
+- [x] Central progress never waits for provider acknowledgment after all required shards and profile intents are durable.
+- [x] Records, logs, errors, and receipts expose no credentials, raw source payloads, database locations, or cross-organization data.
 
 ## Verification
 
@@ -195,5 +203,6 @@ Named scenario: **Offline-provider fan-out and initial-profile recovery** — pr
 - Initial profile artifacts and intents cover every profile required by the actual healthy P02 build requests. P05's public store enforces initial active-profile prerequisites; task006 owns end-to-end first-head activation. P04 does not claim that merely sealing artifacts activates those public heads.
 - `profile-outbox-recovery.integration.test.ts` proves deterministic reuse with distinct intents, immutable database evidence, independent claims, authorization/environment/browser refusals, durable-before-send operations, lost-response reconciliation, expired-owner fencing, forged receipts, transaction interruption, exact status after ambiguity/expiry, late lease expiry, and per-profile attempt exhaustion.
 - `public-profile-snapshot-assembler.test.ts` and `public-catalog-text.test.ts` prove bounded capture before executable objects, nested URL protection, and benign encoded-value preservation. The browser-neutral text policy is the future shared boundary for pack/profile integration, not a legacy adapter.
-- Focused evidence: 37 tests pass with zero skips in `/tmp/packscout-p04-structural-url-focused-20260904.log`. Contracts/database/services lint and types pass in `/tmp/packscout-p04-structural-url-static-20260904.log`.
+- Current focused evidence:117 tests pass with zero skips on `b95041bf`; real shared-metadata and rehashed profile-envelope refusals leave durable state unchanged. Logs and independent review are recorded above. Earlier37-test evidence is historical.
+- Deferred status seam: P04 retains the ambiguity barrier when P05 status reports `already_applied` without the original refused outcome. Task006 owns returning the genuine stored receipt and the real signed-transport lost-refusal drill; P04 does not fabricate that evidence or claim that case converges already.
 - Full framework verification, final acceptance record, and publication remain pending. No schedule, service authorization, public head, or route was activated.

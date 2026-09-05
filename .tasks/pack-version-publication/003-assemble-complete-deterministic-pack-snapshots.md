@@ -6,9 +6,19 @@
 **Delivery phase:** P03
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
-**Status:** in_progress
+**Status:** done
 
-## Current encoded-prose and public-route repair — 2026-09-05
+## Active literal-stack repair — 2026-09-05
+
+Full `npm run verify:framework` PASSED September5 at19:53UTC on runtime `587fb942ecf091ee85e04ed55b7ac773b7c73a63`, parent `b96b43691b48170d64bdd541e4a42cb15f096ecf`, including1,498 service tests and both production builds. Log `/tmp/packscout-p03-literal-stack-framework-20260905.log`;28 unrelated opt-in skips remain in the full runner, none in the143 owning tests. The final delivery-record documentation check passes320 files. All acceptance criteria and phase-scoped specs are verified; task003 is done. PR114 remains unmerged pending fresh exact-head CI and clear review. No production activation.
+
+Final runtime `587fb942` is committed on main `b96b4369`. Explicit V8/Node, Python, Java and Firefox source frames reject in original, derived, nested, percent-encoded and fullwidth-normalized text. Recognition-only decoding consumes existing depth/node/byte budgets and never reparses a decoded whole URL. Public Error/at/Bearer labels remain accepted. Final143/143 complete tests pass with zero skips, including8,000-member full/lifecycle/reuse and the actual private-PG seam; services lint/types and ratchet0 pass. Logs `/tmp/packscout-p03-literal-stack-complete-focused-20260905.log` and `/tmp/packscout-p03-literal-stack-static-final-20260905.log`. Guard hash `0a14e797cf03266757713b2cd5380e1b452f8743d30e29b9f047b20e20f57b78`. Fresh full gate runs in `/tmp/packscout-p03-literal-stack-framework-20260905.log`; task completion/publication remain pending that gate and review.
+
+PR114 review `3941788718` / thread `PRRT_kwDOTplTZc6fmNOF` demonstrates that literal source stack frames can enter display fields without a protected `stackTrace` key. The same two assembler guard/test files are being repaired with explicit frame syntax, not Error/at/Bearer keyword bans. Raw, nested JSON, encoded URL and independently percent-encoded display text must retain the existing bounded inspection policy. Final focused, capacity/private-PG, full and independent verification remain before acceptance.
+
+Published head `3cbf55cd` / runtime `5bba8e4f` passed the full local framework gate (session47139, exit0, both builds) in `/tmp/packscout-p03-mixed-quotes-odbc-framework-20260905.log`. This is historical evidence for that runtime, not certification of the new repair. Earlier encoded-assignment/path comments are replied in `3941779682` and `3941779722` and resolved. The user has authorized merge after current gates/review clear. Phase remains dormant; task006 owns actual publisher E2E.
+
+## Previous encoded-prose and public-route repair — 2026-09-05
 
 Runtime `5bba8e4f561e76b306f44170031c4d13f50665dc` repairs114 comments3941702580/3941702584 and mirrors119's named ODBC protection. Decode only charged lexical runs and a quoted field's following separator component, never an entire URL or a repeated full suffix. Account/host route words require syntactic identifier/endpoint values; ordinary rewards/events routes work while actual credential and accountid paths and query/JSON fields remain strict. Exact normalized PWD is protected without the unrelated itemPWD suffix false positive. DSN/UID context stays in contiguous assignment groups; UID alone is public. NFKC recognition protects actual decoded fullwidth action-URL fields without changing stored public bytes. Existing bounds stay.
 
@@ -221,9 +231,9 @@ The assembler performs no read, write, lease, schedule, network, credential, or 
 - [x] Partial contents, invalid odds, mismatched EV, stale dependencies, duplicate identities, and cross-provider records fail closed.
 - [x] A lifecycle-only request without a complete prior snapshot fails closed.
 - [x] Oversized or unbounded inputs fail before a `BuiltPublicPackSnapshot` is returned.
-- [ ] Protected-field scanning rejects sensitive values at every nesting depth, including normalized derived projections and nested URLs.
+- [x] Protected-field scanning rejects sensitive values at every nesting depth, including normalized derived projections and nested URLs.
 - [x] Rejected assembly performs no persistence, head, receipt, or network operation.
-- [ ] Valid public labels and promotion-code links remain accepted while recognizable credentials and private endpoints fail closed.
+- [x] Valid public labels and promotion-code links remain accepted while recognizable credentials and private endpoints fail closed.
 
 ## Verification
 
