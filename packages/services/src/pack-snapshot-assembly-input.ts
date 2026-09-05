@@ -4,7 +4,7 @@ import { assertPublicPackCatalogBytes, compareCanonicalStrings, packBuildRequest
   packSnapshotEvidenceSchema, providerPackBuildInputsSchema, publicProfileSnapshotIdSchema } from "@packscout/contracts";
 import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-snapshot-assembly-types.ts";
 
-const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl",
+const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
@@ -55,6 +55,13 @@ function originalUrlPath(candidate: string): string {
 }
 const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
 type OAuthContext = { authentication: boolean; code: boolean };
+function hasCookiePair(text: string, start: number): boolean {
+  // A cookie header needs a name/value pair; its name alone can be public prose.
+  // Sticky matching inspects only this value, without allocating a suffix.
+  const pair = /[!#$%&'*+.^_\x60|~a-z0-9-]+\s*=\s*\S/iyu;
+  pair.lastIndex = start;
+  return pair.test(text);
+}
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
   const normalized = value.trim().normalize("NFC");
   requireAssembly(!credentialText.test(normalized));
@@ -126,16 +133,19 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
-  function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean): boolean {
+  function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathSegment = false): boolean {
     const key = text.trim().normalize("NFC").toLowerCase().replace(/[^a-z0-9]/gu, "");
+    // Cookie product paths are not HTTP header fields; still charge their bytes.
+    if (pathSegment && (key === "cookie" || key === "setcookie")) { chargeUrlText(text, depth); return false; }
     let protectedName = privateKeys.has(key);
     if (colonTarget !== undefined && !protectedName) {
       try { assertPublicPackCatalogBytes({ [text]: null }); } catch { protectedName = true; }
     }
     // Unquoted Actor is a public credit label. Host identifies topology only
     // when its value has connection syntax; quoted/URL/JSON fields stay strict.
-    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host");
-    if (publicLabel) protectedName = key === "host" && colonTarget === true;
+    const cookieHeader = key === "cookie" || key === "setcookie";
+    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host" || cookieHeader);
+    if (publicLabel) protectedName = cookieHeader ? cookieTarget : key === "host" && colonTarget === true;
     // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
     // candidate names still decode under the same charged depth/byte budget.
     if (colonTarget !== undefined && !protectedName && !text.includes("%")) return publicLabel;
@@ -146,7 +156,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       requireAssembly(!context.code || !context.authentication);
     }
     const decoded = decodeLayer(normalized);
-    return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget) : publicLabel;
+    return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
   }
   function inspectProseAssignments(text: string, depth: number): void {
     // Quoted names are explicit fields, including punctuation and whitespace.
@@ -172,6 +182,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         while (valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
       }
       const colonTarget = colon ? hasPrivateUriTarget(text, valueStart) : undefined;
+      const cookieTarget = colon && hasCookiePair(text, valueStart);
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -184,7 +195,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        const publicLabel = inspectUrlKey(key, depth + 1, { authentication: false, code: false }, colonTarget);
+        const publicLabel = inspectUrlKey(key, depth + 1, { authentication: false, code: false }, colonTarget, cookieTarget);
         // A recognized public credit/host label ends the name. Preceding prose
         // must not turn "Premium Actor:" into a different protected field.
         if (publicLabel) break;
@@ -211,7 +222,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     for (const match of normalized.matchAll(/[^/]+/gu)) {
       let next = match.index + match[0].length;
       while (normalized[next] === "/") next += 1;
-      if (next < normalized.length) inspectUrlKey(match[0], depth + 1, context);
+      if (next < normalized.length) inspectUrlKey(match[0], depth + 1, context, undefined, false, true);
     }
     // Decode only this pathname component, never authority/query boundaries.
     const decoded = decodeLayer(normalized);
@@ -324,6 +335,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
+    inspectProseAssignments(normalized, depth);
     rejectCredentialText(normalized, target => {
       if (target !== normalized) inspectEmbeddedTarget(target, depth + 1);
     });

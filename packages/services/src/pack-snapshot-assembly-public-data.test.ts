@@ -7,6 +7,33 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("explicit cookie headers and structured header fields never enter public snapshots", async () => {
+  for (const title of ["Cookie: session_id=private-marker", "Set-Cookie: auth=private-marker",
+    "Documentation COOKIE: a=b", "Set Cookie: a = b; Secure; HttpOnly", "Cookie: \"a=b\"",
+    "Documentation %63ookie: a=b", 'Documentation "Set-Cookie": "a=b"',
+    '{"\\u0063ookie":"a=b"}', '{"headers":{"Set-Cookie":"a=b"}}']) {
+    refuses({ title });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(title) });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    const { input } = await assemblyFixture(); input.inputs.contents[0]!.displayName = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  for (const key of ["Cookie", "set-cookie", "set_cookie"]) refuses({ [key]: "a=b" });
+});
+
+test("cookie prose and labels without a cookie pair remain public", async () => {
+  for (const title of ["Cookie Monster", "Chocolate cookie collection", "Cookie: Chocolate edition",
+    "Cookie: [1/1] edition", "Cookie: https://example.com/recipe", "Cookie:", "Set-Cookie:",
+    "Documentation Cookie: recipe", "Bearer a", "session_id=a", "auth=public-label",
+    "Visit https://example.com/products/cookie/chocolate-chip",
+    "Visit https://example.com/products/%63ookie/chocolate-chip"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
 test("slashless and single-slash URLs retain original protected path evidence", async () => {
   for (const url of ["https:access_token/private-marker", "https:/access_token/private-marker",
     String.raw`https:\access_token\private-marker`, "https:/%61ccess_token/private-marker",
