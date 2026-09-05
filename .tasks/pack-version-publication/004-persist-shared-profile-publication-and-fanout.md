@@ -8,7 +8,13 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current account/direct-JSON propagation — 2026-09-05 11:12UTC
+## Current prose-prefixed JSON propagation — 2026-09-05
+
+The owning public-profile boundary carries the matching repair at `dd951aed43fad761affca7cd76090e9263206887` on merged121 parent `0ea6145470a276807a0e9590d759d9fad85e9226`. Existing bounded token inspection covers structured data after prose in direct/profile/nested/URL/fragment values, retaining independent top-level and shared nested OAuth context. Public natural labels and Bearer prose remain valid; no new parser, dependency, field or weakened limit.
+
+Root68/68 focused tests pass0skip, including actual private PostgreSQL fan-out/outbox and production Admin bundle/SPA/two-engine checks (`/tmp/packscout-p04-prose-json-main121-final-focused-20260905.log`). Contracts/services lint/types and ratchet0 pass. All9 preceding source patches replay identically; backup `codex/p04-before-main121-20260905` retains07711d3f. Full local verifier is running (`/tmp/packscout-p04-prose-json-main121-framework-20260905.log`); fresh CI/independent review remain before004 acceptance and PR119 readiness. User has authorized merge after current checks/review are clear, following114.
+
+## Earlier account/direct-JSON propagation — 2026-09-05 11:12UTC
 
 Equivalent owning-boundary repair is committed `0bff32245664af6f257c88d365e680dd14cdd2d4` on mainf6785251. Complete protected colon fields and bounded direct escaped/duplicate/nested/adjacent JSON use existing rules/counters; quoted and URL fields remain strict, while ordinary Bearer prose and public Host/Actor labels remain valid. Independent cross-review caught benign label values inside JSON being parsed as URI schemes; direct and actual-profile red regressions now pass after applying the same explicit label policy to optional parsed values. Required URLs remain HTTP(S), and attached queries/fragments still traverse.
 

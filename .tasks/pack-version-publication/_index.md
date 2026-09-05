@@ -2,7 +2,7 @@
 
 ## Start Here
 
-Authoritative continuation2026-09-05 15:02UTC: the user approved121→114→119→120 after green current checks/clear review, then remaining work, and requested verified Admin/monitoring screenshots plus a management guide. PR121 is merged as0ea6145470a276807a0e9590d759d9fad85e9226; main now includes the neutral core. New114 P1(JSON after prose) and120 P2(pending save across auth refresh) are being repaired in parallel; root propagates the P04 invariant and restacks siblings. Counts4/13 accepted,4/12 phases merged.012 is reopened;003/004/011/012 in_progress. All earlier full passes remain historical for new repairs. P08 owns the V1 guide/screenshot set, P10 adds exact-launch evidence; no public activation occurred.
+Authoritative continuation2026-09-05: the user authorized all four foundation merges after green current checks/clear review, then remaining work, and requested verified Admin/monitoring screenshots plus a management guide. PR121 merged0ea61454 and independent green PR120 mergedf852a166cca88008eb2eb419a6a555c7ff794597 (current main); the technical reorder was explained while publication fixes verified. Task012 is DONE:654 frontend tests0skip, full local and CI33974274282 passed33cdfe96/runtime3d134eb0, reviews resolved. P03/P04 are finishing natural nested caption refinements to the prose-JSON repair, then restacking/certifying onf852a166. Counts5/13 accepted,5/12 phases merged;003/004/011 in_progress. Remaining authorized foundation merges114→119. P08 owns the V1 guide/screenshot set, P10 adds exact-launch evidence; no public activation occurred. Checkpoints below are historical unless explicitly refreshed.
 
 ### Previous verification checkpoint
 
@@ -133,7 +133,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | merged PR121 | Exact parity/full gate; merge0ea61454 | merged |
 | P05A | Preserve every current frontend data point in native V1 | 011 | P03, P04, P05, P05B | root after prerequisites merge | Source-to-snapshot-to-frontend data parity | building |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05, P05A | root after prerequisites merge | Publication ambiguity and recovery race | planned |
-| P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | independent sibling on main; PR120 | New auth-refresh review repair; prior594/fullCI historical | building |
+| P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | PR120 mergedf852a166 | Auth-refresh repair certified:654 frontend tests, full local and CI33974274282 pass | merged |
 | P07 | Direct V1 frontend across every catalog journey | 007 | P05, P05A, P07A | atomic switch after full data parity | Full frontend data parity and browser proof | planned |
 | P08 | Bounded monitoring, read-only Admin, alerts, and launch-plan/readiness evaluation | 008 | P06, P07 | root after prerequisites merge | Operational readiness and fault drill | planned |
 | P09 | Root-safe snapshot retention and bounded pruning | 009 | P06 | sibling from P06 | Retention and active-head race | planned |
@@ -311,7 +311,7 @@ P05B/task013 is a separate prerequisite of P05A, not extra publisher scope.
 |---|---|---|---|---|---|---|
 | 011 | Preserve every frontend data point in V1 | P05A | large | scope from field inventory | in_progress | 003, 004, 005, 013 |
 | 013 | Share neutral existing EV calculation core | P05B | medium | measured extraction | done | 001, 005 |
-| 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | in_progress | 005 |
+| 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | done | 005 |
 | 006 | Publish and recover pack state | P06 | large | 2–3 days | todo | 002, 003, 004, 005, 011 |
 | 007 | Render Pack Catalog V1 in the frontend | P07 | medium | field-driven scope | todo | 005, 011, 012 |
 | 008 | Operate and observe pack publication | P08 | medium | 1.5–2 days | todo | 006, 007 |

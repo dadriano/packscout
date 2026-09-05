@@ -5,9 +5,13 @@
 **Blocks:** pack-version-publication/007
 **Delivery phase:** P07A
 **Estimated scope:** medium
-**Status:** in_progress
+**Status:** done
+
+Merged2026-09-05 15:59:36UTC: PR120 squash `f852a166cca88008eb2eb419a6a555c7ff794597` is tree-identical to certified33cdfe96. All current checks passed, all review threads were resolved, and user authorization covered this merge. Root advanced the independent green frontend foundation ahead of pending114/119 while their fixes verified; no route or writer activation. The merge-wait statements below are historical.
 
 ## Current auth-refresh review — 2026-09-05 15:02UTC
+
+Certification delta: full local `npm run verify:framework` PASSED at runtime `3d134eb0a17cd6cfc6aff4825b68f559d32e7942` on main `0ea6145470a276807a0e9590d759d9fad85e9226`; both production builds pass. The unchanged full runner has28 unrelated opt-in skips; all654 frontend tests run without skips. Full [CI33974274282](https://github.com/dadriano/packscout/actions/runs/33974274282) PASSED exact published `33cdfe962b8bd45672b5fef1b151bf4afb23525e` at15:41:30UTC. Reply3941053968 cites the fixing runtime, threadPRRT_kwDOTplTZc6fittR is resolved, and independent review found no actionable issue. Task012 is accepted; PR120 still waits the user-approved114→119→120 merge order. The pending-state statements below are historical checkpoints, not outstanding gates.
 
 Repair is committed/replayed as `3d134eb0a17cd6cfc6aff4825b68f559d32e7942` on merged121 parent `0ea6145470a276807a0e9590d759d9fad85e9226`. All four phase source patches replay identically; backup `codex/p07a-before-main121-20260905` retains3b8d2e9e. Loading preserves coordinator generation and disables new UI actions, while terminal auth, identity-key remount and unmount still dispose. Root654/654 complete frontend tests pass, zero skips (`/tmp/packscout-p07a-refresh-main121-frontend-20260905.log`); agent112 focused/64 actual-component lifecycle tests, lint/types/boundaries/ratchet0 pass. Independent review found no actionable issue. Full local verifier is running at this runtime (`/tmp/packscout-p07a-refresh-main121-framework-20260905.log`); fresh CI and fixing-SHA reply remain before acceptance. No frontend tree change during restack; no dependency, copy, layout or activation change.
 
@@ -85,11 +89,11 @@ Provide strict server-side readers for the six native V1 operations and preserve
 ## Acceptance Criteria
 
 - [x] All six operation references, input/output validation, credential handling, bounded errors, and cursor recovery have direct focused tests.
-- [ ] Saved-item success/failure/prune/duplicate/concurrent/session-change behavior has direct tests.
+- [x] Saved-item success/failure/prune/duplicate/concurrent/session-change behavior has direct tests.
 - [x] Saved membership remains server-authoritative and pending labels describe the requested action without changing pressed state.
 - [x] Every native saved refusal remains bounded and existing suspended-account behavior is preserved.
 - [x] Existing frontend routes and data points remain unchanged; the V1 loader is dormant until task007.
-- [ ] Full frontend tests, lint/types, framework ratchet, and `npm run verify:framework` pass on the owning phase head.
+- [x] Full frontend tests, lint/types, framework ratchet, and `npm run verify:framework` pass on the owning phase head.
 - [x] The measured phase-only diff is reviewable and committed; final evidence and later acceptance ownership are recorded.
 
 ## Verification

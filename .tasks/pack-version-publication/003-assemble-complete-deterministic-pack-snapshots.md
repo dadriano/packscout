@@ -8,7 +8,15 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
 
-## Current account/direct-JSON repair — 2026-09-05 11:12UTC
+## Current prose-prefixed JSON repair — 2026-09-05
+
+Final natural-caption refinement: `aa62d3d86565e91bb2043e2c21f2289366a6af7b` on current main `f852a166cca88008eb2eb419a6a555c7ff794597`. Nested [1/1], brace labels and quoted names now share direct-text recognition; actually recognized containers remain strict and escaped standalone strings are inspected. Root108/108 complete focused tests pass0skip, including8,000-member full/lifecycle/reuse and private PostgreSQL handoff (`/tmp/packscout-p03-natural-caption-main120-focused-20260905.log`); fresh npm ci, services lint/types and ratchet0 pass. All19 source patches replay identically from backup `codex/p03-before-main120-20260905` (d46cbc30). Full local gate is running in `/tmp/packscout-p03-natural-caption-main120-framework-20260905.log`. Publication/fixing-SHA reply/fresh CI remain; old runtime evidence below is historical.
+
+PR114 P1comment3940424235/threadPRRT_kwDOTplTZc6fit5c is repaired at `9af6b81d2127fb18459a69fb99c6f643cca457c3` on merged121 parent `0ea6145470a276807a0e9590d759d9fad85e9226`. Existing bounded token inspection now finds structured payloads after ordinary prose in content names, titles, aliases, decoded values and bare fragments. Independent direct roots keep independent OAuth contexts; nested URL/form payloads retain their enclosing context. Ordinary Bearer text and natural braces, brackets and quotes remain accepted. No new parser, dependency or policy limit is introduced.
+
+Agent98/98 pure guard/assembler/boundary tests pass0skip with services lint/types and ratchet0; explicit prose-prefix/fragment/context regressions failed before repair. Root verified all18 source patches replay identically from `codex/p03-before-main121-20260905` (679b61f7). Root capacity/private-PostgreSQL focused tests and exact-runtime full certification are still pending. Prior fullCI33962882450 certified b9d4cc44 only. User has authorized merge after current checks/review are clear; no public writer activates here.
+
+## Earlier account/direct-JSON repair — 2026-09-05 11:12UTC
 
 PR114 P1s3940334067/3940334070 are repaired in `8dd10dbf912a6fe595d3bbabd0b5c653333ee8b0` on mainf6785251. Explicit colon fields use the full existing protected-name policy; unquoted Actor is a credit label and Host is private only with connection-shaped values. Quoted/URL/JSON keys stay strict. Direct public JSON uses the existing bounded token scanner, inspecting escaped, duplicate, nested and adjacent root fields before parse; absolute offsets and one source charge avoid quadratic suffix traversal. URL payloads retain strict whole-document parsing. Ordinary Bearer prose, JSON plus aliases, bracketed edition/fraction labels and encoded Actor labels remain accepted.
 
