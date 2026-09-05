@@ -8,6 +8,7 @@ import type {
 } from "@packscout/contracts";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
+import { VendorIdentity } from "./VendorIdentity";
 import {
   presentBuybackSummaryV3,
   presentGrossEvV3,
@@ -109,7 +110,7 @@ function RepackRow({
 
   return (
     <tr className={styles.row} data-selected={selected ? "true" : "false"}>
-      <td>{repack.vendorDisplayName}</td>
+      <td><VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} /></td>
       <td>{repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}</td>
       <td className={styles.packCell}>
         <button
@@ -141,8 +142,7 @@ function RepackRow({
         <MetricValue compact metric={packPrice} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={grossEv.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-        {grossEv.sourceNote ? <span className={styles.chaseEvidence} title={grossEv.sourceNote}>{grossEv.sourceLabel}</span> : null}
+        <MetricValue compact glossaryDetails={[grossEv.sourceNote, grossEv.observedLabel].filter((detail): detail is string => Boolean(detail))} metric={grossEv.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
       </td>
       <td className={styles.numeric}>
         <MetricValue compact metric={grossEv.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
@@ -164,8 +164,7 @@ function RepackRow({
         <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
       </td>
       <td className={styles.numeric}>
-        <MetricValue compact metric={vendorEstimate.usdComparison} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-        <span className={styles.chaseEvidence}>{vendorEstimate.sourceNote}</span>
+        <MetricValue compact glossaryDetails={[vendorEstimate.sourceNote, ...(vendorEstimate.observedLabel ? [vendorEstimate.observedLabel] : [])]} metric={vendorEstimate.usdComparison} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
       </td>
       <td>
         {displayedChase ? (

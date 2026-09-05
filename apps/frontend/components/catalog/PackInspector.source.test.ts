@@ -6,7 +6,7 @@ const source = readFileSync(new URL("./PackInspector.client.tsx", import.meta.ur
 
 test("inspector hints explain each term once instead of repeating visible detail", () => {
   // The heading hint uses the shared one-definition default; the timestamps it
-  // used to append are already visible in the freshness block below it.
+  // used to append are available from the confidence value.
   assert.equal(source.includes("estimatedEvHint"), false);
   assert.equal(source.includes("headingHint="), false);
   // Vendor observation time and evidence coverage ride along as hint details

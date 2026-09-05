@@ -34,11 +34,6 @@ function KpiCard({
           </span>
         ) : null}
       </div>
-      {kpi.stateLabel && kpi.state !== "unavailable" ? (
-        <span aria-hidden="true" className={styles.stateLabel}>
-          {kpi.stateLabel}
-        </span>
-      ) : null}
     </>
   );
 }

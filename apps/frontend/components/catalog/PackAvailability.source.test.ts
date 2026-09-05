@@ -31,6 +31,7 @@ test("availability meaning is available to screen readers and not encoded by col
   assert.match(table, /className="sr-only">\. \{availability\.description\}/);
   assert.match(cards, /className="sr-only">\. \{availability\.description\}/);
   assert.match(inspector, /aria-describedby=\{`\$\{headingId\}-availability-description`\}/);
+  assert.match(inspector, /className="sr-only"\s+id=\{`\$\{headingId\}-availability-description`\}/);
   assert.match(inspector, /\{availability\.description\}/);
   assert.match(inspector, /purchaseActionsAvailable/);
 });
@@ -38,7 +39,7 @@ test("availability meaning is available to screen readers and not encoded by col
 test("availability labels wrap at narrow and zoomed widths and preserve reduced-motion behavior", () => {
   assert.match(tableStyles, /\.availabilityBadge[\s\S]*overflow-wrap: anywhere/);
   assert.match(cardStyles, /\.availability[\s\S]*overflow-wrap: anywhere/);
-  assert.match(inspectorStyles, /\.availabilityDescription[\s\S]*overflow-wrap: anywhere/);
+  assert.match(inspectorStyles, /\.availability[\s\S]*overflow-wrap: anywhere/);
   assert.match(tableStyles, /@media \(max-width: 720px\)/);
   assert.match(cardStyles, /@media \(max-width: 560px\)/);
   assert.match(inspectorStyles, /@media \(max-width: 430px\)/);

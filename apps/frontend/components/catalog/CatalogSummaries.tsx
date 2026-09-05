@@ -4,6 +4,7 @@ import type { DisplayedEvMedianSourcesV3, PublicRepackFilters } from "@packscout
 import { catalogHrefForSummary } from "@/lib/catalog-query-state.client";
 import type { RepackSummaryGroupV3 } from "@/lib/public-repacks-v3";
 import { presentCatalogSummaries } from "./overview-presentation";
+import { VendorIdentity } from "./VendorIdentity";
 import styles from "./CatalogSummaries.module.css";
 
 type CatalogSummariesProps = Readonly<{
@@ -48,8 +49,12 @@ export function CatalogSummaries({
           });
           return (
             <li key={row.key}>
-              <Link aria-label={row.accessibleLabel} className={styles.row} href={href}>
-                <span className={styles.label}>{row.label}</span>
+              <Link aria-label={row.accessibleLabel} className={styles.row} href={href} title={`${row.medianEvPercent.accessibleLabel} ${row.sourceLabel}.`}>
+                <span className={styles.label}>
+                  {title === "By vendor" ? (
+                    <VendorIdentity name={row.label} vendorKey={row.key} />
+                  ) : row.label}
+                </span>
                 <span
                   aria-hidden="true"
                   className={styles.track}
@@ -67,8 +72,6 @@ export function CatalogSummaries({
                   data-tone={row.medianEvPercent.tone ?? "plain"}
                 >
                   <span>{row.medianEvPercent.displayValue}</span>
-                  <small>{row.medianEvPercent.semanticLabel}</small>
-                  <small>{row.sourceLabel}</small>
                 </span>
               </Link>
             </li>

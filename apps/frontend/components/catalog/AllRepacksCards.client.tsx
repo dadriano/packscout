@@ -19,6 +19,7 @@ import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
+import { VendorIdentity } from "./VendorIdentity";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
@@ -69,14 +70,10 @@ function RepackCard({
         onClick={(event) => onSelect(repack.publicRepackId, event.currentTarget)}
         type="button"
       >
-        <CatalogImage
-          fallbackAlt={repack.name}
-          image={repack.primaryImage}
-          variant="thumbnail"
-        />
-        <span className={styles.identity}>
-          <span className={styles.vendor}>{repack.vendorDisplayName}</span>
-          <span className={styles.name}>{repack.name}</span>
+        <span className={styles.vendorRow}>
+          <span className={styles.vendor}>
+            <VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} />
+          </span>
           <span
             className={styles.availability}
             data-state={repack.availability}
@@ -84,24 +81,35 @@ function RepackCard({
             {availability.label}
             <span className="sr-only">. {availability.description}</span>
           </span>
-          <span className={styles.category}>
-            {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
-          </span>
         </span>
-        <span className={styles.price}>
-          <span aria-hidden="true">{price.displayValue}</span>
-          <span className="sr-only">{price.accessibleLabel}</span>
+        <span className={styles.packRow}>
+          <CatalogImage
+            decorative
+            fallbackAlt={repack.name}
+            image={repack.primaryImage}
+            variant="thumbnail"
+          />
+          <span className={styles.identity}>
+            <span className={styles.name}>{repack.name}</span>
+            <span className={styles.category}>
+              {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
+            </span>
+          </span>
+          <span className={styles.price}>
+            <span aria-hidden="true" className={styles.priceLabel}>Pack price</span>
+            <span aria-hidden="true">{price.displayValue}</span>
+            <span className="sr-only">{price.accessibleLabel}</span>
+          </span>
         </span>
       </button>
 
       <div className={styles.metrics}>
-        <MetricValue compact metric={grossEv.grossEvDollars} showReason={false} />
-        <MetricValue compact metric={grossEv.grossEvPercent} showReason={false} />
-        <MetricValue compact metric={grossEv.evDollars} showReason={false} />
-        <MetricValue compact metric={grossEv.evPercent} showReason={false} />
-        <MetricValue compact metric={buyback} showReason={false} />
+        <MetricValue compact glossaryDetails={[grossEv.sourceNote, grossEv.observedLabel].filter((detail): detail is string => Boolean(detail))} glossaryDetailsHeading="Source" metric={grossEv.grossEvDollars} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.grossEvPercent} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evDollars} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={grossEv.evPercent} showReason={false} showSemanticState={false} />
+        <MetricValue compact metric={buyback} showReason={false} showSemanticState={false} />
       </div>
-      {grossEv.sourceNote ? <p className={styles.sourceNote} title={grossEv.sourceNote}>{grossEv.sourceLabel}</p> : null}
 
       <dl className={styles.details}>
         <div>

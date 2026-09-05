@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import type { Metadata, MetadataRoute } from "next";
 import { fetchQuery } from "convex/nextjs";
 import { ConvexError } from "convex/values";
@@ -9,6 +9,7 @@ import {
   identityTokenShapeValid,
 } from "./identity-cookie";
 import { LANDING_METADATA } from "./landing-content";
+import { localAccessBypassEnabled } from "./local-access-bypass.server";
 import { readPublicConvexOrigin } from "./security-policy.server";
 
 /**
@@ -27,7 +28,8 @@ import { readPublicConvexOrigin } from "./security-policy.server";
  * cross-request reuse is the anonymous beta on/off switch, cached for
  * `GATE_STATUS_TTL_MS` per server process. Everything unknown fails closed:
  * an unreachable backend, an unreadable state, or an unconfigured deployment
- * is never admitted.
+ * is never admitted. An explicit loopback development preview can skip this
+ * routing gate; it carries a separate decision and grants no backend identity.
  */
 
 export type AccessHoldReason = "awaiting_review" | "declined" | "suspended";
@@ -37,6 +39,8 @@ export type VisitorAccessDecision =
   | Readonly<{ outcome: "public" }>
   /** Beta on; the verified identity is approved and not suspended. */
   | Readonly<{ outcome: "admitted" }>
+  /** Explicit loopback development preview; no authenticated capabilities. */
+  | Readonly<{ outcome: "local_preview" }>
   /** Beta on; no identity, or one the backend refused to recognize. */
   | Readonly<{ outcome: "signed_out" }>
   /** Beta on; a verified identity the beta is holding at the door. */
@@ -91,6 +95,8 @@ export type AccessGateDependencies = Readonly<{
   fetchGateStatus: (url: string) => Promise<{ closedBetaActive: boolean }>;
   /** The authenticated effective-access self-read (closed-beta-access/001). */
   fetchMyAccess: (url: string, token: string) => Promise<EffectiveAccessResult>;
+  /** Server-owned development opt-in, checked separately for every request. */
+  allowLocalPreview?: () => Promise<boolean>;
   now?: () => number;
   gateStatusTtlMs?: number;
   resolutionTimeoutMs?: number;
@@ -185,6 +191,14 @@ export function createVisitorAccessGate(
   }
 
   async function resolve(): Promise<VisitorAccessDecision> {
+    try {
+      if (await dependencies.allowLocalPreview?.()) {
+        return { outcome: "local_preview" };
+      }
+    } catch {
+      return UNDETERMINED_DECISION;
+    }
+
     const url = dependencies.convexUrl();
     if (url === null) return UNDETERMINED_DECISION;
 
@@ -226,6 +240,8 @@ export function createVisitorAccessGate(
 
 function defaultDependencies(): AccessGateDependencies {
   return {
+    allowLocalPreview: async () =>
+      localAccessBypassEnabled(process.env, (await headers()).get("host")),
     convexUrl: () => {
       try {
         return readPublicConvexOrigin();
@@ -281,6 +297,7 @@ export function resolveRootRoute(
   switch (decision.outcome) {
     case "public":
     case "admitted":
+    case "local_preview":
       return { kind: "product" };
     case "signed_out":
       return { kind: "landing" };
@@ -306,6 +323,7 @@ export function resolveGatedRoute(
   switch (decision.outcome) {
     case "public":
     case "admitted":
+    case "local_preview":
       return { kind: "render" };
     case "signed_out":
       return { kind: "redirect", destination: "/" };
@@ -326,6 +344,7 @@ export function resolveWatchlistRoute(
   switch (decision.outcome) {
     case "public":
     case "admitted":
+    case "local_preview":
     case "signed_out":
       return { kind: "render" };
     case "held":
@@ -355,6 +374,7 @@ export function resolveAccessRoute(
       return { kind: "hold", reason: "undetermined" };
     case "public":
     case "admitted":
+    case "local_preview":
     case "signed_out":
       return { kind: "redirect", destination: "/" };
   }
@@ -364,7 +384,8 @@ export function resolveAccessRoute(
 export function shellSurfaceForDecision(
   decision: VisitorAccessDecision,
 ): "product" | "gateway" {
-  return decision.outcome === "public" || decision.outcome === "admitted"
+  return decision.outcome === "public" || decision.outcome === "admitted" ||
+      decision.outcome === "local_preview"
     ? "product"
     : "gateway";
 }
@@ -396,6 +417,7 @@ export function rootRouteMetadata(decision: VisitorAccessDecision): Metadata {
     case "public":
       return {};
     case "admitted":
+    case "local_preview":
       return { robots: { index: false, follow: false } };
     case "signed_out":
     case "held":
@@ -478,7 +500,11 @@ export function createAccessGuardedHandler(
     } catch {
       decision = UNDETERMINED_DECISION;
     }
-    if (decision.outcome === "public" || decision.outcome === "admitted") {
+    if (
+      decision.outcome === "public" || decision.outcome === "admitted" ||
+      (decision.outcome === "local_preview" &&
+        (request.method === "GET" || request.method === "HEAD"))
+    ) {
       return handler(request);
     }
     if (decision.outcome === "undetermined") {

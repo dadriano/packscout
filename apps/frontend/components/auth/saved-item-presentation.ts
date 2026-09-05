@@ -102,7 +102,7 @@ export function presentSaveControl(input: Readonly<{
       disabled: false,
       label: "Sign in to save",
       pressed: false,
-      statusCopy: `Sign in to save this ${noun(input.kind)} across devices.`,
+      statusCopy: "",
       tone: "neutral",
     };
   }

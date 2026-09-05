@@ -22,6 +22,7 @@ test("a guest save action opens authentication without claiming a save", () => {
   assert.equal(presentation.disabled, false);
   assert.equal(presentation.pressed, false);
   assert.equal(presentation.label, "Sign in to save");
+  assert.equal(presentation.statusCopy, "");
 });
 
 test("configured saved-item controls expose loading, pending, success, and error", () => {
