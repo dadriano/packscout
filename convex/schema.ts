@@ -1621,6 +1621,17 @@ export default defineSchema({
     "publicCollectibleId",
   ]),
 
+  // A viewer's column layout for one table (which columns show, in what
+  // order), keyed by the same verified owner identifier as saved items.
+  tableColumnLayouts: defineTable({
+    ownerTokenIdentifier: v.string(),
+    tableKey: v.string(),
+    columns: v.array(v.object({ key: v.string(), visible: v.boolean() })),
+  }).index("by_owner_token_identifier_and_table_key", [
+    "ownerTokenIdentifier",
+    "tableKey",
+  ]),
+
   // The decision-state index serves the operator review queue (identities in
   // one decision state, oldest decision first) and the bounded
   // awaiting-review count. Records that predate the closed beta store no

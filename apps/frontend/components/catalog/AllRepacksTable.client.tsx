@@ -1,13 +1,18 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useContext } from "react";
 import type {
   PublicRepackChase,
   PublicRepackSort,
   PublicRepackViewSummaryV3,
 } from "@packscout/contracts";
+import {
+  PackScoutAuthContext,
+  unavailableAuthValue,
+} from "@/components/auth/AuthContext.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
+import { useTableColumnLayout } from "@/components/table-layout/TableColumnLayoutContext.client";
 import { VendorIdentity } from "./VendorIdentity";
 import {
   presentBuybackSummaryV3,
@@ -19,17 +24,21 @@ import {
 } from "@/lib/packscout-ev-presentation";
 import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { formatCollectibleIdentity } from "@/lib/collectible-identity";
+import type { GlossaryFieldKey } from "@/lib/metric-vocabulary";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import {
   ALL_REPACKS_HEADERS,
+  ALL_REPACKS_TABLE_KEY,
   catalogHeaderAriaSort,
   nextCatalogSortDirection,
   publicRowActions,
+  visibleAllRepacksHeaders,
   type CatalogSortDirection,
 } from "@/lib/all-repacks-table";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { CatalogImage } from "./CatalogImage.client";
+import { ColumnLayoutControl } from "./ColumnLayoutControl.client";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
@@ -65,6 +74,7 @@ function PlainUnavailable({ reason }: { readonly reason: string }) {
 
 function RepackRow({
   repack,
+  columns,
   selected,
   onSelect,
   onCopyPromo,
@@ -75,6 +85,7 @@ function RepackRow({
   desiredSearchActive,
 }: Readonly<{
   repack: PublicRepackViewSummaryV3;
+  columns: readonly GlossaryFieldKey[];
   selected: boolean;
   onSelect: (publicRepackId: string, trigger: HTMLButtonElement) => void;
   onCopyPromo: (publicRepackId: string) => void;
@@ -108,134 +119,193 @@ function RepackRow({
   const actions = publicRowActions(repack);
   const availability = presentPackAvailability(repack.availability);
 
-  return (
-    <tr className={styles.row} data-selected={selected ? "true" : "false"}>
-      <td><VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} /></td>
-      <td>{repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}</td>
-      <td className={styles.packCell}>
-        <button
-          aria-pressed={selected}
-          className={styles.packSelect}
-          onClick={(event) => onSelect(repack.publicRepackId, event.currentTarget)}
-          type="button"
-        >
-          <RepackImage repack={repack} />
-          <span className={styles.packIdentity}>
-            <span className={styles.packName}>{repack.name}</span>
-            {estimate.simulatedLabel ? (
-              <span className={styles.secondaryBadge}>{estimate.simulatedLabel}</span>
-            ) : null}
-            {repack.contentMode === "mixed" ? (
-              <span className={styles.secondaryBadge}>Mixed content</span>
-            ) : null}
-            <span
-              className={styles.availabilityBadge}
-              data-state={repack.availability}
-            >
-              {availability.label}
-              <span className="sr-only">. {availability.description}</span>
-            </span>
-          </span>
-        </button>
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={packPrice} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact glossaryDetails={[grossEv.sourceNote, grossEv.observedLabel].filter((detail): detail is string => Boolean(detail))} metric={grossEv.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={grossEv.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={grossEv.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={grossEv.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td className={styles.numeric}>
-        <CatalogConfidenceEvidence
-          estimate={estimate}
-          providerHealth={repack.providerHealth}
-          repackName={repack.name}
-        />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact glossaryDetails={[vendorEstimate.sourceNote, ...(vendorEstimate.observedLabel ? [vendorEstimate.observedLabel] : [])]} metric={vendorEstimate.usdComparison} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
-      </td>
-      <td>
-        {displayedChase ? (
-          desiredSearchActive && onInspectChase ? (
+  // One cell per column key so the row follows the viewer's column order.
+  function cell(key: GlossaryFieldKey) {
+    switch (key) {
+      case "vendor":
+        return (
+          <td data-column={key} key={key}>
+            <VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} />
+          </td>
+        );
+      case "category":
+        return (
+          <td data-column={key} key={key}>
+            {repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}
+          </td>
+        );
+      case "repack":
+        return (
+          <td className={styles.packCell} data-column={key} key={key}>
             <button
-              aria-label={`View chase ${displayedChase.collectible.name}`}
-              className={styles.chaseSelect}
-              onClick={(event) =>
-                onInspectChase(
-                  displayedChase.collectible.publicCollectibleId,
-                  event.currentTarget,
-                )
-              }
+              aria-pressed={selected}
+              className={styles.packSelect}
+              onClick={(event) => onSelect(repack.publicRepackId, event.currentTarget)}
               type="button"
             >
-              <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
-              {desiredEvidence ? (
-                <small className={styles.chaseEvidence}>
-                  {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
-                </small>
-              ) : null}
+              <RepackImage repack={repack} />
+              <span className={styles.packIdentity}>
+                <span className={styles.packName}>{repack.name}</span>
+                {estimate.simulatedLabel ? (
+                  <span className={styles.secondaryBadge}>{estimate.simulatedLabel}</span>
+                ) : null}
+                {repack.contentMode === "mixed" ? (
+                  <span className={styles.secondaryBadge}>Mixed content</span>
+                ) : null}
+                <span
+                  className={styles.availabilityBadge}
+                  data-state={repack.availability}
+                >
+                  {availability.label}
+                  <span className="sr-only">. {availability.description}</span>
+                </span>
+              </span>
             </button>
-          ) : (
-            <span className={styles.chaseMatch}>
-              <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
-              {desiredEvidence ? (
-                <small className={styles.chaseEvidence}>
-                  {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
-                </small>
-              ) : null}
-            </span>
-          )
-        ) : (
-          <PlainUnavailable reason={
-            desiredSearchActive
-              ? "Desired chase match is not available."
-              : "Top chase is not available."
-          } />
-        )}
-      </td>
-      <td className={styles.numeric}>
-        <MetricValue compact metric={displayedChaseValue} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
-      </td>
-      <td>
-        {actions.promo ? (
-          <button className={styles.inlineAction} onClick={() => onCopyPromo(repack.publicRepackId)} type="button">
-            Copy promo
-          </button>
-        ) : (
-          <span className={styles.notAvailable}>Not available</span>
-        )}
-      </td>
-      <td>
-        {actions.repackLink && repackHref ? (
-          <a
-            className={styles.inlineAction}
-            href={repackHref}
-            onClick={() => onOpenRepack(repack.publicRepackId)}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open repack <span aria-hidden="true">↗</span>
-          </a>
-        ) : actions.repackLink ? (
-          <button className={styles.inlineAction} onClick={() => onOpenRepack(repack.publicRepackId)} type="button">
-            Open repack <span aria-hidden="true">↗</span>
-          </button>
-        ) : (
-          <span className={styles.notAvailable}>Not available</span>
-        )}
-      </td>
+          </td>
+        );
+      case "repackPrice":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={packPrice} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "grossEv":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact glossaryDetails={[grossEv.sourceNote, grossEv.observedLabel].filter((detail): detail is string => Boolean(detail))} metric={grossEv.grossEvDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
+          </td>
+        );
+      case "grossEvPercent":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={grossEv.grossEvPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "evDollars":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={grossEv.evDollars} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "evPercent":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={grossEv.evPercent} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "evConfidence":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <CatalogConfidenceEvidence
+              estimate={estimate}
+              providerHealth={repack.providerHealth}
+              repackName={repack.name}
+            />
+          </td>
+        );
+      case "buybackPercent":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={buyback} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "vendorReportedEv":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact glossaryDetails={[vendorEstimate.sourceNote, ...(vendorEstimate.observedLabel ? [vendorEstimate.observedLabel] : [])]} metric={vendorEstimate.usdComparison} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} valueHint />
+          </td>
+        );
+      case "topChase":
+        return (
+          <td data-column={key} key={key}>
+            {displayedChase ? (
+              desiredSearchActive && onInspectChase ? (
+                <button
+                  aria-label={`View chase ${displayedChase.collectible.name}`}
+                  className={styles.chaseSelect}
+                  onClick={(event) =>
+                    onInspectChase(
+                      displayedChase.collectible.publicCollectibleId,
+                      event.currentTarget,
+                    )
+                  }
+                  type="button"
+                >
+                  <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
+                  {desiredEvidence ? (
+                    <small className={styles.chaseEvidence}>
+                      {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
+                    </small>
+                  ) : null}
+                </button>
+              ) : (
+                <span className={styles.chaseMatch}>
+                  <span className={styles.chaseName}>{displayedChase.collectible.name}</span>
+                  {desiredEvidence ? (
+                    <small className={styles.chaseEvidence}>
+                      {desiredEvidence.evidenceLabel} · {desiredEvidence.matchConfidenceLabel}
+                    </small>
+                  ) : null}
+                </span>
+              )
+            ) : (
+              <PlainUnavailable reason={
+                desiredSearchActive
+                  ? "Desired chase match is not available."
+                  : "Top chase is not available."
+              } />
+            )}
+          </td>
+        );
+      case "topChaseValue":
+        return (
+          <td className={styles.numeric} data-column={key} key={key}>
+            <MetricValue compact metric={displayedChaseValue} showGlossary={false} showLabel={false} showReason={false} showSemanticState={false} />
+          </td>
+        );
+      case "promoCode":
+        return (
+          <td data-column={key} key={key}>
+            {actions.promo ? (
+              <button className={styles.inlineAction} onClick={() => onCopyPromo(repack.publicRepackId)} type="button">
+                Copy promo
+              </button>
+            ) : (
+              <span className={styles.notAvailable}>Not available</span>
+            )}
+          </td>
+        );
+      case "repackLink":
+        return (
+          <td data-column={key} key={key}>
+            {actions.repackLink && repackHref ? (
+              <a
+                className={styles.inlineAction}
+                href={repackHref}
+                onClick={() => onOpenRepack(repack.publicRepackId)}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                Open repack <span aria-hidden="true">↗</span>
+              </a>
+            ) : actions.repackLink ? (
+              <button className={styles.inlineAction} onClick={() => onOpenRepack(repack.publicRepackId)} type="button">
+                Open repack <span aria-hidden="true">↗</span>
+              </button>
+            ) : (
+              <span className={styles.notAvailable}>Not available</span>
+            )}
+          </td>
+        );
+      default:
+        // Glossary fields without a table column (heat) never reach the layout.
+        return null;
+    }
+  }
+
+  return (
+    <tr className={styles.row} data-selected={selected ? "true" : "false"}>
+      {columns.map(cell)}
     </tr>
   );
 }
@@ -252,6 +322,15 @@ export function AllRepacksTable({
   controls,
 }: AllRepacksTableProps) {
   const { activeQuery } = page;
+  // The table also renders in isolated surface tests; without a session
+  // provider the column control simply offers no sign-in.
+  const auth = useContext(PackScoutAuthContext) ?? unavailableAuthValue;
+  const columnLayout = useTableColumnLayout(
+    ALL_REPACKS_TABLE_KEY,
+    ALL_REPACKS_HEADERS,
+  );
+  const visibleHeaders = visibleAllRepacksHeaders(columnLayout.layout);
+  const visibleKeys = visibleHeaders.map(({ key }) => key);
   const desiredChaseByRepackId = new Map(
     page.desiredChaseMatches.map((match) => [match.publicRepackId, match.chase]),
   );
@@ -260,7 +339,7 @@ export function AllRepacksTable({
     : formatCollectibleIdentity(page.desiredCollectible);
   const contextId = "all-repacks-table-context";
 
-  function headerLabel(key: (typeof ALL_REPACKS_HEADERS)[number]["key"], label: string) {
+  function headerLabel(key: GlossaryFieldKey, label: string) {
     if (!page.desiredCollectible) return label;
     if (key === "topChase") return "Desired Chase Match";
     if (key === "topChaseValue") return "Desired Chase Value";
@@ -281,7 +360,26 @@ export function AllRepacksTable({
           </p>
           <h2 className={styles.title} id="all-repacks-table-title">All repacks</h2>
         </div>
-        <div className={styles.headingActions}>{controls}</div>
+        <div className={styles.headingActions}>
+          {controls}
+          <ColumnLayoutControl
+            authStatus={auth.status}
+            columns={columnLayout.columns.map((column) => ({
+              key: column.key,
+              label: column.label,
+              required: column.required === true,
+              visible: column.visible,
+            }))}
+            loading={columnLayout.loading}
+            onMove={(key, toIndex) => columnLayout.move(key as GlossaryFieldKey, toIndex)}
+            onReset={columnLayout.reset}
+            onSetVisible={(key, visible) => columnLayout.setVisible(key as GlossaryFieldKey, visible)}
+            onSignIn={auth.login}
+            persistence={columnLayout.persistence}
+            saveState={columnLayout.saveState}
+            summary={columnLayout.summary}
+          />
+        </div>
       </div>
 
       {controls ? null : (
@@ -305,9 +403,10 @@ export function AllRepacksTable({
           </caption>
           <thead>
             <tr>
-              {ALL_REPACKS_HEADERS.map((header) => (
+              {visibleHeaders.map((header) => (
                 <th
                   aria-sort={catalogHeaderAriaSort(header, activeQuery.sort, activeQuery.direction, activeQuery.search)}
+                  data-column={header.key}
                   key={header.key}
                   scope="col"
                 >
@@ -350,6 +449,7 @@ export function AllRepacksTable({
             {page.rows.map((repack) => (
               <RepackRow
                 key={repack.publicRepackId}
+                columns={visibleKeys}
                 desiredChase={desiredChaseByRepackId.get(repack.publicRepackId) ?? null}
                 desiredSearchActive={page.desiredCollectible !== null}
                 onCopyPromo={onCopyPromo}

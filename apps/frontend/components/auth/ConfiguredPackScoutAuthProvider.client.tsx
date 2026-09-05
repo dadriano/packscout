@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { SessionTableColumnLayoutProvider } from "@/components/table-layout/TableColumnLayoutContext.client";
 import {
   PackScoutAuthContext,
   type PackScoutAuthValue,
@@ -117,7 +118,9 @@ export function ConfiguredPackScoutAuthProvider({
   return (
     <PackScoutAuthContext.Provider value={lightAuthValue}>
       <SavedItemsContext.Provider value={unavailableSavedItemsValue}>
-        {children}
+        <SessionTableColumnLayoutProvider>
+          {children}
+        </SessionTableColumnLayoutProvider>
       </SavedItemsContext.Provider>
     </PackScoutAuthContext.Provider>
   );

@@ -22,6 +22,11 @@
 }
 
 .headingActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.38rem 0.6rem;
   min-width: 0;
 }
 
@@ -51,7 +56,6 @@
 
 .table {
   width: 100%;
-  min-width: 1760px;
   border-collapse: collapse;
   font-size: 0.78rem;
 }
@@ -74,18 +78,15 @@
   font-weight: 700;
 }
 
-.table th:nth-child(3),
-.table td:nth-child(3) {
+.table [data-column="repack"] {
   min-width: 248px;
 }
 
-.table th:nth-child(11),
-.table td:nth-child(11) {
+.table [data-column="vendorReportedEv"] {
   min-width: 190px;
 }
 
-.table th:nth-child(12),
-.table td:nth-child(12) {
+.table [data-column="topChase"] {
   min-width: 250px;
 }
 
@@ -275,12 +276,9 @@
     flex-direction: column;
   }
 
-  .table {
-    min-width: 1680px;
-  }
-
   .headingActions {
     width: 100%;
+    justify-content: flex-start;
   }
 }
 

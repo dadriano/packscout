@@ -14,6 +14,7 @@ import {
   ConvexReactClient,
   useConvexAuth,
 } from "convex/react";
+import { AccountTableColumnLayoutProvider } from "@/components/table-layout/AccountTableColumnLayoutProvider.client";
 import { AuthenticatedSavedItemsProvider } from "./AuthenticatedSavedItemsProvider.client";
 import { AuthenticatedSignInRecorder } from "./AuthenticatedSignInRecorder.client";
 import {
@@ -199,7 +200,9 @@ function PackScoutAuthBridge({
         <AuthenticatedSavedItemsProvider
           key={authenticated ? user?.id : "signed-out"}
         >
-          {children}
+          <AccountTableColumnLayoutProvider>
+            {children}
+          </AccountTableColumnLayoutProvider>
         </AuthenticatedSavedItemsProvider>
       </AuthenticatedSignInRecorder>
     </PackScoutAuthContext.Provider>

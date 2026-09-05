@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { SessionTableColumnLayoutProvider } from "@/components/table-layout/TableColumnLayoutContext.client";
 import {
   PackScoutAuthContext,
   unavailableAuthValue,
@@ -16,7 +17,9 @@ export function UnavailablePackScoutAuthProvider({
   return (
     <PackScoutAuthContext.Provider value={unavailableAuthValue}>
       <SavedItemsContext.Provider value={unavailableSavedItemsValue}>
-        {children}
+        <SessionTableColumnLayoutProvider>
+          {children}
+        </SessionTableColumnLayoutProvider>
       </SavedItemsContext.Provider>
     </PackScoutAuthContext.Provider>
   );

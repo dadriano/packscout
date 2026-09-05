@@ -224,6 +224,10 @@ const OPEN_PUBLIC_QUERIES: Readonly<Record<string, string>> = Object.freeze({
     "the pack_catalog_v1 twin of the saved-items read (pack-version-publication/005); " +
     "it passes the same admission gate, returns only the caller's own stable " +
     "identities, and stays dormant until P07 switches the frontend",
+  "tableColumnLayouts.getTableColumnLayouts":
+    "the authenticated table column layout read (table-column-layout); it " +
+    "passes the same admission gate as saved items and returns only the " +
+    "caller's own display preferences, never catalog data",
 });
 
 /**

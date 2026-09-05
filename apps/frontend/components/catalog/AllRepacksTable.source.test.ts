@@ -44,7 +44,27 @@ test("horizontal scrolling does not contain the shared fixed hint panel", () => 
   assert.doesNotMatch(styles, /\bcontain\s*:/);
   assert.doesNotMatch(styles, /container-type\s*:/);
   assert.match(styles, /\.scroller \{[\s\S]*?overflow-x: auto;/);
-  assert.match(styles, /\.table \{[\s\S]*?min-width: 1760px;/);
+  // The table sizes to the viewer's visible columns; a fixed floor would keep
+  // hidden columns' width around.
+  assert.match(styles, /\.table \{[\s\S]*?width: 100%;/);
+  assert.doesNotMatch(styles, /\.table \{[^}]*min-width/);
+});
+
+test("the repack table renders headers and cells from the viewer's column layout", () => {
+  assert.match(source, /useTableColumnLayout\(\s*ALL_REPACKS_TABLE_KEY,\s*ALL_REPACKS_HEADERS,?\s*\)/);
+  assert.match(source, /visibleAllRepacksHeaders\(columnLayout\.layout\)/);
+  assert.match(source, /\{visibleHeaders\.map\(\(header\) =>/);
+  assert.match(source, /\{columns\.map\(cell\)\}/);
+  assert.doesNotMatch(source, /ALL_REPACKS_HEADERS\.map\(/);
+  assert.match(source, /<ColumnLayoutControl/);
+});
+
+test("column styling keys off the column identity instead of its position", () => {
+  assert.match(source, /data-column=\{header\.key\}/);
+  assert.match(source, /data-column=\{key\}/);
+  assert.match(styles, /\[data-column="repack"\]/);
+  assert.match(styles, /\[data-column="topChase"\]/);
+  assert.doesNotMatch(styles, /nth-child/);
 });
 
 test("desired chase matches open the chase inspector instead of the pack sheet", () => {
