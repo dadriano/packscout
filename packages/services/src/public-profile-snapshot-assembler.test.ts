@@ -7,14 +7,14 @@ test("profile JSON display text preserves public label values without exposing p
   const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
   for (const text of ['{"caption":"Host: Public Speaker"}', '{"caption":"Actor: Keanu Reeves"}',
     '["Host: Public Speaker","Actor: J. K. Simmons"]', '"Host: Public Speaker"',
-    '{"caption":"first"} {"caption":"second"}']) {
+    '{"caption":"first"} {"caption":"second"}', 'Documentation {"caption":"public"} edition']) {
     const profile = structuredClone(fixture.provider.profile);
     profile.displayName = text;
     const result = await assemblePublicProfileSnapshot(profile);
     assert.equal(result.profile.displayName, text);
   }
   for (const text of ['{"caption":"Host: db.internal:5432"}', '{"\\u0061ccount":"internal-123"}',
-    '{"caption":"safe"} {"\\u0068ost":"db.internal"}']) {
+    '{"caption":"safe"} {"\\u0068ost":"db.internal"}', 'Documentation {"\\u0070assword":"private-marker"}']) {
     const profile = structuredClone(fixture.provider.profile);
     profile.displayName = text;
     await assert.rejects(assemblePublicProfileSnapshot(profile), TypeError);

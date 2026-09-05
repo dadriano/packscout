@@ -90,6 +90,23 @@ test("direct JSON retains the existing structural bounds and malformed-document 
     "[".repeat(7) + "null" + "]".repeat(7)]) assert.throws(() => assertPublicCatalogText(text), TypeError);
 });
 
+test("prose-prefixed structured text inspects protected keys at every bounded value boundary", () => {
+  for (const text of ['Documentation {"\\u0070assword":"private-marker"}',
+    'Public edition [{"\\u0061ccount":"internal-123"}]',
+    'First {"caption":"safe"} then {"\\u0068ost":"db.internal"}',
+    'Details {"caption":{"\\u0070assword":"private-marker"},"caption":"public"}']) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption: text })), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(text)), TypeError);
+  }
+  for (const text of ['Documentation {"caption":"public"} edition',
+    'Public edition ["Host: Public Speaker", "Actor: Keanu Reeves"]',
+    'A {limited edition} and [1/1] card', 'The "Limited Edition" card', 'The "unfinished caption',
+    'First {"caption":"public"} then {"caption":"second"}',
+    '{"code":"SUMMER"} then {"response_type":"code"}']) assert.doesNotThrow(() => assertPublicCatalogText(text));
+});
+
 test("public prose rejects credentials in generic URI authorities", () => {
   for (const scheme of ["amqps", "mssql", "ftp", "custom+driver"]) {
     assert.throws(() => assertPublicCatalogText(`Visit ${scheme}://alice:private-marker@internal.example/path`), TypeError);

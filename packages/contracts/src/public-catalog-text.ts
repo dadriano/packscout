@@ -146,14 +146,28 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     return authenticationRoute(decoded, depth + 1);
   };
   const isStructuredText = (text: string) => /^[{["]/u.test(text.trimStart());
-  // Direct prose may contain leading JSON documents followed by public aliases.
-  // Bracketed edition/fraction labels do not establish JSON structure.
-  const directJsonPrefix = /(?:"|\{\s*["}]|\[\s*(?:["{[\]]|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]))/iyu;
-  const isDirectStructuredText = (text: string, start = 0): boolean => {
-    directJsonPrefix.lastIndex = start;
-    return directJsonPrefix.test(text);
+  const stringTokenEnd = (text: string, start: number): number => {
+    let index = start + 1;
+    while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
+    return index < text.length ? index + 1 : text.length + 1;
   };
-  const inspectStructuredText = (text: string, depth: number, context: OAuthContext, prefixStart?: number): number => {
+  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]/iyu;
+  const isProseContainer = (text: string, start: number): boolean => {
+    let next = start + 1;
+    while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+    const object = text[start] === "{";
+    if (text[next] === (object ? "}" : "]")) return true;
+    if (text[next] === '"') {
+      next = stringTokenEnd(text, next);
+      while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+      return object ? text[next] === ":" : text[next] === "," || text[next] === "]";
+    }
+    if (object) return false;
+    if (text[next] === "{" || text[next] === "[") return true;
+    arrayScalarPrefix.lastIndex = next;
+    return arrayScalarPrefix.test(text);
+  };
+  const inspectStructuredText = (text: string, depth: number, context: OAuthContext, prefixStart?: number, proseString = false): number => {
     // Inspect tokens before parsing the document so overwritten duplicate keys
     // cannot erase protected evidence. Use the same bounds as URL/form traversal.
     let nesting = 0, index = prefixStart ?? 0;
@@ -169,10 +183,12 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         continue;
       }
       if (character === '"') {
-        while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
-        if (index >= text.length) reject(); index += 1;
+        index = stringTokenEnd(text, start);
+        if (proseString && index > text.length) return -index;
+        if (index > text.length) reject();
         let decoded: string;
-        try { decoded = JSON.parse(text.slice(start, index)) as string; } catch { return reject(); }
+        try { decoded = JSON.parse(text.slice(start, index)) as string; }
+        catch { if (proseString) return -index; return reject(); }
         let next = index;
         while (next < text.length && /\s/u.test(text[next]!)) next += 1;
         if (text[next] === ":") inspectKey(decoded, depth + nesting + 1, context);
@@ -186,6 +202,25 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (nesting !== 0) reject();
     try { JSON.parse(prefixStart === undefined ? text : text.slice(prefixStart, index)); } catch { reject(); }
     return index;
+  };
+  const inspectProseStructuredText = (text: string, depth: number, context?: OAuthContext, charged = false): void => {
+    // Absolute offsets consume complete roots, not repeatedly parsed suffixes.
+    // Natural brace/bracket labels and malformed prose quotes remain text.
+    // The closing prose quote can also begin an explicit escaped JSON key.
+    let quoteThrough = -1;
+    for (let index = 0; index < text.length; index += 1) {
+      const container = (text[index] === "{" || text[index] === "[") && isProseContainer(text, index);
+      let quoted = false;
+      if (!container && text[index] === '"' && index >= quoteThrough) {
+        const end = stringTokenEnd(text, index);
+        quoteThrough = end - 1;
+        quoted = text.slice(index, end).includes("\\");
+      }
+      if (!container && !quoted) continue;
+      if (!charged) { charge(text, depth); charged = true; }
+      const end = inspectStructuredText(text, depth, context ?? { authentication: false, code: false }, index, quoted);
+      if (end > 0) index = end - (quoted ? 2 : 1);
+    }
   };
   const inspectFragment = (text: string, depth: number, context: OAuthContext): void => {
     charge(text, depth);
@@ -203,6 +238,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (decoded !== text && (isTarget(decoded) || !text.includes("="))) {
       inspectFragment(decoded, depth + 1, context); return;
     }
+    inspectProseStructuredText(text, depth, context, true);
     // A fragment is either one bare target or a form, never both.
     for (const [key, nested] of new URLSearchParams(text)) {
       inspectKey(key, depth + 1, context); visit(nested, depth + 1, false, context);
@@ -212,6 +248,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     charge(text, depth);
     if (!required) inspectProseAssignments(text.normalize("NFKC"), depth);
     if (!required && isStructuredText(text)) { inspectStructuredText(text, depth, context); return; }
+    if (!required) inspectProseStructuredText(text, depth, context, true);
     const candidate = urlRecognition(text);
     // Nested prose can contain another URL. Share this traversal's budget rather
     // than recursively invoking an exported validator with fresh counters.
@@ -258,16 +295,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   if (required) visit(value, 0, true);
   else {
     const normalized = value.trim().normalize("NFKC");
-    if (isDirectStructuredText(normalized)) {
-      // Charge the source once and use absolute offsets for adjacent roots;
-      // repeatedly charging or slicing remaining suffixes would be quadratic.
-      charge(normalized, 0);
-      let start = 0;
-      do {
-        start = inspectStructuredText(normalized, 0, { authentication: false, code: false }, start);
-        while (start < normalized.length && /\s/u.test(normalized[start]!)) start += 1;
-      } while (isDirectStructuredText(normalized, start));
-    }
+    inspectProseStructuredText(normalized, 0);
     inspectProseAssignments(normalized, 0);
     inspectEmbedded(value, 0);
   }
