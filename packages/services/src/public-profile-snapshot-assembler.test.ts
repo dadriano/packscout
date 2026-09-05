@@ -85,3 +85,17 @@ test("profile URLs fail closed on malformed nested authorities and preserve beni
     }
   }
 });
+
+test("profile display and promotions cannot publish generic userinfo, embedded parameters or form credentials", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const target of ["amqps://alice:private-marker@internal.example/path", "ftp:alice:private-marker@internal.example/path",
+    "wss:/alice:private-marker@internal.example/path", "https://example.com/?%73ig=private-marker",
+    "https://example.com/#authorization_code=private-marker", "https://example.com/?data=sig%3Dprivate-marker"]) {
+    for (const field of ["displayName", "copy"] as const) {
+      const profile = structuredClone(fixture.provider.profile), text = `Visit ${target} for details.`;
+      if (field === "displayName") profile.displayName = text;
+      else profile.promotions = [{ promotionId: "offer", label: "Offer", copy: text, url: "https://example.com/offer" }];
+      await assert.rejects(assemblePublicProfileSnapshot(profile), TypeError);
+    }
+  }
+});
