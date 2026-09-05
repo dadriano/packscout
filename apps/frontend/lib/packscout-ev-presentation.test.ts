@@ -16,6 +16,7 @@ import {
   presentRepackPrice,
   presentSignedEvPercentMetric,
   presentVendorReportedEvV3,
+  presentTopChaseValue,
   type PackScoutEvV3PresentationInput,
 } from "./packscout-ev-presentation";
 import {
@@ -27,7 +28,20 @@ import {
   buildV3ReleaseIdentity,
   buildV3UnavailableEv,
   buildV3UnknownTimeUnavailableEv,
+  buildV3Chase,
 } from "./packscout-ev-fixtures.test-support";
+
+test("top chase retains the source currency when a USD comparison is unavailable", () => {
+  const chase = buildV3Chase("10000000-0000-5000-8000-000000000001");
+  chase.collectible.valuation = {
+    displayMoney: { minorUnits: 4500000, currency: "USDC" },
+    usdComparison: { status: "unavailable", value: null, reason: "CURRENCY_UNSUPPORTED" },
+    valuationType: "vendor_reported", observedAt: "2026-09-04T00:09:05.000Z",
+  };
+  assert.equal(presentTopChaseValue(chase).displayValue, "USDC 45,000.00");
+  assert.equal(presentTopChaseValue(chase).availability, "available");
+  assert.equal(chase.collectible.valuation.usdComparison.status, "unavailable");
+});
 
 function input(
   estimate: PackScoutEvV3PresentationInput["estimate"],

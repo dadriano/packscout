@@ -81,7 +81,7 @@ function valuation(row: DistributedProviderCollectibleRow, ceiling: number, plat
   }
   const valuationType = publicProviderCollectibleValuationType(platformKey, row.valuationType);
   if (valuationType === null) return refuse("DISTRIBUTED_CONTENT_VALUE_INVALID");
-  const displayMoney = row.valuationAmount !== null && /^[A-Z]{3}$/u.test(row.valuationCurrency!)
+  const displayMoney = row.valuationAmount !== null && /^[A-Z0-9]{2,12}$/u.test(row.valuationCurrency!)
     ? { minorUnits: scaled(row.valuationAmount, 2), currency: row.valuationCurrency! } : null;
   const usdComparison = row.valuationUsdAmount === null
     ? {
@@ -186,7 +186,7 @@ export function projectProvisionalProviderPackContentsV3(input: {
     return project(input, (row) => ({
       publicCollectibleId: provisionalCollectiblePublicId({ providerId: input.providerId, localCollectibleId: row.id }),
       publicCategoryIds: [],
-    }), undefined, publicRepackDetailV3Schema) as DistributedProviderPackContentsProjectionV3;
+    }), undefined, publicRepackDetailV3Schema, true) as DistributedProviderPackContentsProjectionV3;
   } catch (error) {
     if (error instanceof DistributedProviderPackContentsError) throw error;
     return refuse("DISTRIBUTED_CONTENT_SNAPSHOT_INVALID");
@@ -240,6 +240,7 @@ function project(input: Omit<Parameters<typeof projectProvisionalProviderPackCon
   identity: (row: DistributedProviderCollectibleRow) => Pick<PublicCollectible, "publicCollectibleId" | "publicCategoryIds">,
   approvedMappings?: ReadonlyMap<string, ApprovedPublicCollectibleMapping>,
   repackSchema: { parse(value: unknown): PublicRepackDetail | PublicRepackDetailV3 } = publicRepackDetailSchema,
+  compareSourceMoney = false,
 ): AnyContentsProjection {
   if (!UUID.test(input.providerId) || input.packs.length === 0) {
     return refuse("DISTRIBUTED_CONTENT_IDENTITY_INVALID");
@@ -304,8 +305,22 @@ function project(input: Omit<Parameters<typeof projectProvisionalProviderPackCon
     observed(new Date(pack.detail.sourceUpdatedAt), ceiling);
     const contents = contentsByPack.get(pack.id) ?? [];
     const candidates = contents.filter((row) => row.contentRole !== "other" && row.availableQuantity !== 0n);
+    const valuations = candidates.map((row) => byLocalId.get(row.collectibleId)!.valuation);
+    const sourceCurrencies = new Set(
+      valuations.flatMap((value) => (value?.displayMoney ? [value.displayMoney.currency] : [])),
+    );
+    const commonCurrency = sourceCurrencies.size === 1 ? [...sourceCurrencies][0] : undefined;
+    const unlabelledUsdValue = valuations.some(
+      (value) => value?.usdComparison.status === "available" && value.displayMoney === null,
+    );
+    const useSourceMoney = compareSourceMoney && !unlabelledUsdValue && commonCurrency !== undefined &&
+      valuations.some((value) => value?.usdComparison.status !== "available");
     const value = (row: typeof candidates[number]) => {
-      const comparison = byLocalId.get(row.collectibleId)!.valuation?.usdComparison;
+      const valuation = byLocalId.get(row.collectibleId)!.valuation;
+      // Comparing like-denominated vendor values needs no USD conversion. The
+      // public USD comparison remains unavailable for cross-pack sorting.
+      if (useSourceMoney) return valuation?.displayMoney?.minorUnits ?? -1;
+      const comparison = valuation?.usdComparison;
       return comparison?.status === "available" ? comparison.value.minorUnits : -1;
     };
     candidates.sort((left, right) => value(right) - value(left) || compare(

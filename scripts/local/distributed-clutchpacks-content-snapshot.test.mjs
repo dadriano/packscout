@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tsImport } from "tsx/esm/api";
 import { contentCatalogFixture, CONTENT_PACK_ID, CONTENT_PROVIDER_ID } from "./distributed-clutchpacks-content.test-support.mjs";
-const { validateClutchpacksContentCatalog, clutchpacksPublicValuationFields } = await tsImport("./distributed-clutchpacks-content-snapshot.mts", import.meta.url);
+const { validateProviderContentCatalog } = await tsImport("./provider-pack-content-proof.mts", import.meta.url);
+const { clutchpacksPublicValuationFields } = await tsImport("./distributed-clutchpacks-content-snapshot.mts", import.meta.url);
 const { providerPackContentSnapshotDigest } = await tsImport("@packscout/database", import.meta.url);
-const validate = (catalog) => validateClutchpacksContentCatalog({ providerId: CONTENT_PROVIDER_ID,
+const validate = (catalog) => validateProviderContentCatalog({ providerId: CONTENT_PROVIDER_ID,
   settledAt: new Date("2026-08-29T21:37:36.800Z"), packs: [{ id: CONTENT_PACK_ID, packKey: "pokemon-mystery-pack" }], catalog });
 test("membership rows require their exact retained same-pack snapshot", () => {
   assert.equal(validate(contentCatalogFixture()).get(CONTENT_PACK_ID), "partial");

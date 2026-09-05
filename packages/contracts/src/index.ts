@@ -58,6 +58,7 @@ export * from "./data-release-v3-publication-paths.ts";
 export * from "./provider-pack-membership-v1.ts";
 export * from "./provider-pack-membership-snapshot-v1.ts";
 export * from "./clutchpacks-pack-membership-v1.ts";
+export * from "./collector-crypt-featured-chases-v1.ts";
 export * from "./data-release-v3-retained-ev-witness.ts";
 export * from "./provider-page-record-counts.ts";
 export * from "./pack-catalog-v1.ts";

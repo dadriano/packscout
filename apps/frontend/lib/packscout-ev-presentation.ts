@@ -422,6 +422,9 @@ export function presentTopChaseValue(
     return unavailableMetric(label, "topChaseValue", "VALUATION_UNAVAILABLE");
   }
   if (valuation.usdComparison.status === "unavailable") {
+    if (valuation.displayMoney !== null) {
+      return availableMoneyMetric(label, "topChaseValue", valuation.displayMoney);
+    }
     return unavailableMetric(
       label,
       "topChaseValue",
