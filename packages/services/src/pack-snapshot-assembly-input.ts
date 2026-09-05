@@ -6,7 +6,7 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
-  "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
+  "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature", "pwd"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
@@ -133,10 +133,24 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
-  function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathSegment = false): boolean {
-    const key = text.trim().normalize("NFC").toLowerCase().replace(/[^a-z0-9]/gu, "");
+  function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean, cookieTarget = false, pathTarget?: string): boolean {
+    const key = text.trim().normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/gu, "");
     // Cookie product paths are not HTTP header fields; still charge their bytes.
-    if (pathSegment && (key === "cookie" || key === "setcookie")) { chargeUrlText(text, depth); return false; }
+    if (pathTarget !== undefined && (key === "cookie" || key === "setcookie")) { chargeUrlText(text, depth); return false; }
+    if (pathTarget !== undefined && (key === "account" || key === "host")) {
+      let target = pathTarget, targetDepth = depth;
+      while (target.includes("%")) {
+        const decoded = decodeLayer(chargeUrlText(target, targetDepth++));
+        if (decoded === target) break;
+        target = decoded.trim();
+      }
+      // Encoded separators can expose another path segment, not a value suffix.
+      target = /[^/\\]+/u.exec(target)?.[0] ?? "";
+      const identifier = /^[0-9]+$|^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$|^[^\s/@]+@[^\s/@]+$/iu.test(target) ||
+        (/^[a-z0-9]+(?:[-_:][a-z0-9]+)+$/iu.test(target) && /(?:^|[-_:])[0-9]+(?:$|[-_:])/u.test(target));
+      const privateTarget = key === "account" ? identifier : hasPrivateUriTarget(target, 0) || isPrivateUrlHostname(target);
+      if (!privateTarget) { chargeUrlText(text, depth); return false; }
+    }
     let protectedName = privateKeys.has(key);
     if (colonTarget !== undefined && !protectedName) {
       try { assertPublicPackCatalogBytes({ [text]: null }); } catch { protectedName = true; }
@@ -149,22 +163,22 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
     // candidate names still decode under the same charged depth/byte budget.
     if (colonTarget !== undefined && !protectedName && !text.includes("%")) return publicLabel;
-    const normalized = chargeUrlText(text, depth);
+    const normalized = chargeUrlText(text, depth).normalize("NFKC");
     if (colonTarget === undefined || protectedName) keys.add(normalized);
     if (colonTarget === undefined) {
       context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
       requireAssembly(!context.code || !context.authentication);
     }
     const decoded = decodeLayer(normalized);
-    return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
+    return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathTarget) : publicLabel;
   }
   function inspectConnectionAssignments(text: string, depth: number): void {
-    let through = -1, endpoint = false, catalog = false;
+    let through = -1, endpoint = false, catalog = false, dsn = false, user = false;
     // Each match consumes one complete value. Only adjacent semicolon fields
     // share DSN context; unrelated prose or another line starts a fresh group.
     const fields = /(?:^|;)[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^=;\r\n]+))[ \t]*=[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^;\r\n]*))[ \t]*/gmu;
     for (const match of text.matchAll(fields)) {
-      if (match.index !== through) { endpoint = false; catalog = false; }
+      if (match.index !== through) { endpoint = false; catalog = false; dsn = false; user = false; }
       through = match.index + match[0].length;
       const quoted = match[1] !== undefined || match[2] !== undefined;
       let name = match[1] ?? match[2] ?? match[3]!, keyDepth = depth + 1;
@@ -186,7 +200,8 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       }
       const server = names.includes("server"), source = names.includes("datasource");
       const database = names.includes("database") || names.includes("initialcatalog");
-      if (!server && !source && !database) continue;
+      const namedSource = names.includes("dsn"), userId = names.includes("uid");
+      if (!server && !source && !database && !namedSource && !userId) continue;
       chargeUrlText(name, keyDepth);
       const rawTarget = (match[4] ?? match[5] ?? match[6]!).trim();
       let target = rawTarget, targetDepth = depth + 1;
@@ -208,19 +223,40 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         endpoint ||= target !== "";
       }
       catalog ||= database && target !== "";
-      requireAssembly(!endpoint || !catalog);
+      dsn ||= namedSource && target !== ""; user ||= userId && target !== "";
+      // UID alone can identify a public card. Adjacent connection fields supply
+      // account context without globally protecting every UID label.
+      requireAssembly(!(endpoint && catalog) && !(dsn && (endpoint || catalog)) && !(user && (dsn || endpoint || catalog)));
     }
   }
-  function inspectProseAssignments(text: string, depth: number): void {
+  function inspectProseAssignments(rawText: string, depth: number): void {
+    // Match schema-equivalent field spelling without rewriting public bytes.
+    const text = rawText.normalize("NFKC");
+    if (text !== rawText) chargeUrlText(rawText, depth);
     inspectConnectionAssignments(text, depth);
     // Quoted names are explicit fields, including punctuation and whitespace.
     // Consume each complete quoted span and charge its full name without truncation.
-    for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {
-      inspectUrlKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
+    for (const match of text.matchAll(/"([^"]*)"\s*([:=]|%[a-z0-9%_.-]*)|'([^']*)'\s*([:=]|%[a-z0-9%_.-]*)/giu)) {
+      let separator = match[2] ?? match[4]!, separatorDepth = depth + 1;
+      // Only the following lexical component can reveal this assignment's
+      // separator. Never decode an unbounded suffix or a whole URL here.
+      while (!/^[:=]/u.test(separator) && separator.includes("%")) {
+        const decoded = decodeLayer(chargeUrlText(separator, separatorDepth++));
+        if (decoded === separator) break;
+        separator = decoded.trim();
+      }
+      if (/^[:=]/u.test(separator)) inspectUrlKey(match[1] ?? match[3]!, separatorDepth, { authentication: false, code: false });
     }
     // Consume full runs even without '='; bounded suffixes recognize spaced or
     // quoted names without treating ordinary colon labels as structured fields.
     for (const match of text.matchAll(/[a-z0-9%_.-]+(?:[ \t]+[a-z0-9%_.-]+)*/giu)) {
+      // Decode one lexical run, never a complete URL's structural delimiters.
+      // Re-enter under the same counters so encoded assignment punctuation and
+      // quoted names retain the existing explicit-field rules at every layer.
+      if (match[0].includes("%")) {
+        const decoded = decodeLayer(chargeUrlText(match[0], depth + 1));
+        if (decoded !== match[0]) inspectProseAssignments(decoded, depth + 1);
+      }
       let end = match.index + match[0].length;
       if (text[end] === '"' || text[end] === "'") end += 1;
       while (end < text.length && /\s/u.test(text[end]!)) end += 1;
@@ -276,7 +312,9 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     for (const match of normalized.matchAll(/[^/]+/gu)) {
       let next = match.index + match[0].length;
       while (normalized[next] === "/") next += 1;
-      if (next < normalized.length) inspectUrlKey(match[0], depth + 1, context, undefined, false, true);
+      let end = next;
+      while (end < normalized.length && normalized[end] !== "/") end += 1;
+      if (next < normalized.length) inspectUrlKey(match[0], depth + 1, context, undefined, false, normalized.slice(next, end));
     }
     // Decode only this pathname component, never authority/query boundaries.
     const decoded = decodeLayer(normalized);

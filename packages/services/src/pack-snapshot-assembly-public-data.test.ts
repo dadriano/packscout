@@ -7,6 +7,143 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("literal quoted names retain following encoded assignment separators", async () => {
+  for (const title of ['"api_key"%3Dprivate-marker', "'password'%3Aprivate-marker", '"P-W-D"%3Da',
+    'Documentation "api/key"%253Dprivate-marker', '"password"%25%33%41private-marker',
+    '"account"%20%3Dinternal-123']) {
+    refuses({ title }); refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("PWD substrings are public without an exact password field", async () => {
+  for (const title of ["itemPWD=a", "itemPWD:a", '"itemPWD"%3Da', "PWD collection"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    for (const suffix of ["?caption=", "#"]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/" + suffix + encodeURIComponent(title) }));
+    }
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  for (const title of ['"caption"%253DFish%2526Actor', '"password"%20documentation']) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+  }
+  refuses({ title: "PWD=a" }); refuses({ PWD: "a" }); refuses({ url: "https://example.com/?pwd=a" });
+});
+
+test("decoded fullwidth password fields retain normalized recognition in final action URLs", async () => {
+  for (const url of ["https://example.com/?" + encodeURIComponent("ＰＷＤ") + "=a",
+    "https://example.com/#" + encodeURIComponent("Documentation ＰＷＤ：a"),
+    "https://example.com/?caption=" + encodeURIComponent('Documentation "Ｐ-Ｗ-Ｄ"%3Da')]) {
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    refuses({ url });
+  }
+  for (const caption of ["ｉｔｅｍＰＷＤ=a", "ＰＷＤ collection", "Ｈｏｓｔ： Public Speaker", "Ｂｅａｒｅｒ a"]) {
+    const url = "https://example.com/#" + encodeURIComponent(caption);
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("encoded prose assignment separators retain explicit credential context", async () => {
+  for (const title of ["Documentation api_key%3Dsk_live_private_marker", "password%3Ahunter2",
+    "Documentation api%5Fkey%253Dsk_live_private_marker", "password%253Ahunter2",
+    "%22api%2Fkey%22%3Dprivate-marker", "Documentation %22account%22%3Ainternal-123",
+    "access%20token%3Dprivate-marker", "Host%3Adb.internal:5432"]) {
+    refuses({ title }); refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("ambiguous account and host route words require identifier or endpoint context", async () => {
+  for (const path of ["/account/rewards", "/host/events", "/%61ccount/%72ewards", "/%2561ccount/%2572ewards",
+    "/%68ost/%65vents", "/%2568ost/%2565vents", "/host/%2Fevents", "/account/preferences",
+    "/account/rewards/redeem", "/host/events/summer"]) {
+    const url = "https://example.com" + path;
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: `Visit ${url}` }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?next=" + encodeURIComponent(url) }));
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  for (const path of ["/account/12345", "/account/123e4567-e89b-12d3-a456-426614174000", "/account/member-123",
+    "/account/alice%40example.com", "/%61ccount/%2531%2532%2533", "/host/db.internal", "/host/localhost",
+    "/host/%252Fdb.internal", "/host/db.internal%3A5432", "/accountid/rewards", "/api_key/rewards",
+    "/password/rewards", "/access_token/rewards", "/callback/code/rewards", "/host/events?account=rewards"]) {
+    const url = "https://example.com" + path;
+    refuses({ url }); refuses({ title: `Visit ${url}` });
+    refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
+test("encoded benign prose keeps literal separators labels and Bearer text", async () => {
+  for (const title of ["Caption%3DFish%26Actor", "Caption%253DA%252BB", "Host%3A%20Public%20Speaker",
+    "Bearer%20a", "Bearer%20of%20the%20Heavens", "Card%20edition", "100% available"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Visit https://example.com/?caption=Fish%26Actor" }));
+});
+
+test("encoded prose assignments retain shared depth and final projection guards", async () => {
+  let nested = "caption=public";
+  for (let layer = 0; layer <= packSnapshotAssemblyLimits.maximumDepth; layer += 1) nested = encodeURIComponent(nested);
+  refuses({ title: nested });
+  const { input } = await assemblyFixture(); input.inputs.title = "api_key"; input.inputs.aliases = ["%3Dprivate-marker"];
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+  await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+});
+
+test("explicit ODBC password aliases and connection credential groups stay private", async () => {
+  for (const title of ["DSN=ProdCards;UID=admin;PWD=s3cr3t", "DSN=ProdCards;UID=admin", "UID=admin;DSN=ProdCards",
+    "Server=SQLHOST;UID=admin", "UID=admin;Data Source=SQLHOST", "DSN=ProdCards;Database=cards",
+    "DSN=ProdCards;Server=SQLHOST", "PWD=s3cr3t", '"P-W-D"="s3cr3t"', "pwd%3Ds3cr3t",
+    "DSN=ProdCards;UID=admin;ＰＷＤ=s3cr3t"]) {
+    refuses({ title }); refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+  for (const title of ["UID=public-card-123", '{"uid":"public-card-123"}', "DSN=public-label", "PWD", "PWD collection"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  const { input } = await assemblyFixture(); input.inputs.title = "DSN=ProdCards;"; input.inputs.aliases = ["UID=admin"];
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+  await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  const fullwidth = await assemblyFixture(); fullwidth.input.inputs.title = "ＰＷＤ=s3cr3t";
+  await assert.rejects(assembler.assemble(await requestFor(fullwidth.input.inputs)), PackSnapshotAssemblyError);
+});
+
 test("connection-shaped key/value DSNs cannot enter public text or snapshots", async () => {
   for (const title of ["Server=10.0.0.7;Database=cards", "Data Source=db.internal:1433;Initial Catalog=cards",
     "Documentation Server = db.internal; Database = cards", 'Data Source="db.internal:1433";Initial Catalog=cards',
