@@ -10,7 +10,7 @@
 
 ## Active build — 2026-09-04
 
-The measured14-file loader/save foundation is now owned by task012/P07A in `.worktrees/pack-version-publication-p07-frontend`, branch `codex/pack-version-publication-p07a-frontend-foundation`, from verified maincd9c2da8. Task007 itself remains todo: all visible catalog routes must switch atomically after011 full-data coverage and012 verification. No operation-by-operation coexistence, old-DTO adapter, cutover, or PR is claimed.
+The measured14-file loader/save foundation is owned by task012/P07A in `.worktrees/pack-version-publication-p07-frontend`, branch `codex/pack-version-publication-p07a-frontend-foundation`, PR120 on mainf6785251. Current runtime35ef3d75 has48 focused tests and its request-ID review fix verified; current full gate is pending. Task007 remains todo: all visible catalog routes switch atomically after011 full-data coverage and012 verification/merge. The user authorizes building the remaining phases when dependencies are ready. No operation-by-operation coexistence, old-DTO adapter, cutover or task007 PR exists.
 
 ## Historical handoff before the all-tasks request
 
@@ -19,6 +19,14 @@ Not started. P05/PR108 is merged, so its dependency is now available, but starti
 Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
 
 ## Start Here
+
+### Parallel implementation brief after prerequisites merge
+
+Run independently of006 after011 and012 are verified/merged. Own frontend pages and shell/status consumers, API read bridges, catalog/Watchlist components, native view helpers, query-state/cursor recovery and telemetry. Preserve012's authoritative auth/save coordinator; consume011's six actual query schemas and bounded native owner-Watchlist resolver directly without DTO conversion. Do not change publisher/recovery services or worker composition.
+
+Root freezes and serializes shared contracts, exports, Convex schema/validators/generated API and any public-store corrections before delegation. Coordinate the native owner-saved resolver with the visible Watchlist switch atomically; prove006 has no old-contract imports before deleting any shared old files. Verify all six journeys in real desktop/narrow/keyboard browser flows, cursor expiry, saves and pack-head advances, plus the594-test frontend predecessor baseline and full framework gate.
+
+Measure early: the read-only audit found34 non-test frontend files referring to old release/read/status identity before additional query-state/Watchlist tests. This is a review-size warning, not permission to introduce adapters, split an unsafe visible cutover, add phases or exceed the hard stop silently. Retain every frontend data point and no Heat.
 
 Map the six catalog journeys to one `pack_catalog_v1` fixture, then record the expected URL, saved identity, query state, focus state, and rendered result for success, empty, and structured-error outcomes.
 

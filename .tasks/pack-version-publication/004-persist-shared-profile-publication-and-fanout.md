@@ -2,11 +2,43 @@
 
 **ID:** pack-version-publication/004
 **Depends on:** pack-version-publication/001
-**Blocks:** pack-version-publication/006
+**Blocks:** pack-version-publication/006, pack-version-publication/011
 **Delivery phase:** P04
 **Estimated scope:** medium
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
+
+## Current account/direct-JSON propagation — 2026-09-05 11:12UTC
+
+Equivalent owning-boundary repair is committed `0bff32245664af6f257c88d365e680dd14cdd2d4` on mainf6785251. Complete protected colon fields and bounded direct escaped/duplicate/nested/adjacent JSON use existing rules/counters; quoted and URL fields remain strict, while ordinary Bearer prose and public Host/Actor labels remain valid. Independent cross-review caught benign label values inside JSON being parsed as URI schemes; direct and actual-profile red regressions now pass after applying the same explicit label policy to optional parsed values. Required URLs remain HTTP(S), and attached queries/fragments still traverse.
+
+Root67/67 focused tests pass with zero skips, including actual PostgreSQL fan-out/outbox and production bundle/SPA/two-Prisma-engine proof (`/tmp/packscout-p04-account-json-root-focused-final-20260905.log`). Contracts/services lint/types and ratchet0 pass. Independent24 tiny probes include provider and collectible display/derived-alias assembly and security neighbors; no remaining finding. Three existing files changed, no new file/schema/dependency/activation. Existing6-depth/1000-node/32KiB-component/64KiB-total limits stay. Published56ade93a includes this runtime plus delivery-only records. New GitHub full CI must pass before004 is done/119 ready. The host's owned PostgreSQL subsequently exhausted disk during P03's full gate (257MiB host free), so no further heavy local full run is started; no user files/test bounds are changed to force a pass. Prior9a728e79 CI33961197231 and e3253ba6 local full passes are historical.
+
+## Earlier short-credential propagation
+
+Colon refinement committed `5f662a4e823c541d1edf581f0d8f4de0a48e5a15` on mainf6785251. Root63/63 focused tests pass, zero skips, including private PostgreSQL and production bundle; contracts lint/types and ratchet0 pass (`/tmp/packscout-p04-colon-context-root-focused-20260905.log`). Unquoted colon recognition is restricted to the existing normalized credential-name family and requires a nonspace value; complete quoted keys are explicit fields. Actor/Host/Bolt labels and bare `Authorization:` remain valid. Encoded names share existing charge/depth limits; no new bound, schema, dependency or activation. A fresh full gate must certify5f662a4e.
+
+Full local `npm run verify:framework` PASSED e3253ba6/runtime at unchanged-source checkpoint9a1a5464, including both production builds. Log `/tmp/packscout-p04-auth-context-framework-20260905.log`;28 unchanged unrelated opt-in skips remain disclosed, while the62-test owning matrix ran without skips. New PR114 colon-assignment feedback revealed analogous normalized/quoted colon forms still missing here despite literal api_key/password colon protection. Root has a red focused regression and is propagating the narrow rule; the real e3253ba6 full pass is historical for that upcoming change, not permission to mark004 done prematurely.
+
+Repair committed `e3253ba69d7d2689b07794551e5a014a54fec263` on mainf6785251. Independent cross-review found quoted punctuation could split a protected field name; the committed repair inspects complete quoted assignment names with the existing normalizer/charge and fresh per-assignment OAuth context. Root reran the full62-test persistence/bundle-inclusive matrix and affected static gates after that correction. Full local `npm run verify:framework` is running against this unchanged runtime (`/tmp/packscout-p04-auth-context-framework-20260905.log`); exact publication CI is also required before readiness.
+
+Root's four-file correction passed62/62 focused tests with zero skips, including actual shared PostgreSQL fan-out/outbox behavior and production-bundle/SPA/two-Prisma-engine proof (`/tmp/packscout-p04-auth-context-root-focused-20260905.log`). Contracts/services lint/types and ratchet0 pass. The new bare-title regressions were red against the frozen heuristic. Quoted authorization headers, normalized protected prose assignments and nonempty nested credential forms reject; literal equality padding terminates only after the unchanged traversal charge and does not bypass depth/node/byte limits. Existing positive controls remain; the old search fixture now explicitly constructs an Authorization header. Commit/publication and a fresh full gate remain required.
+
+Resolved user policy mirrors003: ordinary Bearer words and token-shaped prose remain public without explicit authorization/credential context. Root owns the analogous repair in existing P04 guard/test files, including contextualizing the old derived-search rejection fixture. Preserve `Card bearer collection` and all prior benign-success assertions. Published runtime e34660f9/headc003c027 passed fullCI33945458835; the new repair still needs certification and119 remains draft. No runtime activation. The following original review report is historical; no blanket Bearer heuristic will be added.
+
+PR114's latest P1s3939489239/3939489244 require short Bearer token and ordinary protected-assignment coverage. P04 has the same20-character Bearer floor; its literal assignment recognition already covers the reported api_key case. The agent is reproducing and fixing only analogous policy gaps in the two existing guard/test files. Runtime e34660f9/current fullCI33945458835 is superseded for forthcoming repair certification. Keep004 in_progress/119 draft; no new file or runtime activation.
+
+## Earlier public-label refinement
+
+The refinement is committed `e34660f9e320f9e712092d545aba42122c71e38d` on mainf6785251. Spaced/no-space known-scheme profile labels pass directly and in optional URL captions/JSON strings; required URL fields stay HTTP(S)-only. Every attached query/fragment still receives the shared bounded credential traversal. Private endpoints, SQLite encoded/memory targets, Basic/OAuth/JSON credentials and nearby hostile forms remain rejected. Constant-width lookahead returns at the first connection marker; no repeated suffix scans or new files.
+
+Root reviewed the two-file diff and reran59/59 focused tests with zero skips, including both real PostgreSQL fan-out/outbox suites and the production-bundle/SPA/two-Prisma-engine check: `/tmp/packscout-p04-public-label-root-focused-20260905.log`. Agent32 direct guard tests, contracts lint/types and ratchet0 pass: `/tmp/packscout-p04-prose-label-nested-final-focused-static-20260905.log`; lexical and nested-caption regressions were red before repair. Full framework CI33944274702 PASSED the preceding eb777061/runtime140747b8, but the new e34660f9 must receive fresh full verification. Keep004 in_progress and119 draft pending that gate. No phase, schema, formula or public activation changed.
+
+## Earlier main118 credential repair
+
+Runtime `140747b8`, direct parent main `f678525141a55f4d7acbd82487a1871a94632096`. All12 phase patches replay identically; backup `codex/p04-before-main118-20260905` retains2064bc27. Root propagated the new Basic/OAuth/private-topology corrections into this browser-neutral owning boundary. Short canonical Basic credentials use atob/btoa, contextual codes preserve public promotion links, PKCE verifiers and known private schemes reject, and shared budgets remain unchanged. Independent review found no actionable issues;20 tiny probes pass.
+
+Current-parent45/45 focused tests pass with zero skips, including guard/profile/bundle and both real PostgreSQL fan-out/outbox suites; contracts/services lint/types, ratchet0 and docs pass: `/tmp/packscout-p04-main118-focused-20260905.log`. The admin build fix also has direct affected lint/types/boundary evidence. Exact repaired-parent full gate remains required before004 is done/119 ready. No API, writer, source schedule, profile/pack head or route activation.
 
 ## Current full-gate repair
 
