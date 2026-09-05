@@ -156,14 +156,28 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     return decoded !== path && authenticationRoute(chargeUrlText(decoded, depth + 1), depth + 1);
   }
   const isStructuredText = (text: string) => /^[{["]/u.test(text);
-  // Direct prose can start with a JSON document, then continue with an alias.
-  // A bracketed edition/fraction label does not establish JSON structure.
-  const directJsonPrefix = /(?:"|\{\s*["}]|\[\s*(?:["{[\]]|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]))/iyu;
-  function isDirectStructuredText(text: string, start = 0): boolean {
-    directJsonPrefix.lastIndex = start;
-    return directJsonPrefix.test(text);
+  function stringTokenEnd(text: string, start: number): number {
+    let index = start + 1;
+    while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
+    return index < text.length ? index + 1 : text.length + 1;
   }
-  function inspectStructuredText(text: string, depth: number, context: OAuthContext, prefixStart?: number): number {
+  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]/iyu;
+  function isProseContainer(text: string, start: number): boolean {
+    let next = start + 1;
+    while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+    const object = text[start] === "{";
+    if (text[next] === (object ? "}" : "]")) return true;
+    if (text[next] === '"') {
+      next = stringTokenEnd(text, next);
+      while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+      return object ? text[next] === ":" : text[next] === "," || text[next] === "]";
+    }
+    if (object) return false;
+    if (text[next] === "{" || text[next] === "[") return true;
+    arrayScalarPrefix.lastIndex = next;
+    return arrayScalarPrefix.test(text);
+  }
+  function inspectStructuredText(text: string, depth: number, context: OAuthContext, prefixStart?: number, proseString = false): number {
     // Inspect every token before parsing the document: JSON.parse alone would
     // discard protected values hidden by duplicate object keys. Charge this
     // same traversal before allocating a parsed document or descending further.
@@ -180,12 +194,13 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         continue;
       }
       if (character === '"') {
-        while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
-        requireAssembly(index < text.length); index += 1;
+        index = stringTokenEnd(text, start);
+        if (proseString && index > text.length) return -index;
+        requireAssembly(index <= text.length);
         const token = text.slice(start, index);
         let decoded: string;
         try { decoded = JSON.parse(token) as string; }
-        catch { requireAssembly(false); return index; }
+        catch { if (proseString) return -index; requireAssembly(false); return index; }
         let next = index;
         while (next < text.length && /\s/u.test(text[next]!)) next += 1;
         if (text[next] === ":") inspectUrlKey(decoded, depth + nesting + 1, context);
@@ -201,6 +216,29 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     catch { requireAssembly(false); }
     return index;
   }
+  function inspectProseStructuredText(text: string, depth: number, context?: OAuthContext, charged = false): void {
+    // Absolute offsets consume complete roots without repeatedly parsing the
+    // remaining suffix. Natural brace/bracket labels do not establish JSON.
+    // Quoted prose is only decoded when it contains escapes; malformed or lone
+    // prose quotes remain text. The closing quote can also start an explicit
+    // JSON key, so an earlier prose quote cannot hide an escaped field name.
+    let quoteThrough = -1;
+    for (let index = 0; index < text.length; index += 1) {
+      const container = (text[index] === "{" || text[index] === "[") && isProseContainer(text, index);
+      let quoted = false;
+      if (!container && text[index] === '"' && index >= quoteThrough) {
+        const end = stringTokenEnd(text, index);
+        quoteThrough = end - 1;
+        quoted = text.slice(index, end).includes("\\");
+      }
+      if (!container && !quoted) continue;
+      if (!charged) { chargeUrlText(text, depth); charged = true; }
+      // Independent public prose roots do not create an OAuth relationship.
+      // URL/form descendants instead retain their enclosing explicit context.
+      const end = inspectStructuredText(text, depth, context ?? { authentication: false, code: false }, index, quoted);
+      if (end > 0) index = end - (quoted ? 2 : 1);
+    }
+  }
   function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
     if (isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
@@ -214,6 +252,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     if (decoded !== normalized && (isTarget(decoded) || !normalized.includes("="))) {
       inspectFragment(decoded, depth + 1, context); return;
     }
+    inspectProseStructuredText(normalized, depth, context, true);
     inspectForm(normalized, depth, context);
   }
   function inspectForm(text: string, depth: number, context: OAuthContext): void {
@@ -225,6 +264,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
     if (!required) inspectProseAssignments(normalized, depth);
     if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
+    if (!required) inspectProseStructuredText(normalized, depth, context, true);
     // Dispatch a form by its leading assignment, even when its value contains
     // a literal question mark or fragment marker. URL paths retain precedence.
     const assignment = candidate.indexOf("="), marker = candidate.search(/[?#]/u);
@@ -261,16 +301,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       rejectCredentialText(item, urlField ? undefined : target => inspectUrlText(target));
       if (!urlField) {
         const normalized = item.trim().normalize("NFC");
-        if (isDirectStructuredText(normalized)) {
-          // Charge the source once, then inspect adjacent roots by absolute
-          // offsets; rescanning or charging each remaining suffix is quadratic.
-          chargeUrlText(normalized, 0);
-          let start = 0;
-          do {
-            start = inspectStructuredText(normalized, 0, { authentication: false, code: false }, start);
-            while (start < normalized.length && /\s/u.test(normalized[start]!)) start += 1;
-          } while (isDirectStructuredText(normalized, start));
-        }
+        inspectProseStructuredText(normalized, 0);
         inspectProseAssignments(normalized, 0);
       }
       if (urlField) {

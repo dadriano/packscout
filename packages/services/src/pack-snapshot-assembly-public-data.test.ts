@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertPackAssemblyPublicData } from "./pack-snapshot-assembly-input.ts";
-import { PackSnapshotAssemblyError, ProviderPackSnapshotAssembler } from "./provider-pack-snapshot-assembler.ts";
+import { PackSnapshotAssemblyError, ProviderPackSnapshotAssembler, packSnapshotAssemblyLimits } from "./provider-pack-snapshot-assembler.ts";
 import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.test-support.ts";
 
 const assembler = new ProviderPackSnapshotAssembler();
@@ -145,6 +145,75 @@ test("direct structured public text shares existing depth limits and malformed J
   let nested = "public";
   for (let index = 0; index < 12; index += 1) nested = JSON.stringify({ caption: nested });
   refuses({ title: nested });
+});
+
+test("JSON after prose cannot publish escaped protected fields through member names titles or aliases", async () => {
+  for (const text of ['Documentation {"\\u0070assword":"hunter2"}', 'Documentation [{"\\u0061ccount":"private"}]',
+    'Documentation {"caption":{"\\u0068ost":"db.internal"},"caption":"public"}',
+    'Documentation {} then {"\\u0061ccount":"private"} {"caption":"public"}',
+    'Documentation ' + JSON.stringify('{"\\u0070assword":"hunter2"}'),
+    JSON.stringify({ caption: 'Documentation {"\\u0070assword":"hunter2"}' }),
+    'A quote "prefix {"\\u0070assword":"hunter2"}', 'A quote "prefix \\u0020 {"\\u0070assword":"hunter2"}']) {
+    for (const field of ["displayName", "title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = text;
+      else if (field === "title") input.inputs.title = text; else input.inputs.aliases = [text];
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+    refuses({ displayName: text });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(text) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(text) });
+  }
+});
+
+test("JSON within prose preserves ordinary braces brackets and quoted natural text", async () => {
+  for (const text of ['Documentation {"caption":"public"} extra', 'Documentation {} then ["public"] extra',
+    "Collectibles {Limited Edition} [1/1]", 'The "Limited Edition" pack', '12" ruler', 'A lone "quoted label',
+    'A literal {"Edition"} label', "An unfinished { label", 'Public ["Limited Edition"] label',
+    'He said "look at {braces}"', 'Quote "A [1/1] label" ends', 'Quote "C:\\Cards\\Set" ends',
+    'The set { "A", "B" }', 'Documentation "caption"="public"', 'Documentation {"caption":"Host: Public Speaker"}',
+    'Documentation ' + JSON.stringify('[{"caption":"public"}]'), 'Documentation ' + JSON.stringify('A "public" label')]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ displayName: text }));
+    for (const field of ["displayName", "title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = text;
+      else if (field === "title") input.inputs.title = text; else input.inputs.aliases = [text];
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+});
+
+test("JSON after prose shares the existing depth node and byte limits", () => {
+  for (const json of ['{"caption":"public",}', '[{"caption":"public"}', '{"caption":"\\u00GG"}']) {
+    refuses({ displayName: "Documentation " + json });
+  }
+  refuses({ displayName: "Documentation " + "[".repeat(17) + "null" + "]".repeat(17) });
+  refuses({ displayName: "Documentation [" + "0,".repeat(packSnapshotAssemblyLimits.maximumNodes) + "0]" });
+  refuses({ displayName: "Documentation " + "[]".repeat(packSnapshotAssemblyLimits.maximumSnapshotBytes / 2) });
+});
+
+test("the final search projection inspects JSON assembled across separately safe title and alias text", async () => {
+  const { input } = await assemblyFixture();
+  input.inputs.title = 'Documentation {"\\u0070ass';
+  input.inputs.aliases = ['word":"hunter2"}'];
+  const candidate = await requestFor(input.inputs);
+  assert.doesNotThrow(() => assertPackAssemblyPublicData(candidate));
+  await assert.rejects(assembler.assemble(candidate), PackSnapshotAssemblyError);
+});
+
+test("independent prose JSON roots and URLs do not share OAuth context but nested URL payloads retain it", async () => {
+  for (const title of ['{"code":"SUMMER"} then {"response_type":"code"}',
+    'Documentation {"code":"SUMMER"} then {"response_type":"code"}',
+    "https://example.com/coupon?caption=" + encodeURIComponent('Documentation {"code":"SUMMER"}') +
+      " https://example.com/callback?caption=" + encodeURIComponent('Documentation {"response_type":"code"}')]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  for (const path of ["/?caption=", "/#caption="]) {
+    refuses({ url: "https://example.com" + path + encodeURIComponent('Documentation {"code":"private"} then {"response_type":"code"}') });
+  }
+  refuses({ url: "https://example.com/callback?caption=" + encodeURIComponent('Documentation {"code":"private"}') });
 });
 
 test("an empty authorization label is rejected only after a separate public alias supplies its value", async () => {
