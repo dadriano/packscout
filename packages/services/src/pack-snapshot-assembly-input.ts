@@ -1,15 +1,25 @@
+import { Buffer } from "node:buffer";
 import { isProxy } from "node:util/types";
 import { assertPublicPackCatalogBytes, compareCanonicalStrings, packBuildRequestSchema, packCatalogCanonicalByteCount,
   packSnapshotEvidenceSchema, providerPackBuildInputsSchema, publicProfileSnapshotIdSchema } from "@packscout/contracts";
 import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-snapshot-assembly-types.ts";
 
-const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "connectionstring", "connectionurl",
+const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
-const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{20,})/iu;
+const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{20,})/iu;
+const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
+const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
+type OAuthContext = { authentication: boolean; code: boolean };
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
   const normalized = value.trim().normalize("NFC");
   requireAssembly(!credentialText.test(normalized));
+  // Basic has no minimum credential length. Decode only canonical base64 with
+  // its required user/password separator, preserving ordinary "Basic edition" prose.
+  for (const match of normalized.matchAll(/\bBasic\s+([a-z0-9+/]+={0,2})/giu)) {
+    const decoded = Buffer.from(match[1]!, "base64");
+    requireAssembly(decoded.toString("base64").replace(/=+$/u, "") !== match[1]!.replace(/=+$/u, "") || !decoded.includes(58));
+  }
   // URI authority ends at path/query/fragment or whitespace, not at a quote
   // that WHATWG would percent-encode inside a username or password.
   // WHATWG removes these controls even inside userinfo. Ambiguous control-joined
@@ -22,6 +32,9 @@ function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: strin
   while ((match = schemes.exec(recognized)) !== null) {
     const colon = schemes.lastIndex;
     if (recognized[colon] !== ":") continue;
+    // Private connection schemes also have single-slash or opaque forms; an
+    // authority delimiter or userinfo is not needed to expose their topology.
+    requireAssembly(!privateUriScheme.test(match[0]) || colon + 1 === recognized.length);
     let authorityStart = colon + 1;
     while (recognized[authorityStart] === "/" || recognized[authorityStart] === "\\") authorityStart += 1;
     if (!/^(?:https?|ftp|wss?)$/iu.test(match[0]) && authorityStart - colon - 1 < 2) continue;
@@ -55,11 +68,14 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
-  function inspectUrlKey(text: string, depth: number): void {
+  function inspectUrlKey(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
     keys.add(normalized);
+    const key = normalized.toLowerCase().replace(/[^a-z0-9]/gu, "");
+    context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
+    requireAssembly(!context.code || !context.authentication);
     const decoded = decodeLayer(normalized);
-    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1);
+    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1, context);
   }
   function urlRecognition(normalized: string): string {
     // Match WHATWG scheme/authority recognition, without changing query-value structure.
@@ -69,8 +85,13 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     while (end > start && withoutControls.charCodeAt(end - 1) <= 32) end -= 1;
     return withoutControls.slice(start, end).replaceAll("\\", "/");
   }
+  function authenticationRoute(path: string, depth: number): boolean {
+    if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path)) return true;
+    const decoded = decodeLayer(path);
+    return decoded !== path && authenticationRoute(chargeUrlText(decoded, depth + 1), depth + 1);
+  }
   const isStructuredText = (text: string) => /^[{["]/u.test(text);
-  function inspectStructuredText(text: string, depth: number): void {
+  function inspectStructuredText(text: string, depth: number, context: OAuthContext): void {
     // Inspect every token before parsing the document: JSON.parse alone would
     // discard protected values hidden by duplicate object keys. Charge this
     // same traversal before allocating a parsed document or descending further.
@@ -91,8 +112,8 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         catch { requireAssembly(false); return; }
         let next = index;
         while (next < text.length && /\s/u.test(text[next]!)) next += 1;
-        if (text[next] === ":") inspectUrlKey(decoded, depth + nesting + 1);
-        else inspectUrlText(decoded, depth + nesting + 1);
+        if (text[next] === ":") inspectUrlKey(decoded, depth + nesting + 1, context);
+        else inspectUrlText(decoded, depth + nesting + 1, false, context);
       } else {
         while (index < text.length && !/[\s{}[\]",:]/u.test(text[index]!)) index += 1;
         chargeUrlText(text.slice(start, index), depth + nesting + 1);
@@ -102,51 +123,55 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     try { JSON.parse(text); }
     catch { requireAssembly(false); }
   }
-  function inspectFragment(text: string, depth: number): void {
+  function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
-    if (isStructuredText(normalized)) { inspectStructuredText(normalized, depth); return; }
+    if (isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), equals = candidate.indexOf("=");
       return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.\.?[/]/iu.test(candidate) ||
         (query >= 0 && (equals < 0 || query < equals));
     };
-    if (isTarget(normalized)) { inspectUrlText(normalized, depth + 1); return; }
+    if (isTarget(normalized)) { inspectUrlText(normalized, depth + 1, false, context); return; }
     const decoded = decodeLayer(normalized);
     if (decoded !== normalized && (isTarget(decoded) || !normalized.includes("="))) {
-      inspectFragment(decoded, depth + 1); return;
+      inspectFragment(decoded, depth + 1, context); return;
     }
-    inspectForm(normalized, depth);
+    inspectForm(normalized, depth, context);
   }
-  function inspectForm(text: string, depth: number): void {
+  function inspectForm(text: string, depth: number, context: OAuthContext): void {
     for (const [key, nested] of new URLSearchParams(text)) {
-      inspectUrlKey(key, depth + 1); inspectUrlText(nested, depth + 1);
+      inspectUrlKey(key, depth + 1, context); inspectUrlText(nested, depth + 1, false, context);
     }
   }
-  function inspectUrlText(text: string, depth = 0, required = false): void {
+  function inspectUrlText(text: string, depth = 0, required = false, context: OAuthContext = { authentication: false, code: false }): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
-    if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth); return; }
+    if (!required && isStructuredText(normalized)) { inspectStructuredText(normalized, depth, context); return; }
     // Dispatch a form by its leading assignment, even when its value contains
     // a literal question mark or fragment marker. URL paths retain precedence.
     const assignment = candidate.indexOf("="), marker = candidate.search(/[?#]/u);
     if (!required && !/^[a-z][a-z0-9+.-]*:|^(?:\/|\.\.?\/)/iu.test(candidate) &&
       assignment >= 0 && (marker < 0 || assignment < marker)) {
-      inspectForm(normalized, depth); return;
+      inspectForm(normalized, depth, context); return;
     }
     if (!required && !candidate.startsWith("/") && !/^[a-z][a-z0-9+.-]*:|[?#]/iu.test(candidate)) {
       const decoded = decodeLayer(normalized);
-      if (decoded !== normalized) inspectUrlText(decoded, depth + 1);
+      if (decoded !== normalized) inspectUrlText(decoded, depth + 1, false, context);
       return;
     }
     let url: URL;
     try { url = required ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
     catch { requireAssembly(false); return; }
     requireAssembly(url.username === "" && url.password === "");
+    // A separate nested URL has its own route/query context; forms and JSON
+    // within this URL share it, regardless of parameter or duplicate-key order.
+    const urlContext = { authentication: authenticationRoute(url.pathname, depth) ||
+      (/^[?#]/u.test(candidate) && context.authentication), code: false };
     // Preserve URL structure: decode individual names/values, never the whole URL.
     for (const [key, nested] of url.searchParams) {
-      inspectUrlKey(key, depth + 1); inspectUrlText(nested, depth + 1);
+      inspectUrlKey(key, depth + 1, urlContext); inspectUrlText(nested, depth + 1, false, urlContext);
     }
     const fragment = url.hash.slice(1);
-    if (fragment !== "") inspectFragment(fragment, depth + 1);
+    if (fragment !== "") inspectFragment(fragment, depth + 1, urlContext);
   }
   function visit(item: unknown, depth: number, field = "") {
     requireAssembly(++nodes <= limits.maximumNodes && depth <= limits.maximumDepth);
