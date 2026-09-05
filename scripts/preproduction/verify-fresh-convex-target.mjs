@@ -73,6 +73,7 @@ export const CONVEX_APP_TABLES = Object.freeze([
   "repackHeatState",
   "savedCollectibles",
   "savedRepacks",
+  "tableColumnLayouts",
 ]);
 
 export const FORBIDDEN_FRESH_TARGET_ENVIRONMENT_NAMES = Object.freeze([
