@@ -84,6 +84,32 @@ test("Ruby Go and PHP frames require their source-coordinate and call context", 
   }
 });
 
+test("stack sources retain exact interior-dot path and virtual-source semantics", async () => {
+  for (const source of [".a", "a.", "..", "a.b:bad", "Guide"]) {
+    const title = `${source}:1:in \`handle'`;
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  for (const source of ["...", "a.b.", "a.b", "/srv/script", "C:\\srv\\script", "<stdin>"]) {
+    const title = `${source}:1:in \`handle'`;
+    refuses({ title });
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
+test("bounded malformed dotted stack sources stay public without suffix backtracking", async () => {
+  for (const pairs of [40, 4_000]) {
+    const title = "a.".repeat(pairs) + "a:bad:1:in `handle'";
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    if (pairs === 40) {
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+});
+
 test("literal source-location stack frames never enter public pack text", async () => {
   for (const title of ["Error: boom\n    at handler (/srv/app.js:10:5)", "TypeError: failed\r\n\tat async handler (/srv/app.ts:20:7)",
     "Error: boom\n at Object.handler [as callback] (/srv/app.js:10:5)", "Error: boom\n at new Handler (C:\\app\\file.js:10:5)",

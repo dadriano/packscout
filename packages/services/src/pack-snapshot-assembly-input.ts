@@ -63,6 +63,14 @@ function hasCookiePair(text: string, start: number): boolean {
   pair.lastIndex = start;
   return pair.test(text);
 }
+function isStackSource(source: string): boolean {
+  if (/[\\/]/u.test(source) || /^<[^<>\r\n]+>$/u.test(source)) return true;
+  // Test exclusions once before locating an interior dot. A greedy filename
+  // regex would retry every dot when a long captured source ends in :bad.
+  if (/[:\s]/u.test(source)) return false;
+  const dot = source.indexOf(".", 1);
+  return dot !== -1 && dot < source.length - 1;
+}
 function hasLiteralStackFrame(value: string): boolean {
   const text = value.normalize("NFKC");
   // A source location with line/column coordinates establishes a stack frame,
@@ -70,28 +78,28 @@ function hasLiteralStackFrame(value: string): boolean {
   // source spans keep the scan linear, including whitespace-collapsed search.
   for (const frame of text.matchAll(/(?:^|\s)at[ \t]+(?:(?:async|new)[ \t]+)?(?:[^\s()]+(?:[ \t]+\[as[ \t]+[^\]\r\n[]+\])?[ \t]+\(([^()\r\n]+):[0-9]+:[0-9]+\)|([^()\s]+):[0-9]+:[0-9]+)(?=$|[\s),.;])/giu)) {
     const source = frame[1] ?? frame[2]!;
-    if (/[\\/]|^node:|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(source)) return true;
+    if (source.startsWith("node:") || isStackSource(source)) return true;
   }
   // Python frames quote a source file; Java frames name a class method and
   // .java source line; Firefox frames separate a function and absolute source
   // URL with @. None treats an ordinary Error label or email as a stack frame.
   for (const frame of text.matchAll(/(?:^|\s)File[ \t]+"([^"\r\n]+)",[ \t]+line[ \t]+[0-9]+(?=$|[\s,.;])/giu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+    if (isStackSource(frame[1]!)) return true;
   }
   // .NET source frames pair a method argument list with an explicit source line.
   for (const frame of text.matchAll(/(?:^|\s)at[ \t]+[^\s()]+\([^()\r\n]*\)[ \t]+in[ \t]+([^()\r\n]+):line[ \t]+[0-9]+(?=$|[\s),.;])/giu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+    if (isStackSource(frame[1]!)) return true;
   }
   // Ruby source/in-method frames, Go source/offset call pairs, and PHP numbered
   // source/call frames require their complete language-specific context.
   for (const frame of text.matchAll(/(?:^|\s)(?:from[ \t]+)?([^\s]+):[0-9]+:in[ \t]+`[^`'\r\n]+'(?=$|[\s),.;])/giu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+    if (isStackSource(frame[1]!)) return true;
   }
   for (const frame of text.matchAll(/(?:^|\s)[^\s()]+(?:\(\*[^\s()]+\)[^\s()]+)?\([^()\r\n]*\)\s+([^\s]+):[0-9]+[ \t]+\+0x[0-9a-f]+(?=$|[\s),.;])/giu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+    if (isStackSource(frame[1]!)) return true;
   }
   for (const frame of text.matchAll(/(?:^|\s)#[0-9]+[ \t]+([^\s()]+)\([0-9]+\):[ \t]+[^\s()]+\([^()\r\n]*\)(?=$|[\s),.;])/giu)) {
-    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+    if (isStackSource(frame[1]!)) return true;
   }
   return /(?:^|\s)at[ \t]+[a-z_$][\w$./<>]*\.[\w$<>]+\([^()\r\n]+\.java:[0-9]+\)(?=$|[\s),.;])/iu.test(text) ||
     /(?:^|\s)[^\s@()]*@(?:[a-z][a-z0-9+.-]*:\/{2,}|\/)[^\s()]+:[0-9]+:[0-9]+(?=$|[\s),.;])/iu.test(text);
