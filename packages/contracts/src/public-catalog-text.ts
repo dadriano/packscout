@@ -7,6 +7,7 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
 // Bearer is ordinary public prose unless a protected field or authorization
 // assignment establishes credential context; token spelling/length cannot do so.
 const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
+const credentialColonKeys = new Set(["apikey", "password", "secret", "accesstoken", "refreshtoken", "authorization"]);
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -72,20 +73,26 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (depth > 6 || ++nodes > 1_000 || text.length > 32_768 || (bytes += encoder.encode(text).length) > 65_536) reject();
     assertPublicCatalogLexicalText(text);
   };
-  const inspectKey = (text: string, depth: number, context: OAuthContext): void => {
+  const inspectKey = (text: string, depth: number, context: OAuthContext, credentialOnly = false): void => {
+    const credentialName = credentialColonKeys.has(normalizeProtectedPublicationFieldKey(text.normalize("NFKC")));
+    // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
+    // candidate names still decode under the same charged depth/byte budget.
+    if (credentialOnly && !credentialName && !text.includes("%")) return;
     charge(text, depth);
     const normalized = text.normalize("NFKC");
     const key = normalizeProtectedPublicationFieldKey(normalized);
-    context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
-    if ((context.code && context.authentication) || privateKeys.has(key)) reject();
-    assertPublicPackCatalogBytes({ [normalized]: null });
+    if (!credentialOnly || credentialName) {
+      context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
+      if ((context.code && context.authentication) || privateKeys.has(key)) reject();
+      assertPublicPackCatalogBytes({ [normalized]: null });
+    }
     const decoded = decodeLayer(normalized);
-    if (decoded !== normalized) inspectKey(decoded, depth + 1, context);
+    if (decoded !== normalized) inspectKey(decoded, depth + 1, context, credentialOnly);
   };
   const inspectProseAssignments = (text: string, depth: number): void => {
     // Quotes establish the whole assigned name, including punctuation that the
     // protected-field normalizer removes. Each scan stops at its next delimiter.
-    for (const match of text.matchAll(/"([^"]*)"\s*=|'([^']*)'\s*=/gu)) {
+    for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {
       inspectKey(match[1] ?? match[2]!, depth + 1, { authentication: false, code: false });
     }
     // Consume full runs even without '='; bounded suffixes recognize spaced or
@@ -94,7 +101,13 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       let end = match.index + match[0].length;
       if (text[end] === '"' || text[end] === "'") end += 1;
       while (end < text.length && /\s/u.test(text[end]!)) end += 1;
-      if (text[end] !== "=") continue;
+      const colon = text[end] === ":";
+      if (text[end] !== "=" && !colon) continue;
+      // A bare label can be public on its own; joined search text is scanned
+      // again after aliases supply an actual value (e.g. "Authorization:").
+      let valueStart = end + 1;
+      while (colon && valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
+      if (colon && valueStart === text.length) continue;
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -107,7 +120,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        inspectKey(key, depth + 1, { authentication: false, code: false });
+        inspectKey(key, depth + 1, { authentication: false, code: false }, colon);
       }
     }
   };

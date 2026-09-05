@@ -43,6 +43,20 @@ test("protected credential assignments in prose use the existing normalized fiel
   }
 });
 
+test("colon credential assignments preserve ordinary unquoted public labels", () => {
+  for (const assignment of ["api_key: a", "api.key: a", "api  key: a", "password: a", "secret: a",
+    "access.token: a", "refresh__token: a", "%61pi_key: a", '"api/key": "a"', '"authorization/code": "a"']) {
+    const text = `Documentation ${assignment}`;
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: text }))), TypeError);
+  }
+  for (const text of ["Actor: Keanu Reeves", "Host: Public Speaker", "Bolt: Premium Edition",
+    'Documentation "campaign/name": "SUMMER"', "Authorization:"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
 test("public prose rejects credentials in generic URI authorities", () => {
   for (const scheme of ["amqps", "mssql", "ftp", "custom+driver"]) {
     assert.throws(() => assertPublicCatalogText(`Visit ${scheme}://alice:private-marker@internal.example/path`), TypeError);
