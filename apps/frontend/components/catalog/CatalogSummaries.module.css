@@ -1,4 +1,5 @@
 .section {
+  container-type: inline-size;
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 0.55rem;
@@ -29,8 +30,8 @@
 
 .columns {
   display: grid;
-  grid-template-columns: 3rem 4.7rem;
-  gap: 0.75rem;
+  grid-template-columns: 2.75rem 5.5rem;
+  gap: 0.65rem;
   color: var(--color-text-muted);
   font-size: 0.6rem;
   text-align: right;
@@ -44,10 +45,12 @@
 
 .row {
   display: grid;
-  min-height: 2.55rem;
-  grid-template-columns: minmax(6.5rem, 0.7fr) minmax(5rem, 1.3fr) 3rem 4.7rem;
+  min-width: 0;
+  min-height: 3.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(2rem, 0.55fr) 2.75rem 5.5rem;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
+  padding-block: 0.5rem;
   border-top: 1px solid var(--color-border);
   color: inherit;
   font-size: 0.72rem;
@@ -94,6 +97,7 @@
 
 .count,
 .median {
+  min-width: 0;
   text-align: right;
 }
 
@@ -106,8 +110,10 @@
 
 .median small {
   color: var(--color-text-muted);
-  font-size: 0.53rem;
+  font-size: 0.6rem;
   font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .median[data-tone="positive"] {
@@ -139,13 +145,13 @@
   text-align: center;
 }
 
-@media (max-width: 560px) {
+@container (max-width: 400px) {
   .columns {
     display: none;
   }
 
   .row {
-    grid-template-columns: minmax(6rem, 1fr) 3.25rem 4.5rem;
+    grid-template-columns: minmax(0, 1fr) 2.75rem 5.5rem;
   }
 
   .track {

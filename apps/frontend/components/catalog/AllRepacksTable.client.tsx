@@ -29,6 +29,7 @@ import {
 } from "@/lib/all-repacks-table";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
+import { VendorIdentity } from "./VendorIdentity";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
@@ -114,7 +115,7 @@ function RepackRow({
 
   return (
     <tr className={styles.row} data-selected={selected ? "true" : "false"}>
-      <td>{repack.vendorDisplayName}</td>
+      <td><VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} /></td>
       <td>{repack.categories.map(({ label }) => label).join(" · ") || "Uncategorized"}</td>
       <td className={styles.packCell}>
         <button

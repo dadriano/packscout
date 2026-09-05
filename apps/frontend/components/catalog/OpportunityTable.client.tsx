@@ -7,6 +7,7 @@ import { useClockBoundPackScoutEv } from "@/lib/packscout-ev-clock.client";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
 import { CatalogImage } from "./CatalogImage.client";
+import { VendorIdentity } from "./VendorIdentity";
 import { presentOpportunityRow } from "./overview-presentation";
 import styles from "./OpportunityTable.module.css";
 
@@ -114,21 +115,7 @@ function OpportunityRow({
         </button>
       </td>
       <td>
-        <span className={styles.vendor}>
-          {row.vendorLogoUrl ? (
-            <CatalogImage
-              decorative
-              fallback="none"
-              fallbackAlt={`${row.vendorDisplayName} logo`}
-              image={{
-                url: row.vendorLogoUrl,
-                alt: `${row.vendorDisplayName} logo`,
-              }}
-              variant="vendor"
-            />
-          ) : null}
-          <span>{row.vendorDisplayName}</span>
-        </span>
+        <VendorIdentity name={row.vendorDisplayName} vendorKey={repack.vendorKey} />
       </td>
       <td>{row.category}</td>
       <td>

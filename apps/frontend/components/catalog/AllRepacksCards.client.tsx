@@ -19,6 +19,7 @@ import { formatCollectibleIdentity } from "@/lib/collectible-identity";
 import { presentPackAvailability } from "@/lib/pack-availability-presentation";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
+import { VendorIdentity } from "./VendorIdentity";
 import styles from "./AllRepacksCards.module.css";
 
 type AllRepacksCardsProps = Readonly<{
@@ -75,7 +76,9 @@ function RepackCard({
           variant="thumbnail"
         />
         <span className={styles.identity}>
-          <span className={styles.vendor}>{repack.vendorDisplayName}</span>
+          <span className={styles.vendor}>
+            <VendorIdentity name={repack.vendorDisplayName} vendorKey={repack.vendorKey} />
+          </span>
           <span className={styles.name}>{repack.name}</span>
           <span
             className={styles.availability}

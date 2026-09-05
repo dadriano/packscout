@@ -47,6 +47,7 @@ import {
   presentEstimateCoverage,
   presentTopChase,
 } from "./pack-inspector-presentation";
+import { VendorLogo } from "./VendorIdentity";
 import styles from "./PackInspector.module.css";
 
 export type InspectorActionOutcome =
@@ -356,22 +357,7 @@ export function RepackInspector({
             {repack.name}
           </h2>
           <p className={styles.vendor}>
-            {repack.vendorLogoUrl ? (
-              <CatalogImage
-                decorative
-                fallback="none"
-                fallbackAlt={`${repack.vendorDisplayName} logo`}
-                image={{
-                  url: repack.vendorLogoUrl,
-                  alt: `${repack.vendorDisplayName} logo`,
-                }}
-                variant="vendor"
-              />
-            ) : (
-              <span aria-hidden="true" className={styles.vendorMark}>
-                {repack.vendorDisplayName.trim().slice(0, 1).toUpperCase()}
-              </span>
-            )}
+            <VendorLogo vendorKey={repack.vendorKey} />
             <span>
               Offered by <strong>{repack.vendorDisplayName}</strong>
             </span>

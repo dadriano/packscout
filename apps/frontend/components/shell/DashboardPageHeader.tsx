@@ -15,6 +15,7 @@ import {
   type CatalogViewLayout,
 } from "@/lib/catalog-query-state.client";
 import type { DashboardHref } from "@/lib/provider-banner";
+import styles from "./DashboardPageHeader.module.css";
 
 type DesiredChaseControl = Readonly<{
   query: ListPublicRepacksInput;
@@ -52,55 +53,67 @@ export function DashboardPageHeader({
   }
 
   return (
-    <div
-      className="page-heading-row"
-      data-has-desired-chase={desiredChase ? "true" : undefined}
-    >
-      <div className="dashboard-heading-group">
-        <h1 className="page-heading" data-route-heading tabIndex={-1}>
-          Dashboard
-        </h1>
-        <nav aria-label="Dashboard views" className="dashboard-tabs" role="tablist">
-          <Link
-            aria-current={activeView === "overview" ? "page" : undefined}
-            aria-selected={activeView === "overview"}
-            className="dashboard-tabs__tab"
-            href={overviewHref}
-            role="tab"
-          >
-            Overview
-          </Link>
-          <Link
-            aria-current={activeView === "all-repacks" ? "page" : undefined}
-            aria-selected={activeView === "all-repacks"}
-            className="dashboard-tabs__tab"
-            href="/packs"
-            role="tab"
-          >
-            All Repacks
-          </Link>
-        </nav>
-      </div>
-      {desiredChase ? (
-        <div className="dashboard-desired-chase">
-          <DesiredCollectibleSearch
-            onInspect={
-              chaseInspect
-                ? (publicCollectibleId, trigger, identity) =>
-                    chaseInspect.open({
-                      publicCollectibleId,
-                      identity,
-                      trigger,
-                    })
-                : undefined
-            }
-            onSelect={selectDesiredChase}
-            pending={pending}
-            selected={desiredChase.selected}
-            variant="heading"
-          />
+    <>
+      {activeView === "overview" ? (
+        <section aria-labelledby="dashboard-hero-heading" className={styles.hero}>
+          <h1 className={styles.heroTitle} data-route-heading id="dashboard-hero-heading" tabIndex={-1}>
+            Scout for your next rip
+          </h1>
+          <p className={styles.heroCopy}>
+            Compare repacks, odds, and EV across the top platforms.
+          </p>
+        </section>
+      ) : (
+        <h1 className="sr-only" data-route-heading tabIndex={-1}>All Repacks</h1>
+      )}
+      <div
+        className="page-heading-row"
+        data-has-desired-chase={desiredChase ? "true" : undefined}
+        data-dashboard-view={activeView}
+      >
+        <div className="dashboard-heading-group">
+          <nav aria-label="Dashboard views" className="dashboard-tabs" role="tablist">
+            <Link
+              aria-current={activeView === "overview" ? "page" : undefined}
+              aria-selected={activeView === "overview"}
+              className="dashboard-tabs__tab"
+              href={overviewHref}
+              role="tab"
+            >
+              Overview
+            </Link>
+            <Link
+              aria-current={activeView === "all-repacks" ? "page" : undefined}
+              aria-selected={activeView === "all-repacks"}
+              className="dashboard-tabs__tab"
+              href="/packs"
+              role="tab"
+            >
+              All Repacks
+            </Link>
+          </nav>
         </div>
-      ) : null}
-    </div>
+        {desiredChase ? (
+          <div className="dashboard-desired-chase">
+            <DesiredCollectibleSearch
+              onInspect={
+                chaseInspect
+                  ? (publicCollectibleId, trigger, identity) =>
+                      chaseInspect.open({
+                        publicCollectibleId,
+                        identity,
+                        trigger,
+                      })
+                  : undefined
+              }
+              onSelect={selectDesiredChase}
+              pending={pending}
+              selected={desiredChase.selected}
+              variant="heading"
+            />
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
