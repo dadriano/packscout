@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from "react";
 import { useConvex, useMutation } from "convex/react";
 import { savedCatalogItemIdsSchema } from "@packscout/contracts";
 import { api } from "../../../../convex/_generated/api";
@@ -39,7 +39,8 @@ export function AuthenticatedSavedItemsProvider({ children }: Readonly<{ childre
   }), [convex, setSavedCollectible, setSavedRepack]);
   const mutationState = useSyncExternalStore(mutations.subscribe, mutations.getSnapshot, mutations.getServerSnapshot);
 
-  useEffect(() => {
+  // Cached IDs can enable controls on the first commit, before passive effects.
+  useLayoutEffect(() => {
     if (signedIn) mutations.activate();
     return () => mutations.dispose();
   }, [mutations, signedIn]);
