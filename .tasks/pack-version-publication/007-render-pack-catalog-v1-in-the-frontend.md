@@ -10,7 +10,7 @@
 
 ## Active build — 2026-09-04
 
-The measured14-file loader/save foundation is now owned by task012/P07A in `.worktrees/pack-version-publication-p07-frontend`, branch `codex/pack-version-publication-p07a-frontend-foundation`, from verified maincd9c2da8. Task007 itself remains todo: all visible catalog routes must switch atomically after011 full-data coverage and012 verification. No operation-by-operation coexistence, old-DTO adapter, cutover, or PR is claimed.
+The measured14-file loader/save foundation is owned by task012/P07A in `.worktrees/pack-version-publication-p07-frontend`, branch `codex/pack-version-publication-p07a-frontend-foundation`, PR120 on mainf6785251. Current runtime35ef3d75 has48 focused tests and its request-ID review fix verified; current full gate is pending. Task007 remains todo: all visible catalog routes switch atomically after011 full-data coverage and012 verification/merge. The user authorizes building the remaining phases when dependencies are ready. No operation-by-operation coexistence, old-DTO adapter, cutover or task007 PR exists.
 
 ## Historical handoff before the all-tasks request
 

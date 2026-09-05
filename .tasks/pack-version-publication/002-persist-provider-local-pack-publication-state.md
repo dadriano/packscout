@@ -12,7 +12,7 @@
 
 PR95 merged at 16:32 UTC as `631b9f38badf3233cf470d2108ff3ebdbb988d9f`, tree-identical to certified `bd5f3c64`. Full local framework verification and [CI33893274713](https://github.com/dadriano/packscout/actions/runs/33893274713) passed; all 35 review findings are resolved. The final P02 runtime is `b5482a96`: 118 focused checks, 30 schema checks, affected static gates, and 13 signed store checks pass. Publication remains dormant.
 
-P03 is now restacked on that actual merged parent. Original tip `cc0963f0` and all task history remain at `codex/p03-before-capacity-restack-20260904`. Only the three implementation-bearing commits were replayed (7c7f4d60, 429e2f63, d21db921); obsolete status-only history was omitted and the latest task documents restored. Assembler runtime was unchanged by the rebase, and all Prisma clients were regenerated. P03 alignment and full local certification are complete; it is published in [PR114](https://github.com/dadriano/packscout/pull/114), with current CI pending; **do not merge it** or start later phases.
+P03 is published in [PR114](https://github.com/dadriano/packscout/pull/114), currently based on mainf6785251 with label-repair runtimec5c6782e and its repaired-head full gate pending. Original tip `cc0963f0` and the earlier capacity restack remain at `codex/p03-before-capacity-restack-20260904`; newer backups and exact evidence are in003/_handoff. The user now authorizes building all remaining tasks with delegation. This supersedes the earlier later-build pause, but fresh merge approval and each dependency's verification remain required. Do not rebuild this merged002 phase.
 
 ## Start Here
 
