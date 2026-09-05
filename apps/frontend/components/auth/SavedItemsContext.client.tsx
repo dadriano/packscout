@@ -10,6 +10,8 @@ export type SavedItemController = Readonly<{
   saved: boolean;
   loading: boolean;
   pending: boolean;
+  /** The requested state while pending; the pressed state remains server truth. */
+  pendingSaved?: boolean;
   /** True when the signed-in saved-item id read failed. */
   failed: boolean;
   message?: SavedItemMessage;

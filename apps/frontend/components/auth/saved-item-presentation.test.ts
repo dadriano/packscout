@@ -43,6 +43,7 @@ test("configured saved-item controls expose loading, pending, success, and error
     authStatus: "signed_in",
     saved: true,
     pending: true,
+    pendingSaved: true,
   });
   assert.equal(saving.label, "Saving…");
   assert.equal(saving.pressed, true);
