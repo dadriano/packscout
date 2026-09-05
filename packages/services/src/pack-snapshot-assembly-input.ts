@@ -6,7 +6,8 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
-  "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature", "pwd"]);
+  "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature", "pwd",
+  "sessionid", "sessiontoken", "jsessionid", "phpsessid", "aspnetsessionid"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
@@ -75,6 +76,21 @@ function hasLiteralStackFrame(value: string): boolean {
   // .java source line; Firefox frames separate a function and absolute source
   // URL with @. None treats an ordinary Error label or email as a stack frame.
   for (const frame of text.matchAll(/(?:^|\s)File[ \t]+"([^"\r\n]+)",[ \t]+line[ \t]+[0-9]+(?=$|[\s,.;])/giu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+  }
+  // .NET source frames pair a method argument list with an explicit source line.
+  for (const frame of text.matchAll(/(?:^|\s)at[ \t]+[^\s()]+\([^()\r\n]*\)[ \t]+in[ \t]+([^()\r\n]+):line[ \t]+[0-9]+(?=$|[\s),.;])/giu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+  }
+  // Ruby source/in-method frames, Go source/offset call pairs, and PHP numbered
+  // source/call frames require their complete language-specific context.
+  for (const frame of text.matchAll(/(?:^|\s)(?:from[ \t]+)?([^\s]+):[0-9]+:in[ \t]+`[^`'\r\n]+'(?=$|[\s),.;])/giu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+  }
+  for (const frame of text.matchAll(/(?:^|\s)[^\s()]+(?:\(\*[^\s()]+\)[^\s()]+)?\([^()\r\n]*\)\s+([^\s]+):[0-9]+[ \t]+\+0x[0-9a-f]+(?=$|[\s),.;])/giu)) {
+    if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
+  }
+  for (const frame of text.matchAll(/(?:^|\s)#[0-9]+[ \t]+([^\s()]+)\([0-9]+\):[ \t]+[^\s()]+\([^()\r\n]*\)(?=$|[\s),.;])/giu)) {
     if (/[\\/]|^[^:\s]+\.[^:\s]+$|^<[^<>\r\n]+>$/u.test(frame[1]!)) return true;
   }
   return /(?:^|\s)at[ \t]+[a-z_$][\w$./<>]*\.[\w$<>]+\([^()\r\n]+\.java:[0-9]+\)(?=$|[\s),.;])/iu.test(text) ||
@@ -577,7 +593,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     requireAssembly(bytes <= limits.maximumInputBytes);
   }
   visit(value, 0);
-  for (const key of keys) requireAssembly(!privateKeys.has(key.toLowerCase().replace(/[^a-z0-9]/gu, "")));
+  for (const key of keys) requireAssembly(!privateKeys.has(key.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/gu, "")));
   // Scan raw field/query names before schema parsing; normalize public text later.
   try { assertPublicPackCatalogBytes(Object.fromEntries([...keys].map(key => [key, null]))); }
   catch { requireAssembly(false); }

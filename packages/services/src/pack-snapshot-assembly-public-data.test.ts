@@ -7,6 +7,83 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("standalone normalized session credential fields stay private", async () => {
+  for (const key of ["session_id", "session-token", "JSESSIONID", "PHPSESSID", "ASP.NET_SessionId", "Ｓｅｓｓｉｏｎ＿ＩＤ"]) {
+    const title = `Documentation "${key}"="private-marker"`;
+    const url = "https://example.com/?" + encodeURIComponent(key) + "=private-marker";
+    refuses({ [key]: "private-marker" }); refuses({ title }); refuses({ url });
+    refuses({ title: JSON.stringify({ [key]: "private-marker" }) });
+    refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(JSON.stringify({ [key]: "private-marker" })) });
+    for (const field of ["title", "aliases", "displayName", "actionUrl"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else if (field === "displayName") input.inputs.contents[0]!.displayName = title;
+      else input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+  for (const title of ["Session collection", "Session ID guide", "SID public edition", "Bearer a", "session=Summer", "sid=public-card"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ session: "Summer", sid: "public-card" }));
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?session=Summer&sid=public-card" }));
+  refuses({ title: "session_id=a" });
+});
+
+test("dotnet source frames retain explicit location syntax across public projections", async () => {
+  for (const frame of ["at Namespace.Service.Handle() in C:\\srv\\Pack.cs:line 42",
+    "at Program.Main(String[] args) in /srv/Program.cs:line 10", "at Handler.Run() in Pack.cs:line 42",
+    "AT Namespace.Service.Handle() IN C:\\srv\\Pack.cs:LINE 42", "ａｔ Handler.Run() ｉｎ Pack.cs:ｌｉｎｅ 42"]) {
+    for (const title of [frame, JSON.stringify({ caption: frame }), encodeURIComponent(frame)]) {
+      refuses({ title });
+      for (const field of ["title", "aliases", "displayName"] as const) {
+        const { input } = await assemblyFixture();
+        if (field === "title") input.inputs.title = title;
+        else if (field === "aliases") input.inputs.aliases = [title];
+        else input.inputs.contents[0]!.displayName = title;
+        await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      }
+    }
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(frame) });
+  }
+  for (const title of ["at booth() in Card Guide:line 42", "Namespace.Service.Handle() public edition",
+    "See Pack.cs:line 42", "at the show in line 42"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("Ruby Go and PHP frames require their source-coordinate and call context", async () => {
+  for (const frame of ["/srv/app.rb:10:in `handle'", "from /srv/lib/service.rb:42:in `call'", "/srv/script:10:in `handle'",
+    "goroutine 1 [running]:\nmain.handle()\n\t/srv/app/main.go:42 +0x25",
+    "example.com/project.(*Server).Serve(0xc00001)\n\t/srv/app/server.go:17 +0x9a",
+    "main.handle()\n\t/srv/app/handler.s:42 +0x25", "#0 /srv/app.php(42): App\\Service->handle()",
+    "#1 /srv/bootstrap.php(17): require('/srv/app.php')", "#0 /srv/app.inc(42): App\\Service->handle()",
+    "#0 /srv/app.phtml(42): App\\Service->handle()"]) {
+    for (const title of [frame, frame.replace(/\s+/gu, " "), JSON.stringify({ caption: frame }), encodeURIComponent(frame)]) {
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      refuses({ title });
+    }
+    for (const suffix of ["?caption=", "#"]) refuses({ url: "https://example.com/" + suffix + encodeURIComponent(frame) });
+  }
+  for (const title of ["See /srv/app.rb:10 for details", "from Card Guide:42", "main.handle() public edition",
+    "See /srv/app/main.go:42 for details", "#0 public collection", "See /srv/app.php(42) for details",
+    "Book:42:in `handle'", "main.handle() Guide:42 +0x25", "#0 Guide(42): handle()"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
 test("literal source-location stack frames never enter public pack text", async () => {
   for (const title of ["Error: boom\n    at handler (/srv/app.js:10:5)", "TypeError: failed\r\n\tat async handler (/srv/app.ts:20:7)",
     "Error: boom\n at Object.handler [as callback] (/srv/app.js:10:5)", "Error: boom\n at new Handler (C:\\app\\file.js:10:5)",
@@ -43,7 +120,8 @@ test("ordinary Error and at prose remain public without a structured source fram
 
 test("final normalized search cannot synthesize a source-location stack frame", async () => {
   for (const [title, alias] of [["Error: boom at handler", "(/srv/app.js:10:5)"],
-    ["File", '"/srv/app.py", line 10, in handler']] as const) {
+    ["File", '"/srv/app.py", line 10, in handler'],
+    ["at Namespace.Service.Handle()", "in C:\\srv\\Pack.cs:line 42"]] as const) {
     const { input } = await assemblyFixture(); input.inputs.title = title; input.inputs.aliases = [alias];
     assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
     await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
@@ -322,7 +400,7 @@ test("explicit cookie headers and structured header fields never enter public sn
 test("cookie prose and labels without a cookie pair remain public", async () => {
   for (const title of ["Cookie Monster", "Chocolate cookie collection", "Cookie: Chocolate edition",
     "Cookie: [1/1] edition", "Cookie: https://example.com/recipe", "Cookie:", "Set-Cookie:",
-    "Documentation Cookie: recipe", "Bearer a", "session_id=a", "auth=public-label",
+    "Documentation Cookie: recipe", "Bearer a", "session_id edition", "auth=public-label",
     "Visit https://example.com/products/cookie/chocolate-chip",
     "Visit https://example.com/products/%63ookie/chocolate-chip"]) {
     assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
