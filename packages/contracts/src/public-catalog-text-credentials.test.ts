@@ -116,7 +116,7 @@ test("nested leading structured text retains strict documents and escaped string
 });
 
 test("natural numeric bracket captions differ from complete JSON arrays", () => {
-  for (const caption of ["[1,000 cards]", "[10,000 cards] Premium", "[1,000,000 cards]", "[1, 2 cards]"]) {
+  for (const caption of ["[1,000 cards]", "[10,000 cards] Premium", "[1,000,000 cards]", "[1, 2 cards]", "Edition [1", "[1"]) {
     assert.doesNotThrow(() => assertPublicCatalogText(caption));
     assert.doesNotThrow(() => assertPublicCatalogText(JSON.stringify({ caption })));
     assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(caption)));
@@ -125,7 +125,7 @@ test("natural numeric bracket captions differ from complete JSON arrays", () => 
   for (const text of ["[1,2,3]", '[1,"public",true,null]', '[1,{"caption":"public"}]']) {
     assert.doesNotThrow(() => assertPublicCatalogText(text));
   }
-  for (const text of ["[1,]", '[1,{"caption":"public",}]', '[1,{"\\u0070assword":"a"}]',
+  for (const text of ["[1,]", "[1,2", '[1,{"caption":"public",}]', '[1,{"\\u0070assword":"a"}]',
     '[1,000 cards] {"\\u0070assword":"a"}']) assert.throws(() => assertPublicCatalogText(text), TypeError);
 });
 
@@ -168,6 +168,21 @@ test("explicit protected URL path pairs reuse field and OAuth context", () => {
   }
   for (const path of ["/packs/public", "/product/code/SUMMER", "/access_token", "/access_token/",
     "/caption/Fish%26Actor", "/caption/A%2BB", "/caption%2FFish%26Actor", "/callback?next=" + encodeURIComponent("https://shop.example/product/code/SUMMER")]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com" + path), path);
+  }
+});
+
+test("decoded backslashes and repeated path separators retain protected pair context", () => {
+  for (const path of ["/password%5Cprivate-marker", "/%2570assword%255Cprivate-marker", "/access_token//private-marker",
+    "/callback%5Ccode%5Cprivate-marker", "/callback%255Ccode%255Cprivate-marker"]) {
+    const target = "https://example.com" + path;
+    assert.throws(() => assertPublicCatalogUrl(target), TypeError, path);
+    assert.throws(() => assertPublicCatalogText(`Visit ${target} for details.`), TypeError, path);
+    for (const prefix of ["?next=", "#"]) {
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/" + prefix + encodeURIComponent(target)), TypeError, path);
+    }
+  }
+  for (const path of ["/product%5Ccode%5CSUMMER", "/product//code//SUMMER", "/caption%5CFish%26Actor", "/access_token%5C"]) {
     assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com" + path), path);
   }
 });

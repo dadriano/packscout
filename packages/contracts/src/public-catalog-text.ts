@@ -174,21 +174,25 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     }
   };
   const authenticationRoute = (path: string, depth: number): boolean => {
-    if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path)) return true;
+    if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path.replaceAll("\\", "/"))) return true;
     const decoded = decodeLayer(path);
     if (decoded === path) return false;
     charge(decoded, depth + 1);
     return authenticationRoute(decoded, depth + 1);
   };
   const inspectPath = (path: string, depth: number, context: OAuthContext): void => {
-    const segments = path.split("/");
-    for (let index = 0; index + 1 < segments.length; index += 1) {
-      if (segments[index] !== "" && segments[index + 1] !== "") inspectKey(segments[index]!, depth + 1, context);
+    // Iterate nonempty runs without allocating a slash-sized array. WHATWG
+    // path-separator recognition also applies after bounded component decoding.
+    const normalized = path.replaceAll("\\", "/");
+    for (const match of normalized.matchAll(/[^/]+/gu)) {
+      let next = match.index + match[0].length;
+      while (normalized[next] === "/") next += 1;
+      if (next < normalized.length) inspectKey(match[0], depth + 1, context);
     }
     // Decode only the pathname component, preserving the URL's authority/query
     // boundaries while exposing encoded path-name/value separators.
-    const decoded = decodeLayer(path);
-    if (decoded !== path) { charge(decoded, depth + 1); inspectPath(decoded, depth + 1, context); }
+    const decoded = decodeLayer(normalized);
+    if (decoded !== normalized) { charge(decoded, depth + 1); inspectPath(decoded, depth + 1, context); }
   };
   const stringTokenEnd = (text: string, start: number): number => {
     let index = start + 1;
@@ -210,11 +214,14 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (text[next] === "{" || text[next] === "[") return true;
     // Scan a scalar sequence forward before classifying it as JSON: the first
     // comma in [1,000 cards] is not enough. The charged parser remains strict.
+    let separator = false;
     while (next < text.length) {
       arrayScalarPrefix.lastIndex = next;
       if (!arrayScalarPrefix.test(text)) return false;
       next = arrayScalarPrefix.lastIndex;
-      if (next === text.length || text[next] === "]") return true;
+      if (next === text.length) return separator;
+      if (text[next] === "]") return true;
+      separator = true;
       next += 1;
       while (next < text.length && /\s/u.test(text[next]!)) next += 1;
       if (next === text.length || /[\]"{[]/u.test(text[next]!)) return true;
