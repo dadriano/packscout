@@ -9,6 +9,7 @@ import type {
 } from "@packscout/contracts";
 import { GlossaryHint } from "@/components/metrics/GlossaryHint.client";
 import { MetricValue } from "@/components/metrics/MetricValue";
+import { VendorIdentity } from "./VendorIdentity";
 import {
   presentBuybackSummaryV3,
   presentGrossEvV3,
@@ -29,7 +30,6 @@ import {
 } from "@/lib/all-repacks-table";
 import type { ListPublicRepacksPageV3 } from "@/lib/public-repacks-v3";
 import { CatalogConfidenceEvidence } from "./CatalogConfidenceEvidence.client";
-import { VendorIdentity } from "./VendorIdentity";
 import { presentChaseMatchEvidence } from "./pack-inspector-presentation";
 import styles from "./AllRepacksTable.module.css";
 
