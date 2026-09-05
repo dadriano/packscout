@@ -1,7 +1,7 @@
 # Task: Preserve Every Frontend Data Point in Pack Catalog V1
 
 **ID:** pack-version-publication/011
-**Depends on:** pack-version-publication/003, pack-version-publication/005, pack-version-publication/013
+**Depends on:** pack-version-publication/003, pack-version-publication/004, pack-version-publication/005, pack-version-publication/013
 **Blocks:** pack-version-publication/006, pack-version-publication/007
 **Delivery phase:** P05A
 **Estimated scope:** large
@@ -9,11 +9,27 @@
 
 ## Active build — 2026-09-04
 
-Current boundary: task013/P05B owns the measured8-file neutral calculation/public-value extraction as an independent main sibling. P05A resumes native evidence/data wiring after003/005/013 merge. Its two incomplete native economics files remain preserved, not completed. Root reuses the idle P05A directory/dependencies for P05B only after stashing all ten source files plus records; recreate P05A from merged prerequisites later. Older path/parent notes below are historical preservation evidence.
+Current boundary: task013/P05B owns the measured neutral calculation/public-value extraction, now verified and published independently in PR121 (runtime77c01707 on mainf6785251). P05A resumes native evidence/data wiring after003/005/013 merge. Its two incomplete native economics files remain preserved, not completed. Recreate P05A from those merged prerequisites; the old directory/dependencies have already moved safely to P05B. All current frontend datapoints and unchanged formulas remain required. Older path/parent notes below are historical preservation evidence, not a request to recreate the already-completed013 extraction.
 
 The move is complete. Full immutable backup: `961f20694651e80c2e665f555bbce1e347dcc143`, including all ten source files and task records. Original P05A branch remains at44e2f193, now without a checked-out directory. Its directory/dependencies are reused by `.worktrees/pack-version-publication-p05b-ev-core` on an independent mainef3c73e8 branch. Only the eight013 files are restored there; the incomplete economics schema/test remain recoverable from this stash's untracked tree. No source or prior backup was deleted.
 
 Owning worktree: `.worktrees/pack-version-publication-p05a-frontend-data`; branch `codex/pack-version-publication-p05a-frontend-data`; saved parent `44e2f193fd73ee5fc89eca05495787233d2e38bd` (P03/main115). Main117 requires fresh parent certification, so implementation is paused. Ten partial source files totaling2,337 changed lines are preserved: the original four plus neutral calculator/confidence extraction, exports and a direct neutral-boundary test. The two native economics files remain incomplete. Stash `2cf6c11510983c0e84acc3c77e5c9bd77ce43d5d` retains the original four files/metadata; the six later files are not in that stash. Preserve them before any restack. Root is reviewing a safe standalone neutral-core/value boundary; no extra phase/task exists yet. Native evidence wiring, query/aggregate and visible frontend work must wait for the measured boundary and verified prerequisites.
+
+## Verified resume map — 2026-09-05
+
+The read-only resume audit found no unresolved product policy. Add004 to the actual dependency set: its `public-profile-snapshot-assembler.ts` is absent from current main and must preserve the new provider/profile datapoints and descriptor search normalization. Resume after merged003/004/005/013. This is a dependency correction, not a new product decision or delivery phase.
+
+1. Extend native public shapes in `packages/contracts/src/pack-catalog-domain.ts`, `pack-catalog-query.ts` and the incomplete native economics module; replace the reduced EV amount with the approved four metrics and evidence. Preserve all six operations, filters/sorts and honest unavailable states.
+2. Extend `pack-build-inputs.ts` and `provider-pack-readiness-evaluator.ts` together. Bind canonical record/revision, price, draw semantics, governing buyback terms, method/policy and observed/effective times; replay task013's exact neutral functions. Private normalized economic evidence needs its own explicitly bounded input boundary; do not relax the sealed public-payload guard or treat private inputs as public strings.
+3. Extend all explicit projections/equality/hash inputs in `provider-pack-snapshot-assembler.ts`, `pack-snapshot-assembly-seal.ts`, `pack-snapshot-assembly-input.ts`, P04's profile assembler and `packages/database/src/provider-pack-snapshot-repository.ts`. Preserve lifecycle freeze, exact-byte reuse, complete membership and whole-pack readiness.
+4. Carry those values through Convex `schema.ts`, `packCatalogValidators.ts`, `packCatalogStoreSupport.ts`, `packSnapshotStore.ts`, `profileSnapshotStore.ts`, `packCatalogReadModel.ts` and `packCatalogV1.ts`. Complete aggregates must cover the declared population, not the2,000-row list limit or returned page. Preserve all eight accepted sorts, composable filters, exact selected collectible with zero matches, chase beyond the first content batch and match-confidence ordering.
+5. Prepare bounded native owner-saved resolution in `convex/savedItems.ts`; coordinate the visible owner-read switch with007's atomic frontend cutover. Keep unavailable rows removable and ownership/refusals intact.
+
+Reuse canonical `pack.attributes.evInputEvidence`, `providerPackEvEvidenceV1Schema` and the existing `providers/provider-promotion-ev-evidence.ts` boundary. Production transaction-local capture remains006. The remaining provider-derived arithmetic in `vendor-reported-gross-ev-v3.ts` must be reused/extracted exactly into neutral domain logic without importing its release DTO; do not adopt the saved draft's second inline calculation.
+
+Verification proceeds from inventory-linked strict schemas and unchanged formula fixtures, through wrong-association/stale/incomplete captured inputs, P03 maximum/reuse/privacy/private-PG tests, Convex lifecycle and all six query/Watchlist paths, then two-pack update/rollback isolation and the full unchanged framework gate. Public routes remain dormant.
+
+Scope forecast, not an approved new split:19 existing runtime files plus about16 fixture/test touchpoints before helpers/records. Measure the actual patch before crossing25files/2,500lines or the40file/5,000line hard stop. Immutable native data/admission and native query completeness are possible review boundaries only if measurement requires them; no new task or phase is created here. The saved economics schema/test total112 incomplete lines, not a finished implementation.
 
 ## Authorization and scope
 

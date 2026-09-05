@@ -5,7 +5,39 @@
 **Blocks:** pack-version-publication/007
 **Delivery phase:** P07A
 **Estimated scope:** medium
-**Status:** done
+**Status:** in_progress
+
+## Current auth-refresh review — 2026-09-05 15:02UTC
+
+PR120 P2comment3940423155 invalidates pending-write continuity: same-user auth refresh maps status to loading, causing signedIn-dependent cleanup to dispose the coordinator and discard an already-issued mutation's success/refusal. Agent p07_auth_refresh owns the existing provider/lifecycle-test repair; preserve layout-effect activation, duplicate suppression, authoritative reconciliation, true sign-out/identity/unmount isolation and existing UI/copy. Full current-head CI33962882050 passed e08198a7, but cannot certify this new repair. User has approved merge after checks/reviews clear; no further merge question is needed for120.
+
+## Current certification — 2026-09-05 11:00UTC
+
+Full [framework CI33960130659](https://github.com/dadriano/packscout/actions/runs/33960130659) PASSED on exact head `d0a45b2f0b593c6da69d062519f9078c9e561974`, runtime `77965267f364cbfb94dbf1e6f3dc13d10e9dd217`, parent `f678525141a55f4d7acbd82487a1871a94632096`, completed11:00:22UTC. Root verified the live head/base and success. All594 frontend tests and14 targeted Convex capacity tests pass without skips; the unchanged full CI retry succeeds without weakening tests or timeouts. The activation review thread is replied/resolved and the bot reviewed this exact head with a thumbs-up. Task012 is done; PR120 is open and ready for human review, not approved or merged. Delivery-only records do not change this certified runtime and receive the documentation gate.
+
+## Earlier save-activation review
+
+Published head d0a45b2f/runtime77965267 is replied3940256472 and the activation thread is resolved; bot review completed this exact head with a thumbs-up. FullCI33960130659 failed only the unchanged Convex1000-pack capacity test at its30-second timeout, before the sequential runner reached frontend tests. No Convex source/test/config changed. Root's targeted current-head rerun passed14/14 in13.28seconds (`/tmp/packscout-p07a-ci-capacity-recheck-20260905.log`) and the failed CI job was retried once without weakening a test or timeout. CI must finish successfully before012 is done; the precise cause of runner variance is not proven.
+
+Repair committed as `77965267f364cbfb94dbf1e6f3dc13d10e9dd217` on mainf6785251. No source change after root594-test pass. Synchronizing canonical delivery records and publishing to existing PR120 for fresh exact-head framework CI; keep012 in_progress until that gate passes.
+
+PR120 P2comment3939522777/threadPRRT_kwDOTplTZc6fgZWg is repaired locally by activating/disposing the existing mutation coordinator in the layout effect. Real ReactDOM tests mount the actual provider/buttons/Convex hooks with only transport/cache stubbed, remount with cached IDs and click during an ancestor layout effect before passive effects. All four pack/collectible save/remove cases failed before repair and pass afterward; duplicates remain single writes, pending state stays disabled and only authoritative reads change saved truth/success.
+
+Agent52 focused tests, frontend lint/types/boundaries and ratchet0 pass. Root independently ran all594 frontend tests, zero skips/quarantines (`/tmp/packscout-p07a-save-activation-root-frontend-20260905.log`), checked dependency policy and reviewed the actual-component test and provider diff. Independent review found no actionable issue. The frontend skill preserved existing interaction/accessibility/copy; no visual or route changes. Frontend owns its jsdom26.1.0/types21.1.7 test dependencies;16 lock entries relocate with identical existing versions/integrities, no production dependency update. Old fullCI33946425977 passed6ba5bfb0/runtime35ef3d75; commit/publication and new full-gate certification remain required for this repair.
+
+## Earlier full-gate certification
+
+Full [framework CI33944611792](https://github.com/dadriano/packscout/actions/runs/33944611792) PASSED at exact head `a0457a13c951a91cd51b75c48bfda08f7efde025`, runtime35ef3d75, parent `f678525141a55f4d7acbd82487a1871a94632096`, completed2026-09-05 04:51:20UTC. Root verified the live conclusion/head, parent ancestry and unchanged frontend runtime. All current acceptance criteria are complete. The request-ID thread is replied/resolved and the bot explicitly reviewed that exact head with a thumbs-up. PR120 remains ready for review, not merged; fresh human merge approval is required. Subsequent delivery-only records rerun docs without changing the certified runtime. No catalog route or production writer activates here.
+
+## Earlier request-identity review repair
+
+PR120 P2comment3939406332/threadPRRT_kwDOTplTZc6fgGzj is fixed in runtime `35ef3d75f8cdd5617dcadf959a98fbe57a96fbba` on mainf6785251. Successful getPublicPack and desired-collectible responses must match the parsed stable ID; mismatches return existing bounded CATALOG_UNAVAILABLE, including after the one cursor reset. Root reviewed the two-file diff and reran all five task-focused files:48/48 pass, zero skips, `/tmp/packscout-p07a-identity-root-focused-20260905.log`. Frontend lint/types/ratchet pass. Direct red regression log: `/tmp/packscout-p07a-request-identity-red-20260905.log`. Loader acceptance is reverified; exact repaired-head full gate and fixing-SHA review reply remain pending. Previous gate/thumbs-up do not certify this new runtime.
+
+Published at a0457a13. Reply3939440289 cites35ef3d75 and the request-ID thread is resolved. The bot explicitly reviewed a0457a13 with a thumbs-up. FullCI33944611792 is still pending; only that current-head gate remains before acceptance recertification, not the already-completed reply.
+
+## Earlier main118 recertification
+
+Main advanced through workflow-records-only PR118 tof678525141a55f4d7acbd82487a1871a94632096. Root restacked the phase onto that parent: runtime9459611d, checkpointa19a2628. All eight phase patches match their prior versions; `git diff c6267a71 HEAD -- apps/frontend` is empty. Backup `codex/p07a-before-main118-20260905` retainsc6267a71. The previous full CI33937038465/independent review remain valid historical implementation evidence, and the PR received an explicit bot thumbs-up for083ad937. Parent-specific full gate must be refreshed before merge readiness; task012 is in_progress only for recertification, not new runtime work. No catalog switch or live operation occurs.
 
 ## Current main116 recertification
 
@@ -51,11 +83,11 @@ Provide strict server-side readers for the six native V1 operations and preserve
 ## Acceptance Criteria
 
 - [x] All six operation references, input/output validation, credential handling, bounded errors, and cursor recovery have direct focused tests.
-- [x] Saved-item success/failure/prune/duplicate/concurrent/session-change behavior has direct tests.
+- [ ] Saved-item success/failure/prune/duplicate/concurrent/session-change behavior has direct tests.
 - [x] Saved membership remains server-authoritative and pending labels describe the requested action without changing pressed state.
 - [x] Every native saved refusal remains bounded and existing suspended-account behavior is preserved.
 - [x] Existing frontend routes and data points remain unchanged; the V1 loader is dormant until task007.
-- [x] Full frontend tests, lint/types, framework ratchet, and `npm run verify:framework` pass on the owning phase head.
+- [ ] Full frontend tests, lint/types, framework ratchet, and `npm run verify:framework` pass on the owning phase head.
 - [x] The measured phase-only diff is reviewable and committed; final evidence and later acceptance ownership are recorded.
 
 ## Verification
@@ -65,6 +97,8 @@ Named scenario: **Native reader and authoritative save foundation** — exercise
 Focused files: `pack-catalog.server.test.ts`, `public-repacks.server.test.ts`, `saved-item-mutations.client.test.ts`, `saved-item-presentation.test.ts`, and `account-standing.test.ts`. The final full frontend runner discovers all tests automatically.
 
 ## Spec Compliance
+
+- Current runtime35ef3d75 onmainf6785251 is certified by fullCI33944611792 at a0457a13. Root48 direct task tests, affected static checks and current bot review also pass; the older evidence below is retained as history.
 
 - Related guidance reviewed: tech-001 and tech-004 (task007 shared scope), frontend baseline, UI layout, and shift-left BDD.
 - Boundary split only: no technical companion file is changed and no product outcome is removed.

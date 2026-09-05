@@ -2,11 +2,45 @@
 
 **ID:** pack-version-publication/003
 **Depends on:** pack-version-publication/001, pack-version-publication/002
-**Blocks:** pack-version-publication/006
+**Blocks:** pack-version-publication/006, pack-version-publication/011
 **Delivery phase:** P03
 **Estimated scope:** medium
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** in_progress
+
+## Current account/direct-JSON repair — 2026-09-05 11:12UTC
+
+PR114 P1s3940334067/3940334070 are repaired in `8dd10dbf912a6fe595d3bbabd0b5c653333ee8b0` on mainf6785251. Explicit colon fields use the full existing protected-name policy; unquoted Actor is a credit label and Host is private only with connection-shaped values. Quoted/URL/JSON keys stay strict. Direct public JSON uses the existing bounded token scanner, inspecting escaped, duplicate, nested and adjacent root fields before parse; absolute offsets and one source charge avoid quadratic suffix traversal. URL payloads retain strict whole-document parsing. Ordinary Bearer prose, JSON plus aliases, bracketed edition/fraction labels and encoded Actor labels remain accepted.
+
+Root independently reviewed and ran96/96 complete assembler tests with zero skips, including8,000-member full/lifecycle/reuse and real private PostgreSQL handoff (`/tmp/packscout-p03-account-json-root-focused-20260905.log`). Agent76 focused tests, services lint/types and ratchet0 pass. The existing16-depth/650k-node/48MB limits are unchanged. Latest local `npm run verify:framework` exited7 during the inherited database suite after its connection dropped; the owned PostgreSQL log records No space left on device and the host had257MiB free (`/tmp/packscout-p03-account-json-framework-20260905.log`). This is NOT a passing full gate. No test/timeout was weakened and no user files were removed; fresh GitHub full CI owns certification. Published19ecb8a9 contains this runtime plus delivery-only records. Replies3940403867/3940403908 cite the repair and both P1 threads are resolved. Keep003 in_progress until full CI succeeds; prior28343b85 CI33961320156 and d00d9a43 local full passes certify only the earlier runtime.
+
+## Earlier short-credential and prose-assignment review
+
+Colon repair committed `d00d9a4384a0f4549a22aa8e51eb6c9e6b6055ea` on mainf6785251. Root92/92 complete assembler/capacity/private-PG tests pass, zero skips (`/tmp/packscout-p03-colon-context-root-focused-20260905.log`); agent72 direct/boundary tests, services lint/types and ratchet0 pass. Explicit unquoted colon credentials use the existing normalized six-name family and require an actual value; quoted names use structural protected-field validation. The whole-candidate test proves bare `Authorization:` and separate Bearer alias pass preflight, then the joined projection rejects. Full local framework gate is running against d00d9a43 (`/tmp/packscout-p03-colon-context-framework-20260905.log`); publish/fresh CI/review reply remain before readiness.
+
+Follow-up P1comment3940282168/threadPRRT_kwDOTplTZc6fiWR3 on599aafc8 identifies explicit colon credential assignments (`Documentation api_key: …`, `password: …`). p03_review owns the narrow P03 correction; root owns matching normalized/quoted colon coverage in P04. Colon recognition must preserve unquoted Actor/Host/Bolt labels and the no-Bearer-heuristic policy. The prior two P1 threads are replied3940269784/3940269845 and resolved, but this new finding keeps003 in_progress.
+
+Final contextual repair committed `c42a9f58282e6e0912dd99dd0909206a8ad66968` on mainf6785251. Quoted-key cross-review correction uses complete names without truncation and the same protected-field normalizer/charge. After that correction root independently reran all five suites:89/89 pass, zero skips, including8,000-member full/lifecycle/reuse and actual private PostgreSQL handoff (`/tmp/packscout-p03-auth-context-root-focused-20260905.log`). Direct quoted-name regressions were red, final69 direct/boundary tests and services lint/types/ratchet0 pass. Publishing to existing PR114 for fresh full CI; no pending product-policy question or new scope.
+
+Root independently reviewed the three-file repair and reran all five assembler suites:87/87 passed, zero skips, including8,000-member full/lifecycle/reuse and actual private PostgreSQL persistence (`/tmp/packscout-p03-auth-context-root-focused-20260905.log`). Agent84 direct/boundary tests and services lint/types/ratchet0 also pass. New and existing Basic/URI/JSON/OAuth/limit controls remain intact. Source is ready for commit/publication and fresh full verification, not yet recertified done.
+
+Resolved by user: Bearer or an opaque-looking following token alone is not credential evidence. Explicit authorization syntax and protected assignments/fields establish context, regardless of credential length. Preserve `Bearer` plus `Scout pack`, `Bearer of the Heavens`, and all existing benign-success assertions. Old Bearer-only negative fixtures now include explicit Authorization context; no replacement word/length/digit heuristic. Agent p04_profiles owns the existing P03 guard/two test files; root owns analogous004 separately. Published runtime c5c6782e/head8d723c2a passed fullCI33945377367, but does not certify the new repair. The following original review report is historical and its suggested Bearer-only heuristic is superseded.
+
+New PR114 P1comments3939489239/3939489244 on8d723c2a reopen short Bearer credentials and protected assignments in ordinary public prose (for example `Bearer abc123` and `Documentation api_key=sk_live_private_marker`). The20-character Bearer floor is not a valid syntax guarantee. The agent owns narrow guard/test repairs in P03 and analogous P04 boundary; root owns publication and final proof. Protected-value acceptance is reopened below. Existing valid-label and prior credential/JSON/OAuth corrections must remain intact; no guard budget, test or gate is weakened. FullCI33945377367 cannot certify the forthcoming repair.
+
+## Earlier public-label false-positive repair
+
+PR114 P2comment3939429737/threadPRRT_kwDOTplTZc6fgKpt is fixed in `c5c6782eef9d8e1b6709f0e4e38f933959a07744` on mainf6785251. Ordinary spaced/no-space Bolt/Pulsar/MySQL/SQLite labels remain public; contiguous path, endpoint, userinfo, port, query, encoded-target and SQLite memory syntax remains private. Constant-width lookahead returns at the first marker rather than repeatedly scanning a long suffix. Existing Basic/Bearer/OAuth/JSON guards and bounds are unchanged.
+
+Root reviewed the two-file diff and reran all five assembler suites:84/84 passed, zero skips, including8,000-member full/lifecycle/reuse and real private PostgreSQL handoff (`/tmp/packscout-p03-public-label-root-focused-20260905.log`). Agent64 direct guard/boundary tests, services lint/types and ratchet0 pass (`/tmp/packscout-p03-prose-label-linear-final-focused-static-20260905.log`). Direct label and encoded-target regressions were red before repair. Benign-label acceptance is reverified. Push/reply and the exact repaired-runtime full gate remain required; previousCI33944270898 does not certify this change.
+
+Published at8d723c2a; reply3939475068 cites c5c6782e and the label thread is resolved. Current fullCI33945377367 follows the repaired head. No unresolved finding is known at this checkpoint; query live review state before readiness.
+
+## Earlier follow-up review and main118
+
+PR114 review5119684049 findings3939374805/4808/4811 are fixed at runtime `57805ed8` on current main `f678525141a55f4d7acbd82487a1871a94632096`. Basic canonical base64 credentials, standard Bearer alphabet, contextual OAuth callback/marker codes and PKCE verifiers, and known private database/broker URI schemes (including single-slash/+driver forms) reject; ordinary Basic prose, product/coupon codes, public challenge/state, FTP and email remain valid. Nested forms/JSON retain bounded context; independent URLs do not inherit unrelated OAuth state. Shared depth/node/byte bounds remain unchanged.
+
+The three original defects and analogous alphabet/relative-context/single-slash cases have direct red/green logs. Root's full74/74 focused assembler tests pass with zero skips, including8,000-member full/lifecycle/reuse and actual private PostgreSQL handoff; services lint/types, ratchet0 and docs pass: `/tmp/packscout-p03-main118-focused-20260905.log`. All29 phase patches replay identically from backup `codex/p03-before-main118-20260905` (61091595). Privacy acceptance is reverified. Exact repaired-head full CI and final review replies remain required. Previous full CI33943108405 passed00d4b366 but does not certify this new runtime/parent. JSON finding3939079908 was already replied3939361499 and resolved. No publication activated.
 
 ## Current structured-JSON review repair
 
@@ -149,8 +183,9 @@ The assembler performs no read, write, lease, schedule, network, credential, or 
 - [x] Partial contents, invalid odds, mismatched EV, stale dependencies, duplicate identities, and cross-provider records fail closed.
 - [x] A lifecycle-only request without a complete prior snapshot fails closed.
 - [x] Oversized or unbounded inputs fail before a `BuiltPublicPackSnapshot` is returned.
-- [x] Protected-field scanning rejects sensitive values at every nesting depth, including normalized derived projections and nested URLs.
+- [ ] Protected-field scanning rejects sensitive values at every nesting depth, including normalized derived projections and nested URLs.
 - [x] Rejected assembly performs no persistence, head, receipt, or network operation.
+- [ ] Valid public labels and promotion-code links remain accepted while recognizable credentials and private endpoints fail closed.
 
 ## Verification
 
