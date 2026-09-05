@@ -115,6 +115,63 @@ test("nested leading structured text retains strict documents and escaped string
   }
 });
 
+test("natural numeric bracket captions differ from complete JSON arrays", () => {
+  for (const caption of ["[1,000 cards]", "[10,000 cards] Premium", "[1,000,000 cards]", "[1, 2 cards]"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(caption));
+    assert.doesNotThrow(() => assertPublicCatalogText(JSON.stringify({ caption })));
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(caption)));
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(caption)));
+  }
+  for (const text of ["[1,2,3]", '[1,"public",true,null]', '[1,{"caption":"public"}]']) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+  for (const text of ["[1,]", '[1,{"caption":"public",}]', '[1,{"\\u0070assword":"a"}]',
+    '[1,000 cards] {"\\u0070assword":"a"}']) assert.throws(() => assertPublicCatalogText(text), TypeError);
+});
+
+test("literal private URL hosts are rejected after canonical address parsing", () => {
+  for (const host of ["127.0.0.1", "127.1", "2130706433", "0x7f000001", "0177.0.0.1", "localhost", "LOCALHOST.",
+    "api.localhost", "0.0.0.0", "10.1.2.3", "100.64.0.1", "169.254.1.1", "172.16.0.1", "192.168.1.1",
+    "[::1]", "[0:0:0:0:0:0:0:1]", "[::]", "[fc00::1]", "[fd12::1]", "[fe80::1]",
+    "[::ffff:127.0.0.1]", "[::ffff:a00:1]"]) {
+    const target = `https://${host}/packs`;
+    assert.throws(() => assertPublicCatalogUrl(target), TypeError, host);
+    assert.throws(() => assertPublicCatalogText(`Visit ${target} for details.`), TypeError, host);
+    for (const prefix of ["?next=", "#"]) {
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/" + prefix + encodeURIComponent(target)), TypeError, host);
+    }
+  }
+  for (const host of ["example.com", "localhost.example.com", "8.8.8.8", "172.15.0.1", "172.32.0.1", "100.128.0.1",
+    "[2606:4700:4700::1111]", "[::ffff:8.8.8.8]"]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl(`https://${host}/packs`), host);
+  }
+  for (const host of ["[2606:4700:4700::1111]", "[::ffff:8.8.8.8]"]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl(`https://${host}`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit https://${host} for details.`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit (https://${host}).`));
+  }
+});
+
+test("explicit protected URL path pairs reuse field and OAuth context", () => {
+  for (const path of ["/access_token/private-marker", "/%61ccess_token/private-marker", "/%2561ccess_token/private-marker",
+    "/access_token%2Fprivate-marker", "/%2561ccess_token%252Fprivate-marker",
+    "/access_token/private-marker/../../public", "/%61ccess_token/private-marker/%2e%2e/%2e%2e/public",
+    "/api%2Fkey/private-marker", "/sig/private-marker", "/password/private-marker", "/account/internal-123",
+    "/callback/code/reusable-code", "/call%62ack/%63ode/reusable-code", "/code/reusable-code?client_id=public-client",
+    "/client_id/public-client/code/reusable-code"]) {
+    const target = "https://example.com" + path;
+    assert.throws(() => assertPublicCatalogUrl(target), TypeError, path);
+    assert.throws(() => assertPublicCatalogText(`Visit ${target} for details.`), TypeError, path);
+    for (const prefix of ["?next=", "#"]) {
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/" + prefix + encodeURIComponent(target)), TypeError, path);
+    }
+  }
+  for (const path of ["/packs/public", "/product/code/SUMMER", "/access_token", "/access_token/",
+    "/caption/Fish%26Actor", "/caption/A%2BB", "/caption%2FFish%26Actor", "/callback?next=" + encodeURIComponent("https://shop.example/product/code/SUMMER")]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com" + path), path);
+  }
+});
+
 test("prose-prefixed structured text inspects protected keys at every bounded value boundary", () => {
   for (const text of ['Documentation {"\\u0070assword":"private-marker"}',
     'Public edition [{"\\u0061ccount":"internal-123"}]',

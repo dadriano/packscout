@@ -3,6 +3,18 @@ import { test } from "node:test";
 import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
 
+test("profile assembly preserves numeric captions but refuses private hosts and path credentials", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  const profile = structuredClone(fixture.provider.profile);
+  profile.displayName = "[1,000 cards] Premium";
+  assert.equal((await assemblePublicProfileSnapshot(profile)).profile.displayName, profile.displayName);
+  for (const url of ["https://127.1/packs", "https://[::1]/packs", "https://localhost/packs",
+    "https://example.com/access_token/private-marker", "https://example.com/callback/code/private-marker"]) {
+    profile.promotions = [{ promotionId: "offer", label: "Offer", copy: "A public offer", url }];
+    await assert.rejects(assemblePublicProfileSnapshot(profile), TypeError);
+  }
+});
+
 test("profile JSON display text preserves public label values without exposing protected fields", async () => {
   const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
   for (const text of ['{"caption":"Host: Public Speaker"}', '{"caption":"Actor: Keanu Reeves"}',

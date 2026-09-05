@@ -60,6 +60,41 @@ function urlRecognition(value: string): string {
   while (end > start && value.charCodeAt(end - 1) <= 32) end--;
   return value.slice(start, end).replace(/[\t\n\r]/gu, "").replaceAll("\\", "/");
 }
+function isPrivateUrlHostname(value: string): boolean {
+  // URL.hostname has already canonicalized numeric IPv4 spellings and IPv6.
+  // Literal classification only: do not resolve DNS or infer private DNS names.
+  const host = value.toLowerCase().replace(/\.$/u, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const privateIpv4 = (first: number, second: number) => first === 0 || first === 10 || first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) || (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
+  if (/^\d+\.\d+\.\d+\.\d+$/u.test(host)) {
+    const octets = host.split(".").map(Number); return privateIpv4(octets[0]!, octets[1]!);
+  }
+  if (!host.startsWith("[")) return false;
+  const halves = host.slice(1, -1).split("::");
+  const words = (part: string) => part === "" ? [] : part.split(":").map(word => Number.parseInt(word, 16));
+  const leading = words(halves[0]!), trailing = words(halves[1] ?? "");
+  const address = halves.length === 1 ? leading : [...leading, ...Array<number>(8 - leading.length - trailing.length).fill(0), ...trailing];
+  if (address.slice(0, 6).every(word => word === 0) && address[6] === 0 && address[7]! <= 1) return true;
+  if (address.slice(0, 5).every(word => word === 0) && address[5] === 0xffff) {
+    return privateIpv4(address[6]! >> 8, address[6]! & 255);
+  }
+  return (address[0]! & 0xfe00) === 0xfc00 || (address[0]! & 0xffc0) === 0xfe80;
+}
+function originalUrlPath(candidate: string): string {
+  // Retain path evidence that WHATWG removes when resolving dot segments.
+  // Recognition rewrites only URL controls/slashes, never encoded separators.
+  const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(candidate);
+  let start = scheme?.[0].length ?? 0;
+  if (scheme || candidate.startsWith("//")) {
+    while (candidate[start] === "/") start += 1;
+    while (start < candidate.length && !/[/?#]/u.test(candidate[start]!)) start += 1;
+  }
+  let end = start;
+  while (end < candidate.length && !/[?#]/u.test(candidate[end]!)) end += 1;
+  return candidate.slice(start, end);
+}
 /** Query and fragment keys are decoded before checking the same protected-field policy. */
 function inspectPublicCatalogUrls(value: string, required: boolean): void {
   let bytes = 0, nodes = 0;
@@ -145,12 +180,22 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     charge(decoded, depth + 1);
     return authenticationRoute(decoded, depth + 1);
   };
+  const inspectPath = (path: string, depth: number, context: OAuthContext): void => {
+    const segments = path.split("/");
+    for (let index = 0; index + 1 < segments.length; index += 1) {
+      if (segments[index] !== "" && segments[index + 1] !== "") inspectKey(segments[index]!, depth + 1, context);
+    }
+    // Decode only the pathname component, preserving the URL's authority/query
+    // boundaries while exposing encoded path-name/value separators.
+    const decoded = decodeLayer(path);
+    if (decoded !== path) { charge(decoded, depth + 1); inspectPath(decoded, depth + 1, context); }
+  };
   const stringTokenEnd = (text: string, start: number): number => {
     let index = start + 1;
     while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
     return index < text.length ? index + 1 : text.length + 1;
   };
-  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]/iyu;
+  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(?=[,\]]|$)/iyu;
   const isProseContainer = (text: string, start: number): boolean => {
     let next = start + 1;
     while (next < text.length && /\s/u.test(text[next]!)) next += 1;
@@ -163,8 +208,18 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     }
     if (object) return false;
     if (text[next] === "{" || text[next] === "[") return true;
-    arrayScalarPrefix.lastIndex = next;
-    return arrayScalarPrefix.test(text);
+    // Scan a scalar sequence forward before classifying it as JSON: the first
+    // comma in [1,000 cards] is not enough. The charged parser remains strict.
+    while (next < text.length) {
+      arrayScalarPrefix.lastIndex = next;
+      if (!arrayScalarPrefix.test(text)) return false;
+      next = arrayScalarPrefix.lastIndex;
+      if (next === text.length || text[next] === "]") return true;
+      next += 1;
+      while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+      if (next === text.length || /[\]"{[]/u.test(text[next]!)) return true;
+    }
+    return false;
   };
   const inspectLeadingStructuredText = (text: string, depth: number, context: OAuthContext): boolean => {
     const candidate = text.trim();
@@ -280,11 +335,18 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         !hasPrivateUriTarget(candidate, labelScheme[0].length)));
     let url: URL;
     try { url = new URL(text, !required || candidate.startsWith("//") ? "https://public.invalid" : undefined); } catch { return reject(); }
-    if (url.username || url.password || (!knownSchemeProse && !["https:", "http:"].includes(url.protocol))) reject();
+    if (url.username || url.password || isPrivateUrlHostname(url.hostname) ||
+      (!knownSchemeProse && !["https:", "http:"].includes(url.protocol))) reject();
     // Optional scheme/credit labels are prose, but still traverse every attached
     // query/fragment value below. Required URL fields remain strictly HTTP(S).
+    const originalPath = knownSchemeProse ? url.pathname : originalUrlPath(candidate);
     const urlContext = { authentication: authenticationRoute(url.pathname, depth) ||
+      (originalPath !== url.pathname && authenticationRoute(originalPath, depth)) ||
       (/^[?#]/u.test(candidate) && context.authentication), code: false };
+    if (!knownSchemeProse) {
+      inspectPath(originalPath, depth, urlContext);
+      if (originalPath !== url.pathname) inspectPath(url.pathname, depth, urlContext);
+    }
     // Once structural, decode individual names/values, never the entire URL.
     for (const [key, nested] of url.searchParams) {
       inspectKey(key, depth + 1, urlContext); visit(nested, depth + 1, false, urlContext);
@@ -297,7 +359,10 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       if (skipLeading && match.index === 0) continue;
       // Prose delimiters are not part of a bare URL; userinfo has already been
       // checked without removing punctuation from the complete authority.
-      const target = match[0].replace(/["'<>()[\]{},.;]+$/gu, "");
+      // An IPv6 authority's closing bracket is URL structure, not prose.
+      const authorityEnd = /^https?:[/\\]*\[[^\]]+\]/iu.exec(match[0])?.[0].length ?? 0;
+      const trimmedLength = match[0].replace(/["'<>()[\]{},.;]+$/gu, "").length;
+      const target = match[0].slice(0, Math.max(authorityEnd, trimmedLength));
       visit(target, depth, true);
     }
   };
