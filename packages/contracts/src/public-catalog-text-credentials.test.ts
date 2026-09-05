@@ -187,6 +187,100 @@ test("decoded backslashes and repeated path separators retain protected pair con
   }
 });
 
+test("raw slashless HTTP paths retain protected evidence before authority normalization", () => {
+  for (const scheme of ["https", "http"]) for (const slash of ["", "/", "\\"]) {
+    for (const path of ["access_token/private-marker", "password/private-marker/../../public", "callback/code/private-marker"]) {
+      const target = `${scheme}:${slash}${path}`;
+      assert.throws(() => assertPublicCatalogUrl(target), TypeError, target);
+      assert.throws(() => assertPublicCatalogText(`Visit ${target}`), TypeError, target);
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/?next=" + encodeURIComponent(target)), TypeError, target);
+    }
+    assert.doesNotThrow(() => assertPublicCatalogUrl(`${scheme}:${slash}example.com/product/code/SUMMER`));
+  }
+  for (const slash of ["//", "///", "////", "\\\\"]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl(`https:${slash}access_token/public`));
+    assert.throws(() => assertPublicCatalogUrl(`https:${slash}example.com/password/private-marker`), TypeError);
+  }
+});
+
+test("explicit HTTP schemes never inherit a relative base that hides private hosts", () => {
+  for (const scheme of ["https", "http"]) for (const slash of ["", "/", "\\"]) {
+    for (const host of ["127.1", "2130706433", "localhost", "[::1]"]) {
+      const target = `${scheme}:${slash}${host}/packs`;
+      assert.throws(() => assertPublicCatalogText(`See ${target}`), TypeError, target);
+      for (const prefix of ["?next=", "#"]) assert.throws(() => assertPublicCatalogUrl(
+        "https://example.com/" + prefix + encodeURIComponent(target)), TypeError, target);
+    }
+    const target = `${scheme}:${slash}example.com/product/code/SUMMER`;
+    assert.doesNotThrow(() => assertPublicCatalogUrl("https://example.com/?next=" + encodeURIComponent(target)));
+  }
+});
+
+test("embedded URL punctuation preserves query and fragment JSON container endings", () => {
+  for (const value of ["[1,2]", '{"caption":"public"}']) {
+    for (const prefix of ["?caption=", "#"]) {
+      const target = "https://example.com/" + prefix + value;
+      assert.doesNotThrow(() => assertPublicCatalogText(`Visit ${target}`), target);
+      assert.doesNotThrow(() => assertPublicCatalogText(`Visit "${target}"`), target);
+      assert.doesNotThrow(() => assertPublicCatalogUrl(target), target);
+    }
+  }
+  for (const value of ['[{"\\u0070assword":"private-marker"}]', '{"\\u0070assword":"private-marker"}', '"\\u0070assword:private-marker"']) {
+    for (const prefix of ["?caption=", "#"]) assert.throws(() => assertPublicCatalogText(
+      "Visit https://example.com/" + prefix + value), TypeError, value);
+  }
+});
+
+test("scheme-relative prose links reject userinfo and inspect their own URL context", () => {
+  for (const slash of ["//", "///", "\\\\", "/\\", "\\/"]) {
+    for (const authority of ["alice:private-marker@example.com", "alice@example.com", "ali\nce:private-marker@example.com",
+      'alice:pa"ss@example.com', '"alice@example.com', "'alice@example.com", "<alice@example.com", "127.1", "[::1]"]) {
+      const target = slash + authority + "/public";
+      const caption = `Visit ${target} for details.`;
+      assert.throws(() => assertPublicCatalogText(caption), TypeError, caption);
+      assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption })), TypeError, caption);
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(caption)), TypeError, caption);
+      assert.throws(() => assertPublicCatalogUrl("https://example.com/#" + encodeURIComponent(caption)), TypeError, caption);
+    }
+    assert.throws(() => assertPublicCatalogText(`Visit ${slash}example.com/password/private-marker`), TypeError);
+    assert.throws(() => assertPublicCatalogText(`Visit ${slash}example.com/?%61ccess_token=private-marker`), TypeError);
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ${slash}example.com/path/alice@example.com`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ${slash}example.com/product?code=SUMMER`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit (${slash}[2606:4700:4700::1111]).`));
+  }
+  assert.doesNotThrow(() => assertPublicCatalogText("Visit https://example.com/path//alice@example.com or contact alice@example.com."));
+  assert.doesNotThrow(() => assertPublicCatalogText("Visit //example.com/?code=SUMMER then //example.com/?client_id=public-client"));
+});
+
+test("relative link discovery preserves control boundaries and split-name captions", () => {
+  for (const control of ["\t", "\n", "\r"]) {
+    for (const target of ["//alice:private-marker@example.com/packs", `/${control}/alice:private-marker@example.com/packs`,
+      "//127.1/packs", "//example.com/password/private-marker", '//ali"ce@example.com/packs']) {
+      const caption = `See${control}${target}`;
+      assert.throws(() => assertPublicCatalogText(caption), TypeError, caption);
+      assert.throws(() => assertPublicCatalogText(JSON.stringify({ caption })), TypeError, caption);
+      for (const prefix of ["?caption=", "#"]) assert.throws(() => assertPublicCatalogUrl(
+        "https://example.com/" + prefix + encodeURIComponent(caption)), TypeError, caption);
+      for (const prefix of ["?caption=", "#"]) assert.throws(() => assertPublicCatalogUrl(
+        "https://example.com/" + prefix + caption), TypeError, caption);
+      for (const prefix of ["?caption=", "#"]) assert.throws(() => assertPublicCatalogText(
+        "Visit https://example.com/" + prefix + caption), TypeError, caption);
+    }
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit https://example.com/path${control}//alice@example.com`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ftp://example.com/path${control}//alice@example.com`));
+    assert.doesNotThrow(() => assertPublicCatalogText(`Visit ht${control}tps:/${control}/[2606:4700:4700::1111].`));
+  }
+  for (const caption of ["Fire // Ice", "Wear // Tear", "Rating // five stars"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(caption), caption);
+    assert.doesNotThrow(() => assertPublicCatalogText(JSON.stringify({ caption })), caption);
+  }
+  // Direct prose delimiters are not discovered links. Existing nested target
+  // parsing remains strict for a value consisting solely of a malformed URL.
+  for (const caption of ["//", "///"]) assert.doesNotThrow(() => assertPublicCatalogText(caption), caption);
+  assert.throws(() => assertPublicCatalogText('Visit "//example.com/card""//alice@example.com/packs"'), TypeError);
+  assert.doesNotThrow(() => assertPublicCatalogText('Visit "//[2606:4700:4700::1111]" or <//example.com>'));
+});
+
 test("prose-prefixed structured text inspects protected keys at every bounded value boundary", () => {
   for (const text of ['Documentation {"\\u0070assword":"private-marker"}',
     'Public edition [{"\\u0061ccount":"internal-123"}]',

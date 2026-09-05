@@ -87,7 +87,7 @@ function originalUrlPath(candidate: string): string {
   // Recognition rewrites only URL controls/slashes, never encoded separators.
   const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(candidate);
   let start = scheme?.[0].length ?? 0;
-  if (scheme || candidate.startsWith("//")) {
+  if (candidate.startsWith("//", start)) {
     while (candidate[start] === "/") start += 1;
     while (start < candidate.length && !/[/?#]/u.test(candidate[start]!)) start += 1;
   }
@@ -310,6 +310,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       inspectFragment(decoded, depth + 1, context); return;
     }
     inspectProseStructuredText(text, depth, context, true);
+    inspectEmbedded(text, depth + 1);
     // A fragment is either one bare target or a form, never both.
     for (const [key, nested] of new URLSearchParams(text)) {
       inspectKey(key, depth + 1, context); visit(nested, depth + 1, false, context);
@@ -341,7 +342,8 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       ((labelName === "host" || privateUriScheme.test(labelScheme[1]!)) &&
         !hasPrivateUriTarget(candidate, labelScheme[0].length)));
     let url: URL;
-    try { url = new URL(text, !required || candidate.startsWith("//") ? "https://public.invalid" : undefined); } catch { return reject(); }
+    const absoluteScheme = /^[a-z][a-z0-9+.-]*:/iu.test(candidate);
+    try { url = new URL(text, !absoluteScheme && (!required || candidate.startsWith("//")) ? "https://public.invalid" : undefined); } catch { return reject(); }
     if (url.username || url.password || isPrivateUrlHostname(url.hostname) ||
       (!knownSchemeProse && !["https:", "http:"].includes(url.protocol))) reject();
     // Optional scheme/credit labels are prose, but still traverse every attached
@@ -359,18 +361,53 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       inspectKey(key, depth + 1, urlContext); visit(nested, depth + 1, false, urlContext);
     }
     if (url.hash !== "") inspectFragment(url.hash.slice(1), depth + 1, urlContext);
+    // URL parsing removes raw TAB/LF/CR before returning query/hash values.
+    // Preserve original component evidence without decoding URL delimiters.
+    const componentSource = text.trim(), hash = componentSource.indexOf("#"), query = componentSource.indexOf("?");
+    const originalQuery = query >= 0 && (hash < 0 || query < hash)
+      ? componentSource.slice(query + 1, hash < 0 ? undefined : hash) : "";
+    if (originalQuery !== url.search.slice(1)) {
+      for (const [key, nested] of new URLSearchParams(originalQuery)) {
+        inspectKey(key, depth + 1, urlContext); visit(nested, depth + 1, false, urlContext);
+      }
+    }
+    const originalFragment = hash < 0 ? "" : componentSource.slice(hash + 1);
+    if (originalFragment !== url.hash.slice(1)) inspectFragment(originalFragment, depth + 1, urlContext);
   };
   const inspectEmbedded = (text: string, depth: number, skipLeading = false): void => {
-    const recognized = text.trim().normalize("NFKC").replace(/[\t\n\r]/gu, "");
-    for (const match of recognized.matchAll(/\bhttps?:[^\s]*/giu)) {
-      if (skipLeading && match.index === 0) continue;
+    const normalized = text.trim().normalize("NFKC");
+    const inspectTarget = (value: string): void => {
       // Prose delimiters are not part of a bare URL; userinfo has already been
       // checked without removing punctuation from the complete authority.
       // An IPv6 authority's closing bracket is URL structure, not prose.
-      const authorityEnd = /^https?:[/\\]*\[[^\]]+\]/iu.exec(match[0])?.[0].length ?? 0;
-      const trimmedLength = match[0].replace(/["'<>()[\]{},.;]+$/gu, "").length;
-      const target = match[0].slice(0, Math.max(authorityEnd, trimmedLength));
+      const authorityEnd = /^(?:[a-z][a-z0-9+.\-\t\n\r]*:)?[/\\\t\n\r]*\[[^\]]+\]/iu.exec(value)?.[0].length ?? 0;
+      // A closing JSON array/object delimiter in a query or fragment is data,
+      // not an enclosing prose mark. Keep it for strict component inspection.
+      const punctuation = /[?#]/u.test(value) ? /["'<>().,;]+$/gu : /["'<>()[\]{},.;]+$/gu;
+      const trimmedLength = value.replace(punctuation, "").length;
+      const target = value.slice(0, Math.max(authorityEnd, trimmedLength));
       visit(target, depth, true);
+    };
+    // Preserve URL-internal controls for original query/fragment inspection,
+    // including controls WHATWG ignores inside the HTTP scheme itself.
+    for (const match of normalized.matchAll(/\bh[\t\n\r]*t[\t\n\r]*t[\t\n\r]*p[\t\n\r]*s?[\t\n\r]*:(?:[^\s]|[\t\n\r])*/giu)) {
+      if (!(skipLeading && match.index === 0)) inspectTarget(match[0]);
+    }
+    // Keep original control-separated prose boundaries; consume complete
+    // absolute tokens so path emails are not rediscovered as authorities.
+    // A delimiter-only split name such as Fire // Ice has no URL target.
+    for (const match of normalized.matchAll(/[a-z][a-z0-9+.\-\t\n\r]*(?::(?:[^\s<>"']|[\t\n\r])*)?|(?<![\w:/\\])[/\\][\t\n\r]*[/\\](?:[^\s<>"']|[\t\n\r])*/giu)) {
+      if (/^[/\\]/u.test(match[0]) && !(skipLeading && match.index === 0)) {
+        // Quotes delimit prose tokens, but WHATWG permits them inside userinfo.
+        // Inspect the complete raw authority before shortening the token.
+        let authority = match.index;
+        while (/[/\\\t\n\r]/u.test(normalized[authority] ?? "")) authority += 1;
+        while (authority < normalized.length && (!/[/\\?#\s]/u.test(normalized[authority]!) || /[\t\n\r]/u.test(normalized[authority]!))) {
+          if (normalized[authority] === "@") reject();
+          authority += 1;
+        }
+        if (/[^/\\\t\n\r]/u.test(match[0])) inspectTarget(match[0]);
+      }
     }
   };
   if (required) visit(value, 0, true);

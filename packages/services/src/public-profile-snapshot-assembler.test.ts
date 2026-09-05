@@ -9,7 +9,8 @@ test("profile assembly preserves numeric captions but refuses private hosts and 
   profile.displayName = "[1,000 cards] Premium";
   assert.equal((await assemblePublicProfileSnapshot(profile)).profile.displayName, profile.displayName);
   for (const url of ["https://127.1/packs", "https://[::1]/packs", "https://localhost/packs",
-    "https://example.com/access_token/private-marker", "https://example.com/callback/code/private-marker"]) {
+    "https://example.com/access_token/private-marker", "https://example.com/callback/code/private-marker",
+    "https:/access_token/private-marker", "https:password/private-marker"]) {
     profile.promotions = [{ promotionId: "offer", label: "Offer", copy: "A public offer", url }];
     await assert.rejects(assemblePublicProfileSnapshot(profile), TypeError);
   }
@@ -70,7 +71,8 @@ test("profile assembly preserves benign relative and multiply encoded redirect U
 });
 test("profile ordinary display and promotion text rejects embedded HTTP userinfo", async () => {
   const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
-  for (const target of ["https://alice:correcthorsebattery@example.com", "HTTP://alice@example.com",
+  for (const target of ["//alice:correcthorsebattery@example.com", "\\\\alice:correcthorsebattery@example.com",
+    "https://alice:correcthorsebattery@example.com", "HTTP://alice@example.com",
     "ｈｔｔｐｓ：／／alice:correcthorsebattery＠example.com", "ht\nt\rps://alice:correcthorsebattery@example.com",
     "ht\ttps:\\\\alice:correcthorsebattery@example.com", "https:/alice:correcthorsebattery@example.com",
     "https:\t/\n/alice:correcthorsebattery@example.com",
