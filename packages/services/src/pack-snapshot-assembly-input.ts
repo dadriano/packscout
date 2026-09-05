@@ -8,7 +8,6 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
-const credentialColonKeys = new Set(["apikey", "password", "secret", "accesstoken", "refreshtoken", "authorization"]);
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -78,20 +77,27 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     rejectCredentialText(text);
     return text.trim().normalize("NFC");
   }
-  function inspectUrlKey(text: string, depth: number, context: OAuthContext, credentialOnly = false): void {
-    const credentialName = credentialColonKeys.has(text.trim().normalize("NFC").toLowerCase().replace(/[^a-z0-9]/gu, ""));
+  function inspectUrlKey(text: string, depth: number, context: OAuthContext, colonTarget?: boolean): boolean {
+    const key = text.trim().normalize("NFC").toLowerCase().replace(/[^a-z0-9]/gu, "");
+    let protectedName = privateKeys.has(key);
+    if (colonTarget !== undefined && !protectedName) {
+      try { assertPublicPackCatalogBytes({ [text]: null }); } catch { protectedName = true; }
+    }
+    // Unquoted Actor is a public credit label. Host identifies topology only
+    // when its value has connection syntax; quoted/URL/JSON fields stay strict.
+    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host");
+    if (publicLabel) protectedName = key === "host" && colonTarget === true;
     // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
     // candidate names still decode under the same charged depth/byte budget.
-    if (credentialOnly && !credentialName && !text.includes("%")) return;
+    if (colonTarget !== undefined && !protectedName && !text.includes("%")) return publicLabel;
     const normalized = chargeUrlText(text, depth);
-    if (!credentialOnly || credentialName) keys.add(normalized);
-    const key = normalized.toLowerCase().replace(/[^a-z0-9]/gu, "");
-    if (!credentialOnly) {
+    if (colonTarget === undefined || protectedName) keys.add(normalized);
+    if (colonTarget === undefined) {
       context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
       requireAssembly(!context.code || !context.authentication);
     }
     const decoded = decodeLayer(normalized);
-    if (decoded !== normalized) inspectUrlKey(decoded, depth + 1, context, credentialOnly);
+    return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget) : publicLabel;
   }
   function inspectProseAssignments(text: string, depth: number): void {
     // Quoted names are explicit fields, including punctuation and whitespace.
@@ -112,6 +118,11 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       let valueStart = end + 1;
       while (colon && valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
       if (colon && valueStart === text.length) continue;
+      if (colon && /["']/u.test(text[valueStart]!)) {
+        valueStart += 1;
+        while (valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
+      }
+      const colonTarget = colon ? hasPrivateUriTarget(text, valueStart) : undefined;
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -124,7 +135,10 @@ export function assertPackAssemblyPublicData(value: unknown): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        inspectUrlKey(key, depth + 1, { authentication: false, code: false }, colon);
+        const publicLabel = inspectUrlKey(key, depth + 1, { authentication: false, code: false }, colonTarget);
+        // A recognized public credit/host label ends the name. Preceding prose
+        // must not turn "Premium Actor:" into a different protected field.
+        if (publicLabel) break;
       }
     }
   }
@@ -142,37 +156,50 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     return decoded !== path && authenticationRoute(chargeUrlText(decoded, depth + 1), depth + 1);
   }
   const isStructuredText = (text: string) => /^[{["]/u.test(text);
-  function inspectStructuredText(text: string, depth: number, context: OAuthContext): void {
+  // Direct prose can start with a JSON document, then continue with an alias.
+  // A bracketed edition/fraction label does not establish JSON structure.
+  const directJsonPrefix = /(?:"|\{\s*["}]|\[\s*(?:["{[\]]|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]))/iyu;
+  function isDirectStructuredText(text: string, start = 0): boolean {
+    directJsonPrefix.lastIndex = start;
+    return directJsonPrefix.test(text);
+  }
+  function inspectStructuredText(text: string, depth: number, context: OAuthContext, prefixStart?: number): number {
     // Inspect every token before parsing the document: JSON.parse alone would
     // discard protected values hidden by duplicate object keys. Charge this
     // same traversal before allocating a parsed document or descending further.
-    let nesting = 0, index = 0;
+    let nesting = 0, index = prefixStart ?? 0;
     while (index < text.length) {
       const start = index, character = text[index++]!;
       if (/\s|[,:]/u.test(character)) continue;
       if (character === "{" || character === "[") {
         nesting += 1; chargeUrlText(character, depth + nesting); continue;
       }
-      if (character === "}" || character === "]") { requireAssembly(nesting > 0); nesting -= 1; continue; }
+      if (character === "}" || character === "]") {
+        requireAssembly(nesting > 0); nesting -= 1;
+        if (prefixStart !== undefined && nesting === 0) break;
+        continue;
+      }
       if (character === '"') {
         while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
         requireAssembly(index < text.length); index += 1;
         const token = text.slice(start, index);
         let decoded: string;
         try { decoded = JSON.parse(token) as string; }
-        catch { requireAssembly(false); return; }
+        catch { requireAssembly(false); return index; }
         let next = index;
         while (next < text.length && /\s/u.test(text[next]!)) next += 1;
         if (text[next] === ":") inspectUrlKey(decoded, depth + nesting + 1, context);
         else inspectUrlText(decoded, depth + nesting + 1, false, context);
+        if (prefixStart !== undefined && nesting === 0) break;
       } else {
         while (index < text.length && !/[\s{}[\]",:]/u.test(text[index]!)) index += 1;
         chargeUrlText(text.slice(start, index), depth + nesting + 1);
       }
     }
     requireAssembly(nesting === 0);
-    try { JSON.parse(text); }
+    try { JSON.parse(prefixStart === undefined ? text : text.slice(prefixStart, index)); }
     catch { requireAssembly(false); }
+    return index;
   }
   function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
@@ -232,7 +259,20 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       bytes += encoder.encode(item).byteLength;
       const urlField = field === "url" || field === "imageUrl";
       rejectCredentialText(item, urlField ? undefined : target => inspectUrlText(target));
-      if (!urlField) inspectProseAssignments(item.trim().normalize("NFC"), 0);
+      if (!urlField) {
+        const normalized = item.trim().normalize("NFC");
+        if (isDirectStructuredText(normalized)) {
+          // Charge the source once, then inspect adjacent roots by absolute
+          // offsets; rescanning or charging each remaining suffix is quadratic.
+          chargeUrlText(normalized, 0);
+          let start = 0;
+          do {
+            start = inspectStructuredText(normalized, 0, { authentication: false, code: false }, start);
+            while (start < normalized.length && /\s/u.test(normalized[start]!)) start += 1;
+          } while (isDirectStructuredText(normalized, start));
+        }
+        inspectProseAssignments(normalized, 0);
+      }
       if (urlField) {
         inspectUrlText(item, 0, true);
       }

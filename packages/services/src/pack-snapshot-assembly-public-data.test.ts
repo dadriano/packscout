@@ -85,6 +85,68 @@ test("ordinary colon labels and quoted promotion fields remain public", async ()
   assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Actor: Keanu Reeves; Host: Public Speaker; Bolt:Premium ".repeat(1_000) }));
 });
 
+test("explicit account fields and connection-shaped host colon values reject in public text", async () => {
+  for (const title of ["Host: db.internal:5432", "Account: internal-123", "Host: db.internal", "Host: 127.0.0.1:5432",
+    "Host: [::1]:5432", "Documentation host: localhost:5432", 'Host: "db.internal:5432"',
+    "h.o.s.t: db.internal:5432", "%68ost: db.internal:5432", "Account ID: internal-123", "account.id: a",
+    "raw payload: private-marker", "authorization code: private-marker", "code verifier: private-marker"]) {
+    refuses({ title });
+    refuses({ aliases: [title] });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    for (const field of ["title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title; else input.inputs.aliases = [title];
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("direct structured public text inspects escaped duplicate and nested protected JSON fields", async () => {
+  for (const title of ['{"\\u0061\\u0063\\u0063\\u0065\\u0073\\u0073\\u005f\\u0074\\u006f\\u006b\\u0065\\u006e":"private-marker"}',
+    '{"\\u0061ccess_token":"private-marker"}', '[{"\\u0061ccount":"internal-123"}]',
+    '{"caption":"safe","\\u0061ccess_token":"private-marker","caption":"safe"}',
+    '{"caption":{"\\u0068ost":"db.internal:5432"},"caption":"safe"}',
+    JSON.stringify({ nested: '{"\\u0070assword":"private-marker"}' }),
+    JSON.stringify(['data={"\\u0061ccess_token":"private-marker"}']),
+    JSON.stringify('{"\\u0061ccess_token":"private-marker"}'),
+    '{"\\u0061ccount":"internal-123"} Public Edition', '[{"\\u0068ost":"db.internal"}] Public Edition',
+    JSON.stringify('{"\\u0061ccount":"internal-123"}') + " Public Edition",
+    '{"caption":"safe"} {"\\u0061ccount":"private"}', '"public" [{"\\u0068ost":"db.internal"}]']) {
+    refuses({ title });
+    refuses({ aliases: [title] });
+    for (const field of ["title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title; else input.inputs.aliases = [title];
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("benign direct JSON and ordinary host actor and connection-scheme labels remain publishable", async () => {
+  for (const title of ['{"caption":"Fish & Actor","label":"A+B"}', '[1.5,true,false,null,"public@example.com"]',
+    '{"caption":"first","caption":"second"}', JSON.stringify('{"caption":"public"}'),
+    '{"caption":"public"} Premium', '"Public Edition" Premium', '[{"caption":"public"}] Premium',
+    '{"caption":"first"} {"caption":"second"} Premium', '"First" ["Second"] Premium',
+    "[Limited Edition]", "[1/1] Premium", "Actor: Keanu Reeves", "Host: Public Speaker", "Host:Public Speaker",
+    "Premium %41ctor: Keanu Reeves", "Bolt: Premium Edition", "Pulsar:First Edition"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ aliases: [title] }));
+    for (const field of ["title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title; else input.inputs.aliases = [title];
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+});
+
+test("direct structured public text shares existing depth limits and malformed JSON rules", () => {
+  for (const title of ['{"caption":"public",}', '[{"caption":"public"}', '{"caption":"\\u00GG"}',
+    "[".repeat(17) + "null" + "]".repeat(17)]) refuses({ title });
+  let nested = "public";
+  for (let index = 0; index < 12; index += 1) nested = JSON.stringify({ caption: nested });
+  refuses({ title: nested });
+});
+
 test("an empty authorization label is rejected only after a separate public alias supplies its value", async () => {
   const { input } = await assemblyFixture();
   input.inputs.title = "Authorization:";
