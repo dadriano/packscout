@@ -83,3 +83,38 @@ test("benign structured URL payloads preserve JSON captions, separators and scal
     }
   }
 });
+
+test("Basic authorization protects short credentials without rejecting ordinary Basic prose", () => {
+  for (const token of ["dXNlcjpwYXNzd29yZA==", "YTpi", "dTo="]) {
+    assert.throws(() => assertPublicCatalogText(`Details Basic ${token}`), TypeError);
+    assert.throws(() => assertPublicCatalogUrl(`https://example.com/?caption=${encodeURIComponent(`Basic ${token}`)}`), TypeError);
+  }
+  for (const text of ["Basic edition", "Basic collection", "Basic information available"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
+test("private database and broker connection schemes remain private without userinfo", () => {
+  for (const target of ["amqps://mq.internal:5671/vhost", "mysql://db.internal/catalog",
+    "postgresql+psycopg://db.internal/catalog", "mssql://db.internal/catalog", "amqp://queue.example/path@public",
+    "sqlite:/private/catalog.db", "sqlite+aiosqlite:/private/catalog.db"]) {
+    assert.throws(() => assertPublicCatalogText(`Details ${target}`), TypeError);
+  }
+  assert.doesNotThrow(() => assertPublicCatalogText("Details ftp://public.example/path@public"));
+  assert.doesNotThrow(() => assertPublicCatalogText("MySQL and SQLite are examples."));
+});
+
+test("OAuth callback codes and PKCE verifiers reject while public promotion codes remain valid", () => {
+  for (const target of ["https://example.com/callback?code=reusable-code", "https://example.com/call%62ack?%63ode=reusable-code",
+    "https://example.com/?client_id=public-client&code=reusable-code", "https://example.com/?code=reusable-code&client_id=public-client",
+    "https://example.com/callback#?code=reusable-code", "https://example.com/?code_verifier=reusable-code",
+    "https://example.com/callback?data=" + encodeURIComponent(JSON.stringify({ code: "reusable-code" }))]) {
+    assert.throws(() => assertPublicCatalogUrl(target), TypeError);
+    assert.throws(() => assertPublicCatalogText(`Details ${target}`), TypeError);
+  }
+  for (const target of ["https://example.com/product?code=SUMMER", "https://example.com/packs?code=123&state=available",
+    "https://example.com/?code_challenge=public-challenge",
+    "https://example.com/callback?next=" + encodeURIComponent("https://shop.example/product?code=SUMMER")]) {
+    assert.doesNotThrow(() => assertPublicCatalogUrl(target));
+  }
+});
