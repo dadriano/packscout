@@ -45,7 +45,7 @@ function originalUrlPath(candidate: string): string {
   // normalizes URL controls/slashes only, not encoded component separators.
   const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(candidate);
   let start = scheme?.[0].length ?? 0;
-  if (scheme || candidate.startsWith("//")) {
+  if (candidate.startsWith("//", start)) {
     while (candidate[start] === "/") start += 1;
     while (start < candidate.length && !/[/?#]/u.test(candidate[start]!)) start += 1;
   }
@@ -72,7 +72,7 @@ function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: strin
   // Consume whole scheme-like runs even when no URI follows. Remember scanned
   // spans so nested scheme spellings cannot rescan a long authority or suffix.
   const schemes = /[a-z][a-z0-9+.-]*/giu;
-  let match: RegExpExecArray | null, authorityThrough = 0, parsedThrough = 0;
+  let match: RegExpExecArray | null, authorityThrough = 0;
   while ((match = schemes.exec(recognized)) !== null) {
     const colon = schemes.lastIndex;
     if (recognized[colon] !== ":") continue;
@@ -87,11 +87,25 @@ function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: strin
       requireAssembly(recognized[end] !== "@"); end += 1;
     }
     authorityThrough = end;
-    if (inspectEmbeddedUrl && match.index >= parsedThrough) {
-      end = colon + 1;
-      while (end < recognized.length && !/[\s<>"']/u.test(recognized[end]!)) end += 1;
-      parsedThrough = end;
-      inspectEmbeddedUrl(recognized.slice(match.index, end));
+  }
+  if (inspectEmbeddedUrl) {
+    // Retain original control-separated prose boundaries. Complete absolute
+    // tokens still consume WHATWG-ignored controls, so a path email cannot
+    // become another authority. Optional colons consume unmatched word runs.
+    for (const target of normalized.matchAll(/[a-z][a-z0-9+.\-\t\n\r]*(?::(?:[^\s<>"']|[\t\n\r])*)?|(?<![\w:/\\])[/\\][\t\n\r]*[/\\](?:[^\s<>"']|[\t\n\r])*/giu)) {
+      if (/^[/\\]/u.test(target[0])) {
+        // Quotes/angles delimit prose tokens, but WHATWG accepts them inside
+        // userinfo. Inspect the complete original authority before truncation.
+        let end = target.index;
+        while (/[/\\\t\n\r]/u.test(normalized[end] ?? "")) end += 1;
+        while (end < normalized.length && !/[/?#\\]|[^\S\t\n\r]/u.test(normalized[end]!)) {
+          requireAssembly(normalized[end] !== "@"); end += 1;
+        }
+        if (/[^/\\\t\n\r]/u.test(target[0])) inspectEmbeddedUrl(target[0]);
+      } else {
+        const candidate = target[0].replace(/[\t\n\r]/gu, "");
+        if (/^(?:(?:https?|ftp|wss?):|[a-z][a-z0-9+.-]*:[/\\]{2})/iu.test(candidate)) inspectEmbeddedUrl(target[0]);
+      }
     }
   }
 }
@@ -310,6 +324,9 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectFragment(text: string, depth: number, context: OAuthContext): void {
     const normalized = chargeUrlText(text, depth);
+    rejectCredentialText(normalized, target => {
+      if (target !== normalized) inspectEmbeddedTarget(target, depth + 1);
+    });
     if (inspectLeadingStructuredText(normalized, depth, context)) return;
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), equals = candidate.indexOf("=");
@@ -329,13 +346,22 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       inspectUrlKey(key, depth + 1, context); inspectUrlText(nested, depth + 1, false, context);
     }
   }
+  function inspectEmbeddedTarget(text: string, depth = 0): void {
+    // Trim only embedded prose punctuation, never a required/raw URL. Preserve
+    // the authority's closing IPv6 bracket; full userinfo was checked first.
+    const authorityEnd = /^(?:[a-z][a-z0-9+.\-\t\n\r]*:)?[/\\\t\n\r]*\[[^\]]+\]/iu.exec(text)?.[0].length ?? 0;
+    // Query/fragment JSON closing delimiters belong to the component, not prose.
+    const trailingProse = /[?#]/u.test(text) ? /["'<>()[{,.;]+$/gu : /["'<>()[\]{},.;]+$/gu;
+    const trimmedLength = text.replace(trailingProse, "").length;
+    inspectUrlText(text.slice(0, Math.max(authorityEnd, trimmedLength)), depth);
+  }
   function inspectUrlText(text: string, depth = 0, required = false, context: OAuthContext = { authentication: false, code: false }): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
     // Decoded JSON/form captions can reveal an embedded URL only at this layer.
     // Reuse the same traversal; an exact whole-text URL is parsed below instead
     // of recursively inspecting itself or starting a fresh public-data budget.
     if (!required) rejectCredentialText(normalized, target => {
-      if (target !== normalized) inspectUrlText(target, depth + 1);
+      if (target !== normalized) inspectEmbeddedTarget(target, depth + 1);
     });
     if (!required) inspectProseAssignments(normalized, depth);
     if (!required && inspectLeadingStructuredText(normalized, depth, context)) return;
@@ -353,7 +379,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       return;
     }
     let url: URL;
-    try { url = required ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
+    try { url = required || /^[a-z][a-z0-9+.-]*:/iu.test(candidate) ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
     catch { requireAssembly(false); return; }
     requireAssembly(url.username === "" && url.password === "" && !isPrivateUrlHostname(url.hostname));
     // A separate nested URL has its own route/query context; forms and JSON
@@ -370,6 +396,14 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     }
     const fragment = url.hash.slice(1);
     if (fragment !== "") inspectFragment(fragment, depth + 1, urlContext);
+    // URL removes TAB/LF/CR before exposing search/hash. Retain original
+    // component evidence too, without decoding URL structure or charging an
+    // ordinary unchanged component twice.
+    const hash = normalized.indexOf("#"), query = normalized.indexOf("?");
+    const originalQuery = query >= 0 && (hash < 0 || query < hash) ? normalized.slice(query + 1, hash < 0 ? undefined : hash) : "";
+    if (originalQuery !== url.search.slice(1)) inspectForm(originalQuery, depth, urlContext);
+    const originalFragment = hash >= 0 ? normalized.slice(hash + 1) : "";
+    if (originalFragment !== fragment) inspectFragment(originalFragment, depth + 1, urlContext);
   }
   function visit(item: unknown, depth: number, field = "") {
     requireAssembly(++nodes <= limits.maximumNodes && depth <= limits.maximumDepth);
@@ -377,7 +411,7 @@ export function assertPackAssemblyPublicData(value: unknown): void {
       requireAssembly(item.length <= limits.maximumSnapshotBytes);
       bytes += encoder.encode(item).byteLength;
       const urlField = field === "url" || field === "imageUrl";
-      rejectCredentialText(item, urlField ? undefined : target => inspectUrlText(target));
+      rejectCredentialText(item, urlField ? undefined : target => inspectEmbeddedTarget(target));
       if (!urlField) {
         const normalized = item.trim().normalize("NFC");
         inspectProseStructuredText(normalized, 0);

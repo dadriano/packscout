@@ -7,6 +7,196 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("slashless and single-slash URLs retain original protected path evidence", async () => {
+  for (const url of ["https:access_token/private-marker", "https:/access_token/private-marker",
+    String.raw`https:\access_token\private-marker`, "https:/%61ccess_token/private-marker",
+    "https:/%2561ccess_token/private-marker", "https:/access_token%2Fprivate-marker",
+    "https:/access_token%5Cprivate-marker", "https:/callback/code/private-marker",
+    "https:/access_token/private-marker/../../public"]) {
+    refuses({ url });
+    refuses({ title: `Visit ${url}` });
+    refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+    for (const field of ["displayName", "title", "imageUrl", "action"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = `Visit ${url}`;
+      else if (field === "title") input.inputs.title = `Visit ${url}`;
+      else if (field === "imageUrl") input.inputs.imageUrl = url; else input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(input), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("scheme-relative authorities in public prose share nested URL privacy checks", async () => {
+  for (const target of ["//alice:correcthorsebattery@example.com", "///alice:private-marker@example.com",
+    String.raw`\\alice:private-marker@example.com`, String.raw`/\alice:private-marker@example.com`,
+    String.raw`\/alice:private-marker@example.com`, "//%61lice:private-marker@example.com",
+    "//ali\nce:pri\tvate-marker@example.com", "//127.1/card", "//[::1]/card",
+    "//example.com/access_token/private-marker", "//example.com/%2561ccess_token%252Fprivate-marker",
+    "//example.com/access_token%5Cprivate-marker", "//example.com/?access_token=private-marker",
+    "//example.com/#%73ig=private-marker"]) {
+    const title = `Visit ${target}`;
+    refuses({ title });
+    refuses({ title: target });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const nested of [target, title, JSON.stringify({ caption: title })]) {
+      refuses({ url: "https://example.com/?caption=" + encodeURIComponent(nested) });
+      refuses({ url: "https://example.com/#" + encodeURIComponent(nested) });
+    }
+    for (const field of ["displayName", "title", "aliases"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = title;
+      else if (field === "title") input.inputs.title = title; else input.inputs.aliases = [title];
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("raw authority recognition preserves public paths emails and independent URL contexts", async () => {
+  for (const url of ["https:example.com/products/card", "https:/example.com/products/card",
+    "https://access_token/private-marker", "https:///access_token/private-marker",
+    String.raw`https:\\access_token\private-marker`, String.raw`https:/\access_token/private-marker`,
+    "https://example.com/path//support@example.com"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: `Visit ${url}` }));
+    const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  // An explicit nested authority is distinct from an email inside the outer URL path.
+  refuses({ url: "https://example.com/?caption=//support@example.com/public" });
+  for (const title of ["Visit //example.com/products/card", "Visit //example.com/path//support@example.com",
+    "Visit //8.8.8.8/card", "Visit //example.com/path@public", "Visit //[2606:4700:4700::1111] for details.",
+    "Visit //example.com/coupon?code=SUMMER then //example.com/callback?state=public-state",
+    "Visit https://example.com/callback?state=public-state then //example.com/coupon?code=SUMMER",
+    "Email support@example.com", "Bearer of the Heavens"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("network references retain control-separated prose boundaries without splitting absolute URL paths", async () => {
+  for (const control of ["\t", "\n", "\r"]) {
+    for (const title of [`See${control}//alice:private-marker@example.com/card`,
+      `See${control}/${control}/alice:private-marker@example.com/card`,
+      `See${control}//ali${control}ce:private-marker@example.com/card`]) {
+      refuses({ title });
+      refuses({ title: JSON.stringify({ caption: title }) });
+      refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+      refuses({ url: "https://example.com/#" + encodeURIComponent(title) });
+      const { input } = await assemblyFixture(); input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+    for (const title of [`Visit https://example.com/path${control}//alice@example.com`,
+      `Visit ht${control}tps://example.com/path${control}//alice@example.com`,
+      `See${control}//example.com/products/card`, `See${control}//[2606:4700:4700::1111]`]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    }
+  }
+});
+
+test("public split-card labels are not bare scheme-relative authorities", async () => {
+  for (const title of ["Fire // Ice", "Wear // Tear", "Rating // five stars", "Fire /\t/ Ice", "Fire /// Ice"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+});
+
+test("network authority quotes and angle characters cannot hide username-only credentials", async () => {
+  for (const username of ['ali"ce', "ali'ce", "ali<ce", "ali>ce"]) {
+    const target = `//${username}@example.com/packs`, title = `Visit ${target}`;
+    refuses({ title });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(title) });
+    const { input } = await assemblyFixture(); input.inputs.contents[0]!.displayName = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  refuses({ title: 'Visit "https://example.com/card""//alice@example.com/packs"' });
+  refuses({ title: 'Visit "//example.com/card""//alice@example.com/packs"' });
+  for (const title of ['Visit "https://example.com/card""//example.com/packs"',
+    'Visit "//[2606:4700:4700::1111]"', "Visit <//example.com>", "Visit <//[2606:4700:4700::1111]>",
+    "Visit https://example.com/path//alice@example.com", "Fire // Ice"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+  }
+});
+
+test("original URL query and fragment controls retain embedded network evidence", async () => {
+  for (const control of ["\t", "\n", "\r"]) {
+    for (const target of ["//alice:private-marker@example.com/packs", "//127.1/card",
+      "//example.com/access_token/private-marker"]) {
+      for (const suffix of [`?caption=See${control}${target}`, `#See${control}${target}`]) {
+        const url = "https://example.com/" + suffix;
+        refuses({ url });
+        refuses({ title: `Visit ${url}` });
+        refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+        const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+        await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      }
+    }
+    for (const caption of [`See${control}//example.com/card`, `See https://example.com/path${control}//alice@example.com`,
+      `See${control}//example.com/coupon?code=SUMMER`]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + caption }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/#caption=" + caption }));
+    }
+  }
+});
+
+test("explicit slashless schemes never resolve private hosts against the public placeholder base", async () => {
+  for (const target of ["https:127.1/packs", "https:/127.1/packs", String.raw`https:\127.1\packs`,
+    "https:2130706433/packs", "https:/[::1]/packs", "ht\ttps:/127.1/packs"]) {
+    const title = `See ${target}`;
+    refuses({ title });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    for (const value of [target, title]) {
+      refuses({ url: "https://example.com/?next=" + encodeURIComponent(value) });
+      refuses({ url: "https://example.com/#" + encodeURIComponent(value) });
+    }
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+  for (const target of ["https:8.8.8.8/packs", "https:/example.com/packs", "/packs/card", "//example.com/packs"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?next=" + encodeURIComponent(target) }));
+  }
+});
+
+test("embedded public IPv6 authorities retain closing brackets before prose punctuation", async () => {
+  for (const target of ["//[2606:4700:4700::1111]", "https://[2606:4700:4700::1111]",
+    "ht\ttps://[2606:4700:4700::1111]", String.raw`\\[2606:4700:4700::1111]`]) {
+    for (const title of [`See (${target}).`, `See (${target});`, `See [${target}].`]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: JSON.stringify({ caption: title }) }));
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+  for (const title of ["See (//[::1]).", 'See (//ali"ce@example.com).']) refuses({ title });
+  refuses({ url: "https://[2606:4700:4700::1111])." });
+});
+
+test("embedded URL punctuation trimming preserves structured query and fragment closing delimiters", async () => {
+  for (const suffix of ['?caption=[1,2]', '#[1,2]', '#caption=[1,2]',
+    '?caption={"caption":"public"}', '#{"caption":"public"}', '#caption={"caption":"public"}']) {
+    const url = "https://example.com/" + suffix;
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?next=" + encodeURIComponent(`Visit ${url}`) }));
+    for (const title of [`Visit ${url}`, `Visit "${url}"`]) {
+      assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+      const { input } = await assemblyFixture(); input.inputs.title = title;
+      assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+    }
+  }
+  for (const suffix of ['?caption=[{"\\u0070assword":"private"}]', '#[{"\\u0061ccess_token":"private"}]',
+    '#caption={"\\u0061ccount":"private"}', '?caption={"caption":"safe","\\u0070assword":"private","caption":"safe"}']) {
+    refuses({ title: `Visit "https://example.com/${suffix}"` });
+    refuses({ url: "https://example.com/" + suffix });
+  }
+});
+
 test("literal private URL hosts reject through canonical IPv4 IPv6 and localhost spellings", async () => {
   for (const host of ["127.0.0.1", "127.1", "2130706433", "0x7f000001", "0177.0.0.1", "0.0.0.0", "10.2.3.4",
     "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.168.1.1", "100.64.0.1", "localhost", "LOCALHOST.",
