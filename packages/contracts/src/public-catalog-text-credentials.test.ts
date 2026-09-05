@@ -97,11 +97,57 @@ test("Basic authorization protects short credentials without rejecting ordinary 
 test("private database and broker connection schemes remain private without userinfo", () => {
   for (const target of ["amqps://mq.internal:5671/vhost", "mysql://db.internal/catalog",
     "postgresql+psycopg://db.internal/catalog", "mssql://db.internal/catalog", "amqp://queue.example/path@public",
-    "sqlite:/private/catalog.db", "sqlite+aiosqlite:/private/catalog.db"]) {
+    "sqlite:/private/catalog.db", "sqlite+aiosqlite:/private/catalog.db", "sqlite:private/catalog.db",
+    "SQLite::memory:", "sqlite:catalog.db", "mysql:db.internal:3306", "amqps:mq.internal",
+    "mysql:alice:private-marker@db.internal", "nats:host=mq.internal", "sqlite:%2Fprivate%2Fcatalog", "sqlite:%3Amemory%3A"]) {
     assert.throws(() => assertPublicCatalogText(`Details ${target}`), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(target)), TypeError);
   }
   assert.doesNotThrow(() => assertPublicCatalogText("Details ftp://public.example/path@public"));
   assert.doesNotThrow(() => assertPublicCatalogText("MySQL and SQLite are examples."));
+});
+
+test("known connection-scheme words remain public prose labels without endpoint syntax", async (context) => {
+  for (const title of ["Bolt: Premium Edition", "Pulsar: First Edition", "MySQL: The Guide",
+    "Bolt:Premium Edition", "Pulsar:First Edition", "MySQL:The Guide", "SQLite:Reference", "Pulsar:FirstEdition."]) {
+    await context.test(title, () => assert.doesNotThrow(() => assertPublicCatalogText(title)));
+  }
+});
+
+test("optional URL captions and JSON strings preserve known-scheme prose labels", async (context) => {
+  for (const container of ["caption", "json"] as const) await context.test(container, () => {
+    for (const label of ["Bolt: Premium Edition", "Pulsar: First Edition", "MySQL: The Guide",
+      "Bolt:Premium Edition", "Pulsar:First Edition", "MySQL:The Guide", "SQLite:Reference", "Pulsar:FirstEdition."]) {
+      const query = container === "caption" ? "caption=" + encodeURIComponent(label)
+        : "data=" + encodeURIComponent(JSON.stringify({ caption: label }));
+      assert.doesNotThrow(() => assertPublicCatalogUrl(`https://example.com/?${query}`), `${container}: ${label}`);
+      assert.doesNotThrow(() => assertPublicCatalogText(`Details https://example.com/?${query}`), `${container}: ${label}`);
+      assert.throws(() => assertPublicCatalogUrl(label), TypeError, "required URL fields remain HTTP(S) only");
+    }
+  });
+});
+
+test("optional prose classification retains nearby and nested credential traversal", () => {
+  for (const label of ["Bolt: Premium Edition?sig=private-marker", "Bolt: Premium Edition#authorization_code=private-marker",
+    "Bolt: Premium Edition?data=" + encodeURIComponent('{"access_token":"private-marker"}'),
+    "Bolt: Premium Edition?next=" + encodeURIComponent("sig=private-marker"),
+    "Bolt: Premium Edition https://example.com/?access_token=private-marker",
+    "Bolt: Premium Edition?code=private-marker&client_id=public-client", "Bolt: Basic YTpi"]) {
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(label)), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify({ caption: label }))), TypeError);
+  }
+  for (const payload of [{ caption: "Bolt: Premium Edition", sig: "private-marker" },
+    { caption: "Bolt:Premium Edition", nested: { access_token: "private-marker" } }]) {
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?data=" + encodeURIComponent(JSON.stringify(payload))), TypeError);
+  }
+  assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent("custom: Premium Edition")), TypeError);
+});
+
+test("repeated scheme tokens stop at connection syntax while repeated prose labels remain valid", () => {
+  for (const count of [10, 1_000, 10_000]) {
+    assert.throws(() => assertPublicCatalogText("mysql:".repeat(count)), TypeError);
+  }
+  assert.doesNotThrow(() => assertPublicCatalogText("Bolt:Premium ".repeat(2_000)));
 });
 
 test("OAuth callback codes and PKCE verifiers reject while public promotion codes remain valid", () => {

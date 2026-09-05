@@ -6,6 +6,15 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
   "rawsourceevidence", "sig", "xamzsignature", "signature"]);
 const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|\bbearer\s+[a-z0-9+/_=.~-]{20,}|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
+function hasPrivateUriTarget(value: string, start: number): boolean {
+  // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
+  // differs from "Bolt: Premium Edition" and "Bolt:Premium Edition" prose.
+  // Constant-width lookahead stops at the first marker instead of scanning a suffix.
+  for (let index = start; index < value.length && !/\s/u.test(value[index]!); index += 1) {
+    if (/^[/\\@?#=:]|^%[0-9a-f]{2}|^[a-z0-9]\.[a-z0-9]/iu.test(value.slice(index, index + 3))) return true;
+  }
+  return false;
+}
 const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
 type OAuthContext = { authentication: boolean; code: boolean };
 const reject = () => { throw new TypeError("PUBLIC_CATALOG_PROTECTED_TEXT"); };
@@ -31,7 +40,7 @@ function assertPublicCatalogLexicalText(value: string): void {
   const schemes = /\b([a-z][a-z0-9+.-]*)(:)?([/\\]*)/giu;
   for (let match = schemes.exec(recognized); match !== null; match = schemes.exec(recognized)) {
     if (match[2] && privateUriScheme.test(match[1]!) &&
-      (match[3]!.length > 0 || /\S/u.test(recognized[schemes.lastIndex] ?? ""))) reject();
+      hasPrivateUriTarget(recognized, schemes.lastIndex - match[3]!.length)) reject();
     if (!match[2] || (!/^(?:https?|ftp|wss?)$/iu.test(match[1]!) && match[3]!.length < 2)) continue;
     let end = schemes.lastIndex;
     while (end < recognized.length && !/[/\\?#\s]/u.test(recognized[end]!)) {
@@ -145,9 +154,14 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       if (decoded !== text) visit(decoded, depth + 1, false, context);
       return;
     }
+    const labelScheme = required ? null : /^([a-z][a-z0-9+.-]*):/iu.exec(candidate);
+    const knownSchemeProse = labelScheme !== null && privateUriScheme.test(labelScheme[1]!) &&
+      !hasPrivateUriTarget(candidate, labelScheme[0].length);
     let url: URL;
     try { url = new URL(text, !required || candidate.startsWith("//") ? "https://public.invalid" : undefined); } catch { return reject(); }
-    if (url.username || url.password || !["https:", "http:"].includes(url.protocol)) reject();
+    if (url.username || url.password || (!knownSchemeProse && !["https:", "http:"].includes(url.protocol))) reject();
+    // Optional known-scheme labels are prose, but still traverse every attached
+    // query/fragment value below. Required URL fields remain strictly HTTP(S).
     const urlContext = { authentication: authenticationRoute(url.pathname, depth) ||
       (/^[?#]/u.test(candidate) && context.authentication), code: false };
     // Once structural, decode individual names/values, never the entire URL.
