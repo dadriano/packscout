@@ -2,15 +2,15 @@
 
 ## Start Here
 
-Current main118 checkpoints supersede older records: main isf6785251 (workflow files only). P03's three new privacy findings are fixed at57805ed8;74 focused tests/static gates pass after29identical patches replayed. P04's analogous fix is140747b8 after12identical patches replayed, undergoing the full focused/current-parent gate. P07A runtime9459611d/head98937a11 has42 current-parent focused checks passing; prior full gate/bot thumbs-up remain historical while CI33943710237 recertifies. P05B/task013 builds independently onf6785251. No runtime behavior was lost, no merge or live activation occurred.
+Current checkpoint (2026-09-05 04:36UTC): main is `f678525141a55f4d7acbd82487a1871a94632096`. Task013's neutral EV core passed the full local framework gate at5d710c32/runtime77c01707 and is ready to publish. Root364 focused regressions ran with zero skips;28 unrelated opt-in skips in the unchanged full runner are disclosed in task013.
+
+PR114's private-URI public-label repair is under verification, and the same recognition refinement is being applied independently to PR119. Their credential fixes remain intact. PR120's request-ID fix35ef3d75 is published at a0457a13, root48 focused tests pass, its review thread is resolved and the bot reviewed that exact head with a thumbs-up; fullCI33944611792 remains pending. Earlier gate/parent records below are historical, not current certification.
 
 The user requested `build-from-tasks all` and full coverage of every current frontend data point. This supersedes the earlier pause on later implementation. Heat stays excluded. No publisher, public head, public route, pruning, or launch has been activated.
 
-All three foundations contain main116/ef3c73e8. Full CI passed for PR114 at35b0ab10, but new review3939079908 reopened structured-JSON credential validation; the repair and direct regressions are under integration. PR119's full gate failed the production bundle because a root-prefix alias misresolved the intentional database/publication-input export; a two-file repair is locally green and analogous structured-JSON validation is being updated. PR120 at083ad937 passed full gate33937038465 and final independent acceptance review; task012 is done and PR120 ready for review, not approved or merged. Tasks003/004 remain in_progress;119 stays draft. P05A's ten partial source files are backed up and paused. No public runtime is activated.
-
 P04 and P07A remain independent main siblings. P05B/task013 now owns the measured8-file/2,225-line neutral EV calculation/public-value extraction from011. It depends only on merged main and preserves formulas/current consumers. The two incomplete native economics files remain backed up for011. P05A resumes after003/005/013 merge; every frontend datapoint and complete-pack readiness remain required.
 
-**Progress:** 3/13 tasks currently acceptance-complete; 3/12 implementation phases merged;012's prior acceptance is reopening for docs-only parent recertification, not rebuilding; P03/P04 privacy/build repairs under verification; P05B neutral-core extraction building; P05A partial and paused; P07 atomic switch todo; 0/1 launch operations complete.
+**Progress:** 4/13 tasks acceptance-complete (001/002/005/013); 3/12 implementation phases merged.003/004 refinements and012's repaired-head gate are pending;011 is partial and paused.006–010 remain todo. No merge or live activation occurred in this build.
 
 ## Context
 
@@ -109,7 +109,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 **Activation phase:** P10 launches the exact V1 release certified by P08 and protected by P09.
 
-**Merge order:** P01; P02, P04, and P05 independently; P03 follows P02; P05A follows verified P03/P05; P06 waits for P02–P05 and P05A; P07 foundations may proceed from P05 but its switch waits for P05A; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09.
+**Merge order:** P01; P02, P04, and P05 independently; P03 follows P02; P05B and P07A follow merged P05 independently; P05A follows merged P03/P05/P05B; P06 waits for P02–P05 and P05A; P07 waits for P05A/P07A; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09. Fresh merge approval remains required.
 
 **Additional application path:** none. `pack_catalog_v1` is the only application contract and the frontend calls it directly.
 
@@ -219,7 +219,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Review budget:**8 source/test files/2,225 measured changed lines, mostly exact moves. The16 requested task records may take the total past2,500lines; target overage must be metadata-only and below40files/5,000lines. Splitting calculation from parity proofs or leaving duplicate formulas is unsafe. Remeasure before publish; no generated/lockfile churn intended.
 - **Verification:**013 exact identity/replay, full predecessor regressions, affected lint/types/boundaries/ratchet and framework gate.011/006/007 retain data/runtime/browser E2E.
 - **Rollback:** Revert the pure extraction; current application behavior and stored data remain unchanged.
-- **Implementation:**77c01707 onf6785251. Root364/364 focused regressions and exact-body comparison pass; affected lint/types/boundaries/ratchet pass.9 source files/2,329lines; the added ninth file is direct public-value parity evidence. Full gate pending; no PR opened.
+- **Implementation:**77c01707 onf6785251. Root364/364 focused regressions, exact-body comparison, affected static checks and full framework gate at5d710c32 pass.9 source files/2,329lines; the added ninth file is direct public-value parity evidence. Task013 is done; PR publication is next. The full runner's28 unrelated existing opt-in skips are disclosed in013, not represented as zero skips.
 
 #### P06 — Publisher and recovery
 
@@ -305,7 +305,7 @@ P05B/task013 is a separate prerequisite of P05A, not extra publisher scope.
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
 | 011 | Preserve every frontend data point in V1 | P05A | large | scope from field inventory | in_progress | 003, 005, 013 |
-| 013 | Share neutral existing EV calculation core | P05B | medium | measured extraction | in_progress | 001, 005 |
+| 013 | Share neutral existing EV calculation core | P05B | medium | measured extraction | done | 001, 005 |
 | 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | in_progress | 005 |
 | 006 | Publish and recover pack state | P06 | large | 2–3 days | todo | 002, 003, 004, 005, 011 |
 | 007 | Render Pack Catalog V1 in the frontend | P07 | medium | field-driven scope | todo | 005, 011, 012 |
@@ -340,4 +340,4 @@ Cap dependent open stack depth at three; ordinary prerequisite review waiting is
 
 ## Next Action
 
-Complete mainf6785251 repaired-head gates for PR114/119/120 and publish the measured task013 core independently after its full gate. PR120's new request-identity finding3939406332 is being fixed; a prior bot thumbs-up is not approval of a newer unresolved finding. Keep119 draft until certified. Resume011 after merged003/005/013, preserving all frontend data and whole-pack price/EV coherence. No merge, production publication, route cutover, prune or launch occurred here; the separate PR115 deployment task owns its live operations.
+Publish task013's fully verified neutral core. Finish the public-label refinements and repaired-head gates for PR114/119, and await PR120's current identity-fix gate. Keep119 draft until certified. Request fresh merge approval once prerequisites are ready; resume011 after merged003/005/013, preserving every frontend datapoint and whole-pack price/EV coherence. No merge, production publication, route cutover, prune or launch occurred here; the separate PR115 deployment task owns its live operations.

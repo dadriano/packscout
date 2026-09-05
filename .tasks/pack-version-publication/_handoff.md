@@ -1,6 +1,18 @@
 # Pack publication — current handoff
 
-## Latest main118 and delegation
+## Current checkpoint — 2026-09-05 04:36UTC
+
+Main remainsf6785251. Task013/P05B full local framework verifier finished successfully at exact head5d710c32/runtime77c01707; session26893 is complete. Log `/tmp/packscout-p05b-framework-main118-20260905.log`. Both production builds pass. The unchanged runner has28 pre-existing optional distributed/provider/protected-capture/operator skips; none is in the neutral-core acceptance matrix, whose364 tests ran without skips. Task013 is done and root is publishing the independent PR; no PR number yet. Source is9 files/2,329 changed lines, whole phase25 files/3,139 before final metadata. No local heavy suite remains.
+
+PR114 public-label P2comment3939429737 is actively being repaired. Agent p04_profiles also owns the analogous refinement in P04's existing guard/test files; root asked for early-return target scanning to avoid repeated suffix traversal. No other runtime ownership. PR120 identity fix35ef3d75 is published at a0457a13, root48 focused tests/static gates pass; reply3939440289 resolved its thread, bot thumbs-up reviewed that exact head, fullCI33944611792 remains pending. Agent p03_review is the single read-only watcher (bounded window through about04:47UTC).
+
+Current statuses:001/002/005/013 done;003/004/011/012 in_progress;006–010 todo.4/13 acceptance-complete,3/12 implementation phases merged. P03/P04/P07A/P05B are independent main siblings.011 waits merged003/005/013. Original P05A branch44e2f193 has no checked-out worktree; complete ten-file stash961f20694651e80c2e665f555bbce1e347dcc143 is preserved. Its old directory/dependencies moved safely to P05B. No merge, deployment, live writer or route switch was authorized/executed here.
+
+## Earlier evidence history — superseded checkpoints, preserve for audit
+
+### Main118 and delegation history
+
+04:24UTC delta: PR114 new P2comment3939429737/threadPRRT_kwDOTplTZc6fgKpt reopens false private-URI recognition for ordinary Bolt/Pulsar/MySQL title labels; p04_profiles owns the narrow P03 guard/tests now. PR120 identity repair is committed35ef3d75, root48 focused tests and static checks pass; publishing/fresh full gate/reply are pending. Task013 full local framework verifier is running (session26893) at exact head5d710c32/runtime77c01707 onmainf6785251, log `/tmp/packscout-p05b-framework-main118-20260905.log`. No other local heavy suite is running. p03_review remains the single read-only watcher.
 
 Task013/P05B runtime77c01707 is committed onf6785251:9 source files/2,329changed lines. Root independently reran364/364 regressions, zero skips, and verified calculator/confidence bodies byte-identical apart from imports; affected static gates pass. Full local framework gate is the next operation, using only the owned private PostgreSQL URL and existing moved dependencies. P04 agent has moved to PR120 request-ID binding repair3939406332 in the loader/two focused files; root owns all metadata/Git. No core PR or full data-parity completion yet.
 
