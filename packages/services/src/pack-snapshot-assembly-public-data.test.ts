@@ -7,6 +7,76 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("connection-shaped key/value DSNs cannot enter public text or snapshots", async () => {
+  for (const title of ["Server=10.0.0.7;Database=cards", "Data Source=db.internal:1433;Initial Catalog=cards",
+    "Documentation Server = db.internal; Database = cards", 'Data Source="db.internal:1433";Initial Catalog=cards',
+    "Server=[::1],1433;Database=cards", String.raw`Server=db.internal\instance;Database=cards`,
+    "%53erver=10.0.0.7;Database=cards", '"Data Source"="db.internal:1433";"Initial Catalog"=cards',
+    "Server=SQLHOST;Database=cards", "Database=cards;Server=SQLHOST", "Initial Catalog=cards;Data Source=SQLHOST",
+    'Server="SQLHOST" ; Database="cards"', "Server=SQLHOST,1433", 'Data Source="SQLHOST, 1433";Initial Catalog=cards',
+    '"Server" = "SQLHOST" ; "Database" = "cards"', "Server={SQLHOST};Database=cards",
+    "Server=Public Speaker;Database=Card Collection",
+    "Documentation\tData\tSource=SQLHOST;Initial Catalog=cards", "Data Source=localhost",
+    "Data Source=https://example.com/catalog;Initial Catalog=cards", "Database=cards;Data Source=https://example.com/catalog",
+    "Data Source=https%3A%2F%2F127.1%2Fguide", "Data Source=https%253A%252F%252Fexample.com%252Faccess_token%252Fprivate-marker",
+    "Data Source=https%3A%2F%2Fexample.com%2F%3Faccess_token%3Dprivate-marker", "Server=%20db.internal",
+    "Data Source=%20https%3A%2F%2F127.1%2Fguide"]) {
+    refuses({ title });
+    refuses({ aliases: [title] });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(title) });
+    for (const field of ["title", "aliases", "displayName"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "title") input.inputs.title = title;
+      else if (field === "aliases") input.inputs.aliases = [title];
+      else input.inputs.contents[0]!.displayName = title;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+  }
+});
+
+test("standard PGP private-key armor remains private at every public text boundary", async () => {
+  for (const title of ["-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    "Documentation -----BEGIN PGP PRIVATE KEY BLOCK-----\nprivate-marker\n-----END PGP PRIVATE KEY BLOCK-----",
+    "-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----"]) {
+    refuses({ title });
+    refuses({ title: JSON.stringify({ caption: title }) });
+    refuses({ url: "https://example.com/?caption=" + encodeURIComponent(title) });
+    refuses({ url: "https://example.com/#" + encodeURIComponent(title) });
+    const { input } = await assemblyFixture(); input.inputs.contents[0]!.displayName = title;
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
+test("ordinary connection labels and public-key armor remain public", async () => {
+  for (const title of ["Server: Public Speaker", "Data source: Museum archive", "Database: Cards edition",
+    "Server=Public Speaker", "Data Source=Museum archive", "Database=cards", "Initial Catalog=cards",
+    "Server=SQLHOST", "Data Source=SQLHOST",
+    "Server=SQLHOST; public prose;Database=cards", "Database=cards\nServer=SQLHOST",
+    "Data source=https://example.com/catalog", "Data source: https://example.com/catalog",
+    "Data Source=https%3A%2F%2Fexample.com%2Fguide", "Data Source=https%253A%252F%252Fexample.com%252Fguide",
+    "Data Source=%20https%3A%2F%2Fexample.com%2Fguide",
+    "Data Source=https%3A%2F%2Fexample.com%2F%3Fcaption%3DFish%2526Actor",
+    "-----BEGIN PGP PUBLIC KEY BLOCK-----\npublic-marker\n-----END PGP PUBLIC KEY BLOCK-----",
+    "-----BEGIN PUBLIC KEY-----", "PGP private key documentation", "Bearer a", "Cookie: Chocolate edition"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?caption=" + encodeURIComponent(title) }));
+    const { input } = await assemblyFixture(); input.inputs.title = title;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "Data Source=https://example.com/?caption=Fish%26Actor" }));
+});
+
+test("final search projection cannot synthesize a DSN or private-key armor across fields", async () => {
+  for (const [title, alias] of [["Server=SQLHOST;", "Database=cards"],
+    ["-----BEGIN PGP PRIVATE KEY", "BLOCK-----"]]) {
+    const { input } = await assemblyFixture(); input.inputs.title = title!; input.inputs.aliases = [alias!];
+    assert.doesNotThrow(() => assertPackAssemblyPublicData(input.inputs));
+    await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+  }
+});
+
 test("explicit cookie headers and structured header fields never enter public snapshots", async () => {
   for (const title of ["Cookie: session_id=private-marker", "Set-Cookie: auth=private-marker",
     "Documentation COOKIE: a=b", "Set Cookie: a = b; Secure; HttpOnly", "Cookie: \"a=b\"",

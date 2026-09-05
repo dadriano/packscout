@@ -7,7 +7,7 @@ import { packSnapshotAssemblyLimits as limits, requireAssembly } from "./pack-sn
 const privateKeys = new Set(["account", "accountid", "authorization", "authorizationcode", "cookie", "setcookie", "codeverifier", "connectionstring", "connectionurl",
   "databaseurl", "databasetarget", "host", "port", "stack", "stacktrace", "instanceid", "exactinstance",
   "userid", "userdata", "rawsourceevidence", "sig", "xamzsignature", "signature"]);
-const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
+const credentialText = /(?:postgres(?:ql)?:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN (?:(?!-----)[^\r\n])*PRIVATE KEY(?: BLOCK)?-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -158,7 +158,61 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     const decoded = decodeLayer(normalized);
     return decoded !== normalized ? inspectUrlKey(decoded, depth + 1, context, colonTarget, cookieTarget, pathSegment) : publicLabel;
   }
+  function inspectConnectionAssignments(text: string, depth: number): void {
+    let through = -1, endpoint = false, catalog = false;
+    // Each match consumes one complete value. Only adjacent semicolon fields
+    // share DSN context; unrelated prose or another line starts a fresh group.
+    const fields = /(?:^|;)[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^=;\r\n]+))[ \t]*=[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^;\r\n]*))[ \t]*/gmu;
+    for (const match of text.matchAll(fields)) {
+      if (match.index !== through) { endpoint = false; catalog = false; }
+      through = match.index + match[0].length;
+      const quoted = match[1] !== undefined || match[2] !== undefined;
+      let name = match[1] ?? match[2] ?? match[3]!, keyDepth = depth + 1;
+      // Encoded field names use the existing component decoder and budget.
+      while (name.includes("%")) {
+        name = chargeUrlText(name, keyDepth++);
+        const decoded = decodeLayer(name);
+        if (decoded === name) break;
+        name = decoded;
+      }
+      const key = name.trim().toLowerCase().replace(/[^a-z0-9]/gu, "");
+      const names = [key];
+      if (!quoted) {
+        // The existing prose scanner permits a prefix such as "Documentation".
+        // At most two trailing words comprise the finite connection field names.
+        const trimmed = name.trim().replace(/\s+/gu, " "), last = trimmed.lastIndexOf(" ");
+        names.push(trimmed.slice(last + 1).toLowerCase().replace(/[^a-z0-9]/gu, ""));
+        if (last >= 0) names.push(trimmed.slice(trimmed.lastIndexOf(" ", last - 1) + 1).toLowerCase().replace(/[^a-z0-9]/gu, ""));
+      }
+      const server = names.includes("server"), source = names.includes("datasource");
+      const database = names.includes("database") || names.includes("initialcatalog");
+      if (!server && !source && !database) continue;
+      chargeUrlText(name, keyDepth);
+      const rawTarget = (match[4] ?? match[5] ?? match[6]!).trim();
+      let target = rawTarget, targetDepth = depth + 1;
+      if (server || source) {
+        // Decode the assignment value only until a public URL is recognizable;
+        // its encoded path/query separators remain the existing URL visitor's job.
+        while (!/^https?:\/\//iu.test(target) && target.includes("%")) {
+          target = chargeUrlText(target, targetDepth++);
+          const decoded = decodeLayer(target);
+          if (decoded === target) break;
+          target = decoded.trim();
+        }
+        const connection = hasPrivateUriTarget(target, 0) || /,[ \t]*[0-9]{1,5}$/u.test(target) || isPrivateUrlHostname(target);
+        const publicSourceUrl = source && /^https?:\/\//iu.test(target);
+        requireAssembly(!connection || publicSourceUrl);
+        if (publicSourceUrl && target !== rawTarget) inspectUrlText(target, targetDepth, false);
+        // Two explicit endpoint/catalog fields establish DSN context without
+        // guessing a hostname grammar for quoted, braced or named instances.
+        endpoint ||= target !== "";
+      }
+      catalog ||= database && target !== "";
+      requireAssembly(!endpoint || !catalog);
+    }
+  }
   function inspectProseAssignments(text: string, depth: number): void {
+    inspectConnectionAssignments(text, depth);
     // Quoted names are explicit fields, including punctuation and whitespace.
     // Consume each complete quoted span and charge its full name without truncation.
     for (const match of text.matchAll(/"([^"]*)"\s*[:=]|'([^']*)'\s*[:=]/gu)) {
