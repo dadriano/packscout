@@ -8,7 +8,19 @@
 **Estimated effort:** 1–2 days for one builder after P01, including deterministic fixtures, boundary validation, and protected-data scanning
 **Status:** done
 
-## Current verified virtual-source repair — 2026-09-05 20:22UTC
+## Current frozen review repair — 2026-09-05 20:52UTC
+
+Final runtime `196f897c230f789de17c4948101600f9c9bcd954` includes `ba363c9a`'s exact session-credential fields and explicit .NET/Ruby/Go/PHP source-frame coverage, plus an equivalent linear source-name classifier. V8/Python/Java/Firefox, virtual sources, original/derived/casefolded/nested/encoded text, public labels and all existing counters remain covered. Bare session/SID/Bearer text is public; the previously public session_id=a control intentionally becomes a protected explicit credential assignment with a retained regression.
+
+Complete focused matrix148/148 passes0skip including8,000-member lifecycle/reuse and real private PostgreSQL (`/tmp/packscout-p03-linear-source-frames-complete-focused-20260905.log`). Pure145/145, services lint/types and ratchet0 pass. Independent134 functional plus14 equivalence checks pass; final helpers are byte-identical across owning boundaries. Approved1,024/2,048/4,096-pair benchmark medians0.234/0.223/0.319ms replace the inherited quadratic filename retry without changing source policy. Guard SHA-256 `205ac07a379e3429ed9674bf367d1c478c84863b54d2476033b1751f59da0f35`.
+
+Fresh full `npm run verify:framework` PASSED exit0 at21:02UTC with both production builds (`/tmp/packscout-p03-linear-source-frames-framework-20260905.log`). All task criteria are accepted;003 is done. The full runner retains28 unrelated opt-in skips, none in the148 owning tests. Publish and address3941966281/3941966283 with fixing-SHA evidence; fresh exact-head CI/review still gates the authorized merge. The preceding full99067 was deliberately stopped143 for boundedness repair and is not a pass. No activation.
+
+## Previous session-parameter and .NET checkpoint — historical
+
+PR114 current-head review5122877581 on `ad3e6cb6` raised3941966281 (`PRRT_kwDOTplTZc6fmq3h`, standalone session_id credential parameter) and3941966283 (`PRRT_kwDOTplTZc6fmq3j`, explicit .NET method/in/source:line frame). Task003's privacy criterion is reopened. Both owning guards are being repaired in their existing files with exact credential-field names and explicit frame syntax, preserving public labels and existing traversal bounds. Root retains Git/full-gate ownership; final-source focused/static/full and independent verification remain. The preceding cad03604 full pass is historical for this new repair, not a waived gate.
+
+## Previous verified virtual-source repair — historical
 
 Runtime `cad036046acc333f2d22fbd680f26b8cb6e3ec64` on main `b96b43691b48170d64bdd541e4a42cb15f096ecf` fixes review `3941890116`. Explicit Python/V8 frame syntax now recognizes angle-bracket virtual sources. Case-insensitive frame matching also protects lowercased final search assembled from separately valid title/alias fields; the actual assembler regression was red before repair. Public book labels, bare virtual-source labels and Error/at/Bearer prose remain accepted. No parser, API, budget or formula change.
 

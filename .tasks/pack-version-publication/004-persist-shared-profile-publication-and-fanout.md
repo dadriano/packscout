@@ -8,7 +8,17 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including crash, isolation, and offline-provider verification
 **Status:** in_progress
 
-## Current final-source verification — 2026-09-05 20:22UTC
+## Current frozen review repair — 2026-09-05 20:52UTC
+
+Final runtime `070f7d410709794e580003f66630fb3698ea962d` includes metadata0548991d, exact session-credential fields, explicit standard source-frame protection and the equivalent linear source classifier. Root complete121/121 tests pass0skip, including real PostgreSQL fan-out/recovery and production Admin bundle (`/tmp/packscout-p04-linear-source-frames-complete-focused-20260905.log`). Pure85/85, retained316/316, affected lint/types and ratchet0 pass. Independent134 functional plus14 equivalence checks pass; helpers are identical and1,024/2,048/4,096-pair medians0.195/0.291/0.328ms confirm removal of the overlapping suffix retry. Guard SHA-256 `b5477bf490b0320ee579515d14020c65cd4d42de7f6ccf884225fbd97561b1ec`.
+
+A fresh final-source full gate is running in `/tmp/packscout-p04-linear-source-frames-framework-20260905.log`, started after P03's heavy services/volume lane. Keep004 in progress and119 draft until certified, then handle metadata review3941816873, fresh CI/review and restack after114. No production action;006 retains ownership of the real lost-refusal status seam.
+
+## Previous session-parameter and .NET checkpoint — historical
+
+Fresh full `npm run verify:framework` PASSED exit0 on `7615575d` with both builds (`/tmp/packscout-p04-virtual-casefold-framework-20260905.log`). PR114's newly confirmed standalone session_id credential and .NET source-frame gaps require the same narrow profile-boundary repair before publication. Keep004 in progress and privacy unchecked; the real761 full pass does not certify forthcoming source changes. Existing exact metadata fix0548991d remains accepted. No production action.
+
+## Previous final-source verification — historical
 
 Final runtime `7615575dea0ec6293592effdb03c591ffb00fdf8` on main `b96b43691b48170d64bdd541e4a42cb15f096ecf` includes metadata fix `0548991d` and matching virtual-source/casefold frame protection. Root's complete six-file matrix passes117/117, zero skips, with real PostgreSQL and production Admin bundle proof (`/tmp/packscout-p04-virtual-casefold-complete-focused-20260905.log`). Pure81/81, retained316/316 probes, contracts/services lint/types and ratchet0 pass. Independent bounded review of the final patch finds no actionable defect. Guard SHA-256 `a2d05ee09934bb07708dc28dd033ee1b24e7f9ae505e3b52d393530e7a59325b`.
 
