@@ -8,6 +8,10 @@
 **Estimated effort:** 2–3 days for one builder after dependencies are complete, including storage, authorization, concurrency, query, cursor, lifecycle, and saved-item verification
 **Status:** done
 
+## Handoff — 2026-09-04
+
+Merged in [PR108](https://github.com/dadriano/packscout/pull/108) as `27c7f7ec894996747095aa97652cd95aaefdc4e3` on 2026-09-04 at 11:54:05 UTC. This replaces the old uncommitted-WIP handoff. The owner's implementation/spec-compliance and verification record below is preserved, including its inherited full-gate failures; the merge does not certify P02 or current main. Do not modify the old P05 worktree under the 002/003 repair. P02 now uses the merged title-plus-alias search helper; P03 now implements that alignment and bounded wire-header handling in PR114 with full local verification. PR109 deployed the index-name correction to pinned shiny-newt-310 and released the matching frontend; temporary deployment keys were revoked and publication stayed disabled. No public routing, processor, or launch is enabled by this status update. Shared context: [_handoff.md](_handoff.md).
+
 ## Start Here
 
 Create sealed fixtures for two packs and their required profiles, include one incomplete candidate, then record the expected storage, active-head, six-journey query, saved-item, lifecycle, and live-pagination results before and after activating only one complete pack.

@@ -2,13 +2,13 @@
 
 ## Start Here
 
-PR109 is released. PR113 advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the direct parent. P02 implementation `b5482a96570f71de46d2c87d849e2b3e11bcce2c` includes the canonical-admission, actual public-store outcome, and large-lifecycle capacity repairs. **118 focused checks and 30 schema checks pass, zero skips**, along with affected lint/types, docs, and the zero-finding standards ratchet. The 13 existing signed Convex public-store tests also passed. Task acceptance is complete; the final capacity change still requires current-head full local/CI certification before merge.
+The user requested `build-from-tasks all` and full coverage of every current frontend data point. This supersedes the earlier pause on later implementation. Heat stays excluded. No publisher, public head, public route, pruning, or launch has been activated.
 
-The predecessor `486c68aa` passed both the full local verifier and [CI33890801868](https://github.com/dadriano/packscout/actions/runs/33890801868). Its four remaining review threads are resolved. Only the latest lifecycle-capacity discussion remains open pending full certification. Its genuine red regression is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`; the corrected 6,000-member pack stores and reloads its complete baseline, seals the lifecycle update, and leaves the next pack pageable. Capture and baseline each retain a 16 MB limit; only their combined JSONB storage allowance grows, to 36 MB including formatting headroom. No public snapshot, batch, or request limit is relaxed.
+All three foundations contain main116/ef3c73e8. Full CI passed for PR114 at35b0ab10, but new review3939079908 reopened structured-JSON credential validation; the repair and direct regressions are under integration. PR119's full gate failed the production bundle because a root-prefix alias misresolved the intentional database/publication-input export; a two-file repair is locally green and analogous structured-JSON validation is being updated. PR120 at083ad937 passed full gate33937038465 and final independent acceptance review; task012 is done and PR120 ready for review, not approved or merged. Tasks003/004 remain in_progress;119 stays draft. P05A's ten partial source files are backed up and paused. No public runtime is activated.
 
-P03 remains local and waits for the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
+P04 and P07A remain independent main siblings. P05B/task013 now owns the measured8-file/2,225-line neutral EV calculation/public-value extraction from011. It depends only on merged main and preserves formulas/current consumers. The two incomplete native economics files remain backed up for011. P05A resumes after003/005/013 merge; every frontend datapoint and complete-pack readiness remain required.
 
-**Progress:** 3/10 tasks complete; 2/9 implementation phases merged; final P02 phase gate pending; 0/1 launch operations complete
+**Progress:** 4/13 tasks acceptance-complete; 3/12 implementation phases merged; P07A published/ready for review; P03/P04 repairs in full CI; P04 draft-only; P05B neutral-core extraction building; P05A partial and paused; P07 atomic switch todo; 0/1 launch operations complete.
 
 ## Context
 
@@ -83,7 +83,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 ### Product data
 
 - Heat scoring, presentation, filters, calculations, and operating controls.
-- Pulls, sales activity, provider health, credentials, source evidence, and exact collectible instances inside a pack snapshot.
+- Pulls, sales activity, private provider-health causes, credentials, raw source evidence, and exact collectible instances inside a pack snapshot. Task011 preserves the existing sanitized public feed-status datapoint under the user's full-parity requirement.
 - User-visible partial packs, estimated contents, or cross-pack transactional releases.
 - Provider-specific behavior inside generic publication or public-read contracts.
 - A second public catalog schema or alternate frontend data contract.
@@ -107,7 +107,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 
 **Activation phase:** P10 launches the exact V1 release certified by P08 and protected by P09.
 
-**Merge order:** P01; P02, P04, and P05 may proceed independently; P03 follows P02; P06 waits for P02–P05; P07 may stack on P05; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09.
+**Merge order:** P01; P02, P04, and P05 independently; P03 follows P02; P05A follows verified P03/P05; P06 waits for P02–P05 and P05A; P07 foundations may proceed from P05 but its switch waits for P05A; P08 waits for P06/P07; P09 waits for P06; P10 follows P08/P09.
 
 **Additional application path:** none. `pack_catalog_v1` is the only application contract and the frontend calls it directly.
 
@@ -120,12 +120,15 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | Phase | Reviewable outcome | Tasks | Requires | Planned PR relationship | Verification | Status |
 |---|---|---|---|---|---|---|
 | P01 | Executable V1 atomicity, identity, lifecycle, cursor, and error contracts | 001 | none | root on default | Two-pack V1 contract isolation | merged |
-| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | building |
-| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | follows PR95 | Complete deterministic assembly | blocked |
-| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | sibling from P01 | Offline-provider fan-out and profile matrix | planned |
+| P02 | Durable provider-local desired state, impact, readiness, and activation intent | 002 | P01 | root on main; PR95 | Provider-local crash and isolation matrix | merged |
+| P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 |61 focused checks pass; current-parent full gate required | building |
+| P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; independent worktree | Offline-provider fan-out and profile matrix | building |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
-| P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05 | root after prerequisites merge | Publication ambiguity and recovery race | planned |
-| P07 | Direct V1 frontend across every catalog journey | 007 | P05 | stacked on P05 | Six-journey browser acceptance | planned |
+| P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | independent main sibling | Exact function/formula/value parity | building |
+| P05A | Preserve every current frontend data point in native V1 | 011 | P03, P05, P05B | root after prerequisites merge | Source-to-snapshot-to-frontend data parity | building |
+| P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05, P05A | root after prerequisites merge | Publication ambiguity and recovery race | planned |
+| P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | independent sibling on main; PR120 | Full gate and independent acceptance review pass | published |
+| P07 | Direct V1 frontend across every catalog journey | 007 | P05, P05A, P07A | atomic switch after full data parity | Full frontend data parity and browser proof | planned |
 | P08 | Bounded monitoring, read-only Admin, alerts, and launch-plan/readiness evaluation | 008 | P06, P07 | root after prerequisites merge | Operational readiness and fault drill | planned |
 | P09 | Root-safe snapshot retention and bounded pruning | 009 | P06 | sibling from P06 | Retention and active-head race | planned |
 | P10 | Exact certified V1 release publicly launched or safely aborted | 010 | P08, P09 | operational; no PR; exact merged commit | First Pack Catalog V1 launch | planned |
@@ -152,10 +155,10 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Size exception:** Boundary review permits approximately 28 authored files and 3,250 authored changed lines after the P05 rebase. The boundary/recovery test modules certify inseparable admission-to-outbox, time-dependent readiness, and crash/expiry invariants while keeping the existing 470-line crash suite within the file-size limit. Separating these regressions from the persistence fixes would leave the transaction boundary uncertified. Runtime scope remains the same dormant provider state machine; no generated files are added. This remains below the 40-file/5,000-line hard stop; remeasure before publication.
 - **Branch:** `codex/pack-version-publication-p02-state`.
 - **Direct base:** `main`; prerequisite https://github.com/dadriano/packscout/pull/96 is merged after a green full CI gate.
-- **Current direct parent:** `8125934bb39338f73501ac1bc9fef8950d462746` (PR113). Backup `codex/p02-before-watchlist113-20260904` retains b71ec45b; old P03 boundary8409143c is preserved.
-- **Implementation:** `b5482a96570f71de46d2c87d849e2b3e11bcce2c`; focused task acceptance passes, full corrected-head phase gate pending.
+- **Verified direct parent:** `8125934bb39338f73501ac1bc9fef8950d462746` (PR113). Backup `codex/p02-before-watchlist113-20260904` retains b71ec45b; old P03 boundary8409143c is preserved.
+- **Implementation:** `b5482a96570f71de46d2c87d849e2b3e11bcce2c`; task acceptance and full corrected-head local/CI gates pass.
 - **Evidence:** 118 focused checks, 30 schema checks, 13 signed public-store tests, affected lint/types/docs, and the zero-finding ratchet pass. Capacity log: `/tmp/packscout-p02-lifecycle-capacity-focused-20260904.log`; signed store log: `/tmp/packscout-p02-public-store-results-convex-20260904.log`.
-- **Merge condition:** final full local/CI gates, current base, and fresh review resolution. Target local log: `/tmp/packscout-p02-lifecycle-capacity-framework-20260904.log`. Predecessor486c68aa passed full local and CI33890801868; that does not certify the capacity change. No gate is weakened; P06 owns transport/worker E2E.
+- **Merged:** `631b9f38badf3233cf470d2108ff3ebdbb988d9f`, 2026-09-04 16:32 UTC, tree-identical to certified bd5f3c64. Full local/CI gates passed; all 35 reviews resolved. P06 owns transport/worker E2E.
 - **Integration handoff:** P06 binds transaction-local input capture and authenticated transport; P04 resumes incomplete impact results and sends shared deliveries in increasing provider sequence. See task 002's spec-compliance notes.
 - **PR:** https://github.com/dadriano/packscout/pull/95
 
@@ -164,22 +167,24 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **After merge:** A pure assembler produces or rejects one complete snapshot deterministically; it does not publish.
 - **Review budget:** one task; 1–2 days; target at most 18 authored files and 2,000 authored lines.
 - **Rollback:** Revert the unused assembler and fixtures.
-- **Size exception:** none.
-- **Branch:** `codex/pack-version-publication-p03-assembler`, local only.
-- **Parent boundary:** `8409143c8cca71e63602e097adf3e8ba45d86a12`; restack after PR95 merges. It consumes P02's captured-input contract, without a database dependency at runtime.
-- **Verification:** historical only; P05 title/alias search and bounded wire-header alignment plus full current-parent certification remain required.
-- **PR:** not opened; publication is authorized, merge is not.
+- **Measured runtime size:**10 authored source/test files /1,044 changed lines, plus15 requested canonical task/handoff records. The phase-specific file target is exceeded by records only; remeasure the final metadata-inclusive direct diff before readiness. No generated churn.
+- **Branch:** `codex/pack-version-publication-p03-assembler`.
+- **Current parent:** main `ef3c73e8bb61ade6907dc2abd67751523ae026bd`. Historical full-gate evidence remains in task003 and the handoff.
+- **Current implementation:** `efa1935a` adds bounded JSON URL inspection for review3939079908 after29de9847. Parent remains mainef3c73e8; backup `codex/p03-before-main116-restack-20260904` retainsf4ba51b9.
+- **Current verification:**66 focused checks, including maximum capacity and private PostgreSQL handoff, services lint/types and ratchet pass. Log: `/tmp/packscout-p03-json-full-focused-20260905.log`. Full CI33937669871 passed before the latest JSON repair; a new full gate is required. Runtime11files/1,292lines plus15 task records; file-target overage remains metadata-only, one pure assembler boundary below40files/5,000lines.
+- **PR:** https://github.com/dadriano/packscout/pull/114 — open, non-draft, not merged. Current repairs are published; inspect live CI/review state. Merge needs fresh approval.
 
 #### P04 — Shared fan-out and profiles
 
 - **After merge:** Central changes and profile intents are durable per provider, including while a provider is unavailable; workers remain disabled.
 - **Review budget:** one task; 1.5–2 days; target at most 20 authored files and 2,200 authored lines.
 - **Rollback:** Stop disabled workers and retain unclaimed durable evidence.
-- **Size exception:** none.
-- **Branch:** assigned by builder.
-- **Verified parent:** not recorded.
-- **Verified implementation:** not recorded.
-- **PR:** not opened.
+- **Boundary review:** 35 authored files / 2,364 changed lines before final evidence: 20 runtime/test/migration files / 1,737 lines and 15 canonical task/handoff records / 627 lines. The file target is exceeded only by task tracking; the transaction, immutability migration, profile assembly, and crash/isolation tests are one dormant persistence boundary. Splitting those proofs from the state they certify is unsafe. Keep this boundary below the 40-file / 5,000-line hard stop; no generated churn.
+- **Branch:** `codex/pack-version-publication-p04-profiles`.
+- **Current direct parent:** main `ef3c73e8bb61ade6907dc2abd67751523ae026bd`; corrected runtime3364c501/checkpoint397f88f7. All eight restack patches are identical; backup `codex/p04-before-main116-restack-20260904` retainsbd0d26cc.18 focused credential/profile checks and affected lint/types/ratchet/docs pass. Draft PR119 awaits full current-parent CI. Current measured runtime:21files/1,943 changed lines; phase including15 task records before this delivery update:36files/2,650 lines, within the documented metadata size exception and hard stop.
+- **Earlier implementation evidence:** a2db6063 foundation and shared-guard repairs passed focused/static checks. Latest main70bbae98 anchor passed32 tests, zero skips, all affected lint/types and ratchet/docs. Current-main full CI remains required.
+- **Current repair:** `0a447a1f` fixes the public-subpath production build failure from full CI33937244332 and JSON profile URL validation.22 combined focused checks, affected lint/types/boundaries/ratchet and independent bounded review pass. Two existing admin build/test files join the same integration boundary; no dependency, formula or runtime activation change. Runtime23files/2,025lines plus15 task records remains below40files/5,000lines; actual final diff is remeasured before readiness.
+- **PR:** https://github.com/dadriano/packscout/pull/119 — draft, pending repaired-runtime full CI; phase remains building.
 
 #### P05 — Public store and V1 reads
 
@@ -194,7 +199,29 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **PR:** https://github.com/dadriano/packscout/pull/108
 - **Merged:** `27c7f7ec894996747095aa97652cd95aaefdc4e3` on 2026-09-04 at 11:54:05 UTC. The P05 owner's task record retains its focused evidence and inherited full-gate failures; the merge is not certification of P02 or current main.
 
+#### P05A — Complete frontend data contract
+
+- **User requirement:** Preserve all data points currently used by the frontend, confirmed on 2026-09-04.
+- **Owned task:** 011; supplements the original reduced contract without renumbering existing tasks.
+- **After merge:** Native V1 snapshots and reads preserve all current public data; candidate frontend and recurring publication remain unexposed.
+- **Review budget:** One data-completeness thesis; measure against 25 files/2,500 lines, split at a safe boundary if necessary; no size exception recorded.
+- **Branch:** `codex/pack-version-publication-p05a-frontend-data`; saved parent44e2f193. Ten partial source files /2,337 changed lines are preserved; native economics remains incomplete. Paused for new-parent certification and a measured neutral-core boundary review. No PR.
+- **Verification:** Field inventory, source-to-snapshot parity, per-pack isolation, lifecycle/rollback, every public journey and saved identity, and full framework gate.
+
+#### P05B — Neutral existing EV core
+
+- **Owns:**013, split from011 at the measured8-file/2,225-line domain boundary; two incomplete native economics files stay with011.
+- **After merge:** Existing consumers and native replay share exact calculator/confidence functions and public values; no source capture, API, active head, writer or route changes.
+- **Direct base:** mainef3c73e8, independently of114/119/120;001/005 are merged.
+- **Branch/worktree:** `codex/pack-version-publication-p05b-ev-core` / `.worktrees/pack-version-publication-p05b-ev-core`; reuse the idle P05A directory/dependencies only after complete immutable preservation.
+- **Review budget:**8 source/test files/2,225 measured changed lines, mostly exact moves. The16 requested task records may take the total past2,500lines; target overage must be metadata-only and below40files/5,000lines. Splitting calculation from parity proofs or leaving duplicate formulas is unsafe. Remeasure before publish; no generated/lockfile churn intended.
+- **Verification:**013 exact identity/replay, full predecessor regressions, affected lint/types/boundaries/ratchet and framework gate.011/006/007 retain data/runtime/browser E2E.
+- **Rollback:** Revert the pure extraction; current application behavior and stored data remain unchanged.
+- **Implementation/PR:** not yet committed/opened.
+
 #### P06 — Publisher and recovery
+
+P05B/task013 is a separate prerequisite of P05A, not extra publisher scope.
 
 - **After merge:** Disabled workers can be exercised end to end, and protected commands safely recover one pack through the same fences and receipts.
 - **Review budget:** one task; 2–3 days; target at most 25 authored files and 2,500 authored lines.
@@ -204,6 +231,16 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Verified parent:** not recorded.
 - **Verified implementation:** not recorded.
 - **PR:** not opened.
+
+#### P07A — Native frontend foundation
+
+- **Owns:** task012, split from007 using the measured14-file/1,067-line source-only diff. No visible catalog route switches here.
+- **Branch:** `codex/pack-version-publication-p07a-frontend-foundation`; worktree remains `.worktrees/pack-version-publication-p07-frontend`.
+- **Verified direct base:** mainef3c73e8; runtime990bafe4/certified head083ad937. Full CI33937038465 PASSED; final independent acceptance review found no actionable issues. Delivery-only records preserve this runtime/parent evidence with the documentation gate rerun. All six restack patches are identical; backup `codex/p07a-pre-main116-with-context-20260904` retains62650716. Prior frontend evidence:584/584 tests, zero skips/quarantines, lint/types/ratchet/docs. Numerical semantics and all evidence datapoints are preserved.
+- **Review promise:** exactly six native dormant loaders plus current native saved-state reconciliation. No alternate catalog journey, DTO adapter, or production flag.
+- **Boundary review:** 29 authored files / approximately 1,726 changed lines, including 14 frontend files / 1,099 lines and 15 canonical task/handoff records / 627 lines. The file target is exceeded only by task tracking. The measured frontend foundation is already split from the atomic visible switch; further fragmentation would separate saved-state behavior from its presentation/security tests. No generated churn; remeasure after verification.
+- **PR:** https://github.com/dadriano/packscout/pull/120 — ready for review; task012 done, phase published. No approval, merge or deployment claimed. Measured pre-records diff:29files/1,803lines; runtime14files/1,100lines, no generated churn.
+- **Later owner:**007 atomically switches every visible consumer after011 full data support; no temporary mixed list/detail snapshots.
 
 #### P07 — V1 frontend
 
@@ -257,54 +294,47 @@ Provider databases remain isolated and authoritative for provider-owned history.
 |---|---|---|---|---|---|---|
 | 001 | Establish the Pack Catalog V1 contract | P01 | medium | 1–2 days | done | none |
 | 002 | Persist provider-local pack publication state | P02 | medium | 2–3 days | done | 001 |
-| 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | blocked | 002 |
-| 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | todo | 001 |
+| 003 | Assemble complete deterministic pack snapshots | P03 | medium | 1–2 days | in_progress | 002 |
+| 004 | Persist shared profile publication and fan-out | P04 | medium | 1.5–2 days | in_progress | 001 |
 | 005 | Store and serve Pack Catalog V1 | P05 | large | 2–3 days | done | 001 |
 
 ### Integration and launch tasks
 
 | ID | Task | Phase | Scope | Estimate | Status | Depends on |
 |---|---|---|---|---|---|---|
-| 006 | Publish and recover pack state | P06 | large | 2–3 days | todo | 002, 003, 004, 005 |
-| 007 | Render Pack Catalog V1 in the frontend | P07 | medium | 1–2 days | todo | 005 |
+| 011 | Preserve every frontend data point in V1 | P05A | large | scope from field inventory | in_progress | 003, 005, 013 |
+| 013 | Share neutral existing EV calculation core | P05B | medium | measured extraction | in_progress | 001, 005 |
+| 012 | Native frontend loaders and authoritative saves | P07A | medium | scoped foundation | done | 005 |
+| 006 | Publish and recover pack state | P06 | large | 2–3 days | todo | 002, 003, 004, 005, 011 |
+| 007 | Render Pack Catalog V1 in the frontend | P07 | medium | field-driven scope | todo | 005, 011, 012 |
 | 008 | Operate and observe pack publication | P08 | medium | 1.5–2 days | todo | 006, 007 |
 | 009 | Retain and prune pack and profile snapshots | P09 | medium | 1 day | todo | 006 |
 | 010 | Launch and certify Pack Catalog V1 | P10 | medium | 4–8 hours | todo | 008, 009 |
 
 Total estimated builder/operator effort is 14–21 working days if serialized. P02–P05 and later P07/P09 reduce elapsed time when staffed in parallel.
 
-## Build Order
+## Build Order and PR Topology
 
-1. Merge P01 and its executable V1 contract fixtures.
-2. Build P02, P04, and P05 independently from P01; P03 follows P02's captured-input contract.
-3. Build P06 after P02–P05 merge; build P07 as soon as P05 is reviewable.
-4. Build P08 after P06/P07 and P09 after P06.
-5. Execute P10 only against the exact commit certified by P08 and protected by P09.
+1. Keep merged P01/PR88, P02/PR95, and P05/PR108 accepted; do not rebuild them.
+2. Recertify P03/PR114 on mainef3c73e8 and maintain its review watch. P05A retains exact old parent44e2f193 and ten partial source files backed up at stashcd88d5c6; preserve/restack only its owned work after the parent is verified.
+3. Publish independent P04/task004 and P07A/task012 foundations after their own exact-parent gates.
+4. Complete the P05A/task011 native data extension in measured review boundaries. P06 requires P02–P05 plus011; the atomic P07 switch requires005,011,012.
+5. Build P08 after P06/P07 and P09 after P06. P10 operates only on the exact certified merged release.
 
-## Parallel Groups
-
-| Group | Ready when | Tasks |
+| Phase | Direct prerequisite | Current relationship |
 |---|---|---|
-| A | immediately | 001 |
-| B | 001 complete | 002, 004, 005 |
-| B2 | 002 complete and merged for this resume | 003 |
-| C | 002–005 complete for 006; 005 complete for 007 | 006, 007 |
-| D | 006/007 complete for 008; 006 complete for 009 | 008, 009 |
-| E | 008 and 009 complete | 010 |
+| P03 | merged P02 | PR114 on main |
+| P04 | merged P01 | independent main sibling |
+| P05A | verified P03 and merged P05 | saved parent44e2f193; ten partial files paused pending parent/boundary |
+| P07A | merged P05 | independent main sibling; dormant native loaders and current saves |
+| P06 | P02–P05 and P05A | integration after prerequisite merges |
+| P07 | P05, P05A, P07A | atomic visible consumer switch, not operation-by-operation coexistence |
+| P08 | P06, P07 | operations/readiness |
+| P09 | P06 | retention sibling |
+| P10 | P08, P09 | exact-release operation, no implementation PR |
 
-## PR Topology
-
-```text
-P01 contract
- ├── P02 provider-local state ─┐
- │     └── P03 assembler ──────┤
- ├── P04 shared profiles ──────┼── P06 publisher/recovery ──┬── P08 operations/readiness ─┐
- └── P05 public store/API ─────┘                             └── P09 retention ────────────┼── P10 launch
-            └── P07 frontend ────────────────────────────────────────> P08 ────────────────┘
-```
-
-P02, P04, and P05 may merge independently after P01; P03 follows P02. P06 branches from updated default after all four merge. P07 may stack on P05 and rebase after P05 merges. P08 waits for P06/P07; P09 may proceed independently after P06. P10 is an operation, not an implementation PR.
+Cap dependent open stack depth at three; ordinary prerequisite review waiting is not task completion or approval. Do not merge a child into an open parent branch. No build verification by itself changes production routing or publication authority.
 
 ## Next Action
 
-Require current-head CI and fresh review resolution, then merge PR95 under the existing approval. Restack/certify/publish P03 separately from exact old P02 boundary `8409143c`, adopting P05 title-plus-alias search and the bounded wire header without changing canonical snapshot identity. Do not merge P03 or activate later phases. The earlier stop-agents instruction remains in force.
+Complete exact-mainef3c73e8 remote full gates for PR114/119/120 and keep119/120 draft-only until passing. Preserve P05A's partial extraction, decide its measured safe review boundary, and resume only from a verified prerequisite. Repeated host disk pressure makes isolated full CI the reliable gate. Publish each verified foundation separately and resume011 only from the repaired verified P03 head. Preserve all frontend data and whole-pack price/EV coherence. No merge, production publication, route cutover, prune, or launch has occurred in this workflow; the separate PR115 deployment task owns its live operations.

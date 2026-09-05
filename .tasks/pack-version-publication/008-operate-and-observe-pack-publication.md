@@ -8,6 +8,12 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including timing, alert, authorization, Admin, and fault-drill verification
 **Status:** todo
 
+## Handoff — 2026-09-04
+
+Not started; requires P06 and P07. Status and alerts are per pack/profile, not a provider-wide publication barrier. Admin remains read-only and default-off; do not add retry/hold/publish controls there. Prove pending-time alerts and exact-commit launch readiness through the normal worker paths. This task does not authorize production seeding or launch.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
 
 Drive published, waiting, retry-scheduled, blocked, superseded, held, and provider-unavailable fixtures through the normal planner and publisher, advance the oldest pending item beyond 30 minutes, and record the expected status, alert, Admin, and readiness evidence.

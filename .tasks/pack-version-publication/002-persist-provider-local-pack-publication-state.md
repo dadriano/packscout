@@ -10,11 +10,9 @@
 
 ## Current checkpoint — 2026-09-04
 
-PR109 is released. PR113 advanced main to `8125934bb39338f73501ac1bc9fef8950d462746`, the direct parent. P02 implementation `b5482a96570f71de46d2c87d849e2b3e11bcce2c` includes the canonical-admission, actual public-store outcome, and large-lifecycle capacity repairs. **118 focused checks and 30 schema checks pass, zero skips**, along with affected lint/types, docs, and the zero-finding standards ratchet. The 13 existing signed Convex public-store tests also passed. Task acceptance is complete; the final capacity change still requires current-head full local/CI certification before merge.
+PR95 merged at 16:32 UTC as `631b9f38badf3233cf470d2108ff3ebdbb988d9f`, tree-identical to certified `bd5f3c64`. Full local framework verification and [CI33893274713](https://github.com/dadriano/packscout/actions/runs/33893274713) passed; all 35 review findings are resolved. The final P02 runtime is `b5482a96`: 118 focused checks, 30 schema checks, affected static gates, and 13 signed store checks pass. Publication remains dormant.
 
-The predecessor `486c68aa` passed both the full local verifier and [CI33890801868](https://github.com/dadriano/packscout/actions/runs/33890801868). Its four remaining review threads are resolved. Only the latest lifecycle-capacity discussion remains open pending full certification. Its genuine red regression is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`; the corrected 6,000-member pack stores and reloads its complete baseline, seals the lifecycle update, and leaves the next pack pageable. Capture and baseline each retain a 16 MB limit; only their combined JSONB storage allowance grows, to 36 MB including formatting headroom. No public snapshot, batch, or request limit is relaxed.
-
-P03 remains local and waits for the actual PR95 merge. Restack from exact old P02 boundary `8409143c8cca71e63602e097adf3e8ba45d86a12`, align/certify/publish separately, and do not merge it. No publisher, public head, PR113 deployment, or later phase is activated here.
+P03 is now restacked on that actual merged parent. Original tip `cc0963f0` and all task history remain at `codex/p03-before-capacity-restack-20260904`. Only the three implementation-bearing commits were replayed (7c7f4d60, 429e2f63, d21db921); obsolete status-only history was omitted and the latest task documents restored. Assembler runtime was unchanged by the rebase, and all Prisma clients were regenerated. P03 alignment and full local certification are complete; it is published in [PR114](https://github.com/dadriano/packscout/pull/114), with current CI pending; **do not merge it** or start later phases.
 
 ## Start Here
 
@@ -136,7 +134,7 @@ Named scenario: **Provider-local planning and persistence crash matrix** — dri
 
 ### Current delivery status
 
-Implementation `b5482a96` on parent `8125934b` passes 118 focused checks, 30 schema checks, and affected static gates. Predecessor486c68aa passed full local and CI; its 34 reviewed findings are resolved. The capacity finding is repaired and awaits final full certification. PR95 is not merged; P06 owns external-write E2E.
+PR95 merged at 16:32 UTC as `631b9f38badf3233cf470d2108ff3ebdbb988d9f`, tree-identical to certified `bd5f3c64`. Full local framework verification and [CI33893274713](https://github.com/dadriano/packscout/actions/runs/33893274713) passed; all 35 review findings are resolved. The final P02 runtime is `b5482a96`: 118 focused checks, 30 schema checks, affected static gates, and 13 signed store checks pass. Publication remains dormant.
 
 ### Implemented invariants and review corrections
 
@@ -181,7 +179,7 @@ Related guidance reviewed: feature `tech-001` through `tech-005`, with P02 imple
 
 Current implementation `b5482a96`: **118 focused checks pass, zero skips**, `/tmp/packscout-p02-lifecycle-capacity-focused-20260904.log`. All 30 schema checks, affected contracts/database/services lint and types, docs, and the zero-finding ratchet pass. The 13 existing signed Convex public-store tests passed on the unchanged public store (`/tmp/packscout-p02-public-store-results-convex-20260904.log`), without claiming P06's combined transport E2E.
 
-The capacity red log is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`. The new PostgreSQL capacity test covers independently bounded full capture and baseline, combined JSONB storage above the old 18 MB ceiling, actual page bytes, immutable reload, lifecycle seal, and subsequent independent-pack progress. Full current-head certification targets `/tmp/packscout-p02-lifecycle-capacity-framework-20260904.log`. Predecessor486c68aa passed full local and CI33890801868; earlier interrupted/superseded runs are not current passes. Local TSX cache is disabled and Vitest uses two workers with owned private PostgreSQL; no gate or timeout is weakened.
+The capacity red log is `/tmp/packscout-p02-lifecycle-capacity-red-direct-20260904.log`. The new PostgreSQL capacity test covers independently bounded full capture and baseline, combined JSONB storage above the old 18 MB ceiling, actual page bytes, immutable reload, lifecycle seal, and subsequent independent-pack progress. Full current-head certification PASSED at `/tmp/packscout-p02-lifecycle-capacity-framework-20260904.log`, followed by successful CI33893274713 and the tree-identical PR95 merge. Predecessor486c68aa passed full local and CI33890801868; earlier interrupted/superseded runs are not current passes. Local TSX cache is disabled and Vitest uses two workers with owned private PostgreSQL; no gate or timeout is weakened.
 
 There is no browser acceptance surface in this dormant phase. No manual environment deployment or publication activation is performed; P06 owns the later runtime integration.
 
@@ -194,3 +192,5 @@ Authenticated remote receipts retain their exact completion timestamp with a doc
 Current cumulative focused evidence: **108 passed, zero skips**, `/tmp/packscout-p02-discovery-skew-focused-20260904.log`; red reproduction `/tmp/packscout-p02-operation-discovery-skew-red-confirmed-20260904.log`. Contracts/database/services lint and typechecks pass. The initial skew fixture attempted to modify immutable operation creation time; it was corrected to read the stored timestamp without altering evidence before recording the genuine red reproduction. The current-parent full local certification above supersedes this earlier focused checkpoint. This is not permission to merge P03 or activate publication.
 
 Discussion `3930060751` also has direct admission regression cases for captured EV pinned before changes to price, valid total-preserving odds, valuation amount, method, or policy. The injected evaluator falsely reports ready with newly recomputed digests; the existing independent admission decision rejects every case without request/head/progress writes. The focused authority suite passes all 7 tests, zero skips (`/tmp/packscout-p02-stale-ev-admission-20260904.log`). This expands evidence for the existing fix; no runtime change or new EV calculation was introduced. These cases are included in the current-parent passing cumulative and full local certification.
+
+Canonical release, environment, scope, and next-step handoff: [_handoff.md](_handoff.md).

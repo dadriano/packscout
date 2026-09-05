@@ -8,6 +8,12 @@
 **Estimated effort:** 4–8 hours for the authorized release team after dependencies are complete, including pause, readiness checks, launch, smoke testing, and evidence capture
 **Status:** todo
 
+## Handoff — 2026-09-04
+
+Not started and not authorized to execute from this handoff. Requires completed P08/P09 and an exact certified merged release. Ingestion may pause, but users must continue reading stable complete packs without a visible cutover. No V1 processor, launch, recovery command, production mutation, or pruning has been activated by this workflow. Preserve the approved infrastructure-only rollback boundary; add no compatibility adapter or second catalog version.
+
+Shared resume instructions: [_handoff.md](_handoff.md). This is a status/context update, not authorization to begin a later phase.
+
 ## Start Here
 
 Pin the exact merged commit, production configuration, desired-state cutoff, current disabled `PackCatalogWorkerGateV1` generation, active admin holding `pack_catalog:launch`, and trusted deployment identity, then verify the exact `PackCatalogLaunchPlanV1` is `approved_to_seed` and the `PackProfileSnapshotRetentionPolicyV1` digest is current.
