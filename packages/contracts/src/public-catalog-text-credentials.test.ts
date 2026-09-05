@@ -49,3 +49,37 @@ test("embedded URL traversal shares bounds while long non-URI names remain valid
   for (let depth = 0; depth < 8; depth++) target = `https://example.com/?caption=${encodeURIComponent(`Visit ${target}`)}`;
   assert.throws(() => assertPublicCatalogText(target), TypeError);
 });
+
+test("JSON URL payloads inspect escaped protected keys and every duplicate-key value", () => {
+  for (const payload of ['{"access_token":"private-marker"}', '[{"authorization_code":"private-marker"}]',
+    '{"\\u0061ccess_token":"private-marker"}', '{"%2561ccess_token":"private-marker"}',
+    '{"caption":{"sig":"private-marker"},"caption":"safe"}',
+    JSON.stringify({ next: "https://example.com/?sig=private-marker" }),
+    JSON.stringify({ next: "authorization code=private-marker" })]) {
+    for (const prefix of ["?data=", "#data=", "#"]) {
+      const target = `https://example.com/${prefix}${encodeURIComponent(payload)}`;
+      assert.throws(() => assertPublicCatalogUrl(target), TypeError);
+      assert.throws(() => assertPublicCatalogText(`Details ${target}`), TypeError);
+    }
+  }
+});
+
+test("structured URL payloads fail closed when malformed or beyond the shared budget", () => {
+  for (const payload of ['{"caption":"safe",}', '{"caption":"unterminated}',
+    '{"caption":"\\u00GG"}', "[".repeat(8) + "null" + "]".repeat(8),
+    JSON.stringify(Array.from({ length: 1_001 }, () => 0))]) {
+    assert.throws(() => assertPublicCatalogUrl(`https://example.com/?data=${encodeURIComponent(payload)}`), TypeError);
+  }
+});
+
+test("benign structured URL payloads preserve JSON captions, separators and scalar types", () => {
+  for (const payload of [JSON.stringify({ caption: "Fish & Actor", label: "A+B", rate: "100%" }),
+    JSON.stringify([1.5, true, false, null, "public@example.com"]),
+    '{"caption":"first","caption":"second"}']) {
+    for (const prefix of ["?data=", "#data=", "#"]) {
+      const target = `https://example.com/${prefix}${encodeURIComponent(payload)}`;
+      assert.doesNotThrow(() => assertPublicCatalogUrl(target));
+      assert.doesNotThrow(() => assertPublicCatalogText(`Details ${target}`));
+    }
+  }
+});

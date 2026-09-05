@@ -37,12 +37,8 @@ export async function buildVercelAdminServer(
     format: "esm",
     target: "node22",
     external: ["@prisma/client", "argon2", "express", "pg"],
-    alias: Object.fromEntries(["contracts", "database", "services"].map(
-      (name) => [
-        `@packscout/${name}`,
-        path.join(repositoryRoot, "packages", name, "src/index.ts"),
-      ],
-    )),
+    // Resolve workspace roots and public subpaths through their package exports.
+    // A root-to-file alias also rewrites subpaths into invalid index.ts/<subpath> paths.
     plugins: [{
       name: "generated-prisma-clients",
       setup(builder) {

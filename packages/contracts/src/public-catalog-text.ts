@@ -57,8 +57,40 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     const decoded = decodeLayer(normalized);
     if (decoded !== normalized) inspectKey(decoded, depth + 1);
   };
+  const isStructuredText = (text: string) => /^[{["]/u.test(text.trimStart());
+  const inspectStructuredText = (text: string, depth: number): void => {
+    // Inspect tokens before parsing the document so overwritten duplicate keys
+    // cannot erase protected evidence. Use the same bounds as URL/form traversal.
+    let nesting = 0, index = 0;
+    while (index < text.length) {
+      const start = index, character = text[index++]!;
+      if (/\s|[,:]/u.test(character)) continue;
+      if (character === "{" || character === "[") {
+        nesting += 1; charge(character, depth + nesting); continue;
+      }
+      if (character === "}" || character === "]") {
+        if (nesting <= 0) reject(); nesting -= 1; continue;
+      }
+      if (character === '"') {
+        while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
+        if (index >= text.length) reject(); index += 1;
+        let decoded: string;
+        try { decoded = JSON.parse(text.slice(start, index)) as string; } catch { return reject(); }
+        let next = index;
+        while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+        if (text[next] === ":") inspectKey(decoded, depth + nesting + 1);
+        else visit(decoded, depth + nesting + 1);
+      } else {
+        while (index < text.length && !/[\s{}[\]",:]/u.test(text[index]!)) index += 1;
+        charge(text.slice(start, index), depth + nesting + 1);
+      }
+    }
+    if (nesting !== 0) reject();
+    try { JSON.parse(text); } catch { reject(); }
+  };
   const inspectFragment = (text: string, depth: number): void => {
     charge(text, depth);
+    if (isStructuredText(text)) { inspectStructuredText(text, depth); return; }
     const isTarget = (value: string) => {
       const candidate = urlRecognition(value), query = candidate.indexOf("?"), assignment = candidate.indexOf("=");
       return /^[a-z][a-z0-9+.-]*:|^[/?]|^\.{1,2}\//iu.test(candidate) ||
@@ -76,6 +108,7 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   const visit = (text: string, depth: number, required = false): void => {
     charge(text, depth);
+    if (!required && isStructuredText(text)) { inspectStructuredText(text, depth); return; }
     const candidate = urlRecognition(text);
     // Nested prose can contain another URL. Share this traversal's budget rather
     // than recursively invoking an exported validator with fresh counters.

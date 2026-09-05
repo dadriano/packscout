@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,7 +8,7 @@ import { buildVercelAdminServer } from "./build.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
-test("the production ESM bundle serves the SPA and loads both Prisma native engines", async () => {
+test("the production ESM bundle resolves public workspace entries, serves the SPA and loads both Prisma native engines", async () => {
   const temporaryRoot = path.join(repositoryRoot, ".tmp");
   await mkdir(temporaryRoot, { recursive: true });
   const fixtureRoot = await mkdtemp(path.join(temporaryRoot, "admin-vercel-"));
@@ -17,6 +17,9 @@ test("the production ESM bundle serves the SPA and loads both Prisma native engi
     await mkdir(publicDirectory);
     await writeFile(path.join(publicDirectory, "index.html"), "<main>Admin smoke</main>");
     const bundle = await buildVercelAdminServer(path.join(fixtureRoot, "dist"));
+    assert.doesNotMatch(await readFile(bundle, "utf8"),
+      /\b(?:from\s*|import\s*\(|require\s*\()\s*["']@packscout\//u,
+      "Public workspace roots and subpaths must be bundled, not deferred to the deployment runtime.");
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `
       import assert from "node:assert/strict";
       import { once } from "node:events";
