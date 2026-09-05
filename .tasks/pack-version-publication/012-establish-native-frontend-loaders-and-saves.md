@@ -9,6 +9,8 @@
 
 ## Current auth-refresh review — 2026-09-05 15:02UTC
 
+Repair is committed/replayed as `3d134eb0a17cd6cfc6aff4825b68f559d32e7942` on merged121 parent `0ea6145470a276807a0e9590d759d9fad85e9226`. All four phase source patches replay identically; backup `codex/p07a-before-main121-20260905` retains3b8d2e9e. Loading preserves coordinator generation and disables new UI actions, while terminal auth, identity-key remount and unmount still dispose. Root654/654 complete frontend tests pass, zero skips (`/tmp/packscout-p07a-refresh-main121-frontend-20260905.log`); agent112 focused/64 actual-component lifecycle tests, lint/types/boundaries/ratchet0 pass. Independent review found no actionable issue. Full local verifier is running at this runtime (`/tmp/packscout-p07a-refresh-main121-framework-20260905.log`); fresh CI and fixing-SHA reply remain before acceptance. No frontend tree change during restack; no dependency, copy, layout or activation change.
+
 PR120 P2comment3940423155 invalidates pending-write continuity: same-user auth refresh maps status to loading, causing signedIn-dependent cleanup to dispose the coordinator and discard an already-issued mutation's success/refusal. Agent p07_auth_refresh owns the existing provider/lifecycle-test repair; preserve layout-effect activation, duplicate suppression, authoritative reconciliation, true sign-out/identity/unmount isolation and existing UI/copy. Full current-head CI33962882050 passed e08198a7, but cannot certify this new repair. User has approved merge after checks/reviews clear; no further merge question is needed for120.
 
 ## Current certification — 2026-09-05 11:00UTC

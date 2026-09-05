@@ -8,6 +8,12 @@
 **Estimated effort:** 1.5–2 days for one builder after dependencies are complete, including timing, alert, authorization, Admin, and fault-drill verification
 **Status:** todo
 
+## Requested operator handoff — 2026-09-05
+
+The user explicitly requests Admin/monitoring screenshots and a guide to managing the system. Deliver `docs/pack-catalog-v1-operations.md` with verified routes/commands and an exact-commit screenshot/evidence index. Cover per-pack/profile status and reason interpretation,15-minute health/30-minute alert behavior, delayed/blocked/held/provider-unavailable triage, permissions, normal operating checks, P06 protected preview/apply recovery and gate commands, P09 safe retention, and P10 launch/abort/rollback boundaries. Explain that Admin is read-only and cannot execute publication or alert transitions. Do not present old provider-manifest/Heat runbooks as V1 instructions or document commands before implementation.
+
+Capture actual wide/narrow overview, filtered/paged list, entity detail, delayed alert and unavailable/denied/empty/recovery states against the certified phase build, with keyboard/focus and sanitized organization-scope evidence. Existing signup-review screenshots and design comps are not V1 monitoring proof. P10 adds exact production launch evidence to this guide/index; screenshots alone do not certify timing, isolation or authority receipts.
+
 ## Handoff — 2026-09-04
 
 Not started; requires P06 and P07. Status and alerts are per pack/profile, not a provider-wide publication barrier. Admin remains read-only and default-off; do not add retry/hold/publish controls there. Prove pending-time alerts and exact-commit launch readiness through the normal worker paths. This task does not authorize production seeding or launch.
@@ -111,6 +117,8 @@ Buyer-facing catalog behavior does not change when this task merges. Once author
 - [ ] P10 receives `approved_to_seed` only from a complete plan and receives a digest-bound post-seed `ready` record only when every included head matches, the full reachable-head set contains no excluded or undeclared identity, and every launch criterion passes; incomplete, extra, or conflicting evidence returns `blocked`.
 
 ### Status query contract
+
+- [ ] The verified V1 operations guide and commit-bound Admin/monitoring screenshots cover normal checks, alerts, protected recovery, retention and launch boundaries without invented commands or browser mutation controls.
 
 - [ ] Overview, list, and detail calls use the exact named inputs, require `providers:view`, enforce organization scope, and return only bounded DTOs or declared errors.
 - [ ] Status pagination follows the declared severity, age, and stable-identity order, and a cursor fails with `CURSOR_EXPIRED` after expiry, tampering, or any bound query change.
