@@ -18,6 +18,41 @@ function hasPrivateUriTarget(value: string, start: number): boolean {
   }
   return false;
 }
+function isPrivateUrlHostname(value: string): boolean {
+  // URL.hostname has canonicalized numeric IPv4 spellings and IPv6. Classify
+  // only literal addresses/localhost; never resolve or infer private DNS names.
+  const host = value.toLowerCase().replace(/\.$/u, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const privateIpv4 = (first: number, second: number) => first === 0 || first === 10 || first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) || (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
+  if (/^\d+\.\d+\.\d+\.\d+$/u.test(host)) {
+    const octets = host.split(".").map(Number); return privateIpv4(octets[0]!, octets[1]!);
+  }
+  if (!host.startsWith("[")) return false;
+  const halves = host.slice(1, -1).split("::");
+  const words = (part: string) => part === "" ? [] : part.split(":").map(word => Number.parseInt(word, 16));
+  const leading = words(halves[0]!), trailing = words(halves[1] ?? "");
+  const address = halves.length === 1 ? leading : [...leading, ...Array<number>(8 - leading.length - trailing.length).fill(0), ...trailing];
+  if (address.slice(0, 6).every(word => word === 0) && address[6] === 0 && address[7]! <= 1) return true;
+  if (address.slice(0, 5).every(word => word === 0) && address[5] === 0xffff) {
+    return privateIpv4(address[6]! >> 8, address[6]! & 255);
+  }
+  return (address[0]! & 0xfe00) === 0xfc00 || (address[0]! & 0xffc0) === 0xfe80;
+}
+function originalUrlPath(candidate: string): string {
+  // Keep path evidence erased by WHATWG dot-segment resolution. The candidate
+  // normalizes URL controls/slashes only, not encoded component separators.
+  const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(candidate);
+  let start = scheme?.[0].length ?? 0;
+  if (scheme || candidate.startsWith("//")) {
+    while (candidate[start] === "/") start += 1;
+    while (start < candidate.length && !/[/?#]/u.test(candidate[start]!)) start += 1;
+  }
+  let end = start;
+  while (end < candidate.length && !/[?#]/u.test(candidate[end]!)) end += 1;
+  return candidate.slice(start, end);
+}
 const oauthKeys = new Set(["clientid", "redirecturi", "responsetype", "granttype", "codechallenge", "codechallengemethod"]);
 type OAuthContext = { authentication: boolean; code: boolean };
 function rejectCredentialText(value: string, inspectEmbeddedUrl?: (target: string) => void): void {
@@ -151,16 +186,29 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     return withoutControls.slice(start, end).replaceAll("\\", "/");
   }
   function authenticationRoute(path: string, depth: number): boolean {
-    if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path)) return true;
+    if (/(?:^|\/)(?:oauth2?|oidc|auth|authorize|authorization|callback|login|signin|sign-in|signin-oidc|sso)(?:[-_]callback)?(?:\/|$|[.;])/iu.test(path.replaceAll("\\", "/"))) return true;
     const decoded = decodeLayer(path);
     return decoded !== path && authenticationRoute(chargeUrlText(decoded, depth + 1), depth + 1);
+  }
+  function inspectPath(path: string, depth: number, context: OAuthContext): void {
+    // Each nonempty name needs a following value. Iterate without allocating
+    // an array proportional to the number of slashes in a bounded large URL.
+    const normalized = path.replaceAll("\\", "/");
+    for (const match of normalized.matchAll(/[^/]+/gu)) {
+      let next = match.index + match[0].length;
+      while (normalized[next] === "/") next += 1;
+      if (next < normalized.length) inspectUrlKey(match[0], depth + 1, context);
+    }
+    // Decode only this pathname component, never authority/query boundaries.
+    const decoded = decodeLayer(normalized);
+    if (decoded !== normalized) { chargeUrlText(decoded, depth + 1); inspectPath(decoded, depth + 1, context); }
   }
   function stringTokenEnd(text: string, start: number): number {
     let index = start + 1;
     while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
     return index < text.length ? index + 1 : text.length + 1;
   }
-  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]/iyu;
+  const arrayScalarPrefix = /(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(?=[,\]]|$)/iyu;
   function isProseContainer(text: string, start: number): boolean {
     let next = start + 1;
     while (next < text.length && /\s/u.test(text[next]!)) next += 1;
@@ -173,8 +221,21 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     }
     if (object) return false;
     if (text[next] === "{" || text[next] === "[") return true;
-    arrayScalarPrefix.lastIndex = next;
-    return arrayScalarPrefix.test(text);
+    // One numeric comma does not establish JSON: [1,000 cards] is prose.
+    // Look ahead over the scalar sequence once; the charged parser owns syntax.
+    let separator = false;
+    while (next < text.length) {
+      arrayScalarPrefix.lastIndex = next;
+      if (!arrayScalarPrefix.test(text)) return false;
+      next = arrayScalarPrefix.lastIndex;
+      if (next === text.length) return separator;
+      if (text[next] === "]") return true;
+      separator = true;
+      next += 1;
+      while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+      if (next === text.length || /[\]"{[]/u.test(text[next]!)) return true;
+    }
+    return false;
   }
   function inspectLeadingStructuredText(text: string, depth: number, context: OAuthContext): boolean {
     // Natural labels such as [1/1], {Limited Edition}, or a quoted name followed
@@ -270,6 +331,12 @@ export function assertPackAssemblyPublicData(value: unknown): void {
   }
   function inspectUrlText(text: string, depth = 0, required = false, context: OAuthContext = { authentication: false, code: false }): void {
     const normalized = chargeUrlText(text, depth), candidate = urlRecognition(normalized);
+    // Decoded JSON/form captions can reveal an embedded URL only at this layer.
+    // Reuse the same traversal; an exact whole-text URL is parsed below instead
+    // of recursively inspecting itself or starting a fresh public-data budget.
+    if (!required) rejectCredentialText(normalized, target => {
+      if (target !== normalized) inspectUrlText(target, depth + 1);
+    });
     if (!required) inspectProseAssignments(normalized, depth);
     if (!required && inspectLeadingStructuredText(normalized, depth, context)) return;
     if (!required) inspectProseStructuredText(normalized, depth, context, true);
@@ -288,11 +355,15 @@ export function assertPackAssemblyPublicData(value: unknown): void {
     let url: URL;
     try { url = required ? new URL(normalized) : new URL(normalized, "https://public.invalid"); }
     catch { requireAssembly(false); return; }
-    requireAssembly(url.username === "" && url.password === "");
+    requireAssembly(url.username === "" && url.password === "" && !isPrivateUrlHostname(url.hostname));
     // A separate nested URL has its own route/query context; forms and JSON
     // within this URL share it, regardless of parameter or duplicate-key order.
+    const originalPath = originalUrlPath(candidate);
     const urlContext = { authentication: authenticationRoute(url.pathname, depth) ||
+      (originalPath !== url.pathname && authenticationRoute(originalPath, depth)) ||
       (/^[?#]/u.test(candidate) && context.authentication), code: false };
+    inspectPath(originalPath, depth, urlContext);
+    if (originalPath !== url.pathname) inspectPath(url.pathname, depth, urlContext);
     // Preserve URL structure: decode individual names/values, never the whole URL.
     for (const [key, nested] of url.searchParams) {
       inspectUrlKey(key, depth + 1, urlContext); inspectUrlText(nested, depth + 1, false, urlContext);

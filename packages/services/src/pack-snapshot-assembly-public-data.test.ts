@@ -7,6 +7,105 @@ import { assemblyFixture, requestFor } from "./provider-pack-snapshot-assembler.
 const assembler = new ProviderPackSnapshotAssembler();
 const refuses = (value: unknown) => assert.throws(() => assertPackAssemblyPublicData(value), PackSnapshotAssemblyError);
 
+test("literal private URL hosts reject through canonical IPv4 IPv6 and localhost spellings", async () => {
+  for (const host of ["127.0.0.1", "127.1", "2130706433", "0x7f000001", "0177.0.0.1", "0.0.0.0", "10.2.3.4",
+    "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.168.1.1", "100.64.0.1", "localhost", "LOCALHOST.",
+    "cards.localhost", "cards.localhost.", "[::]", "[::1]", "[fc00::1]", "[fdff::1]", "[fe80::1]", "[febf::1]",
+    "[::ffff:127.0.0.1]", "[::ffff:a00:1]", "[::ffff:c0a8:101]"]) {
+    const url = `https://${host}/card`;
+    for (const field of ["displayName", "title", "imageUrl", "action"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = `Visit ${url}`;
+      else if (field === "title") input.inputs.title = `Visit ${url}`;
+      else if (field === "imageUrl") input.inputs.imageUrl = url; else input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+    refuses({ url });
+    refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+  }
+});
+
+test("public IP destinations and ordinary host-name prose remain publishable", async () => {
+  for (const host of ["8.8.8.8", "172.15.255.255", "172.32.0.1", "192.169.1.1", "100.63.255.255", "100.128.0.1",
+    "[2606:4700:4700::1111]", "[::ffff:8.8.8.8]", "example.com", "localhost.example.com"]) {
+    const url = `https://${host}/products/card`;
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: `Visit https://${host} for details.` }));
+    const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: "A localhost and 127.0.0.1 networking guide" }));
+});
+
+test("explicit protected path pairs reject before URL dot normalization and through encoded separators", async () => {
+  for (const path of ["/access_token/private-marker", "/%61ccess_token/private-marker", "/%2561ccess_token/private-marker",
+    "/api.key/private", "/authorization_code/private", "/account/internal-123", "/host/db.internal",
+    "/callback/code/private", "/code/private?client_id=public-client", "/callback/code/private/../../public",
+    "/access_token/private-marker/../../public", "/%61ccess_token/private-marker/%2e%2e/%2e%2e/public",
+    "/access_token%2Fprivate", "/%2561ccess_token%252Fprivate", "/access_token%5Cprivate",
+    "/callback%5Ccode%5Cprivate", "/access_token//private"]) {
+    const url = "https://example.com" + path;
+    for (const field of ["displayName", "title", "imageUrl", "action"] as const) {
+      const { input } = await assemblyFixture();
+      if (field === "displayName") input.inputs.contents[0]!.displayName = `Visit ${url}`;
+      else if (field === "title") input.inputs.title = `Visit ${url}`;
+      else if (field === "imageUrl") input.inputs.imageUrl = url; else input.inputs.actions[0]!.url = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+    }
+    refuses({ url });
+    refuses({ url: "https://example.com/?next=" + encodeURIComponent(url) });
+  }
+});
+
+test("public product paths keep terminal labels and contextual coupon codes", async () => {
+  for (const path of ["/products/pack-123", "/access_token", "/coupon/code/SUMMER", "/products/code/PACK123",
+    "/card/Fish%26Actor", "/caption/A%2BB", "/products/part%2Fname", "/products/card?code=SUMMER"]) {
+    const url = "https://example.com" + path;
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url }));
+    const { input } = await assemblyFixture(); input.inputs.actions[0]!.url = url;
+    assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+  }
+  assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/callback?next=" +
+    encodeURIComponent("https://example.com/coupon/code/SUMMER") }));
+});
+
+test("decoded JSON prose retains private-host and protected-path checks on its embedded URLs", async () => {
+  for (const destination of ["https://127.0.0.1/card", "https://example.com/access_token/private"]) {
+    const payload = JSON.stringify({ caption: `Visit ${destination}` }).replace("https", "ht\\u0074ps");
+    for (const suffix of ["?data=", "#data=", "#"]) {
+      const url = "https://example.com/" + suffix + encodeURIComponent(payload);
+      const { input } = await assemblyFixture(); input.inputs.imageUrl = url;
+      await assert.rejects(assembler.assemble(await requestFor(input.inputs)), PackSnapshotAssemblyError);
+      refuses({ url });
+    }
+  }
+  for (const destination of ["https://8.8.8.8/card", "https://[2606:4700:4700::1111]", "https://example.com/coupon/code/SUMMER"]) {
+    const payload = JSON.stringify({ caption: `Visit ${destination}` }).replace("https", "ht\\u0074ps");
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/?data=" + encodeURIComponent(payload) }));
+  }
+});
+
+test("numeric bracket captions are not inferred to be JSON from the first comma", async () => {
+  for (const label of ["Includes [1,000 cards]", "[1,000,000 cards] edition", "Includes [1, 2 cards]", "[1,000] cards", "Edition [1"]) {
+    for (const text of [label, JSON.stringify({ caption: label }), "Documentation " + JSON.stringify({ caption: label })]) {
+      for (const field of ["displayName", "title", "aliases"] as const) {
+        const { input } = await assemblyFixture();
+        if (field === "displayName") input.inputs.contents[0]!.displayName = text;
+        else if (field === "title") input.inputs.title = text; else input.inputs.aliases = [text];
+        assert.equal((await assembler.assemble(await requestFor(input.inputs))).disposition, "created");
+      }
+      for (const suffix of ["?caption=", "#"]) {
+        assert.doesNotThrow(() => assertPackAssemblyPublicData({ url: "https://example.com/" + suffix + encodeURIComponent(text) }));
+      }
+    }
+  }
+  for (const text of ['Includes [1,2,"public",true,null]', "Includes [1,2.5,false]", "Includes [1,[2,3]]"]) {
+    assert.doesNotThrow(() => assertPackAssemblyPublicData({ title: text }));
+  }
+  for (const text of ["Includes [1,]", "Includes [1,2", 'Includes [1,{"caption":"public",}]',
+    'Includes [1,000 cards] {"\\u0070assword":"private"}']) refuses({ title: text });
+});
+
 test("public text rejects reusable Basic authorization credentials regardless of credential length", async () => {
   for (const literal of ["Basic dXNlcjpwYXNzd29yZA==", "basic dTpw", "BASIC OnA=", "Basic dTo=",
     "Details: Basic\ndXNlcjpwYXNzd29yZA==", "Basic dXNlcjpwYXNzd29yZA"]) {
