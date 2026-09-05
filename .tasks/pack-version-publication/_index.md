@@ -126,7 +126,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 | P03 | Deterministic complete pack snapshot assembly | 003 | P02 | main; PR114 |74 focused checks pass; current-parent full gate required | building |
 | P04 | Durable shared-change fan-out and independent profiles | 004 | P01 | main; independent worktree | Offline-provider fan-out and profile matrix | building |
 | P05 | Authenticated immutable public storage and the sole V1 read API | 005 | P01 | sibling from P01 | Store, CAS, and six-journey API contract | merged |
-| P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | independent main sibling | Exact function/formula/value parity | building |
+| P05B | One neutral existing EV calculation and public-value core | 013 | P01, P05 | independent main sibling; PR121 | Exact parity and full framework gate pass | published |
 | P05A | Preserve every current frontend data point in native V1 | 011 | P03, P05, P05B | root after prerequisites merge | Source-to-snapshot-to-frontend data parity | building |
 | P06 | Idempotent pack/profile publication and fenced per-pack recovery | 006 | P02–P05, P05A | root after prerequisites merge | Publication ambiguity and recovery race | planned |
 | P07A | Native six-operation loaders and authoritative saved-item state | 012 | P05 | independent sibling on main; PR120 | Prior full gate/review pass; main118 recertification | building |
@@ -220,6 +220,7 @@ Provider databases remain isolated and authoritative for provider-owned history.
 - **Verification:**013 exact identity/replay, full predecessor regressions, affected lint/types/boundaries/ratchet and framework gate.011/006/007 retain data/runtime/browser E2E.
 - **Rollback:** Revert the pure extraction; current application behavior and stored data remain unchanged.
 - **Implementation:**77c01707 onf6785251. Root364/364 focused regressions, exact-body comparison, affected static checks and full framework gate at5d710c32 pass.9 source files/2,329lines; the added ninth file is direct public-value parity evidence. Task013 is done; PR publication is next. The full runner's28 unrelated existing opt-in skips are disclosed in013, not represented as zero skips.
+- **PR:** https://github.com/dadriano/packscout/pull/121 — ready for review; published head a4139d60 validated against live mainf6785251 with exact ancestry, two-dot phase tree and four phase commits.25 files/3,153 lines before this delivery record;9 source/test files/2,329 lines plus16 task records/824. Target line overage is metadata-only, below40files/5,000lines. No approval, merge or deployment claimed.
 
 #### P06 — Publisher and recovery
 
@@ -340,4 +341,4 @@ Cap dependent open stack depth at three; ordinary prerequisite review waiting is
 
 ## Next Action
 
-Publish task013's fully verified neutral core. Finish the public-label refinements and repaired-head gates for PR114/119, and await PR120's current identity-fix gate. Keep119 draft until certified. Request fresh merge approval once prerequisites are ready; resume011 after merged003/005/013, preserving every frontend datapoint and whole-pack price/EV coherence. No merge, production publication, route cutover, prune or launch occurred here; the separate PR115 deployment task owns its live operations.
+Task013 is published as PR121. Finish the public-label refinements and repaired-head gates for PR114/119, and await PR120's current identity-fix gate. Keep119 draft until certified. Request fresh merge approval once prerequisites are ready; resume011 after merged003/005/013, preserving every frontend datapoint and whole-pack price/EV coherence. No merge, production publication, route cutover, prune or launch occurred here; the separate PR115 deployment task owns its live operations.

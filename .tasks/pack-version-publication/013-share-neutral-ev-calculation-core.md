@@ -29,6 +29,10 @@ Red missing-export test: `/tmp/packscout-p05b-neutral-core-red-20260905.log`; fi
 
 Full `npm run verify:framework` PASSED at exact head `5d710c3279cef2f0c07cc7bfe6df61ff613802f5`, runtime77c01707, parentf6785251, completed 2026-09-05 before04:36UTC. Log: `/tmp/packscout-p05b-framework-main118-20260905.log`. The unchanged runner reports28 existing opt-in skips: one distributed-database test,18 provider execution/protected-capture tests and nine local activation/repair/operator tests. None belongs to the neutral-core acceptance matrix; its364 focused tests all ran, and the full services maximum-catalog lane also ran separately. No skip flag, gate, timeout or baseline was changed. Both production builds passed. Delivery-only status records preserve this runtime proof and rerun the documentation gate. PR publication is next; no merge, deployment or full011 completion is claimed.
 
+## Publication
+
+PR https://github.com/dadriano/packscout/pull/121 is open and ready for review, independently based on mainf6785251. Root validated the live base/head (`a4139d6087f089b417c76947a4b0c1cedb6203d7`), non-draft state, exact parent ancestry, phase-only two-dot tree and four phase commits. Published scope25 files/3,153 changed lines: nine source/test files/2,329 plus16 task records/824. Only metadata exceeds the2,500-line target; no generated churn, below40files/5,000lines. A delivery-only record follows; no runtime changed after the certified full gate. Review/CI are not merge or launch approval.
+
 ## Requirements
 
 - One browser-neutral exact rational calculator and confidence implementation; service exports reference the same functions, not copied implementations or wrappers.

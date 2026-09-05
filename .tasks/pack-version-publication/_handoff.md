@@ -2,6 +2,8 @@
 
 ## Current checkpoint — 2026-09-05 04:36UTC
 
+Publication delta: task013 is published ready for review as PR121 at a4139d60; live basef6785251, ancestry, phase-only two-dot tree, four commits and non-draft state validated.25files/3,153changed lines before delivery record (2,329 source/test +824 metadata). Root is committing the publication tracker; add121 to the single review watch. No source change after full gate5d710c32.
+
 Main remainsf6785251. Task013/P05B full local framework verifier finished successfully at exact head5d710c32/runtime77c01707; session26893 is complete. Log `/tmp/packscout-p05b-framework-main118-20260905.log`. Both production builds pass. The unchanged runner has28 pre-existing optional distributed/provider/protected-capture/operator skips; none is in the neutral-core acceptance matrix, whose364 tests ran without skips. Task013 is done and root is publishing the independent PR; no PR number yet. Source is9 files/2,329 changed lines, whole phase25 files/3,139 before final metadata. No local heavy suite remains.
 
 PR114 public-label P2comment3939429737 is actively being repaired. Agent p04_profiles also owns the analogous refinement in P04's existing guard/test files; root asked for early-return target scanning to avoid repeated suffix traversal. No other runtime ownership. PR120 identity fix35ef3d75 is published at a0457a13, root48 focused tests/static gates pass; reply3939440289 resolved its thread, bot thumbs-up reviewed that exact head, fullCI33944611792 remains pending. Agent p03_review is the single read-only watcher (bounded window through about04:47UTC).
