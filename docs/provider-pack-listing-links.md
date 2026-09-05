@@ -12,7 +12,15 @@ DataForrest catalog `record_id` is retained unchanged as the normalized
 | Provider | Catalog identity | Public route |
 | --- | --- | --- |
 | Phygitals | Native pack slug | `https://www.phygitals.com/repacks/<slug>` |
+| Phygitals (legacy) | Numeric pack id | `https://www.phygitals.com/repacks/<recorded slug>` |
 | Collector Crypt | Native machine code | `https://gacha.collectorcrypt.com/gacha/<code>` |
+
+Fifteen legacy Phygitals packs (catalog ids 13 through 41, for example the
+[Rookie Pack](https://www.phygitals.com/repacks/rookie-pack)) carry the
+platform's numeric pack id as their catalog identity. A numeric id does not
+route (`/repacks/13` is a 404), so the registry maps those ids to the slug the
+feed publishes for them, recorded on 2026-09-04 and verified page by page. A
+numeric id outside that table produces no link.
 
 The Phygitals catalog links directly to the [50/50 pack](https://www.phygitals.com/repacks/5050-pack-bssaa3)
 and [Mini 50/50 pack](https://www.phygitals.com/repacks/mini-5050-pack-hbwr8g).
