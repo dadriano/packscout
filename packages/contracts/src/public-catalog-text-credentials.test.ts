@@ -57,6 +57,39 @@ test("colon credential assignments preserve ordinary unquoted public labels", ()
   }
 });
 
+test("explicit private account and host fields differ from ordinary display labels", () => {
+  for (const text of ["Host: db.internal:5432", "Account: internal-123", "Documentation account_id: internal-123",
+    "Database URL: postgres://db.internal/catalog", "Port: 5432", '"Host": "Public Speaker"']) {
+    assert.throws(() => assertPublicCatalogText(text), TypeError);
+    assert.throws(() => assertPublicCatalogUrl("https://example.com/?caption=" + encodeURIComponent(text)), TypeError);
+  }
+  for (const text of ["Host: Public Speaker", "Actor: Keanu Reeves", "Premium %41ctor: Keanu Reeves", "Bolt: Premium Edition", "Bearer abc123"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
+test("direct JSON text uses bounded structural inspection before trailing public prose", () => {
+  for (const json of ['{"\\u0061ccount":"internal-123"}', '{"\\u0068ost":"db.internal:5432"}',
+    '{"\\u0061ccess_token":"private-marker"}', '{"\\u0061\\u0070\\u0069\\u005f\\u006b\\u0065\\u0079":"a"}',
+    '{"caption":{"sig":"private-marker"},"caption":"safe"}',
+    '{"caption":"safe"} {"\\u0061ccount":"private"}', '"public" [{"\\u0068ost":"db.internal"}]']) {
+    assert.throws(() => assertPublicCatalogText(json), TypeError);
+    assert.throws(() => assertPublicCatalogText(json + " public alias"), TypeError);
+  }
+  for (const text of ['{"caption":"public"}', '{"caption":"public"} public alias',
+    '["public","caption"]', '"public" public alias', '{"caption":"first"} {"caption":"second"} public alias',
+    '"First" ["Second"] public alias', '{"caption":"Host: Public Speaker"}',
+    '{"caption":"Actor: Keanu Reeves"}', '["Host: Public Speaker","Actor: J. K. Simmons"]',
+    '"Host: Public Speaker"', "[Limited Edition]", "[1/1] Premium"]) {
+    assert.doesNotThrow(() => assertPublicCatalogText(text));
+  }
+});
+
+test("direct JSON retains the existing structural bounds and malformed-document policy", () => {
+  for (const text of ['{"caption":"public",}', '[{"caption":"public"}', '{"caption":"\\u00GG"}',
+    "[".repeat(7) + "null" + "]".repeat(7)]) assert.throws(() => assertPublicCatalogText(text), TypeError);
+});
+
 test("public prose rejects credentials in generic URI authorities", () => {
   for (const scheme of ["amqps", "mssql", "ftp", "custom+driver"]) {
     assert.throws(() => assertPublicCatalogText(`Visit ${scheme}://alice:private-marker@internal.example/path`), TypeError);

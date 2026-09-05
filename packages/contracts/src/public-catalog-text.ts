@@ -7,7 +7,6 @@ const privateKeys = new Set(["account", "accountid", "authorization", "authoriza
 // Bearer is ordinary public prose unless a protected field or authorization
 // assignment establishes credential context; token spelling/length cannot do so.
 const credentialText = /(?:postgres(?:ql)?:\/\/|mysql:\/\/|mongodb(?:\+srv)?:\/\/|redis(?:s)?:\/\/|-----BEGIN .*PRIVATE KEY-----|(?:api[_\s-]?key|password|secret|access[_\s-]?token|refresh[_\s-]?token|authorization)["']?\s*[:=]\s*\S+)/iu;
-const credentialColonKeys = new Set(["apikey", "password", "secret", "accesstoken", "refreshtoken", "authorization"]);
 const privateUriScheme = /^(?:postgres(?:ql)?|mysql|mariadb|mssql|sqlserver|sqlite|mongodb|rediss?|amqps?|nats|kafkas?|pulsar|mqtts?|cassandra|couchbases?|neo4j|bolt|memcached)(?:\+[a-z0-9.-]+)?$/iu;
 function hasPrivateUriTarget(value: string, start: number): boolean {
   // A contiguous endpoint/path, userinfo, port, query, encoded URI or SQLite :memory: target
@@ -73,21 +72,28 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     if (depth > 6 || ++nodes > 1_000 || text.length > 32_768 || (bytes += encoder.encode(text).length) > 65_536) reject();
     assertPublicCatalogLexicalText(text);
   };
-  const inspectKey = (text: string, depth: number, context: OAuthContext, credentialOnly = false): void => {
-    const credentialName = credentialColonKeys.has(normalizeProtectedPublicationFieldKey(text.normalize("NFKC")));
-    // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
-    // candidate names still decode under the same charged depth/byte budget.
-    if (credentialOnly && !credentialName && !text.includes("%")) return;
-    charge(text, depth);
+  const inspectKey = (text: string, depth: number, context: OAuthContext, colonTarget?: boolean): boolean => {
     const normalized = text.normalize("NFKC");
     const key = normalizeProtectedPublicationFieldKey(normalized);
-    if (!credentialOnly || credentialName) {
+    let protectedName = privateKeys.has(key);
+    if (colonTarget !== undefined && !protectedName) {
+      try { assertPublicPackCatalogBytes({ [normalized]: null }); } catch { protectedName = true; }
+    }
+    // Unquoted Actor is a public credit label. Host identifies topology only
+    // when its value has connection syntax; quoted/URL/JSON fields stay strict.
+    const publicLabel = colonTarget !== undefined && (key === "actor" || key === "host");
+    if (publicLabel) protectedName = key === "host" && colonTarget === true;
+    // Ordinary unquoted labels are prose, not new traversal nodes. Encoded
+    // candidate names still decode under the same charged depth/byte budget.
+    if (colonTarget !== undefined && !protectedName && !text.includes("%")) return publicLabel;
+    charge(text, depth);
+    if (colonTarget === undefined || protectedName) {
       context.code ||= key === "code"; context.authentication ||= oauthKeys.has(key);
       if ((context.code && context.authentication) || privateKeys.has(key)) reject();
       assertPublicPackCatalogBytes({ [normalized]: null });
     }
     const decoded = decodeLayer(normalized);
-    if (decoded !== normalized) inspectKey(decoded, depth + 1, context, credentialOnly);
+    return decoded !== normalized ? inspectKey(decoded, depth + 1, context, colonTarget) : publicLabel;
   };
   const inspectProseAssignments = (text: string, depth: number): void => {
     // Quotes establish the whole assigned name, including punctuation that the
@@ -108,6 +114,11 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       let valueStart = end + 1;
       while (colon && valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
       if (colon && valueStart === text.length) continue;
+      if (colon && /["']/u.test(text[valueStart]!)) {
+        valueStart += 1;
+        while (valueStart < text.length && /\s/u.test(text[valueStart]!)) valueStart += 1;
+      }
+      const colonTarget = colon ? hasPrivateUriTarget(text, valueStart) : undefined;
       const words = match[0].split(/\s+/u);
       let key = "";
       for (let index = words.length - 1; index >= 0; index -= 1) {
@@ -120,7 +131,10 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         if (key.length > 256) break;
         // URL/form parsing owns contextual OAuth codes; lexical assignment
         // discovery must not join separate URLs into one authentication context.
-        inspectKey(key, depth + 1, { authentication: false, code: false }, colon);
+        const publicLabel = inspectKey(key, depth + 1, { authentication: false, code: false }, colonTarget);
+        // A recognized public credit/host label ends the name; preceding prose
+        // must not manufacture a different protected field.
+        if (publicLabel) break;
       }
     }
   };
@@ -132,10 +146,17 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
     return authenticationRoute(decoded, depth + 1);
   };
   const isStructuredText = (text: string) => /^[{["]/u.test(text.trimStart());
-  const inspectStructuredText = (text: string, depth: number, context: OAuthContext): void => {
+  // Direct prose may contain leading JSON documents followed by public aliases.
+  // Bracketed edition/fraction labels do not establish JSON structure.
+  const directJsonPrefix = /(?:"|\{\s*["}]|\[\s*(?:["{[\]]|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*[,\]]))/iyu;
+  const isDirectStructuredText = (text: string, start = 0): boolean => {
+    directJsonPrefix.lastIndex = start;
+    return directJsonPrefix.test(text);
+  };
+  const inspectStructuredText = (text: string, depth: number, context: OAuthContext, prefixStart?: number): number => {
     // Inspect tokens before parsing the document so overwritten duplicate keys
     // cannot erase protected evidence. Use the same bounds as URL/form traversal.
-    let nesting = 0, index = 0;
+    let nesting = 0, index = prefixStart ?? 0;
     while (index < text.length) {
       const start = index, character = text[index++]!;
       if (/\s|[,:]/u.test(character)) continue;
@@ -143,7 +164,9 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         nesting += 1; charge(character, depth + nesting); continue;
       }
       if (character === "}" || character === "]") {
-        if (nesting <= 0) reject(); nesting -= 1; continue;
+        if (nesting <= 0) reject(); nesting -= 1;
+        if (prefixStart !== undefined && nesting === 0) break;
+        continue;
       }
       if (character === '"') {
         while (index < text.length && text[index] !== '"') index += text[index] === "\\" ? 2 : 1;
@@ -154,13 +177,15 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
         while (next < text.length && /\s/u.test(text[next]!)) next += 1;
         if (text[next] === ":") inspectKey(decoded, depth + nesting + 1, context);
         else visit(decoded, depth + nesting + 1, false, context);
+        if (prefixStart !== undefined && nesting === 0) break;
       } else {
         while (index < text.length && !/[\s{}[\]",:]/u.test(text[index]!)) index += 1;
         charge(text.slice(start, index), depth + nesting + 1);
       }
     }
     if (nesting !== 0) reject();
-    try { JSON.parse(text); } catch { reject(); }
+    try { JSON.parse(prefixStart === undefined ? text : text.slice(prefixStart, index)); } catch { reject(); }
+    return index;
   };
   const inspectFragment = (text: string, depth: number, context: OAuthContext): void => {
     charge(text, depth);
@@ -203,12 +228,14 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
       return;
     }
     const labelScheme = required ? null : /^([a-z][a-z0-9+.-]*):/iu.exec(candidate);
-    const knownSchemeProse = labelScheme !== null && privateUriScheme.test(labelScheme[1]!) &&
-      !hasPrivateUriTarget(candidate, labelScheme[0].length);
+    const labelName = labelScheme?.[1]?.toLowerCase();
+    const knownSchemeProse = labelScheme !== null && (labelName === "actor" ||
+      ((labelName === "host" || privateUriScheme.test(labelScheme[1]!)) &&
+        !hasPrivateUriTarget(candidate, labelScheme[0].length)));
     let url: URL;
     try { url = new URL(text, !required || candidate.startsWith("//") ? "https://public.invalid" : undefined); } catch { return reject(); }
     if (url.username || url.password || (!knownSchemeProse && !["https:", "http:"].includes(url.protocol))) reject();
-    // Optional known-scheme labels are prose, but still traverse every attached
+    // Optional scheme/credit labels are prose, but still traverse every attached
     // query/fragment value below. Required URL fields remain strictly HTTP(S).
     const urlContext = { authentication: authenticationRoute(url.pathname, depth) ||
       (/^[?#]/u.test(candidate) && context.authentication), code: false };
@@ -230,7 +257,18 @@ function inspectPublicCatalogUrls(value: string, required: boolean): void {
   };
   if (required) visit(value, 0, true);
   else {
-    inspectProseAssignments(value.trim().normalize("NFKC"), 0);
+    const normalized = value.trim().normalize("NFKC");
+    if (isDirectStructuredText(normalized)) {
+      // Charge the source once and use absolute offsets for adjacent roots;
+      // repeatedly charging or slicing remaining suffixes would be quadratic.
+      charge(normalized, 0);
+      let start = 0;
+      do {
+        start = inspectStructuredText(normalized, 0, { authentication: false, code: false }, start);
+        while (start < normalized.length && /\s/u.test(normalized[start]!)) start += 1;
+      } while (isDirectStructuredText(normalized, start));
+    }
+    inspectProseAssignments(normalized, 0);
     inspectEmbedded(value, 0);
   }
 }

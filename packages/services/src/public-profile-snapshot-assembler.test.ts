@@ -3,6 +3,24 @@ import { test } from "node:test";
 import { createPackCatalogV1Fixture } from "@packscout/contracts/test-fixtures/pack-catalog-v1";
 import { assemblePublicProfileSnapshot } from "./public-profile-snapshot-assembler.ts";
 
+test("profile JSON display text preserves public label values without exposing protected fields", async () => {
+  const fixture = await createPackCatalogV1Fixture(new Uint8Array(32).fill(7));
+  for (const text of ['{"caption":"Host: Public Speaker"}', '{"caption":"Actor: Keanu Reeves"}',
+    '["Host: Public Speaker","Actor: J. K. Simmons"]', '"Host: Public Speaker"',
+    '{"caption":"first"} {"caption":"second"}']) {
+    const profile = structuredClone(fixture.provider.profile);
+    profile.displayName = text;
+    const result = await assemblePublicProfileSnapshot(profile);
+    assert.equal(result.profile.displayName, text);
+  }
+  for (const text of ['{"caption":"Host: db.internal:5432"}', '{"\\u0061ccount":"internal-123"}',
+    '{"caption":"safe"} {"\\u0068ost":"db.internal"}']) {
+    const profile = structuredClone(fixture.provider.profile);
+    profile.displayName = text;
+    await assert.rejects(assemblePublicProfileSnapshot(profile), TypeError);
+  }
+});
+
 test("profile assembly bounds descriptors before getters, proxies, cycles or oversized strings can execute", async () => {
   let invoked = false;
   const accessor = Object.defineProperty({}, "identity", { enumerable: true, get() { invoked = true; throw new Error("private"); } });
